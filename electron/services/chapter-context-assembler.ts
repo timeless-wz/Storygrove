@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { getProjectDb } from '../database'
 import { CharacterRosterRepository } from '../repositories/character-roster-repository'
 import { NarrativeThreadRepository } from '../repositories/narrative-thread-repository'
@@ -9,7 +10,102 @@ import type {
   ChapterContextBlock,
   ChapterContextOmission,
   ChapterContextSourceRef,
+  SettingRule,
 } from '../../src/shared/workspace-hub'
+
+declare module '../../src/shared/workspace-hub' {
+  interface ChapterContextSourceRef {
+    sourceId?: string | null
+    approvedSnapshotId?: string | null
+    sourceSnapshotFragmentId?: string | null
+    filePath?: string
+    titlePath?: string
+  }
+}
+
+function hashString(str: string): string {
+  return createHash('sha256').update(str, 'utf8').digest('hex')
+}
+
+function formatFragmentSourceRef(f: {
+  sourceId?: string
+  approvedSnapshotId?: string | null
+  fragmentId: string
+  sourcePath: string
+  headingPath: string
+  fragmentHash: string
+  startLine: number
+  endLine: number
+}): ChapterContextSourceRef {
+  return {
+    sourceId: f.sourceId || null,
+    approvedSnapshotId: f.approvedSnapshotId || null,
+    snapshotId: f.approvedSnapshotId || null,
+    sourceSnapshotFragmentId: f.fragmentId,
+    fragmentId: f.fragmentId,
+    relativePath: f.sourcePath,
+    filePath: f.sourcePath,
+    headingPath: f.headingPath,
+    titlePath: f.headingPath,
+    contentHash: f.fragmentHash,
+    lineRange: `${f.startLine}-${f.endLine}`,
+  }
+}
+
+function resolveRuleSourceRef(
+  db: ReturnType<typeof getProjectDb>,
+  r: SettingRule,
+): ChapterContextSourceRef {
+  let fragRow: { id: string; snapshot_id: string; source_id: string; fragment_hash: string } | undefined
+  const fragId = r.sourceSnapshotFragmentId || r.sourceFragmentId
+  if (db && fragId) {
+    fragRow = db.prepare(`
+      SELECT id, snapshot_id, source_id, fragment_hash
+      FROM workspace_source_snapshot_fragments
+      WHERE id = ?
+    `).get(fragId) as typeof fragRow
+  }
+  if (db && !fragRow && r.sourceSnapshotId) {
+    fragRow = db.prepare(`
+      SELECT id, snapshot_id, source_id, fragment_hash
+      FROM workspace_source_snapshot_fragments
+      WHERE snapshot_id = ? AND heading_path = ?
+      LIMIT 1
+    `).get(r.sourceSnapshotId, r.sourceHeadingPath) as typeof fragRow
+  }
+
+  let resolvedFragId = fragRow?.id || r.sourceSnapshotFragmentId || r.sourceFragmentId
+  if (db && r.originType === 'scan' && !resolvedFragId && r.sourceSnapshotId) {
+    const fallbackFrag = db.prepare(`
+      SELECT id, snapshot_id, source_id, fragment_hash
+      FROM workspace_source_snapshot_fragments
+      WHERE snapshot_id = ?
+      ORDER BY start_line ASC LIMIT 1
+    `).get(r.sourceSnapshotId) as typeof fragRow
+    if (fallbackFrag) {
+      fragRow = fallbackFrag
+      resolvedFragId = fallbackFrag.id
+    }
+  }
+
+  const resolvedSnapId = fragRow?.snapshot_id || r.sourceSnapshotId || null
+  const resolvedSourceId = fragRow?.source_id || r.sourceId || null
+  const resolvedHash = fragRow?.fragment_hash || hashString(r.content)
+
+  return {
+    sourceId: resolvedSourceId,
+    approvedSnapshotId: resolvedSnapId,
+    snapshotId: resolvedSnapId,
+    sourceSnapshotFragmentId: resolvedFragId || undefined,
+    fragmentId: resolvedFragId || undefined,
+    relativePath: r.sourceFile || 'setting_rules',
+    filePath: r.sourceFile || 'setting_rules',
+    headingPath: r.sourceHeadingPath || r.title,
+    titlePath: r.sourceHeadingPath || r.title,
+    lineRange: r.sourceLineRange,
+    contentHash: resolvedHash,
+  }
+}
 
 export interface AssembleChapterContextOptions {
   projectId?: string
@@ -85,14 +181,7 @@ export class ChapterContextAssembler {
     })
     if (stage1Fragments.length > 0) {
       const combined = stage1Fragments.map(f => f.content).join('\n\n')
-      const sources: ChapterContextSourceRef[] = stage1Fragments.map(f => ({
-        relativePath: f.sourcePath,
-        headingPath: f.headingPath,
-        fragmentId: f.fragmentId,
-        snapshotId: f.approvedSnapshotId,
-        contentHash: f.fragmentHash,
-        lineRange: `${f.startLine}-${f.endLine}`,
-      }))
+      const sources: ChapterContextSourceRef[] = stage1Fragments.map(formatFragmentSourceRef)
       tryAddBlock({
         id: 'stage-1-creation-principles',
         stage: 1,
@@ -128,13 +217,7 @@ export class ChapterContextAssembler {
       const ruleTexts = applicableRules.map(
         r => `### 【${r.constraintType === 'hard' ? '硬约束' : '软约束'}】${r.title}\n${r.content}（来源：${r.sourceFile || '已确认设定'}）`
       ).join('\n\n')
-      const sources: ChapterContextSourceRef[] = applicableRules.map(r => ({
-        relativePath: r.sourceFile || 'setting_rules',
-        headingPath: r.sourceHeadingPath || r.title,
-        fragmentId: r.sourceSnapshotFragmentId || r.sourceFragmentId,
-        snapshotId: r.sourceSnapshotId,
-        lineRange: r.sourceLineRange,
-      }))
+      const sources: ChapterContextSourceRef[] = applicableRules.map(r => resolveRuleSourceRef(db, r))
       tryAddBlock({
         id: 'stage-2-confirmed-rules',
         stage: 2,
@@ -160,13 +243,7 @@ export class ChapterContextAssembler {
       const candidateTexts = candidateRules.map(
         r => `### 【待确认/候选】${r.title}\n${r.content}（警示：未经作者确认，不得作为硬约束）`
       ).join('\n\n')
-      const sources: ChapterContextSourceRef[] = candidateRules.map(r => ({
-        relativePath: r.sourceFile || 'setting_rules',
-        headingPath: r.sourceHeadingPath || r.title,
-        fragmentId: r.sourceSnapshotFragmentId || r.sourceFragmentId,
-        snapshotId: r.sourceSnapshotId,
-        lineRange: r.sourceLineRange,
-      }))
+      const sources: ChapterContextSourceRef[] = candidateRules.map(r => resolveRuleSourceRef(db, r))
       tryAddBlock({
         id: 'stage-2-candidate-rules',
         stage: 2,
@@ -194,14 +271,7 @@ export class ChapterContextAssembler {
     })
     if (stage3Fragments.length > 0) {
       const text = stage3Fragments.map(f => `### ${f.headingPath}\n${f.content}`).join('\n\n')
-      const sources: ChapterContextSourceRef[] = stage3Fragments.map(f => ({
-        relativePath: f.sourcePath,
-        headingPath: f.headingPath,
-        fragmentId: f.fragmentId,
-        snapshotId: f.approvedSnapshotId,
-        contentHash: f.fragmentHash,
-        lineRange: `${f.startLine}-${f.endLine}`,
-      }))
+      const sources: ChapterContextSourceRef[] = stage3Fragments.map(formatFragmentSourceRef)
       tryAddBlock({
         id: 'stage-3-master-plot',
         stage: 3,
@@ -230,14 +300,7 @@ export class ChapterContextAssembler {
     })
     if (stage4Fragments.length > 0) {
       const text = stage4Fragments.map(f => `### ${f.headingPath}\n${f.content}`).join('\n\n')
-      const sources: ChapterContextSourceRef[] = stage4Fragments.map(f => ({
-        relativePath: f.sourcePath,
-        headingPath: f.headingPath,
-        fragmentId: f.fragmentId,
-        snapshotId: f.approvedSnapshotId,
-        contentHash: f.fragmentHash,
-        lineRange: `${f.startLine}-${f.endLine}`,
-      }))
+      const sources: ChapterContextSourceRef[] = stage4Fragments.map(formatFragmentSourceRef)
       tryAddBlock({
         id: 'stage-4-volume-outline',
         stage: 4,
@@ -266,14 +329,7 @@ export class ChapterContextAssembler {
     })
     if (stage5Fragments.length > 0) {
       const text = stage5Fragments.map(f => `### ${f.headingPath}\n${f.content}`).join('\n\n')
-      const sources: ChapterContextSourceRef[] = stage5Fragments.map(f => ({
-        relativePath: f.sourcePath,
-        headingPath: f.headingPath,
-        fragmentId: f.fragmentId,
-        snapshotId: f.approvedSnapshotId,
-        contentHash: f.fragmentHash,
-        lineRange: `${f.startLine}-${f.endLine}`,
-      }))
+      const sources: ChapterContextSourceRef[] = stage5Fragments.map(formatFragmentSourceRef)
       tryAddBlock({
         id: 'stage-5-chapter-outline',
         stage: 5,
@@ -531,13 +587,7 @@ export class ChapterContextAssembler {
 
       if (topFragments.length > 0) {
         const text = topFragments.map(f => `### ${f.headingPath}\n${f.content}`).join('\n\n')
-        const sources: ChapterContextSourceRef[] = topFragments.map(f => ({
-          relativePath: f.sourcePath,
-          headingPath: f.headingPath,
-          fragmentId: f.fragmentId,
-          contentHash: f.fragmentHash,
-          lineRange: `${f.startLine}-${f.endLine}`,
-        }))
+        const sources: ChapterContextSourceRef[] = topFragments.map(formatFragmentSourceRef)
         tryAddBlock({
           id: 'stage-10-world-events',
           stage: 10,
@@ -567,14 +617,7 @@ export class ChapterContextAssembler {
     })
     if (stage11Fragments.length > 0) {
       const text = stage11Fragments.map(f => `### ${f.headingPath}\n${f.content}`).join('\n\n')
-      const sources: ChapterContextSourceRef[] = stage11Fragments.map(f => ({
-        relativePath: f.sourcePath,
-        headingPath: f.headingPath,
-        fragmentId: f.fragmentId,
-        snapshotId: f.approvedSnapshotId,
-        contentHash: f.fragmentHash,
-        lineRange: `${f.startLine}-${f.endLine}`,
-      }))
+      const sources: ChapterContextSourceRef[] = stage11Fragments.map(formatFragmentSourceRef)
       tryAddBlock({
         id: 'stage-11-narrative-goals',
         stage: 11,
@@ -602,14 +645,7 @@ export class ChapterContextAssembler {
     })
     if (stage12Fragments.length > 0) {
       const text = stage12Fragments.map(f => f.content).join('\n\n')
-      const sources: ChapterContextSourceRef[] = stage12Fragments.map(f => ({
-        relativePath: f.sourcePath,
-        headingPath: f.headingPath,
-        fragmentId: f.fragmentId,
-        snapshotId: f.approvedSnapshotId,
-        contentHash: f.fragmentHash,
-        lineRange: `${f.startLine}-${f.endLine}`,
-      }))
+      const sources: ChapterContextSourceRef[] = stage12Fragments.map(formatFragmentSourceRef)
       tryAddBlock({
         id: 'stage-12-style-guide',
         stage: 12,
@@ -652,17 +688,8 @@ export class ChapterContextAssembler {
       ].join('\n')
 
       const sources: ChapterContextSourceRef[] = [
-        ...deprecatedRules.map(r => ({
-          relativePath: r.sourceFile || 'setting_rules',
-          headingPath: r.sourceHeadingPath || r.title,
-          fragmentId: r.sourceSnapshotFragmentId || r.sourceFragmentId,
-          snapshotId: r.sourceSnapshotId,
-        })),
-        ...deprecatedFragments.map(f => ({
-          relativePath: f.sourcePath,
-          headingPath: f.headingPath,
-          fragmentId: f.fragmentId,
-        })),
+        ...deprecatedRules.map(r => resolveRuleSourceRef(db, r)),
+        ...deprecatedFragments.map(formatFragmentSourceRef),
       ]
 
       tryAddBlock({
