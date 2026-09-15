@@ -20,6 +20,174 @@ import { ensureCharacterRosterSchema } from './repositories/character-roster-sch
 let projectDb: BetterSqlite3.Database | null = null
 let currentProjectPath: string | null = null
 
+const WORKSPACE_HUB_LEGACY_MIGRATION_ID = 'workspace-hub-approved-snapshots-v1'
+
+/**
+ * 一次性、显式迁移旧工作区表。只有旧记录明确处于 imported 状态时，
+ * 才把 workspace_source_fragments 固化为批准快照；无法确认批准状态的数据
+ * 保持未批准且永远不会被运行时查询回退读取。迁移结果写入审计表。
+ */
+function migrateLegacyWorkspaceHubData(db: BetterSqlite3.Database): void {
+  const alreadyApplied = db.prepare(`
+    SELECT migration_id FROM workspace_hub_migration_audit WHERE migration_id = ?
+  `).get(WORKSPACE_HUB_LEGACY_MIGRATION_ID)
+  if (alreadyApplied) return
+
+  db.transaction(() => {
+    const sources = db.prepare(`
+      SELECT id, project_id, content_hash, file_size
+      FROM workspace_sources
+      WHERE import_status = 'imported'
+        AND (approved_snapshot_id IS NULL OR approved_snapshot_id = '')
+        AND content_hash <> ''
+        AND EXISTS (
+          SELECT 1 FROM workspace_source_fragments legacy WHERE legacy.source_id = workspace_sources.id
+        )
+      ORDER BY id
+    `).all() as Array<{ id: string; project_id: string; content_hash: string; file_size: number }>
+
+    const legacyFragments = db.prepare(`
+      SELECT heading_path, content, start_line, end_line, fragment_hash,
+             chapter_start, chapter_end, purpose, status
+      FROM workspace_source_fragments
+      WHERE source_id = ?
+      ORDER BY start_line, fragment_id
+    `)
+    const insertSnapshot = db.prepare(`
+      INSERT INTO workspace_source_snapshots (
+        snapshot_id, source_id, project_id, content_hash, file_size, fragment_count
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `)
+    const insertFragment = db.prepare(`
+      INSERT INTO workspace_source_snapshot_fragments (
+        id, snapshot_id, source_id, project_id, heading_path, content,
+        start_line, end_line, fragment_hash, chapter_start, chapter_end, purpose, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    const updateSource = db.prepare(`
+      UPDATE workspace_sources
+      SET observed_snapshot_id = ?, approved_snapshot_id = ?,
+          observed_file_hash = content_hash, approved_content_hash = content_hash,
+          updated_at = datetime('now')
+      WHERE id = ? AND project_id = ?
+    `)
+
+    let migratedFragmentCount = 0
+    for (const source of sources) {
+      const snapshotId = `snap-legacy-${source.id}-${source.content_hash.slice(0, 16)}`
+      const fragments = legacyFragments.all(source.id) as Array<{
+        heading_path: string
+        content: string
+        start_line: number
+        end_line: number
+        fragment_hash: string
+        chapter_start: number | null
+        chapter_end: number | null
+        purpose: string
+        status: 'active' | 'stale' | 'deprecated'
+      }>
+      insertSnapshot.run(
+        snapshotId,
+        source.id,
+        source.project_id,
+        source.content_hash,
+        source.file_size,
+        fragments.length,
+      )
+      fragments.forEach((fragment, index) => {
+        insertFragment.run(
+          `${snapshotId}-f-${index + 1}`,
+          snapshotId,
+          source.id,
+          source.project_id,
+          fragment.heading_path,
+          fragment.content,
+          fragment.start_line,
+          fragment.end_line,
+          fragment.fragment_hash,
+          fragment.chapter_start,
+          fragment.chapter_end,
+          fragment.purpose,
+          fragment.status === 'stale' ? 'active' : fragment.status,
+        )
+      })
+      migratedFragmentCount += fragments.length
+      updateSource.run(snapshotId, snapshotId, source.id, source.project_id)
+    }
+
+    const legacyScanRules = db.prepare(`
+      SELECT rule_id, project_id, title, content, status, constraint_type, scope,
+             source_file, source_heading_path, source_line_range
+      FROM setting_rules
+      WHERE confirmed_by = 'preset-importer' AND origin_type = 'manual'
+      ORDER BY rule_id
+    `).all() as Array<{
+      rule_id: string
+      project_id: string
+      title: string
+      content: string
+      status: string
+      constraint_type: string
+      scope: string
+      source_file: string
+      source_heading_path: string
+      source_line_range: string
+    }>
+    let promotedLegacyRuleCount = 0
+    let discardedUnapprovedRuleCount = 0
+    for (const rule of legacyScanRules) {
+      const source = db.prepare(`
+        SELECT id, approved_snapshot_id
+        FROM workspace_sources
+        WHERE project_id = ? AND relative_path = ?
+          AND approved_snapshot_id IS NOT NULL AND approved_snapshot_id <> ''
+      `).get(rule.project_id, rule.source_file) as { id: string; approved_snapshot_id: string } | undefined
+      if (!source) {
+        db.prepare('DELETE FROM setting_rules WHERE rule_id = ?').run(rule.rule_id)
+        discardedUnapprovedRuleCount++
+        continue
+      }
+      db.prepare(`
+        UPDATE setting_rules
+        SET origin_type = 'scan', source_id = ?, source_snapshot_id = ?
+        WHERE rule_id = ?
+      `).run(source.id, source.approved_snapshot_id, rule.rule_id)
+      const stagedId = `${source.approved_snapshot_id}-legacy-rule-${createHash('sha256').update(rule.rule_id).digest('hex').slice(0, 12)}`
+      db.prepare(`
+        INSERT OR IGNORE INTO workspace_source_snapshot_rules (
+          id, snapshot_id, source_id, project_id, title, content, status,
+          constraint_type, scope, source_file, source_heading_path, source_line_range
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        stagedId,
+        source.approved_snapshot_id,
+        source.id,
+        rule.project_id,
+        rule.title,
+        rule.content,
+        rule.status,
+        rule.constraint_type,
+        rule.scope,
+        rule.source_file,
+        rule.source_heading_path,
+        rule.source_line_range,
+      )
+      promotedLegacyRuleCount++
+    }
+
+    db.prepare(`
+      INSERT INTO workspace_hub_migration_audit (
+        migration_id, migrated_source_count, migrated_fragment_count, details_json
+      ) VALUES (?, ?, ?, ?)
+    `).run(
+      WORKSPACE_HUB_LEGACY_MIGRATION_ID,
+      sources.length,
+      migratedFragmentCount,
+      JSON.stringify({ promotedLegacyRuleCount, discardedUnapprovedRuleCount }),
+    )
+  })()
+}
+
 /** 初始化项目数据库（打开项目时调用） */
 export function initProjectDatabase(projectPath: string, importSourceSecret?: Buffer): void {
   closeProjectDatabase()
@@ -94,6 +262,9 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
       -- [系统缓存]
       character_states TEXT DEFAULT '',           -- 全书角色动态快照
       plot_tree_snapshot TEXT NOT NULL DEFAULT '',-- 可重建的剧情树派生快照
+      -- [创作中枢关联]
+      external_workspace_path TEXT DEFAULT '',     -- 关联的外部创作母稿目录路径
+      external_workspace_scanned_at TEXT DEFAULT '', -- 最近一次扫描完成时间
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
@@ -586,6 +757,207 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- ============================================================
+    -- 10. 创作资料中枢 (Workspace Hub) — 外部来源、片段、规则与候选
+    -- ============================================================
+    CREATE TABLE IF NOT EXISTS workspace_sources (
+      id TEXT NOT NULL PRIMARY KEY,
+      project_id TEXT NOT NULL DEFAULT 'main',
+      absolute_path TEXT NOT NULL,
+      relative_path TEXT NOT NULL,
+      category TEXT NOT NULL,
+      authority_status TEXT NOT NULL CHECK(authority_status IN (
+        'confirmed', 'candidate', 'background', 'deprecated', 'reference', 'material'
+      )),
+      content_hash TEXT NOT NULL,
+      observed_file_hash TEXT NOT NULL DEFAULT '',
+      approved_content_hash TEXT NOT NULL DEFAULT '',
+      observed_snapshot_id TEXT DEFAULT NULL,
+      approved_snapshot_id TEXT DEFAULT NULL,
+      parse_error TEXT DEFAULT NULL,
+      parse_status TEXT NOT NULL DEFAULT 'parsed' CHECK(parse_status IN ('parsed', 'metadata_only', 'error')),
+      skip_reason TEXT DEFAULT NULL,
+      mtime INTEGER NOT NULL DEFAULT 0,
+      last_scanned_at TEXT NOT NULL DEFAULT (datetime('now')),
+      import_status TEXT NOT NULL DEFAULT 'scanned' CHECK(import_status IN (
+        'scanned', 'imported', 'stale', 'missing', 'disabled'
+      )),
+      is_missing INTEGER NOT NULL DEFAULT 0 CHECK(is_missing IN (0, 1)),
+      is_disabled INTEGER NOT NULL DEFAULT 0 CHECK(is_disabled IN (0, 1)),
+      file_size INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspace_sources_project_path
+      ON workspace_sources(project_id, relative_path);
+
+    CREATE TABLE IF NOT EXISTS workspace_source_snapshots (
+      snapshot_id TEXT PRIMARY KEY,
+      source_id TEXT NOT NULL,
+      project_id TEXT NOT NULL DEFAULT 'main',
+      content_hash TEXT NOT NULL,
+      file_size INTEGER NOT NULL DEFAULT 0,
+      fragment_count INTEGER NOT NULL DEFAULT 0,
+      parser_schema_version INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (source_id) REFERENCES workspace_sources(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspace_source_snapshots_source
+      ON workspace_source_snapshots(source_id);
+
+    CREATE TABLE IF NOT EXISTS workspace_source_snapshot_fragments (
+      id TEXT PRIMARY KEY,
+      snapshot_id TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      project_id TEXT NOT NULL DEFAULT 'main',
+      heading_path TEXT NOT NULL,
+      content TEXT NOT NULL,
+      start_line INTEGER NOT NULL,
+      end_line INTEGER NOT NULL,
+      fragment_hash TEXT NOT NULL,
+      chapter_start INTEGER DEFAULT NULL,
+      chapter_end INTEGER DEFAULT NULL,
+      purpose TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'stale', 'deprecated')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (snapshot_id) REFERENCES workspace_source_snapshots(snapshot_id) ON DELETE CASCADE,
+      FOREIGN KEY (source_id) REFERENCES workspace_sources(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspace_snapshot_fragments_snapshot
+      ON workspace_source_snapshot_fragments(snapshot_id);
+    CREATE INDEX IF NOT EXISTS idx_workspace_snapshot_fragments_chapter
+      ON workspace_source_snapshot_fragments(chapter_start, chapter_end);
+
+    CREATE TABLE IF NOT EXISTS workspace_source_snapshot_rules (
+      id TEXT PRIMARY KEY,
+      snapshot_id TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      project_id TEXT NOT NULL DEFAULT 'main',
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('confirmed', 'candidate', 'background', 'deprecated')),
+      constraint_type TEXT NOT NULL DEFAULT 'hard' CHECK(constraint_type IN ('hard', 'soft')),
+      scope TEXT NOT NULL DEFAULT 'global',
+      source_fragment_id TEXT DEFAULT NULL,
+      source_file TEXT NOT NULL DEFAULT '',
+      source_heading_path TEXT NOT NULL DEFAULT '',
+      source_line_range TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (snapshot_id) REFERENCES workspace_source_snapshots(snapshot_id) ON DELETE CASCADE,
+      FOREIGN KEY (source_id) REFERENCES workspace_sources(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspace_snapshot_rules_snapshot
+      ON workspace_source_snapshot_rules(snapshot_id);
+
+    CREATE TABLE IF NOT EXISTS workspace_approval_receipts (
+      candidate_id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL DEFAULT 'main',
+      candidate_type TEXT NOT NULL,
+      operation_id TEXT NOT NULL,
+      payload_hash TEXT NOT NULL DEFAULT '',
+      frozen_payload TEXT NOT NULL DEFAULT '',
+      stage TEXT NOT NULL CHECK(stage IN ('prepared', 'roster_committed', 'completed')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspace_approval_receipts_stage
+      ON workspace_approval_receipts(project_id, stage);
+
+    CREATE TABLE IF NOT EXISTS chapter_context_snapshots (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL DEFAULT 'main',
+      chapter_number INTEGER NOT NULL,
+      total_chars INTEGER NOT NULL DEFAULT 0,
+      estimated_tokens INTEGER NOT NULL DEFAULT 0,
+      bundle_text TEXT NOT NULL,
+      sources_json TEXT NOT NULL DEFAULT '[]',
+      blocks_json TEXT NOT NULL DEFAULT '[]',
+      stale_warnings_json TEXT NOT NULL DEFAULT '[]',
+      candidate_warnings_json TEXT NOT NULL DEFAULT '[]',
+      omissions_json TEXT NOT NULL DEFAULT '[]',
+      excluded_deprecated_count INTEGER NOT NULL DEFAULT 0,
+      is_over_budget INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_chapter_context_snapshots_project_chapter
+      ON chapter_context_snapshots(project_id, chapter_number);
+
+    CREATE TABLE IF NOT EXISTS workspace_source_fragments (
+      fragment_id TEXT PRIMARY KEY,
+      source_id TEXT NOT NULL,
+      heading_path TEXT NOT NULL,
+      content TEXT NOT NULL,
+      start_line INTEGER NOT NULL,
+      end_line INTEGER NOT NULL,
+      fragment_hash TEXT NOT NULL,
+      chapter_start INTEGER DEFAULT NULL,
+      chapter_end INTEGER DEFAULT NULL,
+      purpose TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'stale', 'deprecated')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (source_id) REFERENCES workspace_sources(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspace_fragments_source
+      ON workspace_source_fragments(source_id);
+    CREATE INDEX IF NOT EXISTS idx_workspace_fragments_chapter
+      ON workspace_source_fragments(chapter_start, chapter_end);
+
+    CREATE TABLE IF NOT EXISTS setting_rules (
+      rule_id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL DEFAULT 'main',
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'confirmed' CHECK(status IN (
+        'confirmed', 'candidate', 'background', 'deprecated'
+      )),
+      constraint_type TEXT NOT NULL DEFAULT 'hard' CHECK(constraint_type IN ('hard', 'soft')),
+      scope TEXT NOT NULL DEFAULT 'global',
+      source_fragment_id TEXT DEFAULT NULL,
+      source_snapshot_fragment_id TEXT DEFAULT NULL,
+      source_file TEXT NOT NULL DEFAULT '',
+      source_heading_path TEXT NOT NULL DEFAULT '',
+      source_line_range TEXT NOT NULL DEFAULT '',
+      confirmed_at TEXT DEFAULT NULL,
+      confirmed_by TEXT DEFAULT NULL,
+      origin_type TEXT NOT NULL DEFAULT 'manual' CHECK(origin_type IN ('manual', 'scan')),
+      source_id TEXT DEFAULT NULL,
+      source_snapshot_id TEXT DEFAULT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (source_fragment_id) REFERENCES workspace_source_fragments(fragment_id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_setting_rules_status
+      ON setting_rules(project_id, status);
+    CREATE INDEX IF NOT EXISTS idx_setting_rules_scan_source
+      ON setting_rules(project_id, origin_type, source_id);
+
+    CREATE TABLE IF NOT EXISTS workspace_hub_migration_audit (
+      migration_id TEXT PRIMARY KEY,
+      migrated_source_count INTEGER NOT NULL DEFAULT 0,
+      migrated_fragment_count INTEGER NOT NULL DEFAULT 0,
+      details_json TEXT NOT NULL DEFAULT '{}',
+      applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS workspace_import_candidates (
+      candidate_id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL DEFAULT 'main',
+      candidate_type TEXT NOT NULL CHECK(candidate_type IN ('character', 'setting', 'blueprint', 'lead')),
+      raw_data TEXT NOT NULL,
+      suggested_data TEXT NOT NULL,
+      source_file TEXT NOT NULL DEFAULT '',
+      source_heading_path TEXT NOT NULL DEFAULT '',
+      source_line_range TEXT NOT NULL DEFAULT '',
+      evidence TEXT NOT NULL DEFAULT '',
+      confidence REAL NOT NULL DEFAULT 1.0,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
+      actioned_at TEXT DEFAULT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspace_candidates_status
+      ON workspace_import_candidates(project_id, candidate_type, status);
   `)
 
   const draftColumns = db.prepare('PRAGMA table_info(drafts)').all() as Array<{ name: string }>
@@ -1019,6 +1391,8 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
   addProjectCoreTextColumn('world_setting', 'worldbuilding')
   addProjectCoreTextColumn('protagonist_profile')
   addProjectCoreTextColumn('plot_tree_snapshot')
+  addProjectCoreTextColumn('external_workspace_path')
+  addProjectCoreTextColumn('external_workspace_scanned_at')
   if (!projectCoreColumns.has('writing_language')) {
     db.exec("ALTER TABLE project_core ADD COLUMN writing_language TEXT NOT NULL DEFAULT 'zh-CN'")
     projectCoreColumns.add('writing_language')
@@ -1054,6 +1428,157 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
   } catch {
     // 旧库结构差异时忽略
   }
+
+  const workspaceSourcesColumns = new Set(
+    (db.prepare('PRAGMA table_info(workspace_sources)').all() as Array<{ name: string }>).map(c => c.name),
+  )
+  if (workspaceSourcesColumns.size > 0) {
+    if (!workspaceSourcesColumns.has('observed_file_hash')) {
+      db.exec("ALTER TABLE workspace_sources ADD COLUMN observed_file_hash TEXT NOT NULL DEFAULT ''")
+      db.exec("UPDATE workspace_sources SET observed_file_hash = content_hash WHERE observed_file_hash = ''")
+    }
+    if (!workspaceSourcesColumns.has('approved_content_hash')) {
+      db.exec("ALTER TABLE workspace_sources ADD COLUMN approved_content_hash TEXT NOT NULL DEFAULT ''")
+      db.exec("UPDATE workspace_sources SET approved_content_hash = content_hash WHERE approved_content_hash = ''")
+    }
+    if (!workspaceSourcesColumns.has('observed_snapshot_id')) {
+      db.exec("ALTER TABLE workspace_sources ADD COLUMN observed_snapshot_id TEXT DEFAULT NULL")
+    }
+    if (!workspaceSourcesColumns.has('approved_snapshot_id')) {
+      db.exec("ALTER TABLE workspace_sources ADD COLUMN approved_snapshot_id TEXT DEFAULT NULL")
+    }
+    if (!workspaceSourcesColumns.has('parse_error')) {
+      db.exec("ALTER TABLE workspace_sources ADD COLUMN parse_error TEXT DEFAULT NULL")
+    }
+    if (!workspaceSourcesColumns.has('file_size')) {
+      db.exec("ALTER TABLE workspace_sources ADD COLUMN file_size INTEGER NOT NULL DEFAULT 0")
+    }
+    if (!workspaceSourcesColumns.has('parse_status')) {
+      db.exec("ALTER TABLE workspace_sources ADD COLUMN parse_status TEXT NOT NULL DEFAULT 'parsed'")
+    }
+    if (!workspaceSourcesColumns.has('skip_reason')) {
+      db.exec('ALTER TABLE workspace_sources ADD COLUMN skip_reason TEXT DEFAULT NULL')
+    }
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS workspace_source_snapshots (
+      snapshot_id TEXT PRIMARY KEY,
+      source_id TEXT NOT NULL,
+      project_id TEXT NOT NULL DEFAULT 'main',
+      content_hash TEXT NOT NULL,
+      file_size INTEGER NOT NULL DEFAULT 0,
+      fragment_count INTEGER NOT NULL DEFAULT 0,
+      parser_schema_version INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (source_id) REFERENCES workspace_sources(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspace_source_snapshots_source
+      ON workspace_source_snapshots(source_id);
+
+    CREATE TABLE IF NOT EXISTS workspace_source_snapshot_fragments (
+      id TEXT PRIMARY KEY,
+      snapshot_id TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      project_id TEXT NOT NULL DEFAULT 'main',
+      heading_path TEXT NOT NULL,
+      content TEXT NOT NULL,
+      start_line INTEGER NOT NULL,
+      end_line INTEGER NOT NULL,
+      fragment_hash TEXT NOT NULL,
+      chapter_start INTEGER DEFAULT NULL,
+      chapter_end INTEGER DEFAULT NULL,
+      purpose TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'stale', 'deprecated')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (snapshot_id) REFERENCES workspace_source_snapshots(snapshot_id) ON DELETE CASCADE,
+      FOREIGN KEY (source_id) REFERENCES workspace_sources(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspace_snapshot_fragments_snapshot
+      ON workspace_source_snapshot_fragments(snapshot_id);
+    CREATE INDEX IF NOT EXISTS idx_workspace_snapshot_fragments_chapter
+      ON workspace_source_snapshot_fragments(chapter_start, chapter_end);
+
+    CREATE TABLE IF NOT EXISTS workspace_source_snapshot_rules (
+      id TEXT PRIMARY KEY,
+      snapshot_id TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      project_id TEXT NOT NULL DEFAULT 'main',
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('confirmed', 'candidate', 'background', 'deprecated')),
+      constraint_type TEXT NOT NULL DEFAULT 'hard' CHECK(constraint_type IN ('hard', 'soft')),
+      scope TEXT NOT NULL DEFAULT 'global',
+      source_fragment_id TEXT DEFAULT NULL,
+      source_file TEXT NOT NULL DEFAULT '',
+      source_heading_path TEXT NOT NULL DEFAULT '',
+      source_line_range TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (snapshot_id) REFERENCES workspace_source_snapshots(snapshot_id) ON DELETE CASCADE,
+      FOREIGN KEY (source_id) REFERENCES workspace_sources(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspace_snapshot_rules_snapshot
+      ON workspace_source_snapshot_rules(snapshot_id);
+
+    CREATE TABLE IF NOT EXISTS workspace_approval_receipts (
+      candidate_id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL DEFAULT 'main',
+      candidate_type TEXT NOT NULL,
+      operation_id TEXT NOT NULL,
+      payload_hash TEXT NOT NULL DEFAULT '',
+      frozen_payload TEXT NOT NULL DEFAULT '',
+      stage TEXT NOT NULL CHECK(stage IN ('prepared', 'roster_committed', 'completed')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspace_approval_receipts_stage
+      ON workspace_approval_receipts(project_id, stage);
+
+    CREATE TABLE IF NOT EXISTS workspace_hub_migration_audit (
+      migration_id TEXT PRIMARY KEY,
+      migrated_source_count INTEGER NOT NULL DEFAULT 0,
+      migrated_fragment_count INTEGER NOT NULL DEFAULT 0,
+      details_json TEXT NOT NULL DEFAULT '{}',
+      applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `)
+
+  const settingRuleColumns = new Set(
+    (db.prepare('PRAGMA table_info(setting_rules)').all() as Array<{ name: string }>).map(c => c.name),
+  )
+  if (!settingRuleColumns.has('origin_type')) {
+    db.exec("ALTER TABLE setting_rules ADD COLUMN origin_type TEXT NOT NULL DEFAULT 'manual'")
+  }
+  if (!settingRuleColumns.has('source_id')) {
+    db.exec('ALTER TABLE setting_rules ADD COLUMN source_id TEXT DEFAULT NULL')
+  }
+  if (!settingRuleColumns.has('source_snapshot_id')) {
+    db.exec('ALTER TABLE setting_rules ADD COLUMN source_snapshot_id TEXT DEFAULT NULL')
+  }
+  if (!settingRuleColumns.has('source_snapshot_fragment_id')) {
+    db.exec('ALTER TABLE setting_rules ADD COLUMN source_snapshot_fragment_id TEXT DEFAULT NULL')
+  }
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_setting_rules_scan_source
+    ON setting_rules(project_id, origin_type, source_id)`)
+
+  const snapshotColumns = new Set(
+    (db.prepare('PRAGMA table_info(workspace_source_snapshots)').all() as Array<{ name: string }>).map(c => c.name),
+  )
+  if (!snapshotColumns.has('parser_schema_version')) {
+    db.exec('ALTER TABLE workspace_source_snapshots ADD COLUMN parser_schema_version INTEGER NOT NULL DEFAULT 1')
+  }
+
+  const approvalReceiptColumns = new Set(
+    (db.prepare('PRAGMA table_info(workspace_approval_receipts)').all() as Array<{ name: string }>).map(c => c.name),
+  )
+  if (!approvalReceiptColumns.has('payload_hash')) {
+    db.exec("ALTER TABLE workspace_approval_receipts ADD COLUMN payload_hash TEXT NOT NULL DEFAULT ''")
+  }
+  if (!approvalReceiptColumns.has('frozen_payload')) {
+    db.exec("ALTER TABLE workspace_approval_receipts ADD COLUMN frozen_payload TEXT NOT NULL DEFAULT ''")
+  }
+
+  migrateLegacyWorkspaceHubData(db)
 
   migrateDraftUnitCounts(db)
 }

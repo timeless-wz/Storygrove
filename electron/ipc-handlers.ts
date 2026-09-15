@@ -7,6 +7,7 @@ import { registerLLMController } from './controllers/llm-controller'
 import { registerDatabaseController } from './controllers/db-controller'
 import { registerKBController } from './controllers/kb-controller'
 import { registerImportController } from './controllers/import-controller'
+import { registerWorkspaceHubController } from './controllers/workspace-hub-controller'
 import { registerWindowController } from './controllers/window-controller'
 import { registerOfficialHomepageController } from './controllers/official-homepage-controller'
 import { registerModelProviderResourceController } from './controllers/model-provider-resource-controller'
@@ -48,6 +49,7 @@ export function registerIPCHandlers() {
   registerChapterLifecycleController()
   registerKBController()
   registerImportController()
+  registerWorkspaceHubController()
 
   console.log(`[Vela IPC] 所有 Controller 已注册完成 | 全局工作区: ${VELA_HOME}`)
 }

@@ -69,6 +69,18 @@ import type {
   ImportRunStartResult,
   ImportRunStage,
 } from './import-run'
+import type {
+  WorkspaceHubStatus,
+  WorkspaceSource,
+  WorkspaceSourceFragment,
+  SettingRule,
+  SettingRuleStatus,
+  WorkspaceImportCandidate,
+  WorkspaceImportCandidateType,
+  WorkspaceImportCandidateStatus,
+  ChapterContextBundle,
+  ChapterContextSnapshot,
+} from './workspace-hub'
 
 // ===== 全局配置 =====
 export interface ConfigChannels {
@@ -1147,8 +1159,84 @@ export interface MCPChannels {
   'mcp:get-config-path': { args: []; return: string }
 }
 
+// ===== 创作资料中枢 =====
+export interface WorkspaceHubChannels {
+  'workspace:get-status': {
+    args: [expectedProjectPath?: string]
+    return: WorkspaceHubStatus
+  }
+  'workspace:select-directory': {
+    args: [expectedProjectPath?: string]
+    return: { grantId: string; displayName: string } | null
+  }
+  'workspace:bind-directory': {
+    args: [grantId: string, expectedProjectPath?: string]
+    return: { success: boolean; scannedCount?: number; recognizedCount?: number; error?: string }
+  }
+  'workspace:unbind-directory': {
+    args: [expectedProjectPath?: string]
+    return: { success: boolean; error?: string }
+  }
+  'workspace:scan': {
+    args: [taskId?: string, expectedProjectPath?: string]
+    return: { success: boolean; scannedCount: number; recognizedCount: number; error?: string }
+  }
+  'workspace:cancel-scan': {
+    args: [taskId?: string, expectedProjectPath?: string]
+    return: { success: boolean; error?: string }
+  }
+  'workspace:approve-source': {
+    args: [sourceId: string, expectedProjectPath?: string]
+    return: { success: boolean; error?: string }
+  }
+  'workspace:approve-all-sources': {
+    args: [expectedProjectPath?: string]
+    return: { success: boolean; count: number; error?: string }
+  }
+  'workspace:list-sources': {
+    args: [expectedProjectPath?: string]
+    return: WorkspaceSource[]
+  }
+  'workspace:get-source-detail': {
+    args: [sourceId: string, expectedProjectPath?: string]
+    return: { source: WorkspaceSource | null; fragments: WorkspaceSourceFragment[] }
+  }
+  'workspace:list-rules': {
+    args: [status?: SettingRuleStatus, expectedProjectPath?: string]
+    return: SettingRule[]
+  }
+  'workspace:upsert-rule': {
+    args: [rule: SettingRule, expectedProjectPath?: string]
+    return: { success: boolean; error?: string }
+  }
+  'workspace:update-rule-status': {
+    args: [ruleId: string, status: SettingRuleStatus, expectedProjectPath?: string]
+    return: { success: boolean; error?: string }
+  }
+  'workspace:delete-rule': {
+    args: [ruleId: string, expectedProjectPath?: string]
+    return: { success: boolean; error?: string }
+  }
+  'workspace:list-candidates': {
+    args: [candidateType?: WorkspaceImportCandidateType, status?: WorkspaceImportCandidateStatus, expectedProjectPath?: string]
+    return: WorkspaceImportCandidate[]
+  }
+  'workspace:action-candidate': {
+    args: [candidateId: string, action: 'approve' | 'reject', expectedProjectPath?: string]
+    return: { success: boolean; error?: string }
+  }
+  'workspace:assemble-chapter-context': {
+    args: [chapterNumber: number, budgetChars?: number, includeCandidates?: boolean, expectedProjectPath?: string]
+    return: ChapterContextBundle
+  }
+  'workspace:save-chapter-context-snapshot': {
+    args: [snapshot: ChapterContextSnapshot, expectedProjectPath?: string]
+    return: { success: boolean; snapshotId?: string; error?: string }
+  }
+}
+
 // ===== 合并所有频道 =====
-export type AllInvokeChannels = WindowChannels & OfficialHomepageChannels & ModelProviderResourceChannels & ConfigChannels & UpdateChannels & SkinChannels & ProjectChannels & FileChannels & AppDataChannels & LLMChannels & DatabaseChannels & KnowledgeBaseChannels & ChapterLifecycleChannels & ImportChannels & MCPChannels
+export type AllInvokeChannels = WindowChannels & OfficialHomepageChannels & ModelProviderResourceChannels & ConfigChannels & UpdateChannels & SkinChannels & ProjectChannels & FileChannels & AppDataChannels & LLMChannels & DatabaseChannels & KnowledgeBaseChannels & ChapterLifecycleChannels & ImportChannels & MCPChannels & WorkspaceHubChannels
 export type AllEventChannels = LLMStreamEvents & UpdateStateEvents & WindowEvents
 
 /** 提取 invoke 频道名 */

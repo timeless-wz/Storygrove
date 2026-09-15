@@ -61,6 +61,7 @@ function isProjectScopedChannel(channel: string): boolean {
     || channel.startsWith('kb:')
     || channel.startsWith('chapter:')
     || channel.startsWith('fs:')
+    || channel.startsWith('workspace:')
     || channel === 'project:save'
     || channel === 'project:update-config'
     || channel === 'project:delete'
