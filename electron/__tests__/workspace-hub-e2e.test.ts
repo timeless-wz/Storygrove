@@ -189,7 +189,7 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
     expect(deprecatedRules.length).toBe(1)
     expect(deprecatedRules[0].ruleId).toBe('rule-deprecated-1')
 
-    WorkspaceHubRepository.updateRuleStatus('rule-candidate-1', 'confirmed')
+    WorkspaceHubRepository.updateRuleStatus('rule-candidate-1', 'main', 'confirmed')
     const confirmedAfter = WorkspaceHubRepository.listRules('main', 'confirmed')
     expect(confirmedAfter.length).toBe(2)
   })

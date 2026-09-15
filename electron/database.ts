@@ -933,6 +933,8 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
       ON setting_rules(project_id, status);
     CREATE INDEX IF NOT EXISTS idx_setting_rules_scan_source
       ON setting_rules(project_id, origin_type, source_id);
+    CREATE INDEX IF NOT EXISTS idx_setting_rules_source_fragment
+      ON setting_rules(source_fragment_id);
 
     CREATE TABLE IF NOT EXISTS workspace_hub_migration_audit (
       migration_id TEXT PRIMARY KEY,
@@ -1550,6 +1552,47 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
     .filter(c => c.pk > 0)
     .map(c => c.name)
   if (settingRulePkColumns.length === 1 && settingRulePkColumns[0] === 'rule_id') {
+    const legacySettingRuleColumns = new Set(
+      (db.prepare('PRAGMA table_info(setting_rules)').all() as Array<{ name: string }>).map(c => c.name),
+    )
+    const legacySettingRuleIndexes = db.prepare(`
+      SELECT name, sql
+      FROM sqlite_master
+      WHERE type = 'index' AND tbl_name = 'setting_rules' AND sql IS NOT NULL
+      ORDER BY name
+    `).all() as Array<{ name: string; sql: string }>
+    const settingRuleColumnsToCopy = [
+      'rule_id', 'project_id', 'title', 'content', 'status', 'constraint_type', 'scope',
+      'source_fragment_id', 'source_snapshot_fragment_id', 'source_file',
+      'source_heading_path', 'source_line_range', 'confirmed_at', 'confirmed_by',
+      'origin_type', 'source_id', 'source_snapshot_id', 'created_at', 'updated_at',
+    ]
+    const missingColumnDefaults: Record<string, string> = {
+      rule_id: "''",
+      project_id: "'main'",
+      title: "''",
+      content: "''",
+      status: "'confirmed'",
+      constraint_type: "'hard'",
+      scope: "'global'",
+      source_fragment_id: 'NULL',
+      source_snapshot_fragment_id: 'NULL',
+      source_file: "''",
+      source_heading_path: "''",
+      source_line_range: "''",
+      confirmed_at: 'NULL',
+      confirmed_by: 'NULL',
+      origin_type: "'manual'",
+      source_id: 'NULL',
+      source_snapshot_id: 'NULL',
+      created_at: "datetime('now')",
+      updated_at: "datetime('now')",
+    }
+    const quotedColumns = settingRuleColumnsToCopy.map(column => `"${column}"`).join(', ')
+    const copyExpressions = settingRuleColumnsToCopy.map(column => (
+      legacySettingRuleColumns.has(column) ? `"${column}"` : missingColumnDefaults[column]
+    )).join(', ')
+
     db.pragma('foreign_keys = OFF')
     try {
       db.transaction(() => {
@@ -1576,16 +1619,32 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
             source_snapshot_id TEXT DEFAULT NULL,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-            PRIMARY KEY (project_id, rule_id)
+            PRIMARY KEY (project_id, rule_id),
+            FOREIGN KEY (source_fragment_id) REFERENCES workspace_source_fragments(fragment_id) ON DELETE SET NULL
           );
-          INSERT OR IGNORE INTO setting_rules_stage_v2 SELECT * FROM setting_rules;
+          INSERT INTO setting_rules_stage_v2 (${quotedColumns})
+            SELECT ${copyExpressions} FROM setting_rules;
           DROP TABLE setting_rules;
           ALTER TABLE setting_rules_stage_v2 RENAME TO setting_rules;
+        `)
+
+        // Rebuild every named legacy index after the table swap. The required
+        // indexes below are added afterwards so an existing index definition is
+        // never silently replaced by an IF NOT EXISTS collision.
+        for (const index of legacySettingRuleIndexes) db.exec(index.sql)
+        db.exec(`
           CREATE INDEX IF NOT EXISTS idx_setting_rules_status
             ON setting_rules(project_id, status);
           CREATE INDEX IF NOT EXISTS idx_setting_rules_scan_source
             ON setting_rules(project_id, origin_type, source_id);
+          CREATE INDEX IF NOT EXISTS idx_setting_rules_source_fragment
+            ON setting_rules(source_fragment_id);
         `)
+
+        const foreignKeyViolations = db.prepare("PRAGMA foreign_key_check('setting_rules')").all()
+        if (foreignKeyViolations.length > 0) {
+          throw new Error('setting_rules 迁移后外键校验失败，已回滚')
+        }
       })()
     } finally {
       db.pragma('foreign_keys = ON')
@@ -1609,6 +1668,8 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
   }
   db.exec(`CREATE INDEX IF NOT EXISTS idx_setting_rules_scan_source
     ON setting_rules(project_id, origin_type, source_id)`)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_setting_rules_source_fragment
+    ON setting_rules(source_fragment_id)`)
 
   const snapshotColumns = new Set(
     (db.prepare('PRAGMA table_info(workspace_source_snapshots)').all() as Array<{ name: string }>).map(c => c.name),

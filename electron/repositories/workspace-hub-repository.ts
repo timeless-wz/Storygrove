@@ -63,6 +63,289 @@ interface ApprovableSourceRow {
   content_hash: string
 }
 
+interface ApprovedSnapshotRow {
+  snapshot_id: string
+  source_id: string
+  project_id: string
+  content_hash: string
+  file_size: number
+  fragment_count: number
+  parser_schema_version: number
+}
+
+function normalizeSettingRuleForIntegrity(rule: {
+  ruleId?: string
+  projectId?: string
+  title?: string
+  content?: string
+  status?: string
+  constraintType?: string
+  scope?: string
+  sourceFragmentId?: string | null
+  sourceSnapshotFragmentId?: string | null
+  sourceFile?: string
+  sourceHeadingPath?: string
+  sourceLineRange?: string
+}): Record<string, unknown> {
+  return {
+    ruleId: rule.ruleId ?? '',
+    projectId: rule.projectId ?? '',
+    title: rule.title ?? '',
+    content: rule.content ?? '',
+    status: rule.status ?? '',
+    constraintType: rule.constraintType ?? '',
+    scope: rule.scope ?? '',
+    sourceFragmentId: rule.sourceFragmentId ?? null,
+    sourceSnapshotFragmentId: rule.sourceSnapshotFragmentId ?? null,
+    sourceFile: rule.sourceFile ?? '',
+    sourceHeadingPath: rule.sourceHeadingPath ?? '',
+    sourceLineRange: rule.sourceLineRange ?? '',
+  }
+}
+
+function settingRuleIntegrityHash(rule: Parameters<typeof normalizeSettingRuleForIntegrity>[0]): string {
+  return hashString(JSON.stringify(normalizeSettingRuleForIntegrity(rule)))
+}
+
+function characterEntryIntegrityValue(entry: CharacterRosterEntry): string {
+  return JSON.stringify({
+    name: entry.name,
+    role: entry.role,
+    gender: entry.gender,
+    age: entry.age,
+    appearance: entry.appearance,
+    personality: entry.personality,
+    background: entry.background,
+    abilities: entry.abilities,
+    motivation: entry.motivation,
+    relationships: [...entry.relationships].sort((left, right) => (
+      `${left.target}\u0000${left.relation}`.localeCompare(`${right.target}\u0000${right.relation}`)
+    )),
+    arc: entry.arc,
+    notes: entry.notes,
+    currentState: entry.currentState ?? null,
+    legacyRelationshipNotes: entry.legacyRelationshipNotes ?? null,
+  })
+}
+
+function assertCharacterOperationStillAuthoritative(
+  db: BetterSqlite3.Database,
+  operationId: string,
+  frozenRequest: CharacterRosterCommitRequest,
+  targetName: string,
+): void {
+  if (frozenRequest.operationId !== operationId) {
+    throw new Error('审批冻结请求 operationId 不一致')
+  }
+
+  const operation = db.prepare(`
+    SELECT operation_id, payload_hash, committed_revision, projection_hash
+    FROM character_roster_operations
+    WHERE operation_id = ?
+  `).get(operationId) as {
+    operation_id: string
+    payload_hash: string
+    committed_revision: number
+    projection_hash: string
+  } | undefined
+  if (!operation) {
+    throw new Error('审批恢复失败：缺少本次 operation 的正式角色事实证据，已拒绝闭合回执')
+  }
+
+  const currentRoster = CharacterRosterRepository.read()
+  const targetKey = characterRosterIdentityKey(targetName)
+  const targetEntry = currentRoster.entries.find(entry => characterRosterIdentityKey(entry.name) === targetKey)
+  const expectedEntry = frozenRequest.entries.find(entry => characterRosterIdentityKey(entry.name) === targetKey)
+  if (
+    operation.operation_id !== operationId
+    || operation.committed_revision < 1
+    || operation.committed_revision > currentRoster.revision
+    || !targetEntry
+    || !expectedEntry
+    || characterEntryIntegrityValue(targetEntry) !== characterEntryIntegrityValue(expectedEntry)
+  ) {
+    throw new Error('审批恢复失败：正式角色已被删除或替换，已拒绝闭合回执')
+  }
+
+  // The operation receipt stores the canonical roster request hash indirectly in
+  // CharacterRosterRepository. A matching revision and projection alone is not
+  // enough if the operation record itself was forged.
+  const replay = CharacterRosterRepository.commit(frozenRequest)
+  if (
+    replay.operationId !== operationId
+    || replay.payloadHash !== operation.payload_hash
+    || !operation.projection_hash
+  ) {
+    throw new Error('审批恢复失败：正式角色事实不属于本次 operation，已拒绝闭合回执')
+  }
+}
+
+function assertApprovedSnapshotPayloadIntegrity(
+  db: BetterSqlite3.Database,
+  source: WorkspaceSource,
+  item: StagedSourceItem,
+  approvedSnapshotId: string,
+  existingSource: {
+    absolute_path: string
+    relative_path: string
+    category: string
+    authority_status: string
+    content_hash: string
+    observed_file_hash: string
+    approved_content_hash: string
+    observed_snapshot_id: string | null
+    approved_snapshot_id: string | null
+    import_status: string
+    parse_error: string | null
+    parse_status: string
+    skip_reason: string | null
+    is_missing: number
+    is_disabled: number
+    file_size: number
+  },
+): void {
+  const snapshot = db.prepare(`
+    SELECT snapshot_id, source_id, project_id, content_hash, file_size, fragment_count, parser_schema_version
+    FROM workspace_source_snapshots
+    WHERE snapshot_id = ?
+  `).get(approvedSnapshotId) as ApprovedSnapshotRow | undefined
+  if (!snapshot) throw new Error('已批准快照不存在，已拒绝不一致扫描提交')
+
+  const observedFileHash = source.observedFileHash || source.contentHash
+  if (
+    source.projectId !== item.source.projectId
+    || source.absolutePath !== existingSource.absolute_path
+    || source.relativePath !== existingSource.relative_path
+    || source.category !== existingSource.category
+    || source.authorityStatus !== existingSource.authority_status
+    || source.observedSnapshotId !== approvedSnapshotId
+    || source.approvedSnapshotId !== approvedSnapshotId
+    || source.contentHash !== existingSource.content_hash
+    || observedFileHash !== existingSource.observed_file_hash
+    || source.contentHash !== snapshot.content_hash
+    || (source.fileSize ?? 0) !== existingSource.file_size
+    || (source.fileSize ?? 0) !== snapshot.file_size
+    || source.approvedContentHash !== existingSource.approved_content_hash
+    || source.importStatus !== existingSource.import_status
+    || (source.parseError ?? null) !== existingSource.parse_error
+    || (source.parseStatus ?? 'parsed') !== existingSource.parse_status
+    || (source.skipReason ?? null) !== existingSource.skip_reason
+    || (source.isMissing ? 1 : 0) !== existingSource.is_missing
+    || (source.isDisabled ? 1 : 0) !== existingSource.is_disabled
+    || snapshot.source_id !== source.id
+    || snapshot.project_id !== source.projectId
+  ) {
+    throw new Error('已批准 snapshotId 的来源观察数据不一致，已拒绝扫描提交')
+  }
+
+  if (item.snapshot) {
+    const incoming = item.snapshot
+    if (
+      incoming.snapshotId !== snapshot.snapshot_id
+      || incoming.sourceId !== snapshot.source_id
+      || incoming.projectId !== snapshot.project_id
+      || incoming.contentHash !== snapshot.content_hash
+      || incoming.fileSize !== snapshot.file_size
+      || incoming.fragmentCount !== snapshot.fragment_count
+      || (incoming.parserSchemaVersion ?? 1) !== snapshot.parser_schema_version
+    ) {
+      throw new Error('已批准快照元数据不一致，已拒绝覆盖')
+    }
+  }
+
+  if (item.fragments) {
+    const storedFragments = db.prepare(`
+      SELECT id, snapshot_id, source_id, project_id, heading_path, content,
+             start_line, end_line, fragment_hash, chapter_start, chapter_end, purpose, status
+      FROM workspace_source_snapshot_fragments
+      WHERE snapshot_id = ?
+      ORDER BY id
+    `).all(approvedSnapshotId) as Array<Record<string, unknown>>
+    const incomingFragments = [...item.fragments].sort((a, b) => a.id.localeCompare(b.id))
+    if (incomingFragments.length !== storedFragments.length) {
+      throw new Error('已批准快照片段数量不一致，已拒绝覆盖')
+    }
+    for (let index = 0; index < incomingFragments.length; index += 1) {
+      const incoming = incomingFragments[index]
+      const stored = storedFragments[index]
+      const equal = (
+        incoming.id === stored.id
+        && incoming.snapshotId === stored.snapshot_id
+        && incoming.sourceId === stored.source_id
+        && incoming.projectId === stored.project_id
+        && incoming.headingPath === stored.heading_path
+        && incoming.content === stored.content
+        && incoming.startLine === stored.start_line
+        && incoming.endLine === stored.end_line
+        && incoming.fragmentHash === stored.fragment_hash
+        && incoming.chapterStart === stored.chapter_start
+        && incoming.chapterEnd === stored.chapter_end
+        && incoming.purpose === stored.purpose
+        && incoming.status === stored.status
+      )
+      if (!equal) throw new Error('已批准快照片段不一致，已拒绝覆盖')
+    }
+  }
+
+  if (item.rules) {
+    const storedRules = db.prepare(`
+      SELECT id, snapshot_id, source_id, project_id, title, content, status,
+             constraint_type, scope, source_fragment_id, source_file,
+             source_heading_path, source_line_range
+      FROM workspace_source_snapshot_rules
+      WHERE snapshot_id = ?
+      ORDER BY id
+    `).all(approvedSnapshotId) as Array<Record<string, unknown>>
+    const incomingRules = item.rules.map((rule, index) => ({
+      id: `${approvedSnapshotId}-r-${index + 1}`,
+      rule,
+    })).sort((a, b) => a.id.localeCompare(b.id))
+    if (incomingRules.length !== storedRules.length) {
+      throw new Error('已批准快照规则数量不一致，已拒绝覆盖')
+    }
+    for (let index = 0; index < incomingRules.length; index += 1) {
+      const incoming = incomingRules[index]
+      const stored = storedRules[index]
+      const rule = incoming.rule
+      const storedRuleHash = settingRuleIntegrityHash({
+        ruleId: stored.id as string,
+        projectId: stored.project_id as string,
+        title: stored.title as string,
+        content: stored.content as string,
+        status: stored.status as string,
+        constraintType: stored.constraint_type as string,
+        scope: stored.scope as string,
+        sourceFragmentId: stored.source_fragment_id as string | null,
+        sourceFile: stored.source_file as string,
+        sourceHeadingPath: stored.source_heading_path as string,
+        sourceLineRange: stored.source_line_range as string,
+      })
+      const incomingRuleHash = settingRuleIntegrityHash({
+        ruleId: incoming.id,
+        projectId: rule.projectId,
+        title: rule.title,
+        content: rule.content,
+        status: rule.status,
+        constraintType: rule.constraintType,
+        scope: rule.scope,
+        sourceFragmentId: rule.sourceFragmentId ?? null,
+        sourceFile: rule.sourceFile,
+        sourceHeadingPath: rule.sourceHeadingPath,
+        sourceLineRange: rule.sourceLineRange,
+      })
+      if (
+        stored.id !== incoming.id
+        || stored.snapshot_id !== approvedSnapshotId
+        || stored.source_id !== source.id
+        || stored.project_id !== source.projectId
+        || storedRuleHash !== incomingRuleHash
+      ) {
+        throw new Error('已批准快照规则不一致，已拒绝覆盖')
+      }
+    }
+  }
+}
+
 function promoteSnapshotRules(
   db: BetterSqlite3.Database,
   source: ApprovableSourceRow,
@@ -755,29 +1038,79 @@ export class WorkspaceHubRepository {
         if (!s || !s.id) {
           throw new Error('Invalid source payload: source id cannot be null or empty')
         }
+        if (!payload.projectId || s.projectId !== payload.projectId) {
+          throw new Error('扫描来源项目与 payload 项目不一致，已拒绝提交')
+        }
 
-        upsertSourceStmt.run(
-          s.id,
-          s.projectId,
-          s.absolutePath,
-          s.relativePath,
-          s.category,
-          s.authorityStatus,
-          s.contentHash,
-          s.observedFileHash || s.contentHash,
-          s.approvedContentHash || '',
-          s.observedSnapshotId ?? null,
-          s.approvedSnapshotId ?? null,
-          s.parseError ?? null,
-          s.parseStatus ?? 'parsed',
-          s.skipReason ?? null,
-          s.mtime,
-          s.lastScannedAt || payload.scanTime || new Date().toISOString(),
-          s.importStatus || 'scanned',
-          s.isMissing ? 1 : 0,
-          s.isDisabled ? 1 : 0,
-          s.fileSize ?? 0,
-        )
+        const existingSource = db.prepare(`
+          SELECT absolute_path, relative_path, category, authority_status,
+                 content_hash, observed_file_hash, approved_content_hash,
+                 observed_snapshot_id, approved_snapshot_id, import_status,
+                 parse_error, parse_status, skip_reason, is_missing, is_disabled, file_size
+          FROM workspace_sources WHERE id = ? AND project_id = ?
+        `).get(s.id, s.projectId) as {
+          absolute_path: string
+          relative_path: string
+          category: string
+          authority_status: string
+          content_hash: string
+          observed_file_hash: string
+          approved_content_hash: string
+          observed_snapshot_id: string | null
+          approved_snapshot_id: string | null
+          import_status: string
+          parse_error: string | null
+          parse_status: string
+          skip_reason: string | null
+          is_missing: number
+          is_disabled: number
+          file_size: number
+        } | undefined
+
+        if (existingSource?.approved_snapshot_id && s.observedSnapshotId === existingSource.approved_snapshot_id) {
+          // An approved snapshot is immutable. Validate the complete payload before
+          // touching even harmless-looking source metadata; otherwise a forged scan
+          // could make the approved source appear imported.
+          assertApprovedSnapshotPayloadIntegrity(db, s, item, existingSource.approved_snapshot_id, existingSource)
+
+          // A valid replay may refresh observation timestamps, but never rewrites
+          // content identity, approval identity, status, or file size.
+          db.prepare(`
+            UPDATE workspace_sources
+            SET mtime = ?, last_scanned_at = ?, is_missing = ?, is_disabled = ?, updated_at = datetime('now')
+            WHERE id = ? AND project_id = ?
+          `).run(
+            s.mtime,
+            s.lastScannedAt || payload.scanTime || new Date().toISOString(),
+            s.isMissing ? 1 : 0,
+            s.isDisabled ? 1 : 0,
+            s.id,
+            s.projectId,
+          )
+        } else {
+          upsertSourceStmt.run(
+            s.id,
+            s.projectId,
+            s.absolutePath,
+            s.relativePath,
+            s.category,
+            s.authorityStatus,
+            s.contentHash,
+            s.observedFileHash || s.contentHash,
+            s.approvedContentHash || '',
+            s.observedSnapshotId ?? null,
+            s.approvedSnapshotId ?? null,
+            s.parseError ?? null,
+            s.parseStatus ?? 'parsed',
+            s.skipReason ?? null,
+            s.mtime,
+            s.lastScannedAt || payload.scanTime || new Date().toISOString(),
+            s.importStatus || 'scanned',
+            s.isMissing ? 1 : 0,
+            s.isDisabled ? 1 : 0,
+            s.fileSize ?? 0,
+          )
+        }
 
         if (item.snapshot && !item.preserveOldSnapshots) {
           const isApprovedSnapshot = Boolean(
@@ -1176,19 +1509,18 @@ export class WorkspaceHubRepository {
 
   static updateRuleStatus(
     ruleId: string,
-    projectIdOrStatus: string | SettingRuleStatus = 'main',
+    projectIdOrStatus: string | SettingRuleStatus,
     maybeStatus?: SettingRuleStatus,
     confirmedBy?: string,
   ): void {
     const db = requiredDb()
     const validStatuses: SettingRuleStatus[] = ['confirmed', 'candidate', 'background', 'deprecated']
-    let projectId = 'main'
+    let projectId = ''
     let status: SettingRuleStatus
-    let author = confirmedBy ?? 'author'
+    const author = confirmedBy ?? 'author'
 
     if (validStatuses.includes(projectIdOrStatus as SettingRuleStatus)) {
-      status = projectIdOrStatus as SettingRuleStatus
-      if (typeof maybeStatus === 'string') author = maybeStatus
+      throw new Error('updateRuleStatus 必须提供显式 projectId')
     } else {
       projectId = projectIdOrStatus
       status = maybeStatus ?? 'confirmed'
@@ -1215,7 +1547,7 @@ export class WorkspaceHubRepository {
     }
   }
 
-  static deleteRule(ruleId: string, projectId = 'main'): void {
+  static deleteRule(ruleId: string, projectId: string): void {
     const db = requiredDb()
     if (!projectId || !projectId.trim()) {
       throw new Error('删除设定规则失败：projectId 不能为空')
@@ -1390,6 +1722,9 @@ export class WorkspaceHubRepository {
         return { success: false, error: '候选项目不存在' }
       }
 
+      const candidateContentHash = hashString(candidate.suggested_data)
+      const deterministicOpId = `workspace-approve-${candidate.candidate_id}-${candidateContentHash.slice(0, 8)}`
+
       // 检查审批回执
       let existingReceipt = db.prepare(`
         SELECT candidate_id, project_id, candidate_type, operation_id, payload_hash, frozen_payload, stage
@@ -1411,10 +1746,11 @@ export class WorkspaceHubRepository {
           existingReceipt.candidate_id !== candidate.candidate_id ||
           existingReceipt.project_id !== candidate.project_id ||
           existingReceipt.candidate_type !== candidate.candidate_type ||
-          !existingReceipt.operation_id ||
-          !existingReceipt.frozen_payload ||
-          !existingReceipt.payload_hash ||
-          hashString(existingReceipt.frozen_payload) !== existingReceipt.payload_hash
+           !existingReceipt.operation_id ||
+           !existingReceipt.frozen_payload ||
+           !existingReceipt.payload_hash ||
+           existingReceipt.operation_id !== deterministicOpId ||
+           hashString(existingReceipt.frozen_payload) !== existingReceipt.payload_hash
         ) {
           throw new Error('审批回执完整性校验失败：冻结负载或哈希被篡改')
         }
@@ -1431,40 +1767,62 @@ export class WorkspaceHubRepository {
 
         if (candidate.candidate_type === 'character') {
           const frozenReq = JSON.parse(existingReceipt.frozen_payload) as CharacterRosterCommitRequest
-          const opRow = db.prepare(`
-            SELECT operation_id, payload_hash FROM character_roster_operations WHERE operation_id = ?
-          `).get(existingReceipt.operation_id) as { operation_id: string; payload_hash: string } | undefined
-
-          if (!opRow) {
-            // 未提交过，原样重放 frozenReq
-            const commitRes = CharacterRosterRepository.commit(frozenReq)
-            const parsed = JSON.parse(candidate.suggested_data) as { name: string }
-            const key = characterRosterIdentityKey(parsed.name)
-            if (!commitRes.snapshot.entries.some(e => characterRosterIdentityKey(e.name) === key)) {
-              throw new Error('角色领域提交未包含目标角色')
-            }
-          } else {
-            // 已提交过，验证哈希
-            const reqPayloadHash = hashString(JSON.stringify(frozenReq))
-            if (opRow.payload_hash !== reqPayloadHash) {
-              throw new Error('角色操作记录哈希不一致')
-            }
-          }
+          const parsed = JSON.parse(candidate.suggested_data) as { name: string }
+          assertCharacterOperationStillAuthoritative(db, existingReceipt.operation_id, frozenReq, parsed.name)
         } else if (candidate.candidate_type === 'setting') {
           const frozenData = JSON.parse(existingReceipt.frozen_payload) as {
             targetRule: SettingRule
             targetContentHash: string
           }
+          if (
+            !frozenData.targetRule
+            || frozenData.targetRule.projectId !== candidate.project_id
+            || frozenData.targetRule.sourceFile !== candidate.source_file
+            || frozenData.targetRule.sourceHeadingPath !== candidate.source_heading_path
+            || frozenData.targetRule.sourceLineRange !== candidate.source_line_range
+          ) {
+            throw new Error('审批冻结设定回执与候选项目或来源不一致')
+          }
           const ruleIdToInspect = frozenData.targetRule?.ruleId || `rule-${hashString(`${candidate.source_file}:${candidate.source_heading_path}`).slice(0, 16)}`
           const currentRule = db.prepare(`
-            SELECT rule_id, project_id, title, content, status, constraint_type, scope
+            SELECT rule_id, project_id, title, content, status, constraint_type, scope,
+                   source_fragment_id, source_snapshot_fragment_id, source_file,
+                   source_heading_path, source_line_range
             FROM setting_rules WHERE project_id = ? AND rule_id = ?
-          `).get(actualProjectId, ruleIdToInspect) as { rule_id: string; content: string } | undefined
+          `).get(actualProjectId, ruleIdToInspect) as {
+            rule_id: string
+            project_id: string
+            title: string
+            content: string
+            status: string
+            constraint_type: string
+            scope: string
+            source_fragment_id: string | null
+            source_snapshot_fragment_id: string | null
+            source_file: string
+            source_heading_path: string
+            source_line_range: string
+          } | undefined
 
           if (!currentRule) {
-            WorkspaceHubRepository.upsertRule(frozenData.targetRule)
+            throw new Error('审批恢复失败：正式设定规则已被删除，已拒绝闭合回执')
           } else {
-            if (currentRule.content !== frozenData.targetRule.content) {
+            const currentRuleHash = settingRuleIntegrityHash({
+              ruleId: currentRule.rule_id,
+              projectId: currentRule.project_id,
+              title: currentRule.title,
+              content: currentRule.content,
+              status: currentRule.status,
+              constraintType: currentRule.constraint_type,
+              scope: currentRule.scope,
+              sourceFragmentId: currentRule.source_fragment_id,
+              sourceSnapshotFragmentId: currentRule.source_snapshot_fragment_id,
+              sourceFile: currentRule.source_file,
+              sourceHeadingPath: currentRule.source_heading_path,
+              sourceLineRange: currentRule.source_line_range,
+            })
+            const frozenRuleHash = settingRuleIntegrityHash(frozenData.targetRule)
+            if (currentRuleHash !== frozenRuleHash) {
               throw new Error('审批恢复失败：设定规则已被作者修改，已拒绝覆盖')
             }
           }
@@ -1495,9 +1853,6 @@ export class WorkspaceHubRepository {
         })()
         return { success: true }
       }
-
-      const candidateContentHash = hashString(candidate.suggested_data)
-      const deterministicOpId = `workspace-approve-${candidate.candidate_id}-${candidateContentHash.slice(0, 8)}`
 
       if (existingReceipt && existingReceipt.operation_id !== deterministicOpId) {
         throw new Error('审批回执 operationId 与候选冻结内容不一致')
@@ -1587,22 +1942,23 @@ export class WorkspaceHubRepository {
       // 阶段 2: 领域实体提交
       if (candidate.candidate_type === 'character') {
         const frozenRequest = JSON.parse(existingReceipt.frozen_payload) as CharacterRosterCommitRequest
-        if (frozenRequest.operationId !== existingReceipt.operation_id) {
-          throw new Error('审批冻结请求 operationId 不一致')
-        }
-
-        // 原样重放同一个冻结请求；禁止把过期冻结请求的 expectedRevision 改成当前 revision
-        const commitResult = CharacterRosterRepository.commit(frozenRequest)
         const parsed = JSON.parse(candidate.suggested_data) as { name: string }
-        const targetKey = characterRosterIdentityKey(parsed.name)
-        const existsInRoster = commitResult.snapshot.entries.some(e => characterRosterIdentityKey(e.name) === targetKey)
-        if (!existsInRoster) {
-          throw new Error('角色领域提交未包含目标角色')
+        const operationExists = Boolean(db.prepare(`
+          SELECT 1 FROM character_roster_operations WHERE operation_id = ?
+        `).get(existingReceipt.operation_id))
+
+        // If the domain commit did not happen yet, replay the frozen request
+        // exactly once. If it did happen, only read and verify its operation
+        // evidence; never replay a stale request over a newer author edit.
+        if (!operationExists) {
+          CharacterRosterRepository.commit(frozenRequest)
         }
+        assertCharacterOperationStillAuthoritative(db, existingReceipt.operation_id, frozenRequest, parsed.name)
 
-        invokeTestCrashHook('after_roster_commit_before_receipt')
+        const receiptWasPrepared = existingReceipt.stage === 'prepared'
+        if (receiptWasPrepared) invokeTestCrashHook('after_roster_commit_before_receipt')
 
-        if (existingReceipt.stage === 'prepared') {
+        if (receiptWasPrepared) {
           const receiptUpdate = db.prepare(`
             UPDATE workspace_approval_receipts
             SET stage = 'roster_committed', updated_at = datetime('now')
@@ -1614,7 +1970,7 @@ export class WorkspaceHubRepository {
           existingReceipt = { ...existingReceipt, stage: 'roster_committed' }
         }
 
-        invokeTestCrashHook('roster_committed')
+        if (receiptWasPrepared) invokeTestCrashHook('roster_committed')
 
         // 阶段 3: 原子推进候选 approved 与回执 completed
         db.transaction(() => {
@@ -1649,19 +2005,62 @@ export class WorkspaceHubRepository {
           priorRuleHash: string
           targetContentHash: string
         }
+        if (
+          !frozenData.targetRule
+          || frozenData.targetRule.projectId !== candidate.project_id
+          || frozenData.targetRule.sourceFile !== candidate.source_file
+          || frozenData.targetRule.sourceHeadingPath !== candidate.source_heading_path
+          || frozenData.targetRule.sourceLineRange !== candidate.source_line_range
+          || frozenData.targetContentHash !== hashString(frozenData.targetRule.content)
+        ) {
+          throw new Error('审批冻结设定回执与候选或内容哈希不一致')
+        }
         const deterministicRuleId = frozenData.targetRule?.ruleId || `rule-${hashString(`${candidate.source_file}:${candidate.source_heading_path}`).slice(0, 16)}`
 
         const currentRule = db.prepare(`
-          SELECT rule_id, project_id, title, content, status, constraint_type, scope
+          SELECT rule_id, project_id, title, content, status, constraint_type, scope,
+                 source_fragment_id, source_snapshot_fragment_id, source_file,
+                 source_heading_path, source_line_range
           FROM setting_rules WHERE project_id = ? AND rule_id = ?
-        `).get(actualProjectId, deterministicRuleId) as { rule_id: string; content: string } | undefined
+        `).get(actualProjectId, deterministicRuleId) as {
+          rule_id: string
+          project_id: string
+          title: string
+          content: string
+          status: string
+          constraint_type: string
+          scope: string
+          source_fragment_id: string | null
+          source_snapshot_fragment_id: string | null
+          source_file: string
+          source_heading_path: string
+          source_line_range: string
+        } | undefined
 
         if (currentRule) {
           // 当前规则存在：如果内容已被作者改变，必须失败关闭，不能覆盖
-          if (currentRule.content !== frozenData.targetRule.content) {
+          const currentRuleHash = settingRuleIntegrityHash({
+            ruleId: currentRule.rule_id,
+            projectId: currentRule.project_id,
+            title: currentRule.title,
+            content: currentRule.content,
+            status: currentRule.status,
+            constraintType: currentRule.constraint_type,
+            scope: currentRule.scope,
+            sourceFragmentId: currentRule.source_fragment_id,
+            sourceSnapshotFragmentId: currentRule.source_snapshot_fragment_id,
+            sourceFile: currentRule.source_file,
+            sourceHeadingPath: currentRule.source_heading_path,
+            sourceLineRange: currentRule.source_line_range,
+          })
+          const frozenRuleHash = settingRuleIntegrityHash(frozenData.targetRule)
+          if (currentRuleHash !== frozenRuleHash) {
             throw new Error('审批恢复失败：设定规则已被作者修改，已拒绝覆盖')
           }
         } else {
+          if (existingReceipt.stage !== 'prepared') {
+            throw new Error('审批恢复失败：正式设定规则已被删除，已拒绝闭合回执')
+          }
           // 规则不存在，可以安全写入
           WorkspaceHubRepository.upsertRule(frozenData.targetRule)
         }

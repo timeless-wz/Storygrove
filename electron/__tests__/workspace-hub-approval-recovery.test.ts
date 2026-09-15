@@ -496,4 +496,263 @@ describe('Workspace Hub - Candidate Approval Crash Recovery & Idempotency', () =
     expect(retry2.success).toBe(false)
     expect(retry2.error).toMatch(/哈希被篡改|完整性校验失败/u)
   })
+
+  it('8. setting modification of ANY field (title, status, scope, constraintType) causes recovery failure and preserves author edits', () => {
+    const projDir = createDir('proj-setting-field-change-')
+    initProjectDatabase(projDir)
+    const db = getProjectDb()!
+    db.prepare("INSERT INTO project_core (id, project_name) VALUES ('main', 'Test Novel')").run()
+
+    const candidateId = 'cand-setting-field-check-001'
+    const settingData = {
+      title: '玄元禁制',
+      content: '禁制领域内法力递减。',
+      constraintType: 'hard',
+      scope: 'global',
+    }
+
+    WorkspaceHubRepository.saveCandidate({
+      candidateId,
+      projectId: 'main',
+      candidateType: 'setting',
+      rawData: '玄元禁制原文',
+      suggestedData: JSON.stringify(settingData),
+      sourceFile: '01_已确认设定清单.md',
+      sourceHeadingPath: '核心法则 > 玄元禁制',
+      sourceLineRange: '1-5',
+      evidence: '玄元禁制',
+      confidence: 1.0,
+      status: 'pending',
+    })
+
+    // 正常审批创建回执和规则
+    const firstApproval = WorkspaceHubRepository.approveCandidate(candidateId, 'main', 'author')
+    expect(firstApproval.success).toBe(true)
+
+    // 获取确定性 ruleId
+    const receiptRow = db.prepare('SELECT frozen_payload FROM workspace_approval_receipts WHERE candidate_id = ?').get(candidateId) as { frozen_payload: string }
+    const frozenObj = JSON.parse(receiptRow.frozen_payload) as { targetRule: { ruleId: string } }
+    const targetRuleId = frozenObj.targetRule.ruleId
+
+    // 回退状态以便重试恢复路径
+    db.prepare("UPDATE workspace_import_candidates SET status = 'pending' WHERE candidate_id = ? AND project_id = ?").run(candidateId, 'main')
+    db.prepare("UPDATE workspace_approval_receipts SET stage = 'prepared' WHERE candidate_id = ? AND project_id = ?").run(candidateId, 'main')
+
+    // 场景 A: 作者只修改 title（content 不变）
+    WorkspaceHubRepository.upsertRule({
+      ruleId: targetRuleId,
+      projectId: 'main',
+      title: '作者改了标题的玄元禁制',
+      content: '禁制领域内法力递减。',
+      status: 'confirmed',
+      constraintType: 'hard',
+      scope: 'global',
+      sourceFile: '01_已确认设定清单.md',
+      sourceHeadingPath: '核心法则 > 玄元禁制',
+      sourceLineRange: '1-5',
+    })
+
+    const retryA = WorkspaceHubRepository.approveCandidate(candidateId, 'main', 'author')
+    expect(retryA.success).toBe(false)
+    expect(retryA.error).toContain('设定规则已被作者修改')
+
+    // 验证作者的标题修改保留
+    const ruleAfterA = WorkspaceHubRepository.listRules('main').find(r => r.ruleId === targetRuleId)
+    expect(ruleAfterA?.title).toBe('作者改了标题的玄元禁制')
+
+    // 场景 B: 恢复 title，改 constraintType
+    WorkspaceHubRepository.upsertRule({
+      ruleId: targetRuleId,
+      projectId: 'main',
+      title: '玄元禁制',
+      content: '禁制领域内法力递减。',
+      status: 'confirmed',
+      constraintType: 'soft',
+      scope: 'global',
+      sourceFile: '01_已确认设定清单.md',
+      sourceHeadingPath: '核心法则 > 玄元禁制',
+      sourceLineRange: '1-5',
+    })
+
+    const retryB = WorkspaceHubRepository.approveCandidate(candidateId, 'main', 'author')
+    expect(retryB.success).toBe(false)
+    expect(retryB.error).toContain('设定规则已被作者修改')
+
+    // 场景 C: 恢复 constraintType，改 scope
+    WorkspaceHubRepository.upsertRule({
+      ruleId: targetRuleId,
+      projectId: 'main',
+      title: '玄元禁制',
+      content: '禁制领域内法力递减。',
+      status: 'confirmed',
+      constraintType: 'hard',
+      scope: 'chapter-5',
+      sourceFile: '01_已确认设定清单.md',
+      sourceHeadingPath: '核心法则 > 玄元禁制',
+      sourceLineRange: '1-5',
+    })
+
+    const retryC = WorkspaceHubRepository.approveCandidate(candidateId, 'main', 'author')
+    expect(retryC.success).toBe(false)
+    expect(retryC.error).toContain('设定规则已被作者修改')
+  })
+
+  it('9. formal character deleted after roster operation → recovery receipt cannot close', () => {
+    const projDir = createDir('proj-char-deleted-recovery-')
+    initProjectDatabase(projDir)
+    const db = getProjectDb()!
+    db.prepare("INSERT INTO project_core (id, project_name) VALUES ('main', 'Test Novel')").run()
+
+    const candidateId = 'cand-char-deleted-001'
+    const characterData = {
+      name: '林墨',
+      role: 'supporting',
+      gender: '男',
+      age: '35',
+      appearance: '灰衣学士',
+      background: '天机阁',
+      personality: '睿智沉稳',
+      abilities: '推演之术',
+      motivation: '探寻天机',
+      arc: '牺牲觉悟',
+      notes: '第五章登场',
+      relationships: [],
+    }
+
+    WorkspaceHubRepository.saveCandidate({
+      candidateId,
+      projectId: 'main',
+      candidateType: 'character',
+      rawData: '角色原始卡片：林墨',
+      suggestedData: JSON.stringify(characterData),
+      sourceFile: '05_人物与关系.md',
+      sourceHeadingPath: '角色档案 > 林墨',
+      sourceLineRange: '30-40',
+      evidence: '检测到角色卡：林墨',
+      confidence: 0.95,
+      status: 'pending',
+    })
+
+    // 模拟在 roster_committed 阶段崩溃
+    const crashHook = (stage: string) => {
+      if (stage === 'roster_committed') {
+        throw new Error('SIMULATED_CRASH_ROSTER_COMMITTED')
+      }
+    }
+
+    const firstTry = WorkspaceHubRepository.approveCandidate(candidateId, 'main', 'author', crashHook)
+    expect(firstTry.success).toBe(false)
+
+    // 验证角色已在名单中
+    const rosterAfterCrash = CharacterRosterRepository.read()
+    expect(rosterAfterCrash.entries.some(e => e.name === '林墨')).toBe(true)
+
+    // 作者在崩溃后删除了该角色（通过提交不包含该角色的名单）
+    CharacterRosterRepository.commit({
+      operationId: 'author-delete-linmo',
+      expectedRevision: rosterAfterCrash.revision,
+      schemaVersion: 1,
+      intent: 'manual_edit',
+      entries: [], // 全部删除
+    })
+
+    // 验证角色确实被删除
+    expect(CharacterRosterRepository.read().entries.length).toBe(0)
+
+    // 恢复审批：正式角色已被删除，必须失败关闭
+    const retryRes = WorkspaceHubRepository.approveCandidate(candidateId, 'main', 'author')
+    expect(retryRes.success).toBe(false)
+    expect(retryRes.error).toMatch(/正式角色已被删除或替换/u)
+
+    // 角色名单仍为空，没有被错误地重新写入
+    expect(CharacterRosterRepository.read().entries.length).toBe(0)
+  })
+
+  it('10. roster_committed reject does not produce rejected+formal character residue and does not mis-delete author character', () => {
+    const projDir = createDir('proj-roster-committed-reject-residue-')
+    initProjectDatabase(projDir)
+    const db = getProjectDb()!
+    db.prepare("INSERT INTO project_core (id, project_name) VALUES ('main', 'Test Novel')").run()
+
+    // 作者预先创建一个同名正式角色
+    CharacterRosterRepository.commit({
+      operationId: 'author-original-char',
+      expectedRevision: 0,
+      schemaVersion: 1,
+      intent: 'manual_edit',
+      entries: [{
+        name: '萧逸',
+        role: 'protagonist',
+        gender: '男',
+        age: '22',
+        appearance: '剑眉星目',
+        background: '萧家嫡子',
+        personality: '洒脱不羁',
+        abilities: '星辰剑法',
+        motivation: '快意恩仇',
+        arc: '浪子回头',
+        notes: '作者亲手创建',
+        relationships: [],
+      }],
+    })
+
+    const candidateId = 'cand-char-residue-001'
+    WorkspaceHubRepository.saveCandidate({
+      candidateId,
+      projectId: 'main',
+      candidateType: 'character',
+      rawData: '外部角色卡片：萧逸',
+      suggestedData: JSON.stringify({
+        name: '萧逸',
+        role: 'supporting',
+        gender: '男',
+        age: '22',
+        appearance: '黑衣',
+        background: '扫描提取',
+        personality: '沉默',
+        abilities: '无',
+        motivation: '无',
+        arc: '无',
+        notes: '扫描提取的同名角色',
+        relationships: [],
+      }),
+      sourceFile: '05_人物与关系.md',
+      sourceHeadingPath: '角色档案 > 萧逸',
+      sourceLineRange: '1-10',
+      evidence: '检测到角色卡：萧逸',
+      confidence: 0.9,
+      status: 'pending',
+    })
+
+    // 模拟在 roster_committed 阶段崩溃
+    const crashHook = (stage: string) => {
+      if (stage === 'roster_committed') {
+        throw new Error('CRASH_ROSTER_COMMITTED')
+      }
+    }
+
+    const firstTry = WorkspaceHubRepository.approveCandidate(candidateId, 'main', 'author', crashHook)
+    expect(firstTry.success).toBe(false)
+
+    // 此时候选处于 pending，回执处于 roster_committed
+    const candidateMid = WorkspaceHubRepository.listCandidates({ projectId: 'main' })[0]
+    expect(candidateMid.status).toBe('pending')
+
+    const receiptMid = db.prepare('SELECT stage FROM workspace_approval_receipts WHERE candidate_id = ?').get(candidateId) as { stage: string }
+    expect(receiptMid.stage).toBe('roster_committed')
+
+    // 尝试拒绝：状态机防护必须拒绝
+    const rejectRes = WorkspaceHubRepository.rejectCandidate(candidateId, 'main')
+    expect(rejectRes.success).toBe(false)
+    expect(rejectRes.error).toContain('roster_committed')
+
+    // 核心验证：候选不应被标记为 rejected（没有产生 rejected + 正式角色共存的残留状态）
+    const candidateAfterReject = WorkspaceHubRepository.listCandidates({ projectId: 'main' })[0]
+    expect(candidateAfterReject.status).toBe('pending')
+
+    // 核心验证：作者角色未被删除（禁止按名字删角色）
+    const rosterAfterReject = CharacterRosterRepository.read()
+    expect(rosterAfterReject.entries.some(e => e.name === '萧逸')).toBe(true)
+    expect(rosterAfterReject.entries.find(e => e.name === '萧逸')?.notes).not.toBe('扫描提取的同名角色')
+  })
 })

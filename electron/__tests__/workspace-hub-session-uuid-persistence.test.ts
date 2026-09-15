@@ -9,6 +9,13 @@ import {
 } from '../database'
 import { WorkspaceHubRepository } from '../repositories/workspace-hub-repository'
 import { WorkspaceScannerService } from '../services/workspace-scanner-service'
+import type {
+  WorkspaceAuthorityStatus,
+  WorkspaceSource,
+  WorkspaceSourceCategory,
+  WorkspaceSourceSnapshot,
+  WorkspaceSourceSnapshotFragment,
+} from '../../src/shared/workspace-hub'
 
 describe('Workspace Hub - Session UUID & project_core Row Identity Persistence', () => {
   const testRoots: string[] = []
@@ -289,6 +296,14 @@ describe('Workspace Hub - Session UUID & project_core Row Identity Persistence',
     expect(() => {
       WorkspaceHubRepository.deleteRule('non-existent-rule', projectA)
     }).toThrow(/未找到属于项目 proj-tenant-aaaa-1111 的规则/u)
+
+    // 写操作不接受缺失的会话项目；不得隐式回退到 main。
+    expect(() => {
+      WorkspaceHubRepository.updateRuleStatus(sharedRuleId, '', 'deprecated')
+    }).toThrow(/projectId 不能为空/u)
+    expect(() => {
+      WorkspaceHubRepository.deleteRule(sharedRuleId, '')
+    }).toThrow(/projectId 不能为空/u)
 
     // 6. 验证 upsertRule 参数校验
     expect(() => {
@@ -629,7 +644,7 @@ describe('Workspace Hub - Session UUID & project_core Row Identity Persistence',
     const originalFragments = db.prepare('SELECT id, content FROM workspace_source_snapshot_fragments WHERE snapshot_id = ?').all(approvedSnapId) as Array<{ id: string; content: string }>
 
     // 尝试构造相同 snapshot_id 的 StagedScanPayload 再次提交，试图覆写快照和片段正文
-    WorkspaceHubRepository.commitScanPayload({
+    expect(() => WorkspaceHubRepository.commitScanPayload({
       projectId: sessionProjectId,
       items: [{
         source: {
@@ -682,7 +697,7 @@ describe('Workspace Hub - Session UUID & project_core Row Identity Persistence',
       }],
       activeSourceIds: [source.id],
       scanTime: new Date().toISOString(),
-    })
+    })).toThrow(/已批准 snapshotId 的来源观察数据不一致/u)
 
     // 验证：已批准快照记录未被覆盖，片段正文严格保持原样
     const fragmentsAfter = db.prepare('SELECT id, content FROM workspace_source_snapshot_fragments WHERE snapshot_id = ?').all(approvedSnapId) as Array<{ id: string; content: string }>
@@ -693,5 +708,245 @@ describe('Workspace Hub - Session UUID & project_core Row Identity Persistence',
     const snapRow = db.prepare('SELECT fragment_count FROM workspace_source_snapshots WHERE snapshot_id = ?').get(approvedSnapId) as { fragment_count: number }
     expect(snapRow.fragment_count).toBe(originalFragments.length)
     expect(snapRow.fragment_count).not.toBe(999)
+  })
+
+  it('11. commitScanPayload with approved snapshotId does not pollute workspace_sources content_hash, observed_file_hash, or import_status', () => {
+    const projDir = createDir('proj-source-pollution-')
+    const extDir = createDir('ext-source-pollution-')
+    initProjectDatabase(projDir)
+    const db = getProjectDb()!
+    db.prepare("INSERT INTO project_core (id, project_name) VALUES ('main', 'Test Novel')").run()
+
+    const sourceId = 'source-pollution-test'
+    const snapshotId = 'snap-pollution-001'
+    const originalContentHash = 'original-content-hash-abc123'
+    const originalFileHash = 'original-file-hash-def456'
+
+    // 1. 初始提交：创建 source 和 snapshot
+    const payload1: import('../repositories/workspace-hub-repository').StagedScanPayload = {
+      projectId: 'main',
+      items: [{
+        source: {
+          id: sourceId,
+          projectId: 'main',
+          absolutePath: `${extDir}/test.md`,
+          relativePath: 'test.md',
+          category: 'confirmed_settings' satisfies WorkspaceSourceCategory,
+          authorityStatus: 'material' satisfies WorkspaceAuthorityStatus,
+          contentHash: originalContentHash,
+          observedFileHash: originalFileHash,
+          observedSnapshotId: snapshotId,
+          approvedContentHash: '',
+          approvedSnapshotId: null,
+          mtime: 1000,
+          lastScannedAt: '2024-01-01T00:00:00Z',
+          importStatus: 'imported',
+          isMissing: false,
+          isDisabled: false,
+          fileSize: 100,
+        } satisfies WorkspaceSource,
+        snapshot: {
+          snapshotId,
+          sourceId,
+          projectId: 'main',
+          contentHash: originalContentHash,
+          fileSize: 100,
+          fragmentCount: 1,
+          parserSchemaVersion: 1,
+        } satisfies WorkspaceSourceSnapshot,
+        fragments: [{
+          id: 'frag-pollution-001',
+          snapshotId,
+          sourceId,
+          projectId: 'main',
+          headingPath: '测试',
+          content: '原始内容',
+          startLine: 1,
+          endLine: 10,
+          fragmentHash: 'frag-hash-001',
+          chapterStart: null,
+          chapterEnd: null,
+          purpose: 'setting',
+          status: 'active',
+        } satisfies WorkspaceSourceSnapshotFragment],
+      }],
+      activeSourceIds: [sourceId],
+      scanTime: '2024-01-01T00:00:00Z',
+    }
+
+    WorkspaceHubRepository.commitScanPayload(payload1)
+
+    // 2. 批准该 snapshot
+    db.prepare(`
+      UPDATE workspace_sources SET approved_snapshot_id = ?, approved_content_hash = ?
+      WHERE id = ? AND project_id = ?
+    `).run(snapshotId, originalContentHash, sourceId, 'main')
+
+    // 验证批准后的状态
+    const sourceBeforePollution = db.prepare(
+      'SELECT content_hash, observed_file_hash, import_status, observed_snapshot_id FROM workspace_sources WHERE id = ?',
+    ).get(sourceId) as { content_hash: string; observed_file_hash: string; import_status: string; observed_snapshot_id: string }
+    expect(sourceBeforePollution.content_hash).toBe(originalContentHash)
+    expect(sourceBeforePollution.observed_file_hash).toBe(originalFileHash)
+    expect(sourceBeforePollution.import_status).toBe('imported')
+
+    // 3. 恶意提交：使用相同 approved snapshotId 但不同 content_hash
+    const payload2: import('../repositories/workspace-hub-repository').StagedScanPayload = {
+      projectId: 'main',
+      items: [{
+        source: {
+          id: sourceId,
+          projectId: 'main',
+          absolutePath: `${extDir}/test.md`,
+          relativePath: 'test.md',
+          category: 'confirmed_settings' satisfies WorkspaceSourceCategory,
+          authorityStatus: 'material' satisfies WorkspaceAuthorityStatus,
+          contentHash: 'MALICIOUS-content-hash',
+          observedFileHash: 'MALICIOUS-file-hash',
+          observedSnapshotId: snapshotId,
+          approvedContentHash: originalContentHash,
+          approvedSnapshotId: snapshotId,
+          mtime: 2000,
+          lastScannedAt: '2024-06-01T00:00:00Z',
+          importStatus: 'imported',
+          isMissing: false,
+          isDisabled: false,
+          fileSize: 999,
+        } satisfies WorkspaceSource,
+      }],
+      activeSourceIds: [sourceId],
+      scanTime: '2024-06-01T00:00:00Z',
+    }
+
+    expect(() => WorkspaceHubRepository.commitScanPayload(payload2)).toThrow(/已批准 snapshotId 的来源观察数据不一致/u)
+
+    // 4. 核心验证：content_hash、observed_file_hash、import_status 没有被污染
+    const sourceAfterPollution = db.prepare(
+      'SELECT content_hash, observed_file_hash, import_status, observed_snapshot_id, mtime, file_size FROM workspace_sources WHERE id = ?',
+    ).get(sourceId) as { content_hash: string; observed_file_hash: string; import_status: string; observed_snapshot_id: string; mtime: number; file_size: number }
+    expect(sourceAfterPollution.content_hash).toBe(originalContentHash)
+    expect(sourceAfterPollution.observed_file_hash).toBe(originalFileHash)
+    expect(sourceAfterPollution.import_status).toBe('imported')
+    expect(sourceAfterPollution.observed_snapshot_id).toBe(snapshotId)
+
+    // 失败关闭也不能更新观察元数据。
+    expect(sourceAfterPollution.mtime).toBe(1000)
+    expect(sourceAfterPollution.file_size).toBe(100)
+  })
+
+  it('12. migrates legacy single-key setting_rules without losing fields, foreign key, or indexes', () => {
+    const projectRoot = createDir('proj-setting-rules-migration-')
+    initProjectDatabase(projectRoot)
+    const db = getProjectDb()!
+    db.prepare("INSERT INTO project_core (id, project_name) VALUES ('main', 'Migration Test')").run()
+    db.prepare(`
+      INSERT INTO workspace_sources (
+        id, project_id, absolute_path, relative_path, category, authority_status,
+        content_hash, observed_file_hash, import_status
+      ) VALUES ('migration-source', 'main', 'C:/migration.md', 'migration.md',
+                'confirmed_settings', 'material', 'source-hash', 'source-hash', 'scanned')
+    `).run()
+    db.prepare(`
+      INSERT INTO workspace_source_fragments (
+        fragment_id, source_id, heading_path, content, start_line, end_line,
+        fragment_hash, purpose, status
+      ) VALUES ('migration-fragment', 'migration-source', '规则 > 保留', '保留字段', 1, 2,
+                'fragment-hash', 'confirmed_settings', 'active')
+    `).run()
+    db.prepare(`
+      INSERT INTO setting_rules (
+        rule_id, project_id, title, content, status, constraint_type, scope,
+        source_fragment_id, source_snapshot_fragment_id, source_file,
+        source_heading_path, source_line_range, confirmed_at, confirmed_by,
+        origin_type, source_id, source_snapshot_id
+      ) VALUES ('legacy-rule', 'main', '迁移标题', '迁移正文', 'confirmed', 'soft', 'chapter-3',
+                'migration-fragment', NULL, 'migration.md', '规则 > 保留', '1-2',
+                '2026-01-01T00:00:00Z', 'migration-test', 'manual', NULL, NULL)
+    `).run()
+
+    // Recreate the pre-migration shape with a single-column primary key and a
+    // named legacy index, then reopen the DB so the production migration runs.
+    db.pragma('foreign_keys = OFF')
+    db.exec(`
+      CREATE TABLE setting_rules_legacy_v1 (
+        rule_id TEXT NOT NULL PRIMARY KEY,
+        project_id TEXT NOT NULL DEFAULT 'main',
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'confirmed',
+        constraint_type TEXT NOT NULL DEFAULT 'hard',
+        scope TEXT NOT NULL DEFAULT 'global',
+        source_fragment_id TEXT DEFAULT NULL,
+        source_snapshot_fragment_id TEXT DEFAULT NULL,
+        source_file TEXT NOT NULL DEFAULT '',
+        source_heading_path TEXT NOT NULL DEFAULT '',
+        source_line_range TEXT NOT NULL DEFAULT '',
+        confirmed_at TEXT DEFAULT NULL,
+        confirmed_by TEXT DEFAULT NULL,
+        origin_type TEXT NOT NULL DEFAULT 'manual',
+        source_id TEXT DEFAULT NULL,
+        source_snapshot_id TEXT DEFAULT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO setting_rules_legacy_v1 SELECT * FROM setting_rules;
+      CREATE INDEX idx_setting_rules_legacy_scope ON setting_rules_legacy_v1(scope);
+      DROP TABLE setting_rules;
+      ALTER TABLE setting_rules_legacy_v1 RENAME TO setting_rules;
+    `)
+    db.pragma('foreign_keys = ON')
+    closeProjectDatabase()
+    initProjectDatabase(projectRoot)
+
+    const migratedDb = getProjectDb()!
+    const pkColumns = (migratedDb.prepare('PRAGMA table_info(setting_rules)').all() as Array<{ name: string; pk: number }>)
+      .filter(column => column.pk > 0)
+      .sort((a, b) => a.pk - b.pk)
+      .map(column => column.name)
+    expect(pkColumns).toEqual(['project_id', 'rule_id'])
+
+    const migratedRule = migratedDb.prepare(`
+      SELECT rule_id, project_id, title, content, status, constraint_type, scope,
+             source_fragment_id, source_file, source_heading_path, source_line_range,
+             confirmed_at, confirmed_by, origin_type
+      FROM setting_rules WHERE project_id = 'main' AND rule_id = 'legacy-rule'
+    `).get()
+    expect(migratedRule).toEqual({
+      rule_id: 'legacy-rule',
+      project_id: 'main',
+      title: '迁移标题',
+      content: '迁移正文',
+      status: 'confirmed',
+      constraint_type: 'soft',
+      scope: 'chapter-3',
+      source_fragment_id: 'migration-fragment',
+      source_file: 'migration.md',
+      source_heading_path: '规则 > 保留',
+      source_line_range: '1-2',
+      confirmed_at: '2026-01-01T00:00:00Z',
+      confirmed_by: 'migration-test',
+      origin_type: 'manual',
+    })
+
+    const foreignKeys = migratedDb.prepare("PRAGMA foreign_key_list('setting_rules')").all() as Array<{
+      table: string
+      from: string
+      to: string
+      on_delete: string
+    }>
+    expect(foreignKeys).toEqual(expect.arrayContaining([expect.objectContaining({
+      table: 'workspace_source_fragments',
+      from: 'source_fragment_id',
+      to: 'fragment_id',
+      on_delete: 'SET NULL',
+    })]))
+
+    const indexes = migratedDb.prepare("PRAGMA index_list('setting_rules')").all() as Array<{ name: string }>
+    expect(indexes.map(index => index.name)).toEqual(expect.arrayContaining([
+      'idx_setting_rules_legacy_scope',
+      'idx_setting_rules_status',
+      'idx_setting_rules_scan_source',
+      'idx_setting_rules_source_fragment',
+    ]))
   })
 })
