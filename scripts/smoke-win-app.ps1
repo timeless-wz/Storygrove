@@ -15,6 +15,7 @@
 )
 
 $ErrorActionPreference = 'Stop'
+$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
 if (-not ([System.Management.Automation.PSTypeName]'AiNovelSmoke.TopLevelWindowProbe').Type) {
   Add-Type -TypeDefinition @'
