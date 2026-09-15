@@ -36,6 +36,11 @@ function getDirectoryFingerprint(dir: string) {
 const verifyPath = process.env.NOVEL_WORKSPACE_VERIFY_PATH
 const canRunRealDirTest = Boolean(verifyPath && fs.existsSync(verifyPath))
 
+// The session project id is passed explicitly to every workspace-hub call: the
+// repository layer fails closed when it is missing and never falls back to an
+// implicit "main" or legacy project.
+const SESSION_PROJECT_ID = 'main'
+
 // 1. 真实外部目录验证（仅当设置了 NOVEL_WORKSPACE_VERIFY_PATH 时执行，严禁硬编码路径）
 describe.skipIf(!canRunRealDirTest)('Real Verification Directory Read-Only & Extraction Verification', () => {
   it('scans designated external directory without mutating any files and extracts facts', async () => {
@@ -47,15 +52,15 @@ describe.skipIf(!canRunRealDirTest)('Real Verification Directory Read-Only & Ext
 
     const tempProj = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-novel-verify-desktop-'))
     initProjectDatabase(tempProj)
-    getProjectDb()!.prepare("INSERT OR IGNORE INTO project_core (id) VALUES ('main')").run()
+    getProjectDb()!.prepare('INSERT OR IGNORE INTO project_core (id) VALUES (?)').run(SESSION_PROJECT_ID)
 
     try {
-      WorkspaceHubRepository.bindWorkspaceDirectory(targetDir)
-      const scanResult = await WorkspaceScannerService.scanDirectory(targetDir)
+      WorkspaceHubRepository.bindWorkspaceDirectory(targetDir, SESSION_PROJECT_ID)
+      const scanResult = await WorkspaceScannerService.scanDirectory(targetDir, SESSION_PROJECT_ID)
       expect(scanResult.success).toBe(true)
       expect(scanResult.scannedCount).toBe(beforeFingerprint.size)
 
-      const sources = WorkspaceHubRepository.listSources()
+      const sources = WorkspaceHubRepository.listSources(SESSION_PROJECT_ID)
       expect(sources.length).toBe(beforeFingerprint.size)
 
       // Verify read-only invariant: fingerprint must be identical
@@ -104,7 +109,7 @@ describe('Default Temporary Workspace Ingestion & Extraction Verification', () =
     const workspaceDir = createTempDir('workspace-desktop-mock-')
 
     initProjectDatabase(projDir)
-    getProjectDb()!.prepare("INSERT OR IGNORE INTO project_core (id) VALUES ('main')").run()
+    getProjectDb()!.prepare('INSERT OR IGNORE INTO project_core (id) VALUES (?)').run(SESSION_PROJECT_ID)
 
     // Create 13 mock novel files corresponding to standard categories
     fs.writeFileSync(path.join(workspaceDir, '00_创作方向.md'), '# 核心创作总则\n## 真实硬核\n严禁伪科学')
@@ -124,30 +129,37 @@ describe('Default Temporary Workspace Ingestion & Extraction Verification', () =
     const beforeFingerprint = getDirectoryFingerprint(workspaceDir)
     expect(beforeFingerprint.size).toBe(13)
 
-    WorkspaceHubRepository.bindWorkspaceDirectory(workspaceDir)
-    const scanResult = await WorkspaceScannerService.scanDirectory(workspaceDir)
+    WorkspaceHubRepository.bindWorkspaceDirectory(workspaceDir, SESSION_PROJECT_ID)
+    const scanResult = await WorkspaceScannerService.scanDirectory(workspaceDir, SESSION_PROJECT_ID)
     expect(scanResult.success).toBe(true)
     expect(scanResult.scannedCount).toBe(13)
     expect(scanResult.recognizedCount).toBe(13)
 
     // Sources verification
-    const sources = WorkspaceHubRepository.listSources()
+    const sources = WorkspaceHubRepository.listSources(SESSION_PROJECT_ID)
     expect(sources.length).toBe(13)
 
     // Character candidates verification
-    const candidates = WorkspaceHubRepository.listCandidates({ candidateType: 'character' })
+    const candidates = WorkspaceHubRepository.listCandidates({
+      projectId: SESSION_PROJECT_ID,
+      candidateType: 'character',
+    })
     expect(candidates.length).toBeGreaterThan(0)
     const char = JSON.parse(candidates[0].suggestedData)
     expect(char.name).toBe('许渡')
     expect(char.role).toBe('protagonist')
 
     // 扫描提取规则仍在快照暂存层，批准前不得进入正式规则表。
-    expect(WorkspaceHubRepository.listRules('main')).toEqual([])
+    expect(WorkspaceHubRepository.listRules(SESSION_PROJECT_ID)).toEqual([])
 
     // Assemble chapter context (approve all sources first to test approved snapshot inclusion)
-    WorkspaceHubRepository.approveAllSources('main')
-    expect(WorkspaceHubRepository.listRules('main').length).toBeGreaterThan(0)
-    const bundle = ChapterContextAssembler.assemble({ chapterNumber: 1, budgetChars: 16000 })
+    WorkspaceHubRepository.approveAllSources(SESSION_PROJECT_ID)
+    expect(WorkspaceHubRepository.listRules(SESSION_PROJECT_ID).length).toBeGreaterThan(0)
+    const bundle = ChapterContextAssembler.assemble({
+      chapterNumber: 1,
+      budgetChars: 16000,
+      projectId: SESSION_PROJECT_ID,
+    })
     expect(bundle.chapterNumber).toBe(1)
     expect(bundle.blocks.length).toBeGreaterThan(0)
     expect(bundle.excludedDeprecatedCount).toBeGreaterThan(0)

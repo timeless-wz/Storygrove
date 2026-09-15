@@ -791,6 +791,11 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
     );
     CREATE INDEX IF NOT EXISTS idx_workspace_sources_project_path
       ON workspace_sources(project_id, relative_path);
+    -- commitScanPayload 的“该快照是否已被批准”护栏按 approved_snapshot_id 逐条
+    -- 回查；缺少此索引时会退化为扫描本项目的全部来源行，千文件扫描约 156ms
+    -- （已批准快照的不可变保护会随来源数量呈平方级增长）。
+    CREATE INDEX IF NOT EXISTS idx_workspace_sources_approved_snapshot
+      ON workspace_sources(project_id, approved_snapshot_id);
 
     CREATE TABLE IF NOT EXISTS workspace_binding_states (
       project_id TEXT NOT NULL PRIMARY KEY,

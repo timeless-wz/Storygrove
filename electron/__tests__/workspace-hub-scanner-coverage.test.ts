@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -10,8 +10,12 @@ import {
 import { WorkspaceHubRepository } from '../repositories/workspace-hub-repository'
 import { WorkspaceScannerService } from '../services/workspace-scanner-service'
 
+const MAX_FILES_FIXTURE_COUNT = 1001
+const MAX_FILES_FIXTURE_LIMIT = 1000
+
 describe('Workspace Hub - Scanner Coverage & Boundary Conditions', () => {
   const testRoots: string[] = []
+  let maxFilesFixtureDir = ''
 
   function createDir(prefix: string): string {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
@@ -19,47 +23,96 @@ describe('Workspace Hub - Scanner Coverage & Boundary Conditions', () => {
     return dir
   }
 
-  afterEach(() => {
+  /**
+   * project_core is the per-database singleton ledger row (id = 'main'), created
+   * by ProjectCoreRepository.init when a project is opened. The scan commit is
+   * fail-closed: if that row is missing the whole transaction rolls back, so the
+   * fixture must establish it exactly like every other workspace-hub test.
+   */
+  function initProjectDatabaseWithCoreRow(projectDir: string): void {
+    initProjectDatabase(projectDir)
+    getProjectDb()!
+      .prepare("INSERT OR IGNORE INTO project_core (id) VALUES ('main')")
+      .run()
+  }
+
+  /**
+   * Write the fixture files with bounded concurrency. 1001 simultaneous writes
+   * queue behind the shared libuv threadpool and thrash the Windows file cache,
+   * which measurably costs more than a bounded pool.
+   */
+  async function writeFixtureFiles(dir: string, count: number): Promise<void> {
+    let nextIndex = 0
+    const workers = Array.from({ length: Math.min(32, count) }, async () => {
+      while (nextIndex < count) {
+        const index = nextIndex++
+        const pad = String(index + 1).padStart(4, '0')
+        await fs.promises.writeFile(path.join(dir, `file_${pad}.txt`), `C${index + 1}`, 'utf8')
+      }
+    })
+    await Promise.all(workers)
+  }
+
+  /**
+   * Creating 1001 real files is ~0.5s of pure filesystem work (measured, and
+   * irreducible: bounded pools, a synchronous loop and hardlinks all cost the
+   * same or more). It is fixture construction rather than the behaviour under
+   * test, so it is built once here instead of being charged to the scenario's
+   * own test timeout. The fixture is unchanged: 1001 real files on disk with an
+   * allowed extension.
+   */
+  beforeAll(async () => {
+    maxFilesFixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ext-limit-files-'))
+    await writeFixtureFiles(maxFilesFixtureDir, MAX_FILES_FIXTURE_COUNT)
+  })
+
+  afterAll(async () => {
+    if (!maxFilesFixtureDir) return
+    try {
+      await fs.promises.rm(maxFilesFixtureDir, { recursive: true, force: true })
+    } catch {
+      // ignore
+    }
+  })
+
+  afterEach(async () => {
     closeProjectDatabase()
-    for (const r of testRoots) {
+    // Asynchronous cleanup: a recursive synchronous delete of a thousand files
+    // freezes this worker's event loop and amplifies suite-wide disk contention.
+    await Promise.all(testRoots.splice(0).map(async (root) => {
       try {
-        fs.rmSync(r, { recursive: true, force: true })
+        await fs.promises.rm(root, { recursive: true, force: true })
       } catch {
         // ignore
       }
-    }
-    testRoots.length = 0
+    }))
   })
 
   it('1. truncates with reason "max_files_limit" when directory contains 1001 files exceeding limit', async () => {
     const projDir = createDir('proj-limit-files-')
-    const extDir = createDir('ext-limit-files-')
-    initProjectDatabase(projDir)
+    initProjectDatabaseWithCoreRow(projDir)
 
-    // 创建 1001 个合法的小文件（并发异步写入以避免 Windows 单盘同步串行 IO 耗时）
-    await Promise.all(
-      Array.from({ length: 1001 }, (_, idx) => {
-        const pad = String(idx + 1).padStart(4, '0')
-        return fs.promises.writeFile(path.join(extDir, `file_${pad}.txt`), `C${idx + 1}`, 'utf8')
-      }),
-    )
+    // The scenario premise must hold before the limit behaviour is asserted.
+    expect(fs.readdirSync(maxFilesFixtureDir).length).toBe(MAX_FILES_FIXTURE_COUNT)
 
-    const res = await WorkspaceScannerService.scanDirectory(extDir, 'main', { maxFiles: 1000 })
+    const res = await WorkspaceScannerService.scanDirectory(maxFilesFixtureDir, 'main', {
+      maxFiles: MAX_FILES_FIXTURE_LIMIT,
+    })
     expect(res.success).toBe(true)
     expect(res.truncated).toBe(true)
     expect(res.truncationReason).toBe('max_files_limit')
     expect(res.enumerationComplete).toBe(false)
-    expect(res.scannedCount).toBe(1000)
+    expect(res.scannedCount).toBe(MAX_FILES_FIXTURE_LIMIT)
 
     // 验证入库的 1000 个文件均正常持久化在 workspace_sources 中
     const sources = WorkspaceHubRepository.listSources('main')
-    expect(sources.length).toBe(1000)
+    expect(sources.length).toBe(MAX_FILES_FIXTURE_LIMIT)
   })
 
   it('2. truncates with reason "max_total_bytes_limit" when total content size exceeds byte budget', async () => {
     const projDir = createDir('proj-limit-bytes-')
     const extDir = createDir('ext-limit-bytes-')
-    initProjectDatabase(projDir)
+    initProjectDatabaseWithCoreRow(projDir)
 
     // 创建 3 个 20KB 文件，设定 maxTotalBytes = 35KB
     const chunk20k = 'A'.repeat(20 * 1024)
@@ -80,7 +133,7 @@ describe('Workspace Hub - Scanner Coverage & Boundary Conditions', () => {
   it('3. handles unreadable subdirectory gracefully while root failure rolls back and throws', async () => {
     const projDir = createDir('proj-error-diff-')
     const extDir = createDir('ext-error-diff-')
-    initProjectDatabase(projDir)
+    initProjectDatabaseWithCoreRow(projDir)
 
     fs.writeFileSync(path.join(extDir, '00_创作方向.md'), '# 方向\n正常文件', 'utf8')
 
@@ -108,7 +161,7 @@ describe('Workspace Hub - Scanner Coverage & Boundary Conditions', () => {
   it('4. detects deleted external files, marks is_missing=1, and preserves approved snapshot', async () => {
     const projDir = createDir('proj-del-detect-')
     const extDir = createDir('ext-del-detect-')
-    initProjectDatabase(projDir)
+    initProjectDatabaseWithCoreRow(projDir)
 
     const fileA = path.join(extDir, '00_创作方向.md')
     const fileB = path.join(extDir, '01_已确认设定清单.md')

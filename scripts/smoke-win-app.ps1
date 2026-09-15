@@ -167,8 +167,29 @@ function Get-AiNovelProcessTreeIds {
   return @($processIds)
 }
 
+function Get-AiNovelProcessNameByProcessId {
+  # A desktop can expose several hundred top-level windows while only a few dozen
+  # processes own them. Opening a handle per window costs seconds per snapshot and
+  # makes the quiet-window polling loop miss its interval, so read one process
+  # snapshot instead. The name is already materialized during enumeration.
+  $names = @{}
+  foreach ($candidate in [System.Diagnostics.Process]::GetProcesses()) {
+    try {
+      $names[[int]$candidate.Id] = $candidate.ProcessName
+    }
+    catch {
+      # A process that exits mid-snapshot keeps the '<exited>' fallback by omission.
+    }
+    finally {
+      $candidate.Dispose()
+    }
+  }
+  return $names
+}
+
 function Get-AiNovelTopLevelWindowSnapshot {
   $windows = [System.Collections.Generic.List[object]]::new()
+  $processNamesByProcessId = Get-AiNovelProcessNameByProcessId
   [AiNovelSmoke.TopLevelWindowProbe]::EnumWindows({
     param($handle, $state)
     $length = [AiNovelSmoke.TopLevelWindowProbe]::GetWindowTextLength($handle)
@@ -181,13 +202,8 @@ function Get-AiNovelTopLevelWindowSnapshot {
     $windowProcessId = 0
     [void][AiNovelSmoke.TopLevelWindowProbe]::GetWindowThreadProcessId($handle, [ref]$windowProcessId)
     $processName = '<exited>'
-    try {
-      $owner = [System.Diagnostics.Process]::GetProcessById([int]$windowProcessId)
-      $processName = $owner.ProcessName
-      $owner.Dispose()
-    }
-    catch {
-      # The owner may exit between EnumWindows and process lookup; retain the PID as evidence.
+    if ($processNamesByProcessId.ContainsKey([int]$windowProcessId)) {
+      $processName = [string]$processNamesByProcessId[[int]$windowProcessId]
     }
 
     $windows.Add([pscustomobject]@{
