@@ -426,9 +426,16 @@ export class WorkspaceHubRepository {
   }
 
   /** 获取单个外部来源详情及其片段列表 */
-  static getSourceDetail(sourceId: string, projectId = 'main'): {
+  static getSourceDetail(
+    sourceId: string,
+    projectId = 'main',
+    snapshotId?: string | null,
+    fragmentId?: string | null,
+  ): {
     source: WorkspaceSource | null
     fragments: WorkspaceSourceFragment[]
+    targetSnapshotId?: string | null
+    provenanceStatus?: 'found' | 'provenance-missing'
   } {
     const db = requiredDb()
     const r = db.prepare(`
@@ -461,10 +468,10 @@ export class WorkspaceHubRepository {
       file_size: number
     } | undefined
 
-    if (!r) return { source: null, fragments: [] }
+    if (!r) return { source: null, fragments: [], targetSnapshotId: null, provenanceStatus: 'provenance-missing' }
 
-    // 详情页展示最新观察快照；不再从旧片段表进行空结果回退。
-    const targetSnapshotId = r.observed_snapshot_id || r.approved_snapshot_id
+    // 严禁默认展示 observed_snapshot_id！默认优先展示 approved_snapshot_id，只有在尚未首次批准时才允许回退到 observed
+    const targetSnapshotId = snapshotId || r.approved_snapshot_id || r.observed_snapshot_id
     let fragments: Array<{
       fragment_id: string
       source_id: string
@@ -479,15 +486,30 @@ export class WorkspaceHubRepository {
       status: 'active' | 'stale' | 'deprecated'
     }> = []
 
+    let provenanceStatus: 'found' | 'provenance-missing' = 'found'
+
     if (targetSnapshotId) {
+      // 强制限制 project_id，并严格校验 snapshot_id 与 source_id
       const snapRows = db.prepare(`
         SELECT id AS fragment_id, source_id, heading_path, content, start_line, end_line,
                fragment_hash, chapter_start, chapter_end, purpose, status
         FROM workspace_source_snapshot_fragments
-        WHERE snapshot_id = ?
+        WHERE snapshot_id = ? AND source_id = ? AND project_id = ?
         ORDER BY start_line ASC
-      `).all(targetSnapshotId) as typeof fragments
+      `).all(targetSnapshotId, sourceId, projectId) as typeof fragments
       fragments = snapRows
+
+      if (fragmentId) {
+        // 校验 snapshot_id, source_id, fragment_id 三者一致，不得静默回退
+        const matched = fragments.find(f => f.fragment_id === fragmentId)
+        if (!matched) {
+          provenanceStatus = 'provenance-missing'
+        }
+      } else if (snapshotId && fragments.length === 0) {
+        provenanceStatus = 'provenance-missing'
+      }
+    } else {
+      provenanceStatus = 'provenance-missing'
     }
 
     return {
@@ -526,6 +548,8 @@ export class WorkspaceHubRepository {
         purpose: f.purpose,
         status: f.status,
       })),
+      targetSnapshotId: targetSnapshotId || null,
+      provenanceStatus,
     }
   }
 

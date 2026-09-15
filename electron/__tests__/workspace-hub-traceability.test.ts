@@ -522,6 +522,129 @@ describe('Workspace Hub - End-to-End Traceability & Snapshot Context Isolation',
     expect(midStage13!.content).toContain('【双丹田互冲构想】')
     expect(midStage13!.content).toMatch(/禁止.*采用|严禁.*采用/)
   })
+
+  it('verifies locate source detail respects approved V1 when unapproved V2 exists, highlights exact fragment, and returns provenance-missing on mismatch', async () => {
+    const projDir = createDir('proj-locate-trace-')
+    const extDir = createDir('ext-locate-materials-')
+    initProjectDatabase(projDir)
+
+    const docRules = path.join(extDir, '01_已确认设定清单.md')
+    const docDeprecated = path.join(extDir, '06_废案与漏洞记录.md')
+
+    fs.writeFileSync(
+      docRules,
+      '# 灵力系统\n## 灵力不可逆转化律\n灵力消耗后只能转化为不可回收的辐射热（V1已批准原稿）。\n\n## 契约誓约\n高位契约一旦确立不可单方解除（V1已批准原稿）。\n',
+      'utf8',
+    )
+    fs.writeFileSync(
+      docDeprecated,
+      '# 废案记录\n## 双丹田互冲构想\n双丹田同时运转方案因存在严重逻辑矛盾，已废止。\n',
+      'utf8',
+    )
+
+    // 1. 扫描并批准 V1
+    const scan1 = await WorkspaceScannerService.scanDirectory(extDir, 'main')
+    expect(scan1.success).toBe(true)
+
+    const sourcesV1 = WorkspaceHubRepository.listSources('main')
+    for (const s of sourcesV1) {
+      WorkspaceHubRepository.approveSource(s.id, 'main')
+    }
+
+    const approvedSourcesV1 = WorkspaceHubRepository.listSources('main')
+    const ruleSource = approvedSourcesV1.find(s => s.relativePath.includes('01_已确认设定清单'))!
+    const v1SnapshotId = ruleSource.approvedSnapshotId!
+    expect(v1SnapshotId).toBeTruthy()
+
+    // 获取 V1 详情与快照片段
+    const detailV1 = WorkspaceHubRepository.getSourceDetail(ruleSource.id, 'main')
+    expect(detailV1.source).toBeDefined()
+    expect(detailV1.targetSnapshotId).toBe(v1SnapshotId)
+    expect(detailV1.provenanceStatus).toBe('found')
+    expect(detailV1.fragments.length).toBe(3)
+    const targetV1Fragment = detailV1.fragments.find(f => f.headingPath.includes('灵力不可逆转化律'))!
+    expect(targetV1Fragment).toBeDefined()
+    expect(targetV1Fragment.content).toContain('V1已批准原稿')
+
+    // 2. 外部文件产生 V2 变更（未批准），产生 observedSnapshotId
+    fs.writeFileSync(
+      docRules,
+      '# 灵力系统\n## 灵力不可逆转化律\n灵力可以与气血实现自由无损双向逆转（V2草稿绝对不可泄露）。\n\n## 契约誓约\n契约誓约限制改为可以缴纳赎金解除（V2未批准）。\n',
+      'utf8',
+    )
+
+    const scan2 = await WorkspaceScannerService.scanDirectory(extDir, 'main')
+    expect(scan2.success).toBe(true)
+
+    const sourcesV2 = WorkspaceHubRepository.listSources('main')
+    const ruleSourceV2 = sourcesV2.find(s => s.id === ruleSource.id)!
+    expect(ruleSourceV2.observedSnapshotId).not.toBe(v1SnapshotId)
+    expect(ruleSourceV2.approvedSnapshotId).toBe(v1SnapshotId)
+
+    // 3. 核心验收断言：未批准 V2 存在时，调用资料详情接口不得默认展示 observed_snapshot_id，必须仍展示 V1
+    const detailAfterV2Observed = WorkspaceHubRepository.getSourceDetail(ruleSource.id, 'main')
+    expect(detailAfterV2Observed.targetSnapshotId).toBe(v1SnapshotId)
+    expect(detailAfterV2Observed.targetSnapshotId).not.toBe(ruleSourceV2.observedSnapshotId)
+    expect(detailAfterV2Observed.fragments.length).toBe(3)
+    const fragAfterObserved = detailAfterV2Observed.fragments.find(f => f.headingPath.includes('灵力不可逆转化律'))!
+    expect(fragAfterObserved.content).toContain('V1已批准原稿')
+    expect(fragAfterObserved.content).not.toContain('自由无损双向逆转')
+
+    // 4. 指定 snapshotId 与 fragmentId 进行反查定位
+    const detailWithExactRef = WorkspaceHubRepository.getSourceDetail(
+      ruleSource.id,
+      'main',
+      v1SnapshotId,
+      targetV1Fragment.fragmentId,
+    )
+    expect(detailWithExactRef.targetSnapshotId).toBe(v1SnapshotId)
+    expect(detailWithExactRef.provenanceStatus).toBe('found')
+    expect(detailWithExactRef.fragments.some(f => f.fragmentId === targetV1Fragment.fragmentId)).toBe(true)
+
+    // 5. 校验 snapshot_id, source_id, fragment_id 三者一致性：若 fragmentId 不匹配，绝不静默回退，返回 provenance-missing
+    const detailWithMismatchedFrag = WorkspaceHubRepository.getSourceDetail(
+      ruleSource.id,
+      'main',
+      v1SnapshotId,
+      'non-existent-or-corrupted-fragment-id',
+    )
+    expect(detailWithMismatchedFrag.provenanceStatus).toBe('provenance-missing')
+
+    // 6. 限制 project_id：跨项目隔离查询必须返回空且标记 provenance-missing
+    const detailCrossProject = WorkspaceHubRepository.getSourceDetail(
+      ruleSource.id,
+      'other-project-scope',
+      v1SnapshotId,
+      targetV1Fragment.fragmentId,
+    )
+    expect(detailCrossProject.source).toBeNull()
+    expect(detailCrossProject.fragments.length).toBe(0)
+    expect(detailCrossProject.provenanceStatus).toBe('provenance-missing')
+
+    // 7. 章节上下文装配器生成的来源引用必须携带三要素且能直接定位至 V1
+    const bundle = ChapterContextAssembler.assemble({ chapterNumber: 1 })
+    const stage2 = bundle.blocks.find(b => b.stage === 2)!
+    expect(stage2).toBeDefined()
+    const targetSourceRef = stage2.sources.find(s => s.headingPath.includes('灵力不可逆转化律'))!
+    expect(targetSourceRef).toBeDefined()
+    expect(targetSourceRef.projectId).toBe('main')
+    expect(targetSourceRef.approvedSnapshotId).toBe(v1SnapshotId)
+    expect(targetSourceRef.sourceSnapshotFragmentId).toBe(targetV1Fragment.fragmentId)
+    expect(targetSourceRef.provenanceStatus).toBe('found')
+
+    // 用上下文来源引用的三要素反查资料详情
+    const reverseDetail = WorkspaceHubRepository.getSourceDetail(
+      targetSourceRef.sourceId!,
+      targetSourceRef.projectId!,
+      targetSourceRef.approvedSnapshotId,
+      targetSourceRef.sourceSnapshotFragmentId,
+    )
+    expect(reverseDetail.targetSnapshotId).toBe(v1SnapshotId)
+    expect(reverseDetail.provenanceStatus).toBe('found')
+    expect(reverseDetail.fragments.find(f => f.fragmentId === targetSourceRef.sourceSnapshotFragmentId)!.content)
+      .toContain('V1已批准原稿')
+  })
 })
+
 
 

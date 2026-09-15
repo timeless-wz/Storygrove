@@ -24,7 +24,15 @@ interface WorkspaceHubState {
   status: WorkspaceHubStatus | null
   sources: WorkspaceSource[]
   selectedSourceId: string | null
-  selectedSourceDetail: { source: WorkspaceSource | null; fragments: WorkspaceSourceFragment[] } | null
+  selectedSnapshotId: string | null
+  selectedFragmentId: string | null
+  selectedSourceDetail: {
+    source: WorkspaceSource | null
+    fragments: WorkspaceSourceFragment[]
+    targetSnapshotId?: string | null
+    provenanceStatus?: 'found' | 'provenance-missing'
+  } | null
+  provenanceStatus: 'found' | 'provenance-missing' | null
   rules: SettingRule[]
   candidates: WorkspaceImportCandidate[]
   ruleFilterStatus: SettingRuleStatus | 'all'
@@ -50,7 +58,11 @@ interface WorkspaceHubState {
   cancelScan: () => Promise<boolean>
   approveSource: (sourceId: string) => Promise<boolean>
   approveAllSources: () => Promise<boolean>
-  selectSource: (sourceId: string | null) => Promise<void>
+  selectSource: (
+    sourceId: string | null,
+    optionsOrSnapshotId?: string | { snapshotId?: string | null; fragmentId?: string | null; projectId?: string } | null,
+    fragmentId?: string | null,
+  ) => Promise<void>
   loadRules: (status?: SettingRuleStatus) => Promise<void>
   updateRuleStatus: (ruleId: string, status: SettingRuleStatus) => Promise<boolean>
   deleteRule: (ruleId: string) => Promise<boolean>
@@ -71,7 +83,10 @@ export const useWorkspaceHubStore = create<WorkspaceHubState>((set, get) => ({
   status: null,
   sources: [],
   selectedSourceId: null,
+  selectedSnapshotId: null,
+  selectedFragmentId: null,
   selectedSourceDetail: null,
+  provenanceStatus: null,
   rules: [],
   candidates: [],
   ruleFilterStatus: 'all',
@@ -301,21 +316,67 @@ export const useWorkspaceHubStore = create<WorkspaceHubState>((set, get) => ({
     }
   },
 
-  selectSource: async (sourceId: string | null) => {
+  selectSource: async (
+    sourceId: string | null,
+    optionsOrSnapshotId?: string | { snapshotId?: string | null; fragmentId?: string | null; projectId?: string } | null,
+    fragmentId?: string | null,
+  ) => {
     if (!sourceId) {
-      set({ selectedSourceId: null, selectedSourceDetail: null })
+      set({
+        selectedSourceId: null,
+        selectedSnapshotId: null,
+        selectedFragmentId: null,
+        selectedSourceDetail: null,
+        provenanceStatus: null,
+      })
       return
     }
     const session = getActiveProjectSessionContext()
     if (!session) return
-    set({ selectedSourceId: sourceId })
+
+    let targetSnapshotId: string | null | undefined
+    let targetFragmentId: string | null | undefined
+
+    if (typeof optionsOrSnapshotId === 'object' && optionsOrSnapshotId !== null) {
+      targetSnapshotId = optionsOrSnapshotId.snapshotId
+      targetFragmentId = optionsOrSnapshotId.fragmentId
+    } else {
+      targetSnapshotId = optionsOrSnapshotId
+      targetFragmentId = fragmentId
+    }
+
+    set({
+      selectedSourceId: sourceId,
+      selectedSnapshotId: targetSnapshotId || null,
+      selectedFragmentId: targetFragmentId || null,
+    })
+
     try {
-      const detail = await workspaceHubService.getSourceDetail(session, sourceId)
+      const detail = await workspaceHubService.getSourceDetail(
+        session,
+        sourceId,
+        targetSnapshotId,
+        targetFragmentId,
+      )
       if (!sameProjectSessionContext(session, getActiveProjectSessionContext())) return
-      set({ selectedSourceDetail: detail })
+
+      const status = detail.provenanceStatus || (
+        targetFragmentId && !detail.fragments.some(f => f.fragmentId === targetFragmentId)
+          ? 'provenance-missing'
+          : 'found'
+      )
+
+      set({
+        selectedSourceDetail: detail,
+        provenanceStatus: status,
+        selectedSnapshotId: detail.targetSnapshotId || targetSnapshotId || detail.source?.approvedSnapshotId || null,
+      })
     } catch (err) {
       if (!sameProjectSessionContext(session, getActiveProjectSessionContext())) return
-      set({ error: err instanceof Error ? err.message : String(err) })
+      set({
+        error: err instanceof Error ? err.message : String(err),
+        provenanceStatus: 'provenance-missing',
+      })
     }
   },
 
@@ -497,7 +558,10 @@ export const useWorkspaceHubStore = create<WorkspaceHubState>((set, get) => ({
     status: null,
     sources: [],
     selectedSourceId: null,
+    selectedSnapshotId: null,
+    selectedFragmentId: null,
     selectedSourceDetail: null,
+    provenanceStatus: null,
     rules: [],
     candidates: [],
     ruleFilterStatus: 'all',

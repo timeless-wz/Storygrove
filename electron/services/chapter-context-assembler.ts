@@ -15,11 +15,13 @@ import type {
 
 declare module '../../src/shared/workspace-hub' {
   interface ChapterContextSourceRef {
+    projectId?: string
     sourceId?: string | null
     approvedSnapshotId?: string | null
     sourceSnapshotFragmentId?: string | null
     filePath?: string
     titlePath?: string
+    provenanceStatus?: 'found' | 'provenance-missing'
   }
 }
 
@@ -27,17 +29,22 @@ function hashString(str: string): string {
   return createHash('sha256').update(str, 'utf8').digest('hex')
 }
 
-function formatFragmentSourceRef(f: {
-  sourceId?: string
-  approvedSnapshotId?: string | null
-  fragmentId: string
-  sourcePath: string
-  headingPath: string
-  fragmentHash: string
-  startLine: number
-  endLine: number
-}): ChapterContextSourceRef {
+function formatFragmentSourceRef(
+  f: {
+    sourceId?: string
+    approvedSnapshotId?: string | null
+    fragmentId: string
+    sourcePath: string
+    headingPath: string
+    fragmentHash: string
+    startLine: number
+    endLine: number
+  },
+  projectId = 'main',
+): ChapterContextSourceRef {
+  const isMissing = !f.fragmentId || !f.approvedSnapshotId
   return {
+    projectId,
     sourceId: f.sourceId || null,
     approvedSnapshotId: f.approvedSnapshotId || null,
     snapshotId: f.approvedSnapshotId || null,
@@ -49,50 +56,63 @@ function formatFragmentSourceRef(f: {
     titlePath: f.headingPath,
     contentHash: f.fragmentHash,
     lineRange: `${f.startLine}-${f.endLine}`,
+    provenanceStatus: isMissing ? 'provenance-missing' : 'found',
   }
 }
 
 function resolveRuleSourceRef(
   db: ReturnType<typeof getProjectDb>,
   r: SettingRule,
+  projectId = 'main',
 ): ChapterContextSourceRef {
-  let fragRow: { id: string; snapshot_id: string; source_id: string; fragment_hash: string } | undefined
+  let fragRow: { id: string; snapshot_id: string; source_id: string; fragment_hash: string; heading_path: string } | undefined
   const fragId = r.sourceSnapshotFragmentId || r.sourceFragmentId
-  if (db && fragId) {
-    fragRow = db.prepare(`
-      SELECT id, snapshot_id, source_id, fragment_hash
-      FROM workspace_source_snapshot_fragments
-      WHERE id = ?
-    `).get(fragId) as typeof fragRow
-  }
-  if (db && !fragRow && r.sourceSnapshotId) {
-    fragRow = db.prepare(`
-      SELECT id, snapshot_id, source_id, fragment_hash
-      FROM workspace_source_snapshot_fragments
-      WHERE snapshot_id = ? AND heading_path = ?
-      LIMIT 1
-    `).get(r.sourceSnapshotId, r.sourceHeadingPath) as typeof fragRow
-  }
+  const snapId = r.sourceSnapshotId
+  const srcId = r.sourceId
 
-  let resolvedFragId = fragRow?.id || r.sourceSnapshotFragmentId || r.sourceFragmentId
-  if (db && r.originType === 'scan' && !resolvedFragId && r.sourceSnapshotId) {
-    const fallbackFrag = db.prepare(`
-      SELECT id, snapshot_id, source_id, fragment_hash
+  // 1. 若有明确 fragId，查询必须限制 project_id，并严格校验 snapshot_id 与 source_id 一致
+  if (db && fragId) {
+    const candidate = db.prepare(`
+      SELECT id, snapshot_id, source_id, fragment_hash, heading_path
       FROM workspace_source_snapshot_fragments
-      WHERE snapshot_id = ?
-      ORDER BY start_line ASC LIMIT 1
-    `).get(r.sourceSnapshotId) as typeof fragRow
-    if (fallbackFrag) {
-      fragRow = fallbackFrag
-      resolvedFragId = fallbackFrag.id
+      WHERE id = ? AND project_id = ?
+    `).get(fragId, projectId) as typeof fragRow
+
+    if (candidate) {
+      const snapMatches = !snapId || candidate.snapshot_id === snapId
+      const srcMatches = !srcId || candidate.source_id === srcId
+      if (snapMatches && srcMatches) {
+        fragRow = candidate
+      }
     }
   }
 
-  const resolvedSnapId = fragRow?.snapshot_id || r.sourceSnapshotId || null
-  const resolvedSourceId = fragRow?.source_id || r.sourceId || null
+  // 2. 若未通过 fragId 精准匹配，但具备快照 ID 与标题路径，在同一 project_id 下严格按标题路径反查
+  if (db && !fragRow && snapId && r.sourceHeadingPath) {
+    const candidate = db.prepare(`
+      SELECT id, snapshot_id, source_id, fragment_hash, heading_path
+      FROM workspace_source_snapshot_fragments
+      WHERE snapshot_id = ? AND project_id = ? AND heading_path = ? ${srcId ? 'AND source_id = ?' : ''}
+      LIMIT 1
+    `).get(...(srcId ? [snapId, projectId, r.sourceHeadingPath, srcId] : [snapId, projectId, r.sourceHeadingPath])) as typeof fragRow
+
+    if (candidate) {
+      fragRow = candidate
+    }
+  }
+
+  // 3. 严格禁止静默回退到“该快照的第一个片段”！若未找到精确来源，返回明确的 provenance-missing 状态
+  const isFound = Boolean(fragRow)
+  const isCandidateOrigin = r.originType !== 'scan'
+  const provenanceStatus: 'found' | 'provenance-missing' = (isFound || isCandidateOrigin) ? 'found' : 'provenance-missing'
+
+  const resolvedFragId = fragRow?.id || (isFound ? (r.sourceSnapshotFragmentId || r.sourceFragmentId) : undefined)
+  const resolvedSnapId = fragRow?.snapshot_id || snapId || null
+  const resolvedSourceId = fragRow?.source_id || srcId || null
   const resolvedHash = fragRow?.fragment_hash || hashString(r.content)
 
   return {
+    projectId,
     sourceId: resolvedSourceId,
     approvedSnapshotId: resolvedSnapId,
     snapshotId: resolvedSnapId,
@@ -100,10 +120,11 @@ function resolveRuleSourceRef(
     fragmentId: resolvedFragId || undefined,
     relativePath: r.sourceFile || 'setting_rules',
     filePath: r.sourceFile || 'setting_rules',
-    headingPath: r.sourceHeadingPath || r.title,
-    titlePath: r.sourceHeadingPath || r.title,
+    headingPath: fragRow?.heading_path || r.sourceHeadingPath || r.title,
+    titlePath: fragRow?.heading_path || r.sourceHeadingPath || r.title,
     lineRange: r.sourceLineRange,
     contentHash: resolvedHash,
+    provenanceStatus,
   }
 }
 
@@ -197,7 +218,7 @@ export class ChapterContextAssembler {
     })
     if (stage1Fragments.length > 0) {
       const combined = stage1Fragments.map(f => f.content).join('\n\n')
-      const sources: ChapterContextSourceRef[] = stage1Fragments.map(formatFragmentSourceRef)
+      const sources: ChapterContextSourceRef[] = stage1Fragments.map(f => formatFragmentSourceRef(f, projectId))
       tryAddBlock({
         id: 'stage-1-creation-principles',
         stage: 1,
@@ -233,7 +254,7 @@ export class ChapterContextAssembler {
       const ruleTexts = applicableRules.map(
         r => `### 【${r.constraintType === 'hard' ? '硬约束' : '软约束'}】${r.title}\n${r.content}（来源：${r.sourceFile || '已确认设定'}）`
       ).join('\n\n')
-      const sources: ChapterContextSourceRef[] = applicableRules.map(r => resolveRuleSourceRef(db, r))
+      const sources: ChapterContextSourceRef[] = applicableRules.map(r => resolveRuleSourceRef(db, r, projectId))
       tryAddBlock({
         id: 'stage-2-confirmed-rules',
         stage: 2,
@@ -259,7 +280,7 @@ export class ChapterContextAssembler {
       const candidateTexts = candidateRules.map(
         r => `### 【待确认/候选】${r.title}\n${r.content}（警示：未经作者确认，不得作为硬约束）`
       ).join('\n\n')
-      const sources: ChapterContextSourceRef[] = candidateRules.map(r => resolveRuleSourceRef(db, r))
+      const sources: ChapterContextSourceRef[] = candidateRules.map(r => resolveRuleSourceRef(db, r, projectId))
       tryAddBlock({
         id: 'stage-2-candidate-rules',
         stage: 2,
@@ -287,7 +308,7 @@ export class ChapterContextAssembler {
     })
     if (stage3Fragments.length > 0) {
       const text = stage3Fragments.map(f => `### ${f.headingPath}\n${f.content}`).join('\n\n')
-      const sources: ChapterContextSourceRef[] = stage3Fragments.map(formatFragmentSourceRef)
+      const sources: ChapterContextSourceRef[] = stage3Fragments.map(f => formatFragmentSourceRef(f, projectId))
       tryAddBlock({
         id: 'stage-3-master-plot',
         stage: 3,
@@ -316,7 +337,7 @@ export class ChapterContextAssembler {
     })
     if (stage4Fragments.length > 0) {
       const text = stage4Fragments.map(f => `### ${f.headingPath}\n${f.content}`).join('\n\n')
-      const sources: ChapterContextSourceRef[] = stage4Fragments.map(formatFragmentSourceRef)
+      const sources: ChapterContextSourceRef[] = stage4Fragments.map(f => formatFragmentSourceRef(f, projectId))
       tryAddBlock({
         id: 'stage-4-volume-outline',
         stage: 4,
@@ -345,7 +366,7 @@ export class ChapterContextAssembler {
     })
     if (stage5Fragments.length > 0) {
       const text = stage5Fragments.map(f => `### ${f.headingPath}\n${f.content}`).join('\n\n')
-      const sources: ChapterContextSourceRef[] = stage5Fragments.map(formatFragmentSourceRef)
+      const sources: ChapterContextSourceRef[] = stage5Fragments.map(f => formatFragmentSourceRef(f, projectId))
       tryAddBlock({
         id: 'stage-5-chapter-outline',
         stage: 5,
@@ -603,7 +624,7 @@ export class ChapterContextAssembler {
 
       if (topFragments.length > 0) {
         const text = topFragments.map(f => `### ${f.headingPath}\n${f.content}`).join('\n\n')
-        const sources: ChapterContextSourceRef[] = topFragments.map(formatFragmentSourceRef)
+        const sources: ChapterContextSourceRef[] = topFragments.map(f => formatFragmentSourceRef(f, projectId))
         tryAddBlock({
           id: 'stage-10-world-events',
           stage: 10,
@@ -633,7 +654,7 @@ export class ChapterContextAssembler {
     })
     if (stage11Fragments.length > 0) {
       const text = stage11Fragments.map(f => `### ${f.headingPath}\n${f.content}`).join('\n\n')
-      const sources: ChapterContextSourceRef[] = stage11Fragments.map(formatFragmentSourceRef)
+      const sources: ChapterContextSourceRef[] = stage11Fragments.map(f => formatFragmentSourceRef(f, projectId))
       tryAddBlock({
         id: 'stage-11-narrative-goals',
         stage: 11,
@@ -661,7 +682,7 @@ export class ChapterContextAssembler {
     })
     if (stage12Fragments.length > 0) {
       const text = stage12Fragments.map(f => f.content).join('\n\n')
-      const sources: ChapterContextSourceRef[] = stage12Fragments.map(formatFragmentSourceRef)
+      const sources: ChapterContextSourceRef[] = stage12Fragments.map(f => formatFragmentSourceRef(f, projectId))
       tryAddBlock({
         id: 'stage-12-style-guide',
         stage: 12,
@@ -704,8 +725,8 @@ export class ChapterContextAssembler {
       ].join('\n')
 
       const sources: ChapterContextSourceRef[] = [
-        ...deprecatedRules.map(r => resolveRuleSourceRef(db, r)),
-        ...deprecatedFragments.map(formatFragmentSourceRef),
+        ...deprecatedRules.map(r => resolveRuleSourceRef(db, r, projectId)),
+        ...deprecatedFragments.map(f => formatFragmentSourceRef(f, projectId)),
       ]
 
       tryAddBlock({

@@ -223,7 +223,9 @@ export function registerWorkspaceHubController(): void {
   // 8. 来源详情及片段
   registerWorkspaceHubHandler('workspace:get-source-detail', (_event, projectId, ...args) => {
     const sourceId = String(args[0] || '')
-    return WorkspaceHubRepository.getSourceDetail(sourceId, projectId)
+    const snapshotId = args[1] ? String(args[1]) : undefined
+    const fragmentId = args[2] ? String(args[2]) : undefined
+    return WorkspaceHubRepository.getSourceDetail(sourceId, projectId, snapshotId, fragmentId)
   })
 
   // 9. 批准单个来源文件内容快照（消除 stale 状态，原子切换 approved_snapshot_id）

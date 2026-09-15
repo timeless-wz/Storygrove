@@ -44,7 +44,11 @@ export default function WorkspaceRulesTab() {
       if (match) targetSourceId = match.id
     }
     if (targetSourceId) {
-      await selectSource(targetSourceId)
+      await selectSource(targetSourceId, {
+        snapshotId: rule.sourceSnapshotId,
+        fragmentId: rule.sourceSnapshotFragmentId || rule.sourceFragmentId,
+        projectId: rule.projectId || 'main',
+      })
       setActiveTab('sources')
       toast.success(text(`已跳转定位至母稿资料快照 [${rule.sourceFile}]`, `Navigated to snapshot source [${rule.sourceFile}]`))
     } else {
