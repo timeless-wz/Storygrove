@@ -440,5 +440,88 @@ describe('Workspace Hub - End-to-End Traceability & Snapshot Context Isolation',
       expect(matchedRow).toBeDefined()
     }
   })
+
+  it('guarantees Stage 13 deprecated exclusions are never omitted even with minimal budgetChars and include titles and forbidden-use semantics', async () => {
+    // 使用隔离临时目录与独立数据库
+    const projDir = createDir('proj-tight-budget-')
+    const extDir = createDir('ext-tight-materials-')
+    initProjectDatabase(projDir)
+
+    // 写入包含正常规则、正文素材与废止设定记录的文件
+    const docRules = path.join(extDir, '01_已确认设定清单.md')
+    const docMaterials = path.join(extDir, '03_里世界探索.md')
+    const docDeprecated = path.join(extDir, '06_废案与漏洞记录.md')
+
+    fs.writeFileSync(
+      docRules,
+      '# 灵力系统\n## 灵力不可逆转化律\n灵力消耗后只能转化为不可回收的辐射热，不可逆转。\n',
+      'utf8',
+    )
+    fs.writeFileSync(
+      docMaterials,
+      '# 里世界\n## 荒古遗迹\n遗迹深处埋藏着第一纪元的大型机械构件，散发着微弱灵力波纹。\n',
+      'utf8',
+    )
+    fs.writeFileSync(
+      docDeprecated,
+      '# 废案与漏洞记录\n## 双丹田互冲构想\n双丹田同时运转方案因存在严重逻辑矛盾，已于设定评审中废止。\n\n## 灵力永动机\n违背热力学与不可逆律，坚决禁止采用。\n',
+      'utf8',
+    )
+
+    // 扫描并批准所有源文件
+    const scanResult = await WorkspaceScannerService.scanDirectory(extDir, 'main')
+    expect(scanResult.success).toBe(true)
+
+    const sources = WorkspaceHubRepository.listSources('main')
+    expect(sources.length).toBe(3)
+    for (const s of sources) {
+      const res = WorkspaceHubRepository.approveSource(s.id, 'main')
+      expect(res.success).toBe(true)
+    }
+
+    // 1. 使用极小的 budgetChars (30 字符)，验证 Stage 13 绝不被省略
+    const tightBundle = ChapterContextAssembler.assemble({
+      chapterNumber: 1,
+      budgetChars: 30,
+      includeBackgroundLore: true,
+    })
+
+    // 验证 Stage 13 存在于 blocks 中，且绝未被推入 omissions
+    const stage13Block = tightBundle.blocks.find(b => b.stage === 13)
+    expect(stage13Block).toBeDefined()
+    expect(tightBundle.omissions.some(o => o.stage === 13)).toBe(false)
+
+    // 验证包含废案标题
+    expect(stage13Block!.content).toContain('【双丹田互冲构想】')
+    expect(stage13Block!.content).toContain('【灵力永动机】')
+
+    // 验证包含禁止采用语义
+    expect(stage13Block!.content).toMatch(/禁止.*采用|严禁.*采用/)
+
+    // 关键安全防线：不得将废案正文全文注入上下文
+    expect(stage13Block!.content).not.toContain('双丹田同时运转方案因存在严重逻辑矛盾')
+    expect(tightBundle.fullAssembledText).not.toContain('双丹田同时运转方案因存在严重逻辑矛盾')
+
+    // 验证来源凭证仍然完整
+    expect(stage13Block!.sources.length).toBeGreaterThan(0)
+    for (const s of stage13Block!.sources) {
+      expect(s.sourceId).toBeTruthy()
+      expect(s.approvedSnapshotId).toBeTruthy()
+      expect(s.sourceSnapshotFragmentId).toBeTruthy()
+      expect(s.contentHash).toMatch(/^[a-f0-9]{64}$/)
+    }
+
+    // 2. 验证保留最低预算机制：适中预算下，素材片段被省略以保留 Stage 13
+    const midBundle = ChapterContextAssembler.assemble({
+      chapterNumber: 1,
+      budgetChars: 350,
+      includeBackgroundLore: true,
+    })
+    const midStage13 = midBundle.blocks.find(b => b.stage === 13)
+    expect(midStage13).toBeDefined()
+    expect(midStage13!.content).toContain('【双丹田互冲构想】')
+    expect(midStage13!.content).toMatch(/禁止.*采用|严禁.*采用/)
+  })
 })
+
 

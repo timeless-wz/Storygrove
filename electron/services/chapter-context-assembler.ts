@@ -134,11 +134,27 @@ export class ChapterContextAssembler {
     const omissions: ChapterContextOmission[] = []
     const staleWarnings: string[] = []
     const candidateWarnings: string[] = []
-    let excludedDeprecatedCount = 0
+
+    // 预先统计废案，为 Stage 13 废案排除保留最低安全预算，确保可选/素材阶段（Stage 3-12）不会挤占安全负向约束
+    const deprecatedRules = WorkspaceHubRepository.listRules(projectId, 'deprecated')
+    const deprecatedFragments = WorkspaceHubRepository.queryFragments({
+      projectId,
+      categories: ['deprecated'],
+      excludeDeprecated: false,
+    })
+    const excludedDeprecatedCount = deprecatedRules.length + deprecatedFragments.length
+    const STAGE13_MIN_RESERVED_BUDGET = excludedDeprecatedCount > 0
+      ? Math.min(400, Math.max(120, excludedDeprecatedCount * 30 + 80))
+      : 0
 
     const tryAddBlock = (block: ChapterContextBlock, isProtected = false): boolean => {
       const len = block.content.length
-      if (!isProtected && len > remainingBudget) {
+      // 非受保护块必须尊重 Stage 13 的最低保留预算，防止素材阶段耗尽额度导致负向安全约束无法加入
+      const availableBudget = (isProtected || block.stage === 13)
+        ? remainingBudget
+        : Math.max(0, remainingBudget - STAGE13_MIN_RESERVED_BUDGET)
+
+      if (!isProtected && len > availableBudget) {
         omissions.push({
           stage: block.stage,
           stageName: block.stageName,
@@ -664,25 +680,25 @@ export class ChapterContextAssembler {
     }
 
     // =========================================================================
-    // 阶段 13: 明确的废案排除清单 (纯负向约束条目，严禁注入废案正文全文)
+    // 阶段 13: 明确的废案排除清单 (纯负向约束条目，严禁注入废案正文全文，受保护)
     // =========================================================================
-    const deprecatedRules = WorkspaceHubRepository.listRules(projectId, 'deprecated')
-    const deprecatedFragments = WorkspaceHubRepository.queryFragments({
-      projectId,
-      categories: ['deprecated'],
-      excludeDeprecated: false,
-    })
-    excludedDeprecatedCount = deprecatedRules.length + deprecatedFragments.length
-
-    if (deprecatedRules.length > 0 || deprecatedFragments.length > 0) {
-      const ruleSummaries = deprecatedRules.slice(0, 20).map(
-        r => `- 废止设定条目：【${r.title}】（约束类型：${r.constraintType === 'hard' ? '硬约束' : '软约束'}，作用域：${r.scope}）`
+    if (excludedDeprecatedCount > 0) {
+      const isCompact = remainingBudget < 300 || budgetLimit < 800
+      const ruleSummaries = deprecatedRules.slice(0, 20).map(r =>
+        isCompact
+          ? `- 废止设定：【${r.title}】（禁止采用）`
+          : `- 废止设定条目：【${r.title}】（约束类型：${r.constraintType === 'hard' ? '硬约束' : '软约束'}，作用域：${r.scope}，禁止采用）`
       )
-      const fragSummaries = deprecatedFragments.slice(0, 20).map(
-        f => `- 废止资料片段：【${f.headingPath}】（来源文件：${f.sourcePath}）`
+      const fragSummaries = deprecatedFragments.slice(0, 20).map(f =>
+        isCompact
+          ? `- 废止片段：【${f.headingPath}】（来源：${f.sourcePath}，禁止采用）`
+          : `- 废止资料片段：【${f.headingPath}】（来源文件：${f.sourcePath}，禁止采用）`
       )
+      const header = isCompact
+        ? '【以下方案与设定已被作者明确废止，严禁在正文与细纲中采用（禁止采用）】：'
+        : '【以下方案与设定已被作者明确废止，严禁在正文与细纲中作为有效事实采用（明确禁止采用）】：'
       const exclusionText = [
-        '【以下方案与设定已被作者明确废止，严禁在正文与细纲中作为有效事实采用】：',
+        header,
         ...ruleSummaries,
         ...fragSummaries,
       ].join('\n')
@@ -705,7 +721,7 @@ export class ChapterContextAssembler {
         isCandidate: false,
         isStale: false,
         charCount: exclusionText.length,
-      })
+      }, true)
     }
 
     // 生成完整装配文本与预算校验
