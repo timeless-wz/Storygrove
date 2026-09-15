@@ -22,6 +22,7 @@ declare module '../../src/shared/workspace-hub' {
     filePath?: string
     titlePath?: string
     provenanceStatus?: 'found' | 'provenance-missing'
+    provenanceError?: string
   }
 }
 
@@ -65,43 +66,100 @@ function resolveRuleSourceRef(
   r: SettingRule,
   projectId = 'main',
 ): ChapterContextSourceRef {
-  let fragRow: { id: string; snapshot_id: string; source_id: string; fragment_hash: string; heading_path: string } | undefined
+  // 1. 禁止跨项目读取来源：若规则显式属于其他项目，立即失败关闭并标记 provenance-missing
+  if (r.projectId && r.projectId !== projectId) {
+    return {
+      projectId,
+      sourceId: null,
+      approvedSnapshotId: null,
+      snapshotId: null,
+      sourceSnapshotFragmentId: undefined,
+      fragmentId: undefined,
+      relativePath: r.sourceFile || 'setting_rules',
+      filePath: r.sourceFile || 'setting_rules',
+      headingPath: r.sourceHeadingPath || r.title,
+      titlePath: r.sourceHeadingPath || r.title,
+      lineRange: r.sourceLineRange,
+      contentHash: '',
+      provenanceStatus: 'provenance-missing',
+      provenanceError: `跨项目读取已禁止：规则所属项目 [${r.projectId}] 与当前装配项目 [${projectId}] 不匹配`,
+    }
+  }
+
+  let fragRow: {
+    id: string
+    snapshot_id: string
+    source_id: string
+    project_id: string
+    fragment_hash: string
+    heading_path: string
+  } | undefined
+
   const fragId = r.sourceSnapshotFragmentId || r.sourceFragmentId
   const snapId = r.sourceSnapshotId
   const srcId = r.sourceId
 
-  // 1. 若有明确 fragId，查询必须限制 project_id，并严格校验 snapshot_id 与 source_id 一致
+  // 2. 来源回查：若规则具备快照片段 ID，SQL 查询必须同时严格校验 project_id, source_id, snapshot_id, fragment_id 四要素
   if (db && fragId) {
-    const candidate = db.prepare(`
-      SELECT id, snapshot_id, source_id, fragment_hash, heading_path
-      FROM workspace_source_snapshot_fragments
-      WHERE id = ? AND project_id = ?
-    `).get(fragId, projectId) as typeof fragRow
+    if (snapId && srcId) {
+      fragRow = db.prepare(`
+        SELECT id, snapshot_id, source_id, project_id, fragment_hash, heading_path
+        FROM workspace_source_snapshot_fragments
+        WHERE id = ? AND snapshot_id = ? AND source_id = ? AND project_id = ?
+      `).get(fragId, snapId, srcId, projectId) as typeof fragRow
+    } else {
+      // 容错：若 snapId 或 srcId 缺失，仍必须限制 project_id 与 id，并进一步校验一致性
+      const candidate = db.prepare(`
+        SELECT id, snapshot_id, source_id, project_id, fragment_hash, heading_path
+        FROM workspace_source_snapshot_fragments
+        WHERE id = ? AND project_id = ?
+      `).get(fragId, projectId) as typeof fragRow
 
-    if (candidate) {
-      const snapMatches = !snapId || candidate.snapshot_id === snapId
-      const srcMatches = !srcId || candidate.source_id === srcId
-      if (snapMatches && srcMatches) {
-        fragRow = candidate
+      if (candidate) {
+        const snapMatches = !snapId || candidate.snapshot_id === snapId
+        const srcMatches = !srcId || candidate.source_id === srcId
+        if (snapMatches && srcMatches) {
+          fragRow = candidate
+        }
+      }
+    }
+
+    // 关键收口：若指定了 fragId 但 4 要素校验未通过，绝不允许回退猜测或兜底，必须失败关闭
+    if (!fragRow) {
+      return {
+        projectId,
+        sourceId: srcId || null,
+        approvedSnapshotId: snapId || null,
+        snapshotId: snapId || null,
+        sourceSnapshotFragmentId: undefined,
+        fragmentId: undefined,
+        relativePath: r.sourceFile || 'setting_rules',
+        filePath: r.sourceFile || 'setting_rules',
+        headingPath: r.sourceHeadingPath || r.title,
+        titlePath: r.sourceHeadingPath || r.title,
+        lineRange: r.sourceLineRange,
+        contentHash: '',
+        provenanceStatus: 'provenance-missing',
+        provenanceError: `规则来源与快照片段不一致：在项目 [${projectId}] 中未找到同时满足 fragment_id=[${fragId}], snapshot_id=[${snapId}], source_id=[${srcId}] 的快照片段凭据（已失败关闭）`,
       }
     }
   }
 
-  // 2. 若未通过 fragId 精准匹配，但具备快照 ID 与标题路径，在同一 project_id 下严格按标题路径反查
-  if (db && !fragRow && snapId && r.sourceHeadingPath) {
+  // 3. 自愈容错路径：仅当未提供 fragId 时，若具备快照 ID、来源 ID 与标题路径，在同一 project_id 下严格按标题路径反查片段 ID
+  if (db && !fragRow && !fragId && snapId && srcId && r.sourceHeadingPath) {
     const candidate = db.prepare(`
-      SELECT id, snapshot_id, source_id, fragment_hash, heading_path
+      SELECT id, snapshot_id, source_id, project_id, fragment_hash, heading_path
       FROM workspace_source_snapshot_fragments
-      WHERE snapshot_id = ? AND project_id = ? AND heading_path = ? ${srcId ? 'AND source_id = ?' : ''}
+      WHERE snapshot_id = ? AND source_id = ? AND project_id = ? AND heading_path = ?
       LIMIT 1
-    `).get(...(srcId ? [snapId, projectId, r.sourceHeadingPath, srcId] : [snapId, projectId, r.sourceHeadingPath])) as typeof fragRow
+    `).get(snapId, srcId, projectId, r.sourceHeadingPath) as typeof fragRow
 
     if (candidate) {
       fragRow = candidate
     }
   }
 
-  // 3. 严格禁止静默回退到“该快照的第一个片段”！若未找到精确来源，返回明确的 provenance-missing 状态
+  // 4. 严格禁止静默回退到“该快照的第一个片段”！若未找到精确来源，返回明确的 provenance-missing 状态与失败关闭错误
   const isFound = Boolean(fragRow)
   const isCandidateOrigin = r.originType !== 'scan'
   const provenanceStatus: 'found' | 'provenance-missing' = (isFound || isCandidateOrigin) ? 'found' : 'provenance-missing'
@@ -109,7 +167,10 @@ function resolveRuleSourceRef(
   const resolvedFragId = fragRow?.id || (isFound ? (r.sourceSnapshotFragmentId || r.sourceFragmentId) : undefined)
   const resolvedSnapId = fragRow?.snapshot_id || snapId || null
   const resolvedSourceId = fragRow?.source_id || srcId || null
-  const resolvedHash = fragRow?.fragment_hash || hashString(r.content)
+  const resolvedHash = fragRow?.fragment_hash || (isFound ? hashString(r.content) : '')
+  const provenanceError = provenanceStatus === 'provenance-missing'
+    ? `规则来源快照片段未找到或凭据缺失（project: ${projectId}, rule: ${r.ruleId}）`
+    : undefined
 
   return {
     projectId,
@@ -125,6 +186,7 @@ function resolveRuleSourceRef(
     lineRange: r.sourceLineRange,
     contentHash: resolvedHash,
     provenanceStatus,
+    provenanceError,
   }
 }
 
@@ -250,20 +312,56 @@ export class ChapterContextAssembler {
     }
 
     const applicableRules = allConfirmedRules.filter(r => ruleMatchesChapter(r.scope))
-    if (applicableRules.length > 0) {
-      const ruleTexts = applicableRules.map(
+    const validConfirmedRules: SettingRule[] = []
+    const verifiedConfirmedSources: ChapterContextSourceRef[] = []
+
+    for (const r of applicableRules) {
+      // 1. 禁止跨项目规则侵入
+      if (r.projectId && r.projectId !== projectId) {
+        omissions.push({
+          stage: 2,
+          stageName: '已确认设定规则',
+          title: r.title,
+          reason: 'provenance-mismatch',
+          sourceInfo: `跨项目规则拒绝：规则所属项目 [${r.projectId}] 与当前装配项目 [${projectId}] 不符（已失败关闭）`,
+        })
+        staleWarnings.push(`规则【${r.title}】归属跨项目 [${r.projectId}]，已执行安全拦截`)
+        continue
+      }
+
+      const sourceRef = resolveRuleSourceRef(db, r, projectId)
+      // 2. 规则来源与快照片段不一致时必须失败关闭：严禁注入正文上下文
+      if (
+        sourceRef.provenanceStatus === 'provenance-missing' &&
+        (r.originType === 'scan' || r.sourceSnapshotFragmentId || r.sourceSnapshotId || r.sourceId)
+      ) {
+        omissions.push({
+          stage: 2,
+          stageName: '已确认设定规则',
+          title: r.title,
+          reason: 'provenance-mismatch',
+          sourceInfo: sourceRef.provenanceError || `${r.sourceFile || 'setting_rules'} (规则来源与快照片段不一致，已失败关闭)`,
+        })
+        staleWarnings.push(`规则【${r.title}】来源凭据不一致或已失效，已执行失败关闭拦截`)
+      } else {
+        validConfirmedRules.push(r)
+        verifiedConfirmedSources.push(sourceRef)
+      }
+    }
+
+    if (validConfirmedRules.length > 0) {
+      const ruleTexts = validConfirmedRules.map(
         r => `### 【${r.constraintType === 'hard' ? '硬约束' : '软约束'}】${r.title}\n${r.content}（来源：${r.sourceFile || '已确认设定'}）`
       ).join('\n\n')
-      const sources: ChapterContextSourceRef[] = applicableRules.map(r => resolveRuleSourceRef(db, r, projectId))
       tryAddBlock({
         id: 'stage-2-confirmed-rules',
         stage: 2,
         stageName: '已确认设定规则',
-        title: `已确认世界规则与硬约束 (${applicableRules.length} 条)`,
+        title: `已确认世界规则与硬约束 (${validConfirmedRules.length} 条)`,
         content: `【已确认设定规则与硬约束】\n${ruleTexts}`,
         sourceType: 'database',
         sourceFile: 'setting_rules',
-        sources,
+        sources: verifiedConfirmedSources,
         authorityStatus: 'confirmed',
         isCandidate: false,
         isStale: false,
@@ -276,20 +374,51 @@ export class ChapterContextAssembler {
       ? WorkspaceHubRepository.listRules(projectId, 'candidate').filter(r => ruleMatchesChapter(r.scope))
       : []
 
-    if (candidateRules.length > 0) {
-      const candidateTexts = candidateRules.map(
+    const validCandidateRules: SettingRule[] = []
+    const verifiedCandidateSources: ChapterContextSourceRef[] = []
+
+    for (const r of candidateRules) {
+      if (r.projectId && r.projectId !== projectId) {
+        omissions.push({
+          stage: 2,
+          stageName: '候选设定参考',
+          title: r.title,
+          reason: 'provenance-mismatch',
+          sourceInfo: `跨项目候选规则拒绝：所属项目 [${r.projectId}] 与当前装配项目 [${projectId}] 不符（已失败关闭）`,
+        })
+        continue
+      }
+      const sourceRef = resolveRuleSourceRef(db, r, projectId)
+      if (
+        sourceRef.provenanceStatus === 'provenance-missing' &&
+        (r.originType === 'scan' || r.sourceSnapshotFragmentId || r.sourceSnapshotId || r.sourceId)
+      ) {
+        omissions.push({
+          stage: 2,
+          stageName: '候选设定参考',
+          title: r.title,
+          reason: 'provenance-mismatch',
+          sourceInfo: sourceRef.provenanceError || '候选规则来源快照片段校验失败（已失败关闭）',
+        })
+      } else {
+        validCandidateRules.push(r)
+        verifiedCandidateSources.push(sourceRef)
+      }
+    }
+
+    if (validCandidateRules.length > 0) {
+      const candidateTexts = validCandidateRules.map(
         r => `### 【待确认/候选】${r.title}\n${r.content}（警示：未经作者确认，不得作为硬约束）`
       ).join('\n\n')
-      const sources: ChapterContextSourceRef[] = candidateRules.map(r => resolveRuleSourceRef(db, r, projectId))
       tryAddBlock({
         id: 'stage-2-candidate-rules',
         stage: 2,
         stageName: '候选设定参考',
-        title: `候选世界设定 [待确认/候选] (${candidateRules.length} 条)`,
+        title: `候选世界设定 [待确认/候选] (${validCandidateRules.length} 条)`,
         content: `【候选世界设定（待确认/软参考）】\n${candidateTexts}`,
         sourceType: 'database',
         sourceFile: 'setting_rules',
-        sources,
+        sources: verifiedCandidateSources,
         authorityStatus: 'candidate',
         isCandidate: true,
         isStale: false,
@@ -705,7 +834,8 @@ export class ChapterContextAssembler {
     // =========================================================================
     if (excludedDeprecatedCount > 0) {
       const isCompact = remainingBudget < 300 || budgetLimit < 800
-      const ruleSummaries = deprecatedRules.slice(0, 20).map(r =>
+      const projectDeprecatedRules = deprecatedRules.filter(r => !r.projectId || r.projectId === projectId)
+      const ruleSummaries = projectDeprecatedRules.slice(0, 20).map(r =>
         isCompact
           ? `- 废止设定：【${r.title}】（禁止采用）`
           : `- 废止设定条目：【${r.title}】（约束类型：${r.constraintType === 'hard' ? '硬约束' : '软约束'}，作用域：${r.scope}，禁止采用）`
@@ -725,7 +855,7 @@ export class ChapterContextAssembler {
       ].join('\n')
 
       const sources: ChapterContextSourceRef[] = [
-        ...deprecatedRules.map(r => resolveRuleSourceRef(db, r, projectId)),
+        ...projectDeprecatedRules.map(r => resolveRuleSourceRef(db, r, projectId)),
         ...deprecatedFragments.map(f => formatFragmentSourceRef(f, projectId)),
       ]
 

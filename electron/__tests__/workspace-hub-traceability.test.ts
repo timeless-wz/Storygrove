@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -10,8 +10,29 @@ import {
 import { WorkspaceHubRepository } from '../repositories/workspace-hub-repository'
 import { WorkspaceScannerService } from '../services/workspace-scanner-service'
 import { ChapterContextAssembler } from '../services/chapter-context-assembler'
+import { registerWorkspaceHubController } from '../controllers/workspace-hub-controller'
+import { projectAccess } from '../services/project-access'
+import type { ChapterContextBundle } from '../../src/shared/workspace-hub'
+
+type IpcHandler = (...args: unknown[]) => Promise<unknown>
+const ipcHandlers = new Map<string, IpcHandler>()
+
+vi.mock('electron', () => ({
+  dialog: {
+    showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] })),
+  },
+  ipcMain: {
+    handle: vi.fn((channel: string, handler: IpcHandler) => {
+      ipcHandlers.set(channel, handler)
+    }),
+  },
+}))
 
 describe('Workspace Hub - End-to-End Traceability & Snapshot Context Isolation', () => {
+  beforeAll(() => {
+    registerWorkspaceHubController()
+  })
+
   const testRoots: string[] = []
 
   function createDir(prefix: string): string {
@@ -643,6 +664,230 @@ describe('Workspace Hub - End-to-End Traceability & Snapshot Context Isolation',
     expect(reverseDetail.provenanceStatus).toBe('found')
     expect(reverseDetail.fragments.find(f => f.fragmentId === targetSourceRef.sourceSnapshotFragmentId)!.content)
       .toContain('V1已批准原稿')
+  })
+
+  it('enforces strict cross-project isolation, 4-way SQL validation, and fail-closed defense via Controller/IPC project session', async () => {
+    // 1. 真实准备双项目目录与外部资料：项目 A 与项目 B 各有同名规则
+    const projDirA = fs.realpathSync.native(createDir('proj-isolate-A-'))
+    const extDirA = fs.realpathSync.native(createDir('ext-isolate-A-'))
+    const projDirB = fs.realpathSync.native(createDir('proj-isolate-B-'))
+    const extDirB = fs.realpathSync.native(createDir('ext-isolate-B-'))
+
+    // 建立项目清单
+    fs.mkdirSync(path.join(projDirA, '.vela'), { recursive: true })
+    fs.writeFileSync(
+      path.join(projDirA, '.vela', 'project.json'),
+      JSON.stringify({ schemaVersion: 1, kind: 'ai-novel-project', projectId: 'project-A', createdAt: new Date().toISOString() }),
+    )
+    fs.mkdirSync(path.join(projDirB, '.vela'), { recursive: true })
+    fs.writeFileSync(
+      path.join(projDirB, '.vela', 'project.json'),
+      JSON.stringify({ schemaVersion: 1, kind: 'ai-novel-project', projectId: 'project-B', createdAt: new Date().toISOString() }),
+    )
+
+    // 项目 A 与项目 B 同名规则文件
+    const docRulesA = path.join(extDirA, '01_已确认设定清单.md')
+    const docRulesB = path.join(extDirB, '01_已确认设定清单.md')
+
+    fs.writeFileSync(
+      docRulesA,
+      '# 灵力系统\n## 同名核心法则\n【项目A专属核心法则】天地灵气不可逆律，灵力消耗只能转化为不可回收的辐射热（绝密A）。\n',
+      'utf8',
+    )
+    fs.writeFileSync(
+      docRulesB,
+      '# 灵力系统\n## 同名核心法则\n【项目B专属核心法则】法宝禁止双向转化律，灵气与气血禁止以任何形式转化（绝密B）。\n',
+      'utf8',
+    )
+
+    // 2. 初始化并扫描项目 B
+    initProjectDatabase(projDirB)
+    const leaseB = projectAccess.beginSession({ kind: 'manifest', projectId: 'project-B', rootPath: projDirB })
+    const sessionB = { projectId: 'project-B', leaseId: leaseB.leaseId, projectPath: projDirB }
+
+    const scanB = await WorkspaceScannerService.scanDirectory(extDirB, 'project-B')
+    expect(scanB.success).toBe(true)
+    WorkspaceHubRepository.approveAllSources('project-B')
+
+    const rulesB = WorkspaceHubRepository.listRules('project-B')
+    const ruleB = rulesB.find(r => r.title === '同名核心法则')!
+    expect(ruleB).toBeDefined()
+    expect(ruleB.content).toContain('绝密B')
+    const fragIdB = ruleB.sourceSnapshotFragmentId!
+    const snapIdB = ruleB.sourceSnapshotId!
+    const srcIdB = ruleB.sourceId!
+    expect(fragIdB).toBeTruthy()
+    expect(snapIdB).toBeTruthy()
+    expect(srcIdB).toBeTruthy()
+
+    // 通过 Controller/IPC 装配项目 B
+    const assembleHandler = ipcHandlers.get('workspace:assemble-chapter-context')!
+    const detailHandler = ipcHandlers.get('workspace:get-source-detail')!
+
+    const bundleB = await assembleHandler(
+      { sender: {} },
+      1,
+      undefined,
+      false,
+      sessionB,
+    ) as ChapterContextBundle
+
+    expect(bundleB.fullAssembledText).toContain('绝密B')
+    expect(bundleB.fullAssembledText).not.toContain('绝密A')
+
+    // 3. 切换到项目 A 并扫描
+    closeProjectDatabase()
+    initProjectDatabase(projDirA)
+    const leaseA = projectAccess.beginSession({ kind: 'manifest', projectId: 'project-A', rootPath: projDirA })
+    const sessionA = { projectId: 'project-A', leaseId: leaseA.leaseId, projectPath: projDirA }
+
+    const scanA = await WorkspaceScannerService.scanDirectory(extDirA, 'project-A')
+    expect(scanA.success).toBe(true)
+    WorkspaceHubRepository.approveAllSources('project-A')
+
+    const rulesA = WorkspaceHubRepository.listRules('project-A')
+    const ruleA = rulesA.find(r => r.title === '同名核心法则')!
+    expect(ruleA).toBeDefined()
+    expect(ruleA.content).toContain('绝密A')
+    const fragIdA = ruleA.sourceSnapshotFragmentId!
+    const snapIdA = ruleA.sourceSnapshotId!
+    const srcIdA = ruleA.sourceId!
+    expect(fragIdA).toBeTruthy()
+    expect(snapIdA).toBeTruthy()
+    expect(srcIdA).toBeTruthy()
+
+    // 通过 Controller/IPC 正常装配项目 A：验证只读取项目 A 内容
+    const bundleA1 = await assembleHandler(
+      { sender: {} },
+      1,
+      undefined,
+      false,
+      sessionA,
+    ) as ChapterContextBundle
+
+    expect(bundleA1.fullAssembledText).toContain('绝密A')
+    expect(bundleA1.fullAssembledText).not.toContain('绝密B')
+    expect(bundleA1.omissions.length).toBe(0)
+
+    const dbA = getProjectDb()!
+
+    // 4. 交叉污染测试场景 1：片段 ID 被错误交叉使用（项目 A 规则被篡改为使用项目 B 的 fragmentId）
+    dbA.prepare(`
+      UPDATE setting_rules
+      SET source_snapshot_fragment_id = ?, source_fragment_id = NULL
+      WHERE rule_id = ? AND project_id = 'project-A'
+    `).run(fragIdB, ruleA.ruleId)
+
+    // 装配项目 A：严格禁止跨项目读取，来源与快照片段不一致时必须失败关闭，装配结果绝不得读取项目 B 内容
+    const bundleA2 = await assembleHandler(
+      { sender: {} },
+      1,
+      undefined,
+      false,
+      sessionA,
+    ) as ChapterContextBundle
+
+    expect(bundleA2.fullAssembledText).not.toContain('绝密B')
+    expect(bundleA2.fullAssembledText).not.toContain('法宝禁止双向转化律')
+    // 失败关闭：该规则必须从正文上下文排除，并进入 omissions
+    expect(bundleA2.omissions.some(o => o.title === '同名核心法则' && o.reason === 'provenance-mismatch')).toBe(true)
+    expect(bundleA2.staleWarnings.some(w => w.includes('同名核心法则'))).toBe(true)
+
+    // 5. 交叉污染测试场景 2：快照 ID 被错误交叉使用（项目 A 规则被篡改为使用项目 B 的 snapshotId）
+    dbA.prepare(`
+      UPDATE setting_rules
+      SET source_snapshot_fragment_id = ?, source_fragment_id = NULL, source_snapshot_id = ?
+      WHERE rule_id = ? AND project_id = 'project-A'
+    `).run(fragIdA, snapIdB, ruleA.ruleId)
+
+    const bundleA3 = await assembleHandler(
+      { sender: {} },
+      1,
+      undefined,
+      false,
+      sessionA,
+    ) as ChapterContextBundle
+
+    expect(bundleA3.fullAssembledText).not.toContain('绝密B')
+    expect(bundleA3.omissions.some(o => o.title === '同名核心法则' && o.reason === 'provenance-mismatch')).toBe(true)
+
+    // 6. 交叉污染测试场景 3：规则 ID / 规则内容被错误跨项目交叉写入
+    dbA.prepare(`
+      INSERT INTO setting_rules (
+        rule_id, project_id, title, content, status, constraint_type, scope,
+        source_fragment_id, source_snapshot_fragment_id, source_file, source_heading_path, source_line_range,
+        origin_type, source_id, source_snapshot_id
+      ) VALUES (
+        ?, 'project-B', '同名核心法则', '【项目B绝密侵入正文】跨项目规则内容', 'confirmed', 'hard', 'global',
+        NULL, ?, '01_已确认设定清单.md', '灵力系统 > 同名核心法则', '1-5',
+        'scan', ?, ?
+      )
+    `).run(ruleB.ruleId, fragIdB, srcIdB, snapIdB)
+
+    const bundleA4 = await assembleHandler(
+      { sender: {} },
+      1,
+      undefined,
+      false,
+      sessionA,
+    ) as ChapterContextBundle
+
+    expect(bundleA4.fullAssembledText).not.toContain('【项目B绝密侵入正文】')
+    expect(bundleA4.fullAssembledText).not.toContain('绝密B')
+
+    // 7. 资料详情反查接口通过 Controller/IPC 校验
+    // 7.1 项目 A 来源 + 项目 A 快照 + 项目 B 片段 ID 交叉：返回明确的 provenance-missing 状态，不静默回退
+    const detailCrossFragment = await detailHandler(
+      { sender: {} },
+      srcIdA,
+      snapIdA,
+      fragIdB,
+      sessionA,
+    ) as { provenanceStatus: string; targetSnapshotId: string; fragments: Array<{ fragmentId: string }> }
+
+    expect(detailCrossFragment.provenanceStatus).toBe('provenance-missing')
+    expect(detailCrossFragment.targetSnapshotId).toBe(snapIdA)
+
+    // 7.2 显式跨项目来源 ID 查询：在项目 A 会话下查询不存在或属于其他项目的来源 ID，必须返回 null，严格禁止跨项目读取
+    const detailCrossProject = await detailHandler(
+      { sender: {} },
+      'src-project-b-isolated-unique',
+      snapIdB,
+      fragIdB,
+      sessionA,
+    ) as { source: unknown; fragments: unknown[]; provenanceStatus: string }
+
+    expect(detailCrossProject.source).toBeNull()
+    expect(detailCrossProject.fragments.length).toBe(0)
+    expect(detailCrossProject.provenanceStatus).toBe('provenance-missing')
+
+    // 7.3 同名来源但交叉使用项目 B 的快照与片段 ID：快照隔离生效，在项目 A 中找不到该快照片段，标记 provenance-missing
+    const detailCrossSnapshot = await detailHandler(
+      { sender: {} },
+      srcIdA,
+      snapIdB,
+      fragIdB,
+      sessionA,
+    ) as { source: unknown; fragments: unknown[]; provenanceStatus: string }
+
+    expect(detailCrossSnapshot.source).toBeDefined()
+    expect(detailCrossSnapshot.fragments.length).toBe(0)
+    expect(detailCrossSnapshot.provenanceStatus).toBe('provenance-missing')
+
+    // 7.4 正确的项目 A 来源回查：正常返回 found 且匹配项目 A 正文
+    const detailNormalA = await detailHandler(
+      { sender: {} },
+      srcIdA,
+      snapIdA,
+      fragIdA,
+      sessionA,
+    ) as { provenanceStatus: string; targetSnapshotId: string; fragments: Array<{ fragmentId: string; content: string }> }
+
+    expect(detailNormalA.provenanceStatus).toBe('found')
+    expect(detailNormalA.targetSnapshotId).toBe(snapIdA)
+    const fragAInDetail = detailNormalA.fragments.find(f => f.fragmentId === fragIdA)!
+    expect(fragAInDetail).toBeDefined()
+    expect(fragAInDetail.content).toContain('绝密A')
   })
 })
 
