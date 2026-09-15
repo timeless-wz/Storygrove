@@ -22,13 +22,18 @@ afterEach(() => {
   }
 })
 
+function initProject(projectRoot: string): void {
+  initProjectDatabase(projectRoot)
+  getProjectDb()!.prepare("INSERT OR IGNORE INTO project_core (id, project_name) VALUES ('main', 'E2E Test Novel')").run()
+}
+
 describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
   it('scans external workspace in strictly read-only mode without mutating files', async () => {
     const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-novel-proj-'))
     const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-novel-external-'))
     roots.push(projectRoot, externalRoot)
 
-    initProjectDatabase(projectRoot)
+    initProject(projectRoot)
 
     const file1Path = path.join(externalRoot, '01_已确认设定清单.md')
     const file1Content = '# 力量体系\n\n超凡序列共有九阶。\n\n## 第一阶：信使\n掌握基础传信与感知。'
@@ -75,7 +80,7 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
     expect(categories).toContain('deprecated')
 
     // Verify Candidate Extraction: Lin Xun and Gu Chen extracted as candidates
-    const candidates = WorkspaceHubRepository.listCandidates({ candidateType: 'character' })
+    const candidates = WorkspaceHubRepository.listCandidates({ projectId: 'main', candidateType: 'character' })
     expect(candidates.length).toBe(2)
     const names = candidates.map(c => JSON.parse(c.suggestedData).name)
     expect(names).toContain('林巡')
@@ -90,7 +95,7 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
     const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-novel-external-'))
     roots.push(projectRoot, externalRoot)
 
-    initProjectDatabase(projectRoot)
+    initProject(projectRoot)
     getProjectDb()!.prepare("INSERT OR IGNORE INTO project_core (id) VALUES ('main')").run()
 
     const charDoc = path.join(externalRoot, '05_人物与关系.md')
@@ -99,7 +104,7 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
     WorkspaceHubRepository.bindWorkspaceDirectory(externalRoot)
     await WorkspaceScannerService.scanDirectory(externalRoot)
 
-    const candidates = WorkspaceHubRepository.listCandidates({ candidateType: 'character' })
+    const candidates = WorkspaceHubRepository.listCandidates({ projectId: 'main', candidateType: 'character' })
     expect(candidates.length).toBe(1)
     const candidate = candidates[0]
     expect(candidate.suggestedData).toContain('陆言明')
@@ -109,11 +114,11 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
     expect(rosterBefore.entries.length).toBe(0)
 
     // Author approves candidate
-    const approveResult = WorkspaceHubRepository.approveCandidate(candidate.candidateId)
+    const approveResult = WorkspaceHubRepository.approveCandidate(candidate.candidateId, 'main')
     if (!approveResult.success) console.error('approveCandidate error:', approveResult.error)
     expect(approveResult.success).toBe(true)
 
-    const candidatesAfter = WorkspaceHubRepository.listCandidates({ candidateType: 'character' })
+    const candidatesAfter = WorkspaceHubRepository.listCandidates({ projectId: 'main', candidateType: 'character' })
     expect(candidatesAfter[0].status).toBe('approved')
 
     const rosterAfter = CharacterRosterRepository.read()
@@ -132,7 +137,7 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
   it('manages confirmed, candidate, background, and deprecated rules correctly in SQLite', () => {
     const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-novel-proj-'))
     roots.push(projectRoot)
-    initProjectDatabase(projectRoot)
+    initProject(projectRoot)
 
     WorkspaceHubRepository.upsertRule({
       ruleId: 'rule-confirmed-1',
@@ -194,7 +199,7 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
     const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-novel-external-'))
     roots.push(projectRoot, externalRoot)
 
-    initProjectDatabase(projectRoot)
+    initProject(projectRoot)
     getProjectDb()!.prepare("INSERT OR IGNORE INTO project_core (id) VALUES ('main')").run()
 
     fs.writeFileSync(path.join(externalRoot, '00_创作方向.md'), '# 创作方向\n硬核克苏鲁探险\n', 'utf8')
@@ -260,7 +265,7 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
     const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-versioned-project-'))
     const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-versioned-source-'))
     roots.push(projectRoot, externalRoot)
-    initProjectDatabase(projectRoot)
+    initProject(projectRoot)
     getProjectDb()!.prepare("INSERT OR IGNORE INTO project_core (id) VALUES ('main')").run()
 
     WorkspaceHubRepository.upsertRule({
@@ -353,7 +358,7 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
     const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-no-fallback-project-'))
     const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-no-fallback-source-'))
     roots.push(projectRoot, externalRoot)
-    initProjectDatabase(projectRoot)
+    initProject(projectRoot)
     const sourcePath = path.join(externalRoot, '00_创作方向.md')
     fs.writeFileSync(sourcePath, '# 原则\n批准快照正文', 'utf8')
     await WorkspaceScannerService.scanDirectory(externalRoot)
@@ -377,7 +382,7 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
     const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-cancel-project-'))
     const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-cancel-source-'))
     roots.push(projectRoot, externalRoot)
-    initProjectDatabase(projectRoot)
+    initProject(projectRoot)
     const sourcePath = path.join(externalRoot, '00_创作方向.md')
     fs.writeFileSync(sourcePath, '# 原则\nV1 健康快照', 'utf8')
     await WorkspaceScannerService.scanDirectory(externalRoot)
@@ -404,7 +409,7 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
   it('audits a one-time legacy migration and migrates only explicitly imported sources', () => {
     const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-legacy-migration-'))
     roots.push(projectRoot)
-    initProjectDatabase(projectRoot)
+    initProject(projectRoot)
     const db = getProjectDb()!
     db.prepare(`
       INSERT INTO workspace_sources (
@@ -428,7 +433,7 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
     insertLegacy.run('legacy-unapproved-fragment', 'legacy-unapproved-source', '未经批准的旧正文', 'frag-unapproved')
     db.prepare("DELETE FROM workspace_hub_migration_audit WHERE migration_id = 'workspace-hub-approved-snapshots-v1'").run()
     closeProjectDatabase()
-    initProjectDatabase(projectRoot)
+    initProject(projectRoot)
 
     const migrated = WorkspaceHubRepository.queryFragments({ categories: ['creation_principles'] })
     expect(migrated.map(fragment => fragment.content)).toEqual(['明确批准的旧正文'])
@@ -445,7 +450,7 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
     const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-novel-external-'))
     roots.push(projectRoot, externalRoot)
 
-    initProjectDatabase(projectRoot)
+    initProject(projectRoot)
 
     const fileA = path.join(externalRoot, '01_已确认设定清单.md')
     const fileB = path.join(externalRoot, '02_剧情总纲.md')

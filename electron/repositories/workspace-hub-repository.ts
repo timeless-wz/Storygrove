@@ -101,6 +101,22 @@ function promoteSnapshotRules(
     ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?,
               CASE WHEN ? = 'confirmed' THEN datetime('now') ELSE NULL END,
               'source-approval', 'scan', ?, ?, datetime('now'))
+    ON CONFLICT(project_id, rule_id) DO UPDATE SET
+      title = excluded.title,
+      content = excluded.content,
+      status = excluded.status,
+      constraint_type = excluded.constraint_type,
+      scope = excluded.scope,
+      source_snapshot_fragment_id = excluded.source_snapshot_fragment_id,
+      source_file = excluded.source_file,
+      source_heading_path = excluded.source_heading_path,
+      source_line_range = excluded.source_line_range,
+      confirmed_at = excluded.confirmed_at,
+      confirmed_by = excluded.confirmed_by,
+      origin_type = 'scan',
+      source_id = excluded.source_id,
+      source_snapshot_id = excluded.source_snapshot_id,
+      updated_at = datetime('now')
   `)
 
   for (const rule of stagedRules) {
@@ -146,65 +162,109 @@ function approveObservedSnapshot(db: BetterSqlite3.Database, source: ApprovableS
   if (!snapshotId) throw new Error('来源没有可批准的观察快照')
 
   const snapshot = db.prepare(`
-    SELECT snapshot_id, content_hash, fragment_count, file_size
+    SELECT snapshot_id, source_id, project_id, content_hash, fragment_count, file_size
     FROM workspace_source_snapshots
-    WHERE snapshot_id = ? AND source_id = ? AND project_id = ?
-  `).get(snapshotId, source.id, source.project_id) as {
+    WHERE snapshot_id = ?
+  `).get(snapshotId) as {
     snapshot_id: string
+    source_id: string
+    project_id: string
     content_hash: string
     fragment_count: number
     file_size: number
   } | undefined
   if (!snapshot) throw new Error('无法确认观察快照完整性，已拒绝批准')
 
-  // 1. 验证实际片段数与 fragment_count 一致
-  const actualFragmentCount = (db.prepare(`
-    SELECT COUNT(*) AS count
-    FROM workspace_source_snapshot_fragments
-    WHERE snapshot_id = ? AND source_id = ? AND project_id = ?
-  `).get(snapshotId, source.id, source.project_id) as { count: number }).count
-
-  if (actualFragmentCount !== snapshot.fragment_count) {
-    throw new Error(`快照片段数不一致（记录: ${snapshot.fragment_count}, 实际: ${actualFragmentCount}），已拒绝批准`)
+  // 验证快照与来源、项目的关联一致性
+  if (snapshot.source_id !== source.id || snapshot.project_id !== source.project_id) {
+    throw new Error(`快照关联不一致（快照来源: ${snapshot.source_id}, 来源: ${source.id}; 快照项目: ${snapshot.project_id}, 来源项目: ${source.project_id}），已拒绝批准`)
   }
 
-  // 2. metadata_only 快照合法片段数必须为 0
+  // 验证观察哈希、快照 content_hash 和待批准来源关系一致
+  const expectedContentHash = source.observed_file_hash || source.content_hash
+  if (snapshot.content_hash !== expectedContentHash) {
+    throw new Error(`快照 content_hash 与来源观察哈希不一致（快照: ${snapshot.content_hash}, 来源: ${expectedContentHash}），已拒绝批准`)
+  }
+
+  // 查询该快照下的所有片段
+  const fragments = db.prepare(`
+    SELECT id, snapshot_id, source_id, project_id, content, fragment_hash
+    FROM workspace_source_snapshot_fragments
+    WHERE snapshot_id = ?
+  `).all(snapshotId) as Array<{
+    id: string
+    snapshot_id: string
+    source_id: string
+    project_id: string
+    content: string
+    fragment_hash: string
+  }>
+
+  // 1. 验证实际片段数与 fragment_count 一致
+  if (fragments.length !== snapshot.fragment_count) {
+    throw new Error(`快照片段数不一致（记录: ${snapshot.fragment_count}, 实际: ${fragments.length}），已拒绝批准`)
+  }
+
+  // 2. 验证每个片段的关联与哈希完整性（防篡改）
+  for (const f of fragments) {
+    if (f.source_id !== source.id || f.project_id !== source.project_id) {
+      throw new Error(`快照片段 ${f.id} 关联的项目或来源与待批准来源不一致，已拒绝批准`)
+    }
+    const computedHash = hashString(f.content)
+    if (computedHash !== f.fragment_hash) {
+      throw new Error(`快照片段 ${f.id} 内容哈希校验失败（内容已被篡改），已拒绝批准`)
+    }
+  }
+
+  // 3. metadata_only 快照合法片段数必须为 0
   const sourceCategory = (db.prepare(`
     SELECT category, parse_status FROM workspace_sources WHERE id = ? AND project_id = ?
   `).get(source.id, source.project_id) as { category?: string; parse_status?: string } | undefined)
 
   if (sourceCategory?.category === 'reference_novel' || sourceCategory?.parse_status === 'metadata_only') {
-    if (actualFragmentCount !== 0) {
+    if (fragments.length !== 0) {
       throw new Error('元数据快照包含非零片段，已拒绝批准')
     }
   }
 
-  // 3. 验证所有暂存规则引用的片段属于同一快照
+  // 4. 验证所有暂存规则关联一致性及引用的片段真实存在且属于同项目、同来源、同快照
   const stagedRules = db.prepare(`
-    SELECT id, source_fragment_id
+    SELECT id, snapshot_id, source_id, project_id, source_fragment_id
     FROM workspace_source_snapshot_rules
     WHERE snapshot_id = ?
-  `).all(snapshotId) as Array<{ id: string; source_fragment_id?: string | null }>
+  `).all(snapshotId) as Array<{
+    id: string
+    snapshot_id: string
+    source_id: string
+    project_id: string
+    source_fragment_id?: string | null
+  }>
 
   for (const r of stagedRules) {
+    if (r.source_id !== source.id || r.project_id !== source.project_id) {
+      throw new Error(`暂存规则 ${r.id} 关联的项目或来源与待批准来源不一致，已拒绝批准`)
+    }
     if (r.source_fragment_id) {
       const fragmentMatches = db.prepare(`
         SELECT 1 FROM workspace_source_snapshot_fragments
-        WHERE id = ? AND snapshot_id = ?
-      `).get(r.source_fragment_id, snapshotId)
+        WHERE id = ? AND snapshot_id = ? AND source_id = ? AND project_id = ?
+      `).get(r.source_fragment_id, snapshotId, source.id, source.project_id)
       if (!fragmentMatches) {
-        throw new Error(`暂存规则 ${r.id} 引用的片段 ${r.source_fragment_id} 不属于当前快照`)
+        throw new Error(`暂存规则 ${r.id} 引用的片段 ${r.source_fragment_id} 不属于当前快照或来源不一致`)
       }
     }
   }
 
   promoteSnapshotRules(db, source, snapshotId)
-  db.prepare(`
+  const updateRes = db.prepare(`
     UPDATE workspace_sources
     SET approved_snapshot_id = ?, approved_content_hash = ?, import_status = 'imported',
         updated_at = datetime('now')
     WHERE id = ? AND project_id = ?
   `).run(snapshotId, source.observed_file_hash || snapshot.content_hash || source.content_hash, source.id, source.project_id)
+  if (updateRes.changes !== 1) {
+    throw new Error('更新来源批准快照状态失败：受影响行数不为 1')
+  }
 }
 
 function freezeCharacterApprovalRequest(
@@ -323,22 +383,22 @@ export class WorkspaceHubRepository {
   static bindWorkspaceDirectory(externalPath: string, _projectId = 'main'): void {
     void _projectId
     const db = requiredDb()
-    db.prepare('INSERT OR IGNORE INTO project_core (id) VALUES (?)').run(PROJECT_CORE_ROW_ID)
-    const result = db.prepare(`
-      UPDATE project_core
-      SET external_workspace_path = ?, updated_at = datetime('now')
-      WHERE id = ?
-    `).run(externalPath.trim(), PROJECT_CORE_ROW_ID)
-    if (result.changes !== 1) {
-      throw new Error(`未能绑定外部目录到 project_core: 未找到 id = '${PROJECT_CORE_ROW_ID}' 的项目主记录`)
-    }
+    db.transaction(() => {
+      const result = db.prepare(`
+        UPDATE project_core
+        SET external_workspace_path = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `).run(externalPath.trim(), PROJECT_CORE_ROW_ID)
+      if (result.changes !== 1) {
+        throw new Error(`未能绑定外部目录到 project_core: 未找到 id = '${PROJECT_CORE_ROW_ID}' 的项目主记录`)
+      }
+    })()
   }
 
   /** 解除外部目录关联（仅清空关联记录与索引，绝不删除外部文件） */
   static unbindWorkspaceDirectory(projectId = 'main'): void {
     const db = requiredDb()
     db.transaction(() => {
-      db.prepare('INSERT OR IGNORE INTO project_core (id) VALUES (?)').run(PROJECT_CORE_ROW_ID)
       const result = db.prepare(`
         UPDATE project_core
         SET external_workspace_path = '', external_workspace_scanned_at = '', updated_at = datetime('now')
@@ -356,15 +416,16 @@ export class WorkspaceHubRepository {
   static recordScanTime(timestamp: string, _projectId = 'main'): void {
     void _projectId
     const db = requiredDb()
-    db.prepare('INSERT OR IGNORE INTO project_core (id) VALUES (?)').run(PROJECT_CORE_ROW_ID)
-    const result = db.prepare(`
-      UPDATE project_core
-      SET external_workspace_scanned_at = ?, updated_at = datetime('now')
-      WHERE id = ?
-    `).run(timestamp, PROJECT_CORE_ROW_ID)
-    if (result.changes !== 1) {
-      throw new Error(`未能更新 project_core 扫描时间: 未找到 id = '${PROJECT_CORE_ROW_ID}' 的项目主记录`)
-    }
+    db.transaction(() => {
+      const result = db.prepare(`
+        UPDATE project_core
+        SET external_workspace_scanned_at = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `).run(timestamp, PROJECT_CORE_ROW_ID)
+      if (result.changes !== 1) {
+        throw new Error(`未能更新 project_core 扫描时间: 未找到 id = '${PROJECT_CORE_ROW_ID}' 的项目主记录`)
+      }
+    })()
   }
 
   /** 获取所有外部来源文件列表 */
@@ -662,7 +723,7 @@ export class WorkspaceHubRepository {
           source_file, source_heading_path, source_line_range, evidence,
           confidence, status, actioned_at, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-        ON CONFLICT(candidate_id) DO NOTHING
+        ON CONFLICT(project_id, candidate_id) DO NOTHING
       `)
 
       for (const item of payload.items) {
@@ -687,64 +748,71 @@ export class WorkspaceHubRepository {
           s.parseStatus ?? 'parsed',
           s.skipReason ?? null,
           s.mtime,
-          s.lastScannedAt,
-          s.importStatus,
+          s.lastScannedAt || payload.scanTime || new Date().toISOString(),
+          s.importStatus || 'scanned',
           s.isMissing ? 1 : 0,
           s.isDisabled ? 1 : 0,
           s.fileSize ?? 0,
         )
 
         if (item.snapshot && !item.preserveOldSnapshots) {
-          insertSnapshotStmt.run(
-            item.snapshot.snapshotId,
-            item.snapshot.sourceId,
-            item.snapshot.projectId,
-            item.snapshot.contentHash,
-            item.snapshot.fileSize,
-            item.snapshot.fragmentCount,
-            item.snapshot.parserSchemaVersion ?? 1,
+          const isApprovedSnapshot = Boolean(
+            db.prepare(`
+              SELECT 1 FROM workspace_sources
+              WHERE approved_snapshot_id = ? AND project_id = ?
+            `).get(item.snapshot.snapshotId, payload.projectId),
           )
 
-          if (item.fragments && item.fragments.length > 0) {
-            for (const f of item.fragments) {
-              insertSnapshotFragmentStmt.run(
-                f.id,
-                f.snapshotId,
-                f.sourceId,
-                f.projectId,
-                f.headingPath,
-                f.content,
-                f.startLine,
-                f.endLine,
-                f.fragmentHash,
-                f.chapterStart,
-                f.chapterEnd,
-                f.purpose,
-                f.status,
-              )
+          if (!isApprovedSnapshot) {
+            insertSnapshotStmt.run(
+              item.snapshot.snapshotId,
+              item.snapshot.sourceId,
+              item.snapshot.projectId,
+              item.snapshot.contentHash,
+              item.snapshot.fileSize,
+              item.snapshot.fragmentCount,
+              item.snapshot.parserSchemaVersion ?? 1,
+            )
 
+            if (item.fragments && item.fragments.length > 0) {
+              for (const f of item.fragments) {
+                insertSnapshotFragmentStmt.run(
+                  f.id,
+                  f.snapshotId,
+                  f.sourceId,
+                  f.projectId,
+                  f.headingPath,
+                  f.content,
+                  f.startLine,
+                  f.endLine,
+                  f.fragmentHash,
+                  f.chapterStart,
+                  f.chapterEnd,
+                  f.purpose,
+                  f.status,
+                )
+              }
             }
-          }
 
-          if (item.rules && item.rules.length > 0) {
-            item.rules.forEach((rule, index) => {
-              insertSnapshotRuleStmt.run(
-                `${item.snapshot!.snapshotId}-r-${index + 1}`,
-                item.snapshot!.snapshotId,
-                item.source.id,
-                item.source.projectId,
-                rule.title,
-                rule.content,
-                rule.status,
-                rule.constraintType,
-                rule.scope,
-                rule.sourceFragmentId ?? null,
-                rule.sourceFile,
-                rule.sourceHeadingPath,
-                rule.sourceLineRange,
-              )
-
-            })
+            if (item.rules && item.rules.length > 0) {
+              item.rules.forEach((rule, index) => {
+                insertSnapshotRuleStmt.run(
+                  `${item.snapshot!.snapshotId}-r-${index + 1}`,
+                  item.snapshot!.snapshotId,
+                  item.source.id,
+                  item.source.projectId,
+                  rule.title,
+                  rule.content,
+                  rule.status,
+                  rule.constraintType,
+                  rule.scope,
+                  rule.sourceFragmentId ?? null,
+                  rule.sourceFile,
+                  rule.sourceHeadingPath,
+                  rule.sourceLineRange,
+                )
+              })
+            }
           }
         }
 
@@ -787,8 +855,7 @@ export class WorkspaceHubRepository {
         }
       }
 
-      // 更新扫描完成时间（写入 project_core 主记录）
-      db.prepare('INSERT OR IGNORE INTO project_core (id) VALUES (?)').run(PROJECT_CORE_ROW_ID)
+      // 更新扫描完成时间（写入 project_core 主记录，若主记录缺失则整事务失败回滚）
       const scanTimeUpdate = db.prepare(`
         UPDATE project_core
         SET external_workspace_scanned_at = ?, updated_at = datetime('now')
@@ -1022,8 +1089,11 @@ export class WorkspaceHubRepository {
   static upsertRule(rule: SettingRule): void {
     const db = requiredDb()
     const r = rule as unknown as Record<string, unknown>
-    const ruleId = rule.ruleId || String(r.id || '')
-    const projectId = rule.projectId || String(r.project_id || 'main')
+    const ruleId = (rule.ruleId || String(r.id || '')).trim()
+    const projectId = (rule.projectId || String(r.project_id || '')).trim()
+    if (!ruleId) throw new Error('设定规则 ruleId 不能为空')
+    if (!projectId) throw new Error('设定规则 projectId 不能为空')
+
     const constraintType = (rule.constraintType || r.constraint_type || 'hard') as SettingRuleConstraint
     const scope = rule.scope || String(r.scope || 'global')
     const sourceFragmentId = (rule.sourceFragmentId || r.source_fragment_id || null) as string | null
@@ -1035,13 +1105,13 @@ export class WorkspaceHubRepository {
     const confirmedBy = (rule.confirmedBy || r.confirmed_by || null) as string | null
 
     // 该入口仅供作者/显式候选审批写入；扫描规则只能经快照批准事务提升。
-    db.prepare(`
+    const result = db.prepare(`
       INSERT INTO setting_rules (
         rule_id, project_id, title, content, status, constraint_type, scope,
         source_fragment_id, source_snapshot_fragment_id, source_file, source_heading_path, source_line_range,
         confirmed_at, confirmed_by, origin_type, source_id, source_snapshot_id, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', NULL, NULL, datetime('now'))
-      ON CONFLICT(rule_id) DO UPDATE SET
+      ON CONFLICT(project_id, rule_id) DO UPDATE SET
         title = excluded.title,
         content = excluded.content,
         status = excluded.status,
@@ -1074,6 +1144,10 @@ export class WorkspaceHubRepository {
       confirmedAt,
       confirmedBy,
     )
+
+    if (result.changes !== 1) {
+      throw new Error(`写入设定规则失败：受影响行数不为 1 (ruleId: ${ruleId}, projectId: ${projectId})`)
+    }
   }
 
   static updateRuleStatus(
@@ -1096,6 +1170,10 @@ export class WorkspaceHubRepository {
       status = maybeStatus ?? 'confirmed'
     }
 
+    if (!projectId || !projectId.trim()) {
+      throw new Error('更新设定规则失败：projectId 不能为空')
+    }
+
     const result = db.prepare(`
       UPDATE setting_rules
       SET status = ?,
@@ -1115,6 +1193,9 @@ export class WorkspaceHubRepository {
 
   static deleteRule(ruleId: string, projectId = 'main'): void {
     const db = requiredDb()
+    if (!projectId || !projectId.trim()) {
+      throw new Error('删除设定规则失败：projectId 不能为空')
+    }
     const result = db.prepare('DELETE FROM setting_rules WHERE rule_id = ? AND project_id = ?').run(ruleId, projectId)
     if (result.changes !== 1) {
       throw new Error(`未找到属于项目 ${projectId} 的规则: ${ruleId}`)
@@ -1125,13 +1206,16 @@ export class WorkspaceHubRepository {
   // 导入与变更候选管理（带审批回执与崩溃恢复机制）
   // ============================================================
 
-  static listCandidates(options?: {
+  static listCandidates(options: {
     projectId?: string
     candidateType?: WorkspaceImportCandidateType
     status?: WorkspaceImportCandidateStatus
   }): WorkspaceImportCandidate[] {
+    if (!options || typeof options.projectId !== 'string' || !options.projectId.trim()) {
+      throw new Error('listCandidates 必须提供显式 sessionProjectId')
+    }
     const db = requiredDb()
-    const projectId = options?.projectId ?? 'main'
+    const projectId = options.projectId
     const whereClauses: string[] = ['project_id = ?']
     const params: unknown[] = [projectId]
 
@@ -1187,6 +1271,12 @@ export class WorkspaceHubRepository {
   }
 
   static saveCandidate(candidate: WorkspaceImportCandidate): void {
+    if (!candidate.candidateId || !candidate.candidateId.trim()) {
+      throw new Error('保存候选失败：candidateId 不能为空')
+    }
+    if (!candidate.projectId || !candidate.projectId.trim()) {
+      throw new Error('保存候选失败：projectId 不能为空')
+    }
     const db = requiredDb()
     db.prepare(`
       INSERT INTO workspace_import_candidates (
@@ -1194,7 +1284,7 @@ export class WorkspaceHubRepository {
         source_file, source_heading_path, source_line_range, evidence,
         confidence, status, actioned_at, created_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      ON CONFLICT(candidate_id) DO NOTHING
+      ON CONFLICT(project_id, candidate_id) DO NOTHING
     `).run(
       candidate.candidateId,
       candidate.projectId,
@@ -1214,188 +1304,200 @@ export class WorkspaceHubRepository {
   /**
    * 作者批准候选项目
    * 包含持久化审批回执机制（prepared -> roster_committed -> completed）与崩溃恢复防护：
-   * 若在 roster_committed 后崩溃，重试时直接读取已提交状态，绝不重复写入角色备注或关系。
+   * 严格按 sessionProjectId 隔离，严禁向 main 回退；
+   * 严格原样重放同一个冻结请求，防止覆盖作者并发编辑；
+   * 每次状态变更均验证 changes === 1。
    */
   static approveCandidate<TStage extends string = string>(
     candidateId: string,
-    projectId: string = 'main',
-    authorName: string | ((stage: TStage) => void) = 'author',
+    projectIdOrOptions: string | { projectId?: string; authorName?: string; testCrashHook?: (stage: TStage) => void },
+    authorName?: string | ((stage: TStage) => void),
     testCrashHook?: (stage: TStage) => void,
   ): { success: boolean; error?: string } {
-    let actualProjectId = projectId
-    let actualAuthor: string = typeof authorName === 'string' ? authorName : 'author'
-    let actualCrashHook: ((stage: string) => void) | undefined = typeof authorName === 'function'
-      ? (authorName as unknown as (stage: string) => void)
-      : (testCrashHook as unknown as ((stage: string) => void) | undefined)
+    let actualProjectId: string
+    let actualAuthor = 'author'
+    let actualCrashHook: ((stage: string) => void) | undefined
 
-    const db = requiredDb()
-    db.prepare('INSERT OR IGNORE INTO project_core (id) VALUES (?)').run(PROJECT_CORE_ROW_ID)
-
-    // 兼容历史测试可能传入 (candidateId, 'author') 或 (candidateId, 'author', crashHook)
-    if (projectId === 'author') {
-      const exists = db.prepare('SELECT 1 FROM workspace_import_candidates WHERE candidate_id = ? AND project_id = ?').get(candidateId, 'author')
-      if (!exists) {
-        actualProjectId = 'main'
-        actualAuthor = typeof authorName === 'string' ? authorName : 'author'
-        if (typeof authorName === 'function') {
-          actualCrashHook = authorName as unknown as ((stage: string) => void)
-        }
+    if (typeof projectIdOrOptions === 'object' && projectIdOrOptions !== null) {
+      if (!projectIdOrOptions.projectId || !projectIdOrOptions.projectId.trim()) {
+        throw new Error('approveCandidate 必须提供显式 sessionProjectId')
       }
-    }
-
-    let candidate = db.prepare(`
-      SELECT * FROM workspace_import_candidates WHERE candidate_id = ? AND project_id = ?
-    `).get(candidateId, actualProjectId) as {
-      candidate_id: string
-      project_id: string
-      candidate_type: WorkspaceImportCandidateType
-      raw_data: string
-      suggested_data: string
-      source_file: string
-      source_heading_path: string
-      source_line_range: string
-      status: string
-    } | undefined
-
-    if (!candidate && actualProjectId !== 'main') {
-      const fallback = db.prepare(`
-        SELECT * FROM workspace_import_candidates WHERE candidate_id = ? AND project_id = 'main'
-      `).get(candidateId) as typeof candidate
-      if (fallback) {
-        actualAuthor = actualProjectId
-        actualProjectId = 'main'
-        candidate = fallback
+      actualProjectId = projectIdOrOptions.projectId
+      actualAuthor = projectIdOrOptions.authorName ?? 'author'
+      actualCrashHook = projectIdOrOptions.testCrashHook as unknown as ((stage: string) => void) | undefined
+    } else if (typeof projectIdOrOptions === 'string') {
+      actualProjectId = projectIdOrOptions
+      if (typeof authorName === 'string') {
+        actualAuthor = authorName
+        actualCrashHook = testCrashHook as unknown as ((stage: string) => void) | undefined
+      } else if (typeof authorName === 'function') {
+        actualCrashHook = authorName as unknown as (stage: string) => void
       }
+    } else {
+      throw new Error('approveCandidate 必须提供显式 sessionProjectId')
     }
 
-    if (!candidate) {
-      return { success: false, error: '候选项目不存在' }
-    }
-
-    // 检查审批回执
-    let existingReceipt = db.prepare(`
-      SELECT candidate_id, project_id, candidate_type, operation_id, payload_hash, frozen_payload, stage
-      FROM workspace_approval_receipts
-      WHERE candidate_id = ? AND project_id = ?
-    `).get(candidateId, actualProjectId) as {
-      candidate_id: string
-      project_id: string
-      candidate_type: string
-      operation_id: string
-      payload_hash: string
-      frozen_payload: string
-      stage: 'prepared' | 'roster_committed' | 'completed'
-    } | undefined
-
-    // 崩溃恢复：若发现 candidate 已 approved 但回执未 completed，执行一致性闭合
-    if (candidate.status === 'approved') {
-      if (existingReceipt && existingReceipt.stage !== 'completed') {
-        db.prepare(`
-          UPDATE workspace_approval_receipts
-          SET stage = 'completed', updated_at = datetime('now')
-          WHERE candidate_id = ? AND project_id = ?
-        `).run(candidateId, actualProjectId)
-      }
-      return { success: true }
-    }
-
-    if (existingReceipt?.stage === 'completed') {
-      db.prepare(`
-        UPDATE workspace_import_candidates
-        SET status = 'approved', actioned_at = datetime('now')
-        WHERE candidate_id = ? AND project_id = ?
-      `).run(candidateId, actualProjectId)
-      return { success: true }
+    if (!actualProjectId || !actualProjectId.trim()) {
+      throw new Error('approveCandidate 必须提供显式 sessionProjectId')
     }
 
     try {
+      const db = requiredDb()
+
+      const candidate = db.prepare(`
+        SELECT candidate_id, project_id, candidate_type, raw_data, suggested_data,
+               source_file, source_heading_path, source_line_range, status
+        FROM workspace_import_candidates
+        WHERE candidate_id = ? AND project_id = ?
+      `).get(candidateId, actualProjectId) as {
+        candidate_id: string
+        project_id: string
+        candidate_type: WorkspaceImportCandidateType
+        raw_data: string
+        suggested_data: string
+        source_file: string
+        source_heading_path: string
+        source_line_range: string
+        status: string
+      } | undefined
+
+      // 严禁向 project_id = 'main' 回退，严格基于当前会话项目校验
+      if (!candidate) {
+        return { success: false, error: '候选项目不存在' }
+      }
+
+      // 检查审批回执
+      let existingReceipt = db.prepare(`
+        SELECT candidate_id, project_id, candidate_type, operation_id, payload_hash, frozen_payload, stage
+        FROM workspace_approval_receipts
+        WHERE candidate_id = ? AND project_id = ?
+      `).get(candidateId, actualProjectId) as {
+        candidate_id: string
+        project_id: string
+        candidate_type: string
+        operation_id: string
+        payload_hash: string
+        frozen_payload: string
+        stage: 'prepared' | 'roster_committed' | 'completed' | 'compensated'
+      } | undefined
+
+      // 验证已有回执的完整性与哈希一致性（防篡改）
+      if (existingReceipt) {
+        if (
+          existingReceipt.candidate_id !== candidate.candidate_id ||
+          existingReceipt.project_id !== candidate.project_id ||
+          existingReceipt.candidate_type !== candidate.candidate_type ||
+          !existingReceipt.operation_id ||
+          !existingReceipt.frozen_payload ||
+          !existingReceipt.payload_hash ||
+          hashString(existingReceipt.frozen_payload) !== existingReceipt.payload_hash
+        ) {
+          throw new Error('审批回执完整性校验失败：冻结负载或哈希被篡改')
+        }
+      }
+
+      // 崩溃恢复：若 candidate 已 approved 或回执已 completed，先校验正式领域实体确实存在，再闭合回执
+      if (candidate.status === 'approved' || existingReceipt?.stage === 'completed') {
+        if (!existingReceipt) {
+          throw new Error('审批完整性校验失败：缺少审批回执')
+        }
+        if (hashString(existingReceipt.frozen_payload) !== existingReceipt.payload_hash) {
+          throw new Error('审批回执完整性校验失败：冻结负载或哈希被篡改')
+        }
+
+        if (candidate.candidate_type === 'character') {
+          const frozenReq = JSON.parse(existingReceipt.frozen_payload) as CharacterRosterCommitRequest
+          const opRow = db.prepare(`
+            SELECT operation_id, payload_hash FROM character_roster_operations WHERE operation_id = ?
+          `).get(existingReceipt.operation_id) as { operation_id: string; payload_hash: string } | undefined
+
+          if (!opRow) {
+            // 未提交过，原样重放 frozenReq
+            const commitRes = CharacterRosterRepository.commit(frozenReq)
+            const parsed = JSON.parse(candidate.suggested_data) as { name: string }
+            const key = characterRosterIdentityKey(parsed.name)
+            if (!commitRes.snapshot.entries.some(e => characterRosterIdentityKey(e.name) === key)) {
+              throw new Error('角色领域提交未包含目标角色')
+            }
+          } else {
+            // 已提交过，验证哈希
+            const reqPayloadHash = hashString(JSON.stringify(frozenReq))
+            if (opRow.payload_hash !== reqPayloadHash) {
+              throw new Error('角色操作记录哈希不一致')
+            }
+          }
+        } else if (candidate.candidate_type === 'setting') {
+          const frozenData = JSON.parse(existingReceipt.frozen_payload) as {
+            targetRule: SettingRule
+            targetContentHash: string
+          }
+          const ruleIdToInspect = frozenData.targetRule?.ruleId || `rule-${hashString(`${candidate.source_file}:${candidate.source_heading_path}`).slice(0, 16)}`
+          const currentRule = db.prepare(`
+            SELECT rule_id, project_id, title, content, status, constraint_type, scope
+            FROM setting_rules WHERE project_id = ? AND rule_id = ?
+          `).get(actualProjectId, ruleIdToInspect) as { rule_id: string; content: string } | undefined
+
+          if (!currentRule) {
+            WorkspaceHubRepository.upsertRule(frozenData.targetRule)
+          } else {
+            if (currentRule.content !== frozenData.targetRule.content) {
+              throw new Error('审批恢复失败：设定规则已被作者修改，已拒绝覆盖')
+            }
+          }
+        }
+
+        db.transaction(() => {
+          if (candidate.status !== 'approved') {
+            const candUpdate = db.prepare(`
+              UPDATE workspace_import_candidates
+              SET status = 'approved', actioned_at = COALESCE(actioned_at, datetime('now'))
+              WHERE candidate_id = ? AND project_id = ? AND status != 'approved'
+            `).run(candidateId, actualProjectId)
+            if (candUpdate.changes !== 1) {
+              throw new Error('更新候选状态失败：受影响行数不为 1')
+            }
+          }
+
+          if (existingReceipt && existingReceipt.stage !== 'completed') {
+            const receiptUpdate = db.prepare(`
+              UPDATE workspace_approval_receipts
+              SET stage = 'completed', updated_at = datetime('now')
+              WHERE candidate_id = ? AND project_id = ? AND stage != 'completed'
+            `).run(candidateId, actualProjectId)
+            if (receiptUpdate.changes !== 1) {
+              throw new Error('更新回执状态失败：受影响行数不为 1')
+            }
+          }
+        })()
+        return { success: true }
+      }
+
       const candidateContentHash = hashString(candidate.suggested_data)
-      // 确定性生成 operationId（严禁 randomUUID）
       const deterministicOpId = `workspace-approve-${candidate.candidate_id}-${candidateContentHash.slice(0, 8)}`
 
       if (existingReceipt && existingReceipt.operation_id !== deterministicOpId) {
         throw new Error('审批回执 operationId 与候选冻结内容不一致')
       }
 
-      // 阶段 1: 在任何正式写入前冻结确定性 operationId 与完整提交请求。
+      // 阶段 1: 在任何正式写入前冻结确定性 operationId 与完整提交请求
       if (!existingReceipt) {
-        const frozenPayload = candidate.candidate_type === 'character'
-          ? JSON.stringify(freezeCharacterApprovalRequest(candidate.suggested_data, deterministicOpId))
-          : candidate.suggested_data
-        const frozenPayloadHash = hashString(frozenPayload)
-        db.prepare(`
-          INSERT INTO workspace_approval_receipts (
-            candidate_id, project_id, candidate_type, operation_id,
-            payload_hash, frozen_payload, stage, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, 'prepared', datetime('now'), datetime('now'))
-        `).run(
-          candidate.candidate_id,
-          candidate.project_id,
-          candidate.candidate_type,
-          deterministicOpId,
-          frozenPayloadHash,
-          frozenPayload,
-        )
-        existingReceipt = db.prepare(`
-          SELECT candidate_id, project_id, candidate_type, operation_id,
-                 payload_hash, frozen_payload, stage
-          FROM workspace_approval_receipts WHERE candidate_id = ? AND project_id = ?
-        `).get(candidateId, actualProjectId) as typeof existingReceipt
-      }
+        let frozenPayload: string
+        if (candidate.candidate_type === 'character') {
+          frozenPayload = JSON.stringify(freezeCharacterApprovalRequest(candidate.suggested_data, deterministicOpId))
+        } else if (candidate.candidate_type === 'setting') {
+          const deterministicRuleId = `rule-${hashString(`${candidate.source_file}:${candidate.source_heading_path}`).slice(0, 16)}`
+          const parsed = JSON.parse(candidate.suggested_data) as {
+            title?: string
+            content?: string
+            constraintType?: SettingRuleConstraint
+            scope?: string
+          }
+          const existingRule = db.prepare(`
+            SELECT rule_id, project_id, title, content, status, constraint_type, scope
+            FROM setting_rules WHERE project_id = ? AND rule_id = ?
+          `).get(actualProjectId, deterministicRuleId) as { content: string } | undefined
 
-      const invokeTestCrashHook = (
-        stage: 'prepared' | 'after_roster_commit_before_receipt' | 'roster_committed' | 'after_candidate_approved_before_receipt',
-      ) => {
-        if (actualCrashHook && (process.env.NODE_ENV === 'test' || process.env.VITEST === 'true')) {
-          actualCrashHook(stage)
-        }
-      }
-
-      invokeTestCrashHook('prepared')
-
-      if (!existingReceipt) throw new Error('无法建立审批 prepared 回执')
-      const requiresFrozenPayload = existingReceipt.stage === 'prepared' || candidate.candidate_type === 'setting'
-      if (requiresFrozenPayload) {
-        if (!existingReceipt.frozen_payload || !existingReceipt.payload_hash) {
-          throw new Error('审批 prepared 回执缺少冻结负载，已拒绝重新计算')
-        }
-        if (hashString(existingReceipt.frozen_payload) !== existingReceipt.payload_hash) {
-          throw new Error('审批冻结负载哈希不一致')
-        }
-      }
-
-      // 阶段 2: prepared 重试始终复用同一冻结请求。角色库先以 operationId
-      // 幂等确认提交，再推进 workspace 回执；两者之间保留真实崩溃注入窗口。
-      if (candidate.candidate_type === 'character' && existingReceipt.stage === 'prepared') {
-        const frozenRequest = JSON.parse(existingReceipt.frozen_payload) as CharacterRosterCommitRequest
-        if (frozenRequest.operationId !== existingReceipt.operation_id) {
-          throw new Error('审批冻结请求 operationId 不一致')
-        }
-        CharacterRosterRepository.commit(frozenRequest)
-        invokeTestCrashHook('after_roster_commit_before_receipt')
-
-        db.prepare(`
-          UPDATE workspace_approval_receipts
-          SET stage = 'roster_committed', updated_at = datetime('now')
-          WHERE candidate_id = ? AND project_id = ? AND stage = 'prepared'
-        `).run(candidateId, actualProjectId)
-        existingReceipt = { ...existingReceipt, stage: 'roster_committed' }
-      }
-
-      invokeTestCrashHook('roster_committed')
-
-      if (candidate.candidate_type === 'setting') {
-        const parsed = JSON.parse(existingReceipt.frozen_payload) as {
-          title: string
-          content: string
-          constraintType?: SettingRuleConstraint
-          scope?: string
-        }
-        const deterministicRuleId = `rule-${hashString(`${candidate.source_file}:${candidate.source_heading_path}`).slice(0, 16)}`
-
-        // 设定规则写入、候选 approved 与回执 completed 在同一数据库事务内原子闭环
-        db.transaction(() => {
-          WorkspaceHubRepository.upsertRule({
+          const targetRule: SettingRule = {
             ruleId: deterministicRuleId,
             projectId: candidate.project_id,
             title: parsed.title || candidate.source_heading_path || '未命名规则',
@@ -1408,41 +1510,184 @@ export class WorkspaceHubRepository {
             sourceLineRange: candidate.source_line_range,
             confirmedAt: new Date().toISOString(),
             confirmedBy: actualAuthor,
+          }
+          frozenPayload = JSON.stringify({
+            targetRule,
+            priorContent: existingRule ? existingRule.content : null,
+            priorRuleHash: existingRule ? hashString(existingRule.content) : 'none',
+            targetContentHash: hashString(targetRule.content),
           })
+        } else {
+          frozenPayload = candidate.suggested_data
+        }
 
-          db.prepare(`
+        const frozenPayloadHash = hashString(frozenPayload)
+        const insertReceipt = db.prepare(`
+          INSERT INTO workspace_approval_receipts (
+            candidate_id, project_id, candidate_type, operation_id,
+            payload_hash, frozen_payload, stage, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, 'prepared', datetime('now'), datetime('now'))
+        `).run(
+          candidate.candidate_id,
+          candidate.project_id,
+          candidate.candidate_type,
+          deterministicOpId,
+          frozenPayloadHash,
+          frozenPayload,
+        )
+        if (insertReceipt.changes !== 1) {
+          throw new Error('创建审批 prepared 回执失败：受影响行数不为 1')
+        }
+
+        existingReceipt = {
+          candidate_id: candidate.candidate_id,
+          project_id: candidate.project_id,
+          candidate_type: candidate.candidate_type,
+          operation_id: deterministicOpId,
+          payload_hash: frozenPayloadHash,
+          frozen_payload: frozenPayload,
+          stage: 'prepared',
+        }
+      }
+
+      const invokeTestCrashHook = (
+        stage: 'prepared' | 'after_roster_commit_before_receipt' | 'roster_committed' | 'after_candidate_approved_before_receipt',
+      ) => {
+        if (actualCrashHook && (process.env.NODE_ENV === 'test' || process.env.VITEST === 'true')) {
+          actualCrashHook(stage)
+        }
+      }
+
+      invokeTestCrashHook('prepared')
+
+      // 阶段 2: 领域实体提交
+      if (candidate.candidate_type === 'character') {
+        const frozenRequest = JSON.parse(existingReceipt.frozen_payload) as CharacterRosterCommitRequest
+        if (frozenRequest.operationId !== existingReceipt.operation_id) {
+          throw new Error('审批冻结请求 operationId 不一致')
+        }
+
+        // 原样重放同一个冻结请求；禁止把过期冻结请求的 expectedRevision 改成当前 revision
+        const commitResult = CharacterRosterRepository.commit(frozenRequest)
+        const parsed = JSON.parse(candidate.suggested_data) as { name: string }
+        const targetKey = characterRosterIdentityKey(parsed.name)
+        const existsInRoster = commitResult.snapshot.entries.some(e => characterRosterIdentityKey(e.name) === targetKey)
+        if (!existsInRoster) {
+          throw new Error('角色领域提交未包含目标角色')
+        }
+
+        invokeTestCrashHook('after_roster_commit_before_receipt')
+
+        if (existingReceipt.stage === 'prepared') {
+          const receiptUpdate = db.prepare(`
+            UPDATE workspace_approval_receipts
+            SET stage = 'roster_committed', updated_at = datetime('now')
+            WHERE candidate_id = ? AND project_id = ? AND stage = 'prepared'
+          `).run(candidateId, actualProjectId)
+          if (receiptUpdate.changes !== 1) {
+            throw new Error('更新回执至 roster_committed 失败：受影响行数不为 1')
+          }
+          existingReceipt = { ...existingReceipt, stage: 'roster_committed' }
+        }
+
+        invokeTestCrashHook('roster_committed')
+
+        // 阶段 3: 原子推进候选 approved 与回执 completed
+        db.transaction(() => {
+          const candUpdate = db.prepare(`
             UPDATE workspace_import_candidates
             SET status = 'approved', actioned_at = datetime('now')
             WHERE candidate_id = ? AND project_id = ?
           `).run(candidateId, actualProjectId)
+          if (candUpdate.changes !== 1) {
+            throw new Error('更新候选状态至 approved 失败：受影响行数不为 1')
+          }
 
           invokeTestCrashHook('after_candidate_approved_before_receipt')
 
-          db.prepare(`
+          const finalReceiptUpdate = db.prepare(`
             UPDATE workspace_approval_receipts
             SET stage = 'completed', updated_at = datetime('now')
             WHERE candidate_id = ? AND project_id = ?
           `).run(candidateId, actualProjectId)
+          if (finalReceiptUpdate.changes !== 1) {
+            throw new Error('更新回执状态至 completed 失败：受影响行数不为 1')
+          }
         })()
 
         return { success: true }
       }
 
-      // 阶段 3: 角色类型候选原子完成候选状态与回执
+      if (candidate.candidate_type === 'setting') {
+        const frozenData = JSON.parse(existingReceipt.frozen_payload) as {
+          targetRule: SettingRule
+          priorContent: string | null
+          priorRuleHash: string
+          targetContentHash: string
+        }
+        const deterministicRuleId = frozenData.targetRule?.ruleId || `rule-${hashString(`${candidate.source_file}:${candidate.source_heading_path}`).slice(0, 16)}`
+
+        const currentRule = db.prepare(`
+          SELECT rule_id, project_id, title, content, status, constraint_type, scope
+          FROM setting_rules WHERE project_id = ? AND rule_id = ?
+        `).get(actualProjectId, deterministicRuleId) as { rule_id: string; content: string } | undefined
+
+        if (currentRule) {
+          // 当前规则存在：如果内容已被作者改变，必须失败关闭，不能覆盖
+          if (currentRule.content !== frozenData.targetRule.content) {
+            throw new Error('审批恢复失败：设定规则已被作者修改，已拒绝覆盖')
+          }
+        } else {
+          // 规则不存在，可以安全写入
+          WorkspaceHubRepository.upsertRule(frozenData.targetRule)
+        }
+
+        db.transaction(() => {
+          const candUpdate = db.prepare(`
+            UPDATE workspace_import_candidates
+            SET status = 'approved', actioned_at = datetime('now')
+            WHERE candidate_id = ? AND project_id = ?
+          `).run(candidateId, actualProjectId)
+          if (candUpdate.changes !== 1) {
+            throw new Error('更新候选状态至 approved 失败：受影响行数不为 1')
+          }
+
+          invokeTestCrashHook('after_candidate_approved_before_receipt')
+
+          const finalReceiptUpdate = db.prepare(`
+            UPDATE workspace_approval_receipts
+            SET stage = 'completed', updated_at = datetime('now')
+            WHERE candidate_id = ? AND project_id = ?
+          `).run(candidateId, actualProjectId)
+          if (finalReceiptUpdate.changes !== 1) {
+            throw new Error('更新回执状态至 completed 失败：受影响行数不为 1')
+          }
+        })()
+
+        return { success: true }
+      }
+
+      // 其他候选类型 (blueprint / lead)
       db.transaction(() => {
-        db.prepare(`
+        const candUpdate = db.prepare(`
           UPDATE workspace_import_candidates
           SET status = 'approved', actioned_at = datetime('now')
           WHERE candidate_id = ? AND project_id = ?
         `).run(candidateId, actualProjectId)
+        if (candUpdate.changes !== 1) {
+          throw new Error('更新候选状态至 approved 失败：受影响行数不为 1')
+        }
 
         invokeTestCrashHook('after_candidate_approved_before_receipt')
 
-        db.prepare(`
+        const finalReceiptUpdate = db.prepare(`
           UPDATE workspace_approval_receipts
           SET stage = 'completed', updated_at = datetime('now')
           WHERE candidate_id = ? AND project_id = ?
         `).run(candidateId, actualProjectId)
+        if (finalReceiptUpdate.changes !== 1) {
+          throw new Error('更新回执状态至 completed 失败：受影响行数不为 1')
+        }
       })()
 
       return { success: true }
@@ -1451,13 +1696,25 @@ export class WorkspaceHubRepository {
     }
   }
 
-  /** 作者拒绝候选项目（带明确项目会话隔离与 dangling prepared 回执清理） */
-  static rejectCandidate(candidateId: string, projectId = 'main'): { success: boolean; error?: string } {
+  /** 作者拒绝候选项目（带明确项目会话隔离、补偿防护与状态机一致性防护） */
+  static rejectCandidate(candidateId: string, projectId: string): { success: boolean; error?: string } {
+    if (!projectId || typeof projectId !== 'string' || !projectId.trim()) {
+      throw new Error('rejectCandidate 必须提供显式 sessionProjectId')
+    }
+
     const db = requiredDb()
     const candidate = db.prepare(`
-      SELECT candidate_id, status FROM workspace_import_candidates
+      SELECT candidate_id, project_id, candidate_type, raw_data, suggested_data, status
+      FROM workspace_import_candidates
       WHERE candidate_id = ? AND project_id = ?
-    `).get(candidateId, projectId) as { candidate_id: string; status: string } | undefined
+    `).get(candidateId, projectId) as {
+      candidate_id: string
+      project_id: string
+      candidate_type: WorkspaceImportCandidateType
+      raw_data: string
+      suggested_data: string
+      status: string
+    } | undefined
 
     if (!candidate) {
       return { success: false, error: '候选项目不存在' }
@@ -1465,19 +1722,54 @@ export class WorkspaceHubRepository {
     if (candidate.status === 'approved') {
       return { success: false, error: '已批准的候选无法直接拒绝' }
     }
+    if (candidate.status === 'rejected') {
+      return { success: true }
+    }
+
+    const existingReceipt = db.prepare(`
+      SELECT candidate_id, project_id, candidate_type, operation_id, payload_hash, frozen_payload, stage
+      FROM workspace_approval_receipts
+      WHERE candidate_id = ? AND project_id = ?
+    `).get(candidateId, projectId) as {
+      candidate_id: string
+      project_id: string
+      candidate_type: string
+      operation_id: string
+      payload_hash: string
+      frozen_payload: string
+      stage: 'prepared' | 'roster_committed' | 'completed' | 'compensated'
+    } | undefined
+
+    // 状态机流转防护：
+    // 若处于 roster_committed，说明角色领域事实已经写入正式名单。
+    // 安全策略：禁止直接拒绝，要求先恢复闭合审批。禁止按角色名删除，不得删除作者原有的同名角色。
+    if (existingReceipt?.stage === 'roster_committed') {
+      return {
+        success: false,
+        error: '候选审批已处于 roster_committed 阶段，禁止直接拒绝；请先恢复闭合审批以保护角色名单一致性',
+      }
+    }
 
     db.transaction(() => {
-      db.prepare(`
+      const candUpdate = db.prepare(`
         UPDATE workspace_import_candidates
         SET status = 'rejected', actioned_at = datetime('now')
         WHERE candidate_id = ? AND project_id = ?
       `).run(candidateId, projectId)
+      if (candUpdate.changes !== 1) {
+        throw new Error('更新候选状态至 rejected 失败：受影响行数不为 1')
+      }
 
-      // 清理未完成的 prepared 审批回执
-      db.prepare(`
-        DELETE FROM workspace_approval_receipts
-        WHERE candidate_id = ? AND project_id = ? AND stage = 'prepared'
-      `).run(candidateId, projectId)
+      // 清理未完成的审批回执（例如 prepared 阶段的临时回执）
+      if (existingReceipt) {
+        const delReceipt = db.prepare(`
+          DELETE FROM workspace_approval_receipts
+          WHERE candidate_id = ? AND project_id = ?
+        `).run(candidateId, projectId)
+        if (delReceipt.changes !== 1) {
+          throw new Error('清理审批回执失败：受影响行数不为 1')
+        }
+      }
     })()
 
     return { success: true }
