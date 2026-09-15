@@ -10,12 +10,28 @@ import {
   Clock,
   Sparkles,
   BookOpen,
+  ExternalLink,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { useWorkspaceHubStore } from '../../stores/workspace-hub-store'
 import { useLocaleStore } from '../../stores/locale-store'
 import { confirm } from '../ui/Confirm'
 import { toast } from '../ui/Toast'
+import type { ChapterContextSourceRef } from '../../shared/workspace-hub'
+
+declare module '../../shared/workspace-hub' {
+  interface ChapterContextSourceRef {
+    projectId?: string
+    sourceId?: string | null
+    approvedSnapshotId?: string | null
+    sourceSnapshotFragmentId?: string | null
+    filePath?: string
+    titlePath?: string
+    provenanceStatus?: 'found' | 'provenance-missing'
+  }
+}
 
 export default function WorkspaceChapterContextTab() {
   const text = useLocaleStore(s => s.text)
@@ -29,9 +45,72 @@ export default function WorkspaceChapterContextTab() {
   const assembleChapterContext = useWorkspaceHubStore(s => s.assembleChapterContext)
   const saveChapterContextSnapshot = useWorkspaceHubStore(s => s.saveChapterContextSnapshot)
   const loading = useWorkspaceHubStore(s => s.loading)
+  const sources = useWorkspaceHubStore(s => s.sources)
+  const selectSource = useWorkspaceHubStore(s => s.selectSource)
+  const setActiveTab = useWorkspaceHubStore(s => s.setActiveTab)
 
   const [copied, setCopied] = useState(false)
   const [activeInspectorTab, setActiveInspectorTab] = useState<'blocks' | 'omissions' | 'exclusions'>('blocks')
+  const [expandedBlockIds, setExpandedBlockIds] = useState<Set<string>>(new Set())
+
+  const toggleBlockExpanded = (blockId: string) => {
+    setExpandedBlockIds(prev => {
+      const next = new Set(prev)
+      if (next.has(blockId)) next.delete(blockId)
+      else next.add(blockId)
+      return next
+    })
+  }
+
+  const handleLocateSourceRef = async (sourceRef: ChapterContextSourceRef) => {
+    let targetSourceId = sourceRef.sourceId
+    const relPath = sourceRef.relativePath || sourceRef.filePath
+    if (!targetSourceId && relPath) {
+      const match = sources.find(s => s.relativePath === relPath || s.absolutePath === relPath)
+      if (match) targetSourceId = match.id
+    }
+
+    const targetSnapshotId = sourceRef.approvedSnapshotId || sourceRef.snapshotId
+    const targetFragmentId = sourceRef.sourceSnapshotFragmentId || sourceRef.fragmentId
+    const targetProjectId = sourceRef.projectId || 'main'
+
+    if (sourceRef.provenanceStatus === 'provenance-missing') {
+      toast.warning(
+        text(
+          `快照来源凭证缺失：该项未能与已批准快照片段建立精确校验关系。`,
+          `Provenance missing: This item cannot be verified against an approved snapshot fragment.`,
+        ),
+      )
+    }
+
+    if (targetSourceId) {
+      await selectSource(targetSourceId, {
+        snapshotId: targetSnapshotId,
+        fragmentId: targetFragmentId,
+        projectId: targetProjectId,
+      })
+      setActiveTab('sources')
+
+      const storeState = useWorkspaceHubStore.getState()
+      if (storeState.provenanceStatus === 'provenance-missing') {
+        toast.warning(
+          text(
+            `快照来源凭证缺失：已打开资料文件，但未能精准匹配快照片段 [${targetFragmentId || '未知'}]（可能外部快照已被修改或快照片段缺失）。`,
+            `Provenance missing: Opened source file, but could not match fragment [${targetFragmentId || 'unknown'}].`,
+          ),
+        )
+      } else {
+        toast.success(
+          text(
+            `已跳转定位并高亮快照片段 [${relPath || targetSourceId}] (快照: ${(targetSnapshotId || '').slice(0, 8) || '已批准'})`,
+            `Navigated and highlighted snapshot fragment [${relPath || targetSourceId}] (Snapshot: ${(targetSnapshotId || '').slice(0, 8) || 'approved'})`,
+          ),
+        )
+      }
+    } else {
+      toast.info(text('未找到关联的母稿文件（可能为数据库事实或手工记录）', 'Source file not found (may be database or manual fact)'))
+    }
+  }
 
   const handleCopy = async () => {
     if (!bundle) return
@@ -331,10 +410,82 @@ export default function WorkspaceChapterContextTab() {
                       {b.title}
                     </div>
 
-                    <div className="text-[10px] opacity-60 flex items-center gap-1.5 pt-0.5 truncate font-mono">
-                      <span>{b.sourceType === 'file' ? text('文件: ', 'File: ') : text('数据库: ', 'DB: ')}</span>
-                      <span className="truncate">{b.sourceFile}</span>
+                    <div className="text-[10px] opacity-60 flex items-center justify-between pt-0.5 truncate font-mono">
+                      <div className="flex items-center gap-1.5 truncate">
+                        <span>{b.sourceType === 'file' ? text('文件: ', 'File: ') : text('数据库: ', 'DB: ')}</span>
+                        <span className="truncate">{b.sourceFile}</span>
+                      </div>
+                      {b.sources && b.sources.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => toggleBlockExpanded(b.id)}
+                          className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] text-accent hover:bg-accent/10 transition-colors"
+                        >
+                          <span>{text(`凭证 (${b.sources.length})`, `Citations (${b.sources.length})`)}</span>
+                          {expandedBlockIds.has(b.id) ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                        </button>
+                      )}
                     </div>
+
+                    {/* 展开的具体快照片段溯源清单 */}
+                    {b.sources && b.sources.length > 0 && expandedBlockIds.has(b.id) && (
+                      <div className="mt-2 pt-2 border-t space-y-2" style={{ borderColor: 'var(--color-border)' }}>
+                        {b.sources.map((s, sIdx) => {
+                          const snapId = s.approvedSnapshotId || s.snapshotId
+                          const fragId = s.sourceSnapshotFragmentId || s.fragmentId
+                          return (
+                            <div
+                              key={sIdx}
+                              className="p-2 rounded bg-surface border text-[10px] space-y-1 font-mono"
+                              style={{ borderColor: 'var(--color-border)' }}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-semibold truncate max-w-[170px]" title={s.headingPath || s.titlePath || s.relativePath}>
+                                  {s.headingPath || s.titlePath || s.relativePath}
+                                </span>
+                                {(s.sourceId || s.relativePath || s.filePath) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleLocateSourceRef(s)}
+                                    className="flex items-center gap-0.5 text-[9px] px-1 py-0.5 rounded bg-accent/10 hover:bg-accent/20 text-accent transition-colors"
+                                    title={text('反查定位到原始母稿快照', 'Locate original snapshot')}
+                                  >
+                                    <ExternalLink size={9} />
+                                    <span>{text('反查', 'Locate')}</span>
+                                  </button>
+                                )}
+                              </div>
+                              <div className="text-muted-foreground truncate">
+                                <span>{s.relativePath || s.filePath}</span>
+                                {s.lineRange && <span> (行 {s.lineRange})</span>}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-1 pt-0.5 text-[9px]">
+                                {snapId && (
+                                  <span className="px-1 py-0.2 rounded bg-blue-500/10 text-[var(--color-info)]">
+                                    快照 {snapId.slice(0, 8)}
+                                  </span>
+                                )}
+                                {fragId && (
+                                  <span className="px-1 py-0.2 rounded bg-purple-500/10 text-purple-400">
+                                    片段 {fragId.slice(-10)}
+                                  </span>
+                                )}
+                                {s.contentHash && (
+                                  <span className="px-1 py-0.2 rounded bg-black/5 dark:bg-white/5 opacity-70">
+                                    SHA {s.contentHash.slice(0, 8)}
+                                  </span>
+                                )}
+                                {s.provenanceStatus === 'provenance-missing' && (
+                                  <span className="px-1 py-0.2 rounded bg-red-500/10 text-[var(--color-error-text)] font-medium">
+                                    凭证缺失
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
                   </div>
                 ))
               )}

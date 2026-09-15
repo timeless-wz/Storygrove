@@ -7,6 +7,7 @@ import {
   Sparkles,
   Filter,
   Check,
+  AlertCircle,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { useWorkspaceHubStore } from '../../stores/workspace-hub-store'
@@ -37,6 +38,9 @@ export default function WorkspaceSourcesTab() {
   const text = useLocaleStore(s => s.text)
   const sources = useWorkspaceHubStore(s => s.sources)
   const selectedSourceId = useWorkspaceHubStore(s => s.selectedSourceId)
+  const selectedSnapshotId = useWorkspaceHubStore(s => s.selectedSnapshotId)
+  const selectedFragmentId = useWorkspaceHubStore(s => s.selectedFragmentId)
+  const provenanceStatus = useWorkspaceHubStore(s => s.provenanceStatus)
   const selectedSourceDetail = useWorkspaceHubStore(s => s.selectedSourceDetail)
   const selectSource = useWorkspaceHubStore(s => s.selectSource)
   const candidates = useWorkspaceHubStore(s => s.candidates)
@@ -227,45 +231,81 @@ export default function WorkspaceSourcesTab() {
                 {/* 展开后的片段与层级结构 */}
                 {isExpanded && selectedSourceDetail && (
                   <div className="border-t p-3 text-xs space-y-3" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-editor-bg)' }}>
+                    {provenanceStatus === 'provenance-missing' && (
+                      <div className="p-2.5 rounded bg-amber-500/10 border border-amber-500/30 text-[var(--color-warning-text)] text-xs flex items-center gap-2">
+                        <AlertCircle size={15} className="shrink-0 text-amber-500" />
+                        <span>
+                          {text(
+                            '来源凭证缺失提示：未能精确匹配目标快照片段，已展示当前可用快照解析结果。',
+                            'Provenance missing: Could not match target snapshot fragment. Showing currently available snapshot.',
+                          )}
+                        </span>
+                      </div>
+                    )}
+
                     <div className="flex items-center justify-between text-[11px] font-medium" style={{ color: 'var(--color-text-muted)' }}>
-                      <span>{text('Markdown 标题层级与片段解析', 'Markdown Heading Hierarchy & Fragments')}</span>
+                      <span className="flex items-center gap-2">
+                        <span>{text('Markdown 标题层级与片段解析', 'Markdown Heading Hierarchy & Fragments')}</span>
+                        {selectedSnapshotId && (
+                          <span className="px-1.5 py-0.5 rounded bg-blue-500/10 text-[var(--color-info)] font-mono text-[10px]">
+                            快照: {selectedSnapshotId.slice(0, 10)}
+                          </span>
+                        )}
+                      </span>
                       <span>{text(`共 ${selectedSourceDetail.fragments.length} 个片段`, `${selectedSourceDetail.fragments.length} fragments`)}</span>
                     </div>
 
                     <div className="space-y-2">
-                      {selectedSourceDetail.fragments.map(f => (
-                        <div
-                          key={f.fragmentId}
-                          className="border rounded p-2.5 text-xs space-y-1.5"
-                          style={{
-                            borderColor: 'var(--color-border)',
-                            backgroundColor: 'var(--color-surface)',
-                          }}
-                        >
-                          <div className="flex items-center justify-between font-medium" style={{ color: 'var(--color-text)' }}>
-                            <div className="flex items-center gap-1.5 min-w-0">
-                              <Layers size={13} className="shrink-0 opacity-70" />
-                              <span className="truncate">{f.headingPath}</span>
+                      {selectedSourceDetail.fragments.map(f => {
+                        const isTarget = Boolean(selectedFragmentId && f.fragmentId === selectedFragmentId)
+                        return (
+                          <div
+                            key={f.fragmentId}
+                            ref={el => {
+                              if (isTarget && el) {
+                                el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+                              }
+                            }}
+                            className={`border rounded p-2.5 text-xs space-y-1.5 transition-all ${
+                              isTarget ? 'ring-2 ring-blue-500/40' : ''
+                            }`}
+                            style={{
+                              borderColor: isTarget ? 'var(--color-accent)' : 'var(--color-border)',
+                              backgroundColor: isTarget
+                                ? 'var(--color-accent-subtle, rgba(59, 130, 246, 0.08))'
+                                : 'var(--color-surface)',
+                            }}
+                          >
+                            <div className="flex items-center justify-between font-medium" style={{ color: 'var(--color-text)' }}>
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <Layers size={13} className="shrink-0 opacity-70" />
+                                <span className="truncate">{f.headingPath}</span>
+                                {isTarget && (
+                                  <span className="px-1.5 py-0.2 rounded text-[10px] font-semibold bg-[var(--color-accent)] text-white shrink-0">
+                                    {text('当前引用片段', 'Current Citation')}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[10px] text-muted-foreground shrink-0 font-mono">
+                                行 {f.startLine} - {f.endLine}
+                                {f.chapterStart !== null && ` · 第${f.chapterStart}章`}
+                              </span>
                             </div>
-                            <span className="text-[10px] text-muted-foreground shrink-0 font-mono">
-                              行 {f.startLine} - {f.endLine}
-                              {f.chapterStart !== null && ` · 第${f.chapterStart}章`}
-                            </span>
-                          </div>
 
-                          {f.content && (
-                            <div
-                              className="text-[11px] font-mono whitespace-pre-wrap max-h-32 overflow-y-auto leading-relaxed p-2 rounded"
-                              style={{
-                                backgroundColor: 'var(--color-editor-bg)',
-                                color: 'var(--color-text-secondary)',
-                              }}
-                            >
-                              {f.content}
-                            </div>
-                          )}
-                        </div>
-                      ))}
+                            {f.content && (
+                              <div
+                                className="text-[11px] font-mono whitespace-pre-wrap max-h-32 overflow-y-auto leading-relaxed p-2 rounded"
+                                style={{
+                                  backgroundColor: 'var(--color-editor-bg)',
+                                  color: 'var(--color-text-secondary)',
+                                }}
+                              >
+                                {f.content}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 )}
