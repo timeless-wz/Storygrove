@@ -247,7 +247,7 @@ export default function WorkspaceChapterContextTab() {
 
       {/* 开启候选预览时的醒目警告条 */}
       {includeCandidates && (
-        <div className="px-4 py-2 bg-amber-500/15 border-b text-[11px] flex items-center gap-2 text-[var(--color-warning-text)] shrink-0" style={{ borderColor: 'var(--color-border)' }}>
+        <div className="px-4 py-2 border-b text-[11px] flex items-center gap-2 text-[var(--color-warning-text)] shrink-0" style={{ borderColor: 'var(--color-border)', backgroundColor: 'color-mix(in srgb, var(--color-warning) 15%, transparent)' }}>
           <AlertTriangle size={14} className="shrink-0" />
           <span>
             {text(
@@ -260,7 +260,7 @@ export default function WorkspaceChapterContextTab() {
 
       {/* 超出预算时的明确字符统计与阻断提示 */}
       {bundle && bundle.isOverBudget && (
-        <div className="px-4 py-2 bg-red-500/15 border-b text-[11px] flex items-center justify-between text-[var(--color-error-text)] shrink-0" style={{ borderColor: 'var(--color-border)' }}>
+        <div className="px-4 py-2 border-b text-[11px] flex items-center justify-between text-[var(--color-error-text)] shrink-0" style={{ borderColor: 'var(--color-border)', backgroundColor: 'color-mix(in srgb, var(--color-error) 15%, transparent)' }}>
           <div className="flex items-center gap-2 font-medium">
             <AlertTriangle size={14} className="shrink-0" />
             <span>
@@ -466,7 +466,7 @@ export default function WorkspaceChapterContextTab() {
                                   </span>
                                 )}
                                 {fragId && (
-                                  <span className="px-1 py-0.2 rounded bg-purple-500/10 text-purple-400">
+                                  <span className="px-1 py-0.2 rounded" style={{ color: 'var(--color-info)', backgroundColor: 'color-mix(in srgb, var(--color-info) 10%, transparent)' }}>
                                     片段 {fragId.slice(-10)}
                                   </span>
                                 )}
@@ -504,7 +504,7 @@ export default function WorkspaceChapterContextTab() {
                     >
                       <div className="flex items-center justify-between font-medium text-[var(--color-warning-text)]">
                         <span>{om.stage}. {om.stageName}</span>
-                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/10 font-normal">
+                        <span className="text-[10px] px-1.5 py-0.2 rounded font-normal" style={{ color: 'var(--color-warning)', backgroundColor: 'color-mix(in srgb, var(--color-warning) 10%, transparent)' }}>
                           {text('超出预算', 'Budget exceeded')}
                         </span>
                       </div>
@@ -521,7 +521,7 @@ export default function WorkspaceChapterContextTab() {
 
               {activeInspectorTab === 'exclusions' && (
                 <div className="space-y-2 text-xs">
-                  <div className="text-[11px] leading-relaxed p-2 rounded bg-red-500/10 text-[var(--color-error-text)]">
+                  <div className="text-[11px] leading-relaxed p-2 rounded text-[var(--color-error-text)]" style={{ backgroundColor: 'color-mix(in srgb, var(--color-error) 10%, transparent)' }}>
                     {text(
                       '已依据创作总则与设定规则，严格屏蔽废案与已淘汰设定。废案仅作为背景警示清单，严禁作为故事内事实注入正文。',
                       'Deprecated lore is strictly excluded from in-story facts.',

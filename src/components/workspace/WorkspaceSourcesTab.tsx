@@ -202,26 +202,26 @@ export default function WorkspaceSourcesTab() {
                       className="text-[11px] px-2 py-0.5 rounded-full font-medium"
                       style={{
                         backgroundColor: s.category === 'deprecated' ? 'rgba(239, 68, 68, 0.15)' : 'var(--color-accent-subtle, rgba(59, 130, 246, 0.15))',
-                        color: s.category === 'deprecated' ? '#ef4444' : 'var(--color-accent)',
+                        color: s.category === 'deprecated' ? 'var(--color-error)' : 'var(--color-accent)',
                       }}
                     >
                       {text(cat.zh, cat.en)}
                     </span>
 
                     {s.isMissing ? (
-                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-red-500/20 text-[var(--color-error-text)] font-medium">
+                      <span className="text-[11px] px-2 py-0.5 rounded-full text-[var(--color-error-text)] font-medium" style={{ backgroundColor: 'color-mix(in srgb, var(--color-error) 20%, transparent)' }}>
                         {text('缺失', 'Missing')}
                       </span>
                     ) : isStale ? (
-                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-500/20 text-[var(--color-warning-text)] font-medium">
+                      <span className="text-[11px] px-2 py-0.5 rounded-full text-[var(--color-warning-text)] font-medium" style={{ backgroundColor: 'color-mix(in srgb, var(--color-warning) 20%, transparent)' }}>
                         {text('已变化', 'Changed')}
                       </span>
                     ) : !s.approvedSnapshotId ? (
-                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-500/20 text-[var(--color-accent)] font-medium">
+                      <span className="text-[11px] px-2 py-0.5 rounded-full text-[var(--color-info)] font-medium" style={{ backgroundColor: 'color-mix(in srgb, var(--color-info) 20%, transparent)' }}>
                         {text('待首次批准', 'Pending Approval')}
                       </span>
                     ) : (
-                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-[var(--color-success-text)] font-medium">
+                      <span className="text-[11px] px-2 py-0.5 rounded-full text-[var(--color-success-text)] font-medium" style={{ backgroundColor: 'color-mix(in srgb, var(--color-success) 20%, transparent)' }}>
                         {text('正常', 'Normal')}
                       </span>
                     )}
@@ -232,8 +232,8 @@ export default function WorkspaceSourcesTab() {
                 {isExpanded && selectedSourceDetail && (
                   <div className="border-t p-3 text-xs space-y-3" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-editor-bg)' }}>
                     {provenanceStatus === 'provenance-missing' && (
-                      <div className="p-2.5 rounded bg-amber-500/10 border border-amber-500/30 text-[var(--color-warning-text)] text-xs flex items-center gap-2">
-                        <AlertCircle size={15} className="shrink-0 text-amber-500" />
+                      <div className="p-2.5 rounded border text-[var(--color-warning-text)] text-xs flex items-center gap-2" style={{ backgroundColor: 'color-mix(in srgb, var(--color-warning) 10%, transparent)', borderColor: 'color-mix(in srgb, var(--color-warning) 30%, transparent)' }}>
+                        <AlertCircle size={15} className="shrink-0" style={{ color: 'var(--color-warning)' }} />
                         <span>
                           {text(
                             '来源凭证缺失提示：未能精确匹配目标快照片段，已展示当前可用快照解析结果。',
@@ -247,7 +247,7 @@ export default function WorkspaceSourcesTab() {
                       <span className="flex items-center gap-2">
                         <span>{text('Markdown 标题层级与片段解析', 'Markdown Heading Hierarchy & Fragments')}</span>
                         {selectedSnapshotId && (
-                          <span className="px-1.5 py-0.5 rounded bg-blue-500/10 text-[var(--color-info)] font-mono text-[10px]">
+                          <span className="px-1.5 py-0.5 rounded text-[var(--color-info)] font-mono text-[10px]" style={{ backgroundColor: 'color-mix(in srgb, var(--color-info) 10%, transparent)' }}>
                             快照: {selectedSnapshotId.slice(0, 10)}
                           </span>
                         )}

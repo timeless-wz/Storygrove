@@ -792,6 +792,17 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
     CREATE INDEX IF NOT EXISTS idx_workspace_sources_project_path
       ON workspace_sources(project_id, relative_path);
 
+    CREATE TABLE IF NOT EXISTS workspace_binding_states (
+      project_id TEXT NOT NULL PRIMARY KEY,
+      current_path TEXT NOT NULL DEFAULT '',
+      healthy_path TEXT NOT NULL DEFAULT '',
+      healthy_scanned_at TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspace_binding_states_healthy
+      ON workspace_binding_states(project_id, healthy_path);
+
     CREATE TABLE IF NOT EXISTS workspace_source_snapshots (
       snapshot_id TEXT PRIMARY KEY,
       source_id TEXT NOT NULL,
@@ -1466,6 +1477,17 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
   }
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS workspace_binding_states (
+      project_id TEXT NOT NULL PRIMARY KEY,
+      current_path TEXT NOT NULL DEFAULT '',
+      healthy_path TEXT NOT NULL DEFAULT '',
+      healthy_scanned_at TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspace_binding_states_healthy
+      ON workspace_binding_states(project_id, healthy_path);
+
     CREATE TABLE IF NOT EXISTS workspace_source_snapshots (
       snapshot_id TEXT PRIMARY KEY,
       source_id TEXT NOT NULL,
@@ -1757,6 +1779,27 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
   }
 
   migrateLegacyWorkspaceHubData(db)
+
+  // Existing databases only have the legacy project_core path. Backfill the
+  // authoritative per-session state once, after legacy approved snapshots have
+  // been promoted; runtime reads never fall back to legacy fragment tables.
+  db.exec(`
+    INSERT OR IGNORE INTO workspace_binding_states (
+      project_id, current_path, healthy_path, healthy_scanned_at
+    )
+    SELECT 'main',
+           COALESCE(external_workspace_path, ''),
+           CASE WHEN EXISTS (
+             SELECT 1 FROM workspace_sources
+             WHERE project_id = 'main'
+               AND approved_snapshot_id IS NOT NULL
+               AND approved_snapshot_id <> ''
+               AND is_missing = 0
+           ) THEN COALESCE(external_workspace_path, '') ELSE '' END,
+           COALESCE(external_workspace_scanned_at, '')
+    FROM project_core
+    WHERE id = 'main'
+  `)
 
   migrateDraftUnitCounts(db)
 }

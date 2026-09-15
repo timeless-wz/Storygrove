@@ -30,6 +30,12 @@ function requiredDb(): BetterSqlite3.Database {
   return db
 }
 
+function requiredSessionProjectId(projectId: string | undefined, operation: string): string {
+  const normalized = projectId?.trim()
+  if (!normalized) throw new Error(`${operation} 必须提供 sessionProjectId`)
+  return normalized
+}
+
 function hashString(str: string): string {
   return createHash('sha256').update(str, 'utf8').digest('hex')
 }
@@ -603,7 +609,12 @@ export class WorkspaceHubRepository {
   /** 获取中枢摘要状态 */
   static getStatus(projectId = 'main'): WorkspaceHubStatus {
     const db = requiredDb()
-    const projectRow = db.prepare(`
+    const bindingState = db.prepare(`
+      SELECT current_path, healthy_scanned_at
+      FROM workspace_binding_states
+      WHERE project_id = ?
+    `).get(projectId) as { current_path?: string; healthy_scanned_at?: string } | undefined
+    const legacyProjectRow = db.prepare(`
       SELECT external_workspace_path, external_workspace_scanned_at
       FROM project_core WHERE id = ?
     `).get(PROJECT_CORE_ROW_ID) as { external_workspace_path?: string; external_workspace_scanned_at?: string } | undefined
@@ -641,8 +652,8 @@ export class WorkspaceHubRepository {
     `).get(projectId) as { count: number }).count
 
     return {
-      externalWorkspacePath: projectRow?.external_workspace_path ?? '',
-      lastScannedAt: projectRow?.external_workspace_scanned_at ?? '',
+      externalWorkspacePath: bindingState?.current_path ?? (projectId === 'main' ? legacyProjectRow?.external_workspace_path ?? '' : ''),
+      lastScannedAt: bindingState?.healthy_scanned_at ?? (projectId === 'main' ? legacyProjectRow?.external_workspace_scanned_at ?? '' : ''),
       totalFiles: counts?.total_files ?? 0,
       recognizedFiles: counts?.recognized_files ?? 0,
       missingFiles: counts?.missing_files ?? 0,
@@ -653,9 +664,13 @@ export class WorkspaceHubRepository {
   }
 
   /** 获取当前项目关联的外部母稿绝对路径 */
-  static getBoundWorkspacePath(_projectId = 'main'): string {
-    void _projectId
+  static getBoundWorkspacePath(projectId = 'main'): string {
     const db = requiredDb()
+    const bindingState = db.prepare(`
+      SELECT current_path FROM workspace_binding_states WHERE project_id = ?
+    `).get(projectId) as { current_path?: string } | undefined
+    if (bindingState) return bindingState.current_path ?? ''
+    if (projectId !== 'main') return ''
     const row = db.prepare(`
       SELECT external_workspace_path FROM project_core WHERE id = ?
     `).get(PROJECT_CORE_ROW_ID) as { external_workspace_path?: string } | undefined
@@ -663,36 +678,198 @@ export class WorkspaceHubRepository {
   }
 
   /** 关联外部创作母稿目录 */
-  static bindWorkspaceDirectory(externalPath: string, _projectId = 'main'): void {
-    void _projectId
+  static bindWorkspaceDirectory(externalPath: string, projectId = 'main'): void {
     const db = requiredDb()
+    const sessionProjectId = requiredSessionProjectId(projectId, 'bindWorkspaceDirectory')
+    const normalizedPath = externalPath.trim()
+    if (!normalizedPath) throw new Error('bindWorkspaceDirectory 必须提供有效目录路径')
     db.transaction(() => {
+      const previousCore = db.prepare(`
+        SELECT external_workspace_path FROM project_core WHERE id = ?
+      `).get(PROJECT_CORE_ROW_ID) as { external_workspace_path?: string } | undefined
       const result = db.prepare(`
         UPDATE project_core
         SET external_workspace_path = ?, updated_at = datetime('now')
         WHERE id = ?
-      `).run(externalPath.trim(), PROJECT_CORE_ROW_ID)
+      `).run(normalizedPath, PROJECT_CORE_ROW_ID)
       if (result.changes !== 1) {
         throw new Error(`未能绑定外部目录到 project_core: 未找到 id = '${PROJECT_CORE_ROW_ID}' 的项目主记录`)
+      }
+
+      const existingState = db.prepare(`
+        SELECT healthy_path FROM workspace_binding_states WHERE project_id = ?
+      `).get(sessionProjectId) as { healthy_path?: string } | undefined
+      if (existingState) {
+        db.prepare(`
+          UPDATE workspace_binding_states
+          SET current_path = ?, updated_at = datetime('now')
+          WHERE project_id = ?
+        `).run(normalizedPath, sessionProjectId)
+      } else {
+        const canInheritLegacyHealth = sessionProjectId === 'main'
+          && Boolean(previousCore?.external_workspace_path)
+          && Boolean(db.prepare(`
+            SELECT 1 FROM workspace_sources
+            WHERE project_id = ? AND approved_snapshot_id IS NOT NULL
+              AND approved_snapshot_id <> '' AND is_missing = 0
+            LIMIT 1
+          `).get(sessionProjectId))
+        db.prepare(`
+          INSERT INTO workspace_binding_states (
+            project_id, current_path, healthy_path, healthy_scanned_at
+          ) VALUES (?, ?, ?, COALESCE((
+            SELECT external_workspace_scanned_at FROM project_core WHERE id = ?
+          ), ''))
+        `).run(
+          sessionProjectId,
+          normalizedPath,
+          canInheritLegacyHealth ? previousCore?.external_workspace_path ?? '' : '',
+          PROJECT_CORE_ROW_ID,
+        )
       }
     })()
   }
 
-  /** 解除外部目录关联（仅清空关联记录与索引，绝不删除外部文件） */
-  static unbindWorkspaceDirectory(projectId = 'main'): void {
+  /**
+   * 解除当前绑定，但保留项目来源、批准快照、片段和作者规则，供补偿失败后事务恢复。
+   * 该方法不再删除 workspace_sources，避免取消扫描破坏最后一次健康状态。
+   */
+  static unbindWorkspaceDirectory(projectId: string): void {
     const db = requiredDb()
+    const sessionProjectId = requiredSessionProjectId(projectId, 'unbindWorkspaceDirectory')
     db.transaction(() => {
+      const currentState = db.prepare(`
+        SELECT current_path, healthy_path FROM workspace_binding_states WHERE project_id = ?
+      `).get(sessionProjectId) as { current_path?: string; healthy_path?: string } | undefined
+      const currentCore = db.prepare(`
+        SELECT external_workspace_path, external_workspace_scanned_at FROM project_core WHERE id = ?
+      `).get(PROJECT_CORE_ROW_ID) as {
+        external_workspace_path?: string
+        external_workspace_scanned_at?: string
+      } | undefined
+      if (!currentCore) {
+        throw new Error(`未能更新 project_core 主记录: 未找到 id = '${PROJECT_CORE_ROW_ID}' 的项目主记录`)
+      }
       const result = db.prepare(`
         UPDATE project_core
         SET external_workspace_path = '', external_workspace_scanned_at = '', updated_at = datetime('now')
         WHERE id = ?
       `).run(PROJECT_CORE_ROW_ID)
-      if (result.changes !== 1) {
+      const ownsLegacyActivePath = sessionProjectId === 'main'
+        || currentState?.current_path === (currentCore.external_workspace_path ?? '')
+      if (result.changes !== 1 && ownsLegacyActivePath) {
         throw new Error(`未能更新 project_core 主记录: 未找到 id = '${PROJECT_CORE_ROW_ID}' 的项目主记录`)
       }
-      // 清空关联的外部来源记录与快照缓存
-      db.prepare('DELETE FROM workspace_sources WHERE project_id = ?').run(projectId)
+      if (result.changes === 1 && !ownsLegacyActivePath) {
+        // A different session owns the legacy active path. Re-apply it while
+        // changing only this session's durable binding state.
+        db.prepare(`
+          UPDATE project_core
+          SET external_workspace_path = ?, external_workspace_scanned_at = ?, updated_at = datetime('now')
+          WHERE id = ?
+        `).run(currentCore.external_workspace_path ?? '', currentCore.external_workspace_scanned_at ?? '', PROJECT_CORE_ROW_ID)
+      }
+      if (currentState) {
+        db.prepare(`
+          UPDATE workspace_binding_states
+          SET current_path = '', healthy_path = ?, healthy_scanned_at = healthy_scanned_at,
+              updated_at = datetime('now')
+          WHERE project_id = ?
+        `).run(currentState.healthy_path ?? '', sessionProjectId)
+      } else {
+        const canInheritLegacyHealth = sessionProjectId === 'main'
+          && Boolean(currentCore?.external_workspace_path)
+          && Boolean(db.prepare(`
+            SELECT 1 FROM workspace_sources
+            WHERE project_id = ? AND approved_snapshot_id IS NOT NULL
+              AND approved_snapshot_id <> '' AND is_missing = 0
+            LIMIT 1
+          `).get(sessionProjectId))
+        db.prepare(`
+          INSERT INTO workspace_binding_states (
+            project_id, current_path, healthy_path, healthy_scanned_at
+          ) VALUES (?, '', ?, ?)
+        `).run(
+          sessionProjectId,
+          canInheritLegacyHealth ? currentCore?.external_workspace_path ?? '' : '',
+          canInheritLegacyHealth ? currentCore?.external_workspace_scanned_at ?? '' : '',
+        )
+      }
     })()
+  }
+
+  /**
+   * 恢复本项目最后一次完整扫描成功的绑定路径。仅恢复仍存在且未缺失的批准快照，
+   * 不从旧 fragments 表回退，也不写入 setting_rules。
+   */
+  static restoreWorkspaceDirectory(projectId: string): { success: boolean; error?: string } {
+    const db = requiredDb()
+    const sessionProjectId = requiredSessionProjectId(projectId, 'restoreWorkspaceDirectory')
+    try {
+      db.transaction(() => {
+        const state = db.prepare(`
+          SELECT healthy_path, healthy_scanned_at
+          FROM workspace_binding_states WHERE project_id = ?
+        `).get(sessionProjectId) as { healthy_path?: string; healthy_scanned_at?: string } | undefined
+        if (!state?.healthy_path) throw new Error('没有可恢复的健康绑定状态')
+
+        const invalidApproved = db.prepare(`
+          SELECT src.id
+          FROM workspace_sources AS src
+          WHERE src.project_id = ?
+            AND src.approved_snapshot_id IS NOT NULL
+            AND src.approved_snapshot_id <> ''
+            AND (
+              src.is_missing = 1
+              OR NOT EXISTS (
+                SELECT 1 FROM workspace_source_snapshots AS snap
+                WHERE snap.snapshot_id = src.approved_snapshot_id
+                  AND snap.source_id = src.id
+                  AND snap.project_id = src.project_id
+              )
+            )
+          LIMIT 1
+        `).get(sessionProjectId) as { id: string } | undefined
+        if (invalidApproved) {
+          throw new Error('健康绑定恢复失败：批准来源或快照已缺失')
+        }
+
+        const core = db.prepare(`
+          SELECT external_workspace_path, external_workspace_scanned_at FROM project_core WHERE id = ?
+        `).get(PROJECT_CORE_ROW_ID) as {
+          external_workspace_path?: string
+          external_workspace_scanned_at?: string
+        } | undefined
+        if (!core) {
+          throw new Error(`未能恢复 project_core 主记录: 未找到 id = '${PROJECT_CORE_ROW_ID}' 的项目主记录`)
+        }
+        const coreResult = db.prepare(`
+          UPDATE project_core
+          SET external_workspace_path = ?, external_workspace_scanned_at = ?, updated_at = datetime('now')
+          WHERE id = ?
+        `).run(state.healthy_path, state.healthy_scanned_at ?? '', PROJECT_CORE_ROW_ID)
+        const canOwnLegacyActivePath = core.external_workspace_path === ''
+          || core.external_workspace_path === state.healthy_path
+        if (coreResult.changes !== 1 && canOwnLegacyActivePath) {
+          throw new Error(`未能恢复 project_core 主记录: 未找到 id = '${PROJECT_CORE_ROW_ID}' 的项目主记录`)
+        }
+        if (coreResult.changes === 1 && !canOwnLegacyActivePath) {
+          db.prepare(`
+            UPDATE project_core
+            SET external_workspace_path = ?, external_workspace_scanned_at = ?, updated_at = datetime('now')
+            WHERE id = ?
+          `).run(core.external_workspace_path ?? '', core.external_workspace_scanned_at ?? '', PROJECT_CORE_ROW_ID)
+        }
+        db.prepare(`
+          UPDATE workspace_binding_states
+          SET current_path = ?, updated_at = datetime('now')
+          WHERE project_id = ?
+        `).run(state.healthy_path, sessionProjectId)
+      })()
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
   }
 
   /** 记录扫描完成时间 */
@@ -1220,6 +1397,30 @@ export class WorkspaceHubRepository {
       `).run(payload.scanTime, PROJECT_CORE_ROW_ID)
       if (scanTimeUpdate.changes !== 1) {
         throw new Error(`未能更新 project_core 扫描时间: 未找到 id = '${PROJECT_CORE_ROW_ID}' 的项目主记录`)
+      }
+
+      // 只有完整扫描已经原子提交，才推进本项目的健康绑定游标。取消、失败或截断
+      // 的扫描不会改变它，因此后续补偿可以恢复到上一次健康目录。
+      if (payload.enumerationComplete && payload.activeSourceIds.length > 0) {
+        db.prepare(`
+          INSERT INTO workspace_binding_states (
+            project_id, current_path, healthy_path, healthy_scanned_at
+          ) VALUES (?, COALESCE((
+            SELECT current_path FROM workspace_binding_states WHERE project_id = ?
+          ), ''), COALESCE((
+            SELECT current_path FROM workspace_binding_states WHERE project_id = ?
+          ), ''), ?)
+          ON CONFLICT(project_id) DO UPDATE SET
+            healthy_path = CASE
+              WHEN workspace_binding_states.current_path <> '' THEN workspace_binding_states.current_path
+              ELSE workspace_binding_states.healthy_path
+            END,
+            healthy_scanned_at = CASE
+              WHEN workspace_binding_states.current_path <> '' THEN excluded.healthy_scanned_at
+              ELSE workspace_binding_states.healthy_scanned_at
+            END,
+            updated_at = datetime('now')
+        `).run(payload.projectId, payload.projectId, payload.projectId, payload.scanTime)
       }
     })()
   }

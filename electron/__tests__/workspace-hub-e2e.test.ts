@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { closeProjectDatabase, getProjectDb, initProjectDatabase } from '../database'
 import { WorkspaceHubRepository } from '../repositories/workspace-hub-repository'
-import { WorkspaceScannerService } from '../services/workspace-scanner-service'
+import { getCanonicalPath, WorkspaceScannerService } from '../services/workspace-scanner-service'
 import { ChapterContextAssembler } from '../services/chapter-context-assembler'
 import { CharacterRosterRepository } from '../repositories/character-roster-repository'
 
@@ -472,11 +472,69 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
     expect(missingSource).toBeDefined()
     expect(missingSource!.isMissing).toBe(true)
 
-    WorkspaceHubRepository.unbindWorkspaceDirectory()
+    WorkspaceHubRepository.unbindWorkspaceDirectory('main')
     const status = WorkspaceHubRepository.getStatus()
     expect(status.externalWorkspacePath).toBe('')
 
     expect(fs.existsSync(fileA)).toBe(true)
     expect(fs.readFileSync(fileA, 'utf8')).toBe('# 设定A\n内容A')
+  })
+
+  it('transactionally restores the last healthy binding after a cancelled compensation scan without mixing projects', async () => {
+    const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-recovery-project-'))
+    const directoryA = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-recovery-a-'))
+    const directoryB = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-recovery-b-'))
+    roots.push(projectRoot, directoryA, directoryB)
+    initProject(projectRoot)
+
+    const projectId = 'session-recovery-a'
+    const fileA = path.join(directoryA, '00_创作方向.md')
+    const fileB = path.join(directoryB, '00_创作方向.md')
+    fs.writeFileSync(fileA, '# 原则\n目录 A 的已批准健康内容', 'utf8')
+    fs.writeFileSync(fileB, '# 原则\n目录 B 的未批准内容', 'utf8')
+
+    WorkspaceHubRepository.bindWorkspaceDirectory(directoryA, projectId)
+    expect((await WorkspaceScannerService.scanDirectory(directoryA, projectId)).success).toBe(true)
+    const scannedA = WorkspaceHubRepository.listSources(projectId)[0]
+    expect(WorkspaceHubRepository.approveSource(scannedA.id, projectId).success).toBe(true)
+    const healthyA = WorkspaceHubRepository.listSources(projectId)[0]
+    const approvedSnapshotId = healthyA.approvedSnapshotId!
+    expect(approvedSnapshotId).toBeTruthy()
+
+    // B is bound for a compensation attempt, but cancellation happens before
+    // commit; the repository must still remember A as the healthy binding.
+    WorkspaceHubRepository.bindWorkspaceDirectory(directoryB, projectId)
+    const abortController = new AbortController()
+    const pendingScan = WorkspaceScannerService.scanDirectory(directoryB, projectId, { signal: abortController.signal })
+    abortController.abort()
+    const cancelled = await pendingScan
+    expect(cancelled.success).toBe(false)
+    expect(cancelled.error).toContain('取消')
+
+    WorkspaceHubRepository.unbindWorkspaceDirectory(projectId)
+    const restored = WorkspaceHubRepository.restoreWorkspaceDirectory(projectId)
+    expect(restored).toEqual({ success: true })
+
+    const status = WorkspaceHubRepository.getStatus(projectId)
+    expect(status.externalWorkspacePath).toBe(directoryA)
+    expect(status.missingFiles).toBe(0)
+
+    const sourcesAfterRestore = WorkspaceHubRepository.listSources(projectId)
+    expect(sourcesAfterRestore).toHaveLength(1)
+    expect(sourcesAfterRestore[0].absolutePath).toBe(getCanonicalPath(fileA))
+    expect(sourcesAfterRestore[0].isMissing).toBe(false)
+    expect(sourcesAfterRestore[0].approvedSnapshotId).toBe(approvedSnapshotId)
+    expect(WorkspaceHubRepository.listSources('another-session')).toEqual([])
+
+    const db = getProjectDb()!
+    expect(db.prepare(`
+      SELECT snapshot_id FROM workspace_source_snapshots
+      WHERE snapshot_id = ? AND source_id = ? AND project_id = ?
+    `).get(approvedSnapshotId, healthyA.id, projectId)).toBeDefined()
+    const effectiveFragments = WorkspaceHubRepository.queryFragments({ projectId })
+    expect(effectiveFragments.map(fragment => fragment.content)).toEqual(['# 原则\n目录 A 的已批准健康内容'])
+    expect(effectiveFragments.some(fragment => fragment.content.includes('目录 B'))).toBe(false)
+    expect(db.prepare('SELECT COUNT(*) AS count FROM workspace_sources WHERE project_id = ? AND absolute_path = ?')
+      .get(projectId, getCanonicalPath(fileB))).toEqual({ count: 0 })
   })
 })

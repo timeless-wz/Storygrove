@@ -57,6 +57,7 @@ describe('Workspace Hub - End-to-End Traceability & Snapshot Context Isolation',
     const projDir = createDir('proj-trace-')
     const extDir = createDir('ext-trace-')
     initProjectDatabase(projDir)
+    getProjectDb()!.prepare("INSERT OR IGNORE INTO project_core (id, project_name) VALUES ('main', 'Traceability Test Novel')").run()
 
     const docPrinciples = path.join(extDir, '00_创作方向.md')
     fs.writeFileSync(docPrinciples, '# 核心原则\n第一条：行文克制冷峻。\n', 'utf8')
@@ -137,6 +138,7 @@ describe('Workspace Hub - End-to-End Traceability & Snapshot Context Isolation',
     const projDir = createDir('proj-trace-rules-')
     const extDir = createDir('ext-trace-rules-')
     initProjectDatabase(projDir)
+    getProjectDb()!.prepare("INSERT OR IGNORE INTO project_core (id, project_name) VALUES ('main', 'Traceability Test Novel')").run()
     const db = getProjectDb()!
 
     const docPrinciples = path.join(extDir, '00_创作方向.md')
@@ -386,6 +388,7 @@ describe('Workspace Hub - End-to-End Traceability & Snapshot Context Isolation',
     const projDir = createDir('proj-frag-id-')
     const extDir = createDir('ext-frag-id-')
     initProjectDatabase(projDir)
+    getProjectDb()!.prepare("INSERT OR IGNORE INTO project_core (id, project_name) VALUES ('main', 'Traceability Test Novel')").run()
     const db = getProjectDb()!
 
     const docRules = path.join(extDir, '01_已确认设定清单.md')
@@ -467,6 +470,7 @@ describe('Workspace Hub - End-to-End Traceability & Snapshot Context Isolation',
     const projDir = createDir('proj-tight-budget-')
     const extDir = createDir('ext-tight-materials-')
     initProjectDatabase(projDir)
+    getProjectDb()!.prepare("INSERT OR IGNORE INTO project_core (id, project_name) VALUES ('main', 'Traceability Test Novel')").run()
 
     // 写入包含正常规则、正文素材与废止设定记录的文件
     const docRules = path.join(extDir, '01_已确认设定清单.md')
@@ -548,6 +552,7 @@ describe('Workspace Hub - End-to-End Traceability & Snapshot Context Isolation',
     const projDir = createDir('proj-locate-trace-')
     const extDir = createDir('ext-locate-materials-')
     initProjectDatabase(projDir)
+    getProjectDb()!.prepare("INSERT OR IGNORE INTO project_core (id, project_name) VALUES ('main', 'Traceability Test Novel')").run()
 
     const docRules = path.join(extDir, '01_已确认设定清单.md')
     const docDeprecated = path.join(extDir, '06_废案与漏洞记录.md')
@@ -702,6 +707,7 @@ describe('Workspace Hub - End-to-End Traceability & Snapshot Context Isolation',
 
     // 2. 初始化并扫描项目 B
     initProjectDatabase(projDirB)
+    getProjectDb()!.prepare("INSERT OR IGNORE INTO project_core (id, project_name) VALUES ('main', 'Traceability Test Novel')").run()
     const leaseB = projectAccess.beginSession({ kind: 'manifest', projectId: 'project-B', rootPath: projDirB })
     const sessionB = { projectId: 'project-B', leaseId: leaseB.leaseId, projectPath: projDirB }
 
@@ -738,6 +744,7 @@ describe('Workspace Hub - End-to-End Traceability & Snapshot Context Isolation',
     // 3. 切换到项目 A 并扫描
     closeProjectDatabase()
     initProjectDatabase(projDirA)
+    getProjectDb()!.prepare("INSERT OR IGNORE INTO project_core (id, project_name) VALUES ('main', 'Traceability Test Novel')").run()
     const leaseA = projectAccess.beginSession({ kind: 'manifest', projectId: 'project-A', rootPath: projDirA })
     const sessionA = { projectId: 'project-A', leaseId: leaseA.leaseId, projectPath: projDirA }
 
@@ -890,6 +897,5 @@ describe('Workspace Hub - End-to-End Traceability & Snapshot Context Isolation',
     expect(fragAInDetail.content).toContain('绝密A')
   })
 })
-
 
 
