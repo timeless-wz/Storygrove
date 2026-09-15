@@ -210,7 +210,7 @@ function runProbeLibrary(script: string): string {
       '-ExecutionPolicy',
       'Bypass',
       '-Command',
-      `. ${quotePowerShell(probeScript)} -LoadProbeLibrary\n${script}`,
+      `$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n. ${quotePowerShell(probeScript)} -LoadProbeLibrary\n${script}`,
     ],
     { encoding: 'utf8' },
   )
@@ -224,7 +224,8 @@ function runInstallerLibrary(script: string): string {
       '-ExecutionPolicy',
       'Bypass',
       '-Command',
-      `$installer = (Get-Command powershell.exe).Source
+      `$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$installer = (Get-Command powershell.exe).Source
 . ${quotePowerShell(installerScript)} -InstallerPath $installer -InstallerTimeoutSeconds 12 -PostExitQuietSeconds 5 -LoadInstallerLibrary
 ${script}`,
     ],
@@ -240,7 +241,7 @@ function runReleaseMonitorLibrary(script: string): string {
       '-ExecutionPolicy',
       'Bypass',
       '-Command',
-      `. ${quotePowerShell(releaseMonitorScript)} -LoadMonitorLibrary\n${script}`,
+      `$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n. ${quotePowerShell(releaseMonitorScript)} -LoadMonitorLibrary\n${script}`,
     ],
     { encoding: 'utf8' },
   )
