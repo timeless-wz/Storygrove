@@ -15,6 +15,11 @@
 )
 
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 otherwise emits stdout in the console code page (for
+# example GBK on a zh-CN host). The Node orchestrator and the smoke tests decode
+# this process's stdout as UTF-8, so non-ASCII process names, window titles and
+# evidence payloads must be written as UTF-8.
+$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
 if (-not ([System.Management.Automation.PSTypeName]'AiNovelSmoke.TopLevelWindowProbe').Type) {
   Add-Type -TypeDefinition @'
@@ -166,8 +171,30 @@ function Get-AiNovelProcessTreeIds {
   return @($processIds)
 }
 
+function Get-AiNovelProcessNameByProcessId {
+  # A desktop can expose several hundred top-level windows while only a few dozen
+  # processes own them. Opening a handle per window costs seconds per snapshot
+  # (measured ~7-8s for ~685 windows) and makes both the post-exit quiet loop and
+  # the release monitor miss their intervals, so read one process snapshot
+  # instead. ProcessName is already materialized during enumeration.
+  $names = @{}
+  foreach ($candidate in [System.Diagnostics.Process]::GetProcesses()) {
+    try {
+      $names[[int]$candidate.Id] = $candidate.ProcessName
+    }
+    catch {
+      # A process that exits mid-snapshot keeps the '<exited>' fallback by omission.
+    }
+    finally {
+      $candidate.Dispose()
+    }
+  }
+  return $names
+}
+
 function Get-AiNovelTopLevelWindowSnapshot {
   $windows = [System.Collections.Generic.List[object]]::new()
+  $processNamesByProcessId = Get-AiNovelProcessNameByProcessId
   [AiNovelSmoke.TopLevelWindowProbe]::EnumWindows({
     param($handle, $state)
     $length = [AiNovelSmoke.TopLevelWindowProbe]::GetWindowTextLength($handle)
@@ -180,13 +207,8 @@ function Get-AiNovelTopLevelWindowSnapshot {
     $windowProcessId = 0
     [void][AiNovelSmoke.TopLevelWindowProbe]::GetWindowThreadProcessId($handle, [ref]$windowProcessId)
     $processName = '<exited>'
-    try {
-      $owner = [System.Diagnostics.Process]::GetProcessById([int]$windowProcessId)
-      $processName = $owner.ProcessName
-      $owner.Dispose()
-    }
-    catch {
-      # The owner may exit between EnumWindows and process lookup; retain the PID as evidence.
+    if ($processNamesByProcessId.ContainsKey([int]$windowProcessId)) {
+      $processName = [string]$processNamesByProcessId[[int]$windowProcessId]
     }
 
     $windows.Add([pscustomobject]@{
