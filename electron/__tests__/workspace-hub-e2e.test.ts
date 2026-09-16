@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { closeProjectDatabase, getProjectDb, initProjectDatabase } from '../database'
 import { WorkspaceHubRepository } from '../repositories/workspace-hub-repository'
-import { WorkspaceScannerService } from '../services/workspace-scanner-service'
+import { getCanonicalPath, WorkspaceScannerService } from '../services/workspace-scanner-service'
 import { ChapterContextAssembler } from '../services/chapter-context-assembler'
 import { CharacterRosterRepository } from '../repositories/character-roster-repository'
 
@@ -22,13 +22,18 @@ afterEach(() => {
   }
 })
 
+function initProject(projectRoot: string): void {
+  initProjectDatabase(projectRoot)
+  getProjectDb()!.prepare("INSERT OR IGNORE INTO project_core (id, project_name) VALUES ('main', 'E2E Test Novel')").run()
+}
+
 describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
   it('scans external workspace in strictly read-only mode without mutating files', async () => {
     const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-novel-proj-'))
     const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-novel-external-'))
     roots.push(projectRoot, externalRoot)
 
-    initProjectDatabase(projectRoot)
+    initProject(projectRoot)
 
     const file1Path = path.join(externalRoot, '01_已确认设定清单.md')
     const file1Content = '# 力量体系\n\n超凡序列共有九阶。\n\n## 第一阶：信使\n掌握基础传信与感知。'
@@ -75,7 +80,7 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
     expect(categories).toContain('deprecated')
 
     // Verify Candidate Extraction: Lin Xun and Gu Chen extracted as candidates
-    const candidates = WorkspaceHubRepository.listCandidates({ candidateType: 'character' })
+    const candidates = WorkspaceHubRepository.listCandidates({ projectId: 'main', candidateType: 'character' })
     expect(candidates.length).toBe(2)
     const names = candidates.map(c => JSON.parse(c.suggestedData).name)
     expect(names).toContain('林巡')
@@ -90,7 +95,7 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
     const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-novel-external-'))
     roots.push(projectRoot, externalRoot)
 
-    initProjectDatabase(projectRoot)
+    initProject(projectRoot)
     getProjectDb()!.prepare("INSERT OR IGNORE INTO project_core (id) VALUES ('main')").run()
 
     const charDoc = path.join(externalRoot, '05_人物与关系.md')
@@ -99,7 +104,7 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
     WorkspaceHubRepository.bindWorkspaceDirectory(externalRoot)
     await WorkspaceScannerService.scanDirectory(externalRoot)
 
-    const candidates = WorkspaceHubRepository.listCandidates({ candidateType: 'character' })
+    const candidates = WorkspaceHubRepository.listCandidates({ projectId: 'main', candidateType: 'character' })
     expect(candidates.length).toBe(1)
     const candidate = candidates[0]
     expect(candidate.suggestedData).toContain('陆言明')
@@ -109,11 +114,11 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
     expect(rosterBefore.entries.length).toBe(0)
 
     // Author approves candidate
-    const approveResult = WorkspaceHubRepository.approveCandidate(candidate.candidateId)
+    const approveResult = WorkspaceHubRepository.approveCandidate(candidate.candidateId, 'main')
     if (!approveResult.success) console.error('approveCandidate error:', approveResult.error)
     expect(approveResult.success).toBe(true)
 
-    const candidatesAfter = WorkspaceHubRepository.listCandidates({ candidateType: 'character' })
+    const candidatesAfter = WorkspaceHubRepository.listCandidates({ projectId: 'main', candidateType: 'character' })
     expect(candidatesAfter[0].status).toBe('approved')
 
     const rosterAfter = CharacterRosterRepository.read()
@@ -132,7 +137,7 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
   it('manages confirmed, candidate, background, and deprecated rules correctly in SQLite', () => {
     const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-novel-proj-'))
     roots.push(projectRoot)
-    initProjectDatabase(projectRoot)
+    initProject(projectRoot)
 
     WorkspaceHubRepository.upsertRule({
       ruleId: 'rule-confirmed-1',
@@ -184,7 +189,7 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
     expect(deprecatedRules.length).toBe(1)
     expect(deprecatedRules[0].ruleId).toBe('rule-deprecated-1')
 
-    WorkspaceHubRepository.updateRuleStatus('rule-candidate-1', 'confirmed')
+    WorkspaceHubRepository.updateRuleStatus('rule-candidate-1', 'main', 'confirmed')
     const confirmedAfter = WorkspaceHubRepository.listRules('main', 'confirmed')
     expect(confirmedAfter.length).toBe(2)
   })
@@ -194,7 +199,7 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
     const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-novel-external-'))
     roots.push(projectRoot, externalRoot)
 
-    initProjectDatabase(projectRoot)
+    initProject(projectRoot)
     getProjectDb()!.prepare("INSERT OR IGNORE INTO project_core (id) VALUES ('main')").run()
 
     fs.writeFileSync(path.join(externalRoot, '00_创作方向.md'), '# 创作方向\n硬核克苏鲁探险\n', 'utf8')
@@ -260,7 +265,7 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
     const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-versioned-project-'))
     const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-versioned-source-'))
     roots.push(projectRoot, externalRoot)
-    initProjectDatabase(projectRoot)
+    initProject(projectRoot)
     getProjectDb()!.prepare("INSERT OR IGNORE INTO project_core (id) VALUES ('main')").run()
 
     WorkspaceHubRepository.upsertRule({
@@ -353,7 +358,7 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
     const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-no-fallback-project-'))
     const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-no-fallback-source-'))
     roots.push(projectRoot, externalRoot)
-    initProjectDatabase(projectRoot)
+    initProject(projectRoot)
     const sourcePath = path.join(externalRoot, '00_创作方向.md')
     fs.writeFileSync(sourcePath, '# 原则\n批准快照正文', 'utf8')
     await WorkspaceScannerService.scanDirectory(externalRoot)
@@ -377,7 +382,7 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
     const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-cancel-project-'))
     const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-cancel-source-'))
     roots.push(projectRoot, externalRoot)
-    initProjectDatabase(projectRoot)
+    initProject(projectRoot)
     const sourcePath = path.join(externalRoot, '00_创作方向.md')
     fs.writeFileSync(sourcePath, '# 原则\nV1 健康快照', 'utf8')
     await WorkspaceScannerService.scanDirectory(externalRoot)
@@ -404,7 +409,7 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
   it('audits a one-time legacy migration and migrates only explicitly imported sources', () => {
     const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-legacy-migration-'))
     roots.push(projectRoot)
-    initProjectDatabase(projectRoot)
+    initProject(projectRoot)
     const db = getProjectDb()!
     db.prepare(`
       INSERT INTO workspace_sources (
@@ -428,7 +433,7 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
     insertLegacy.run('legacy-unapproved-fragment', 'legacy-unapproved-source', '未经批准的旧正文', 'frag-unapproved')
     db.prepare("DELETE FROM workspace_hub_migration_audit WHERE migration_id = 'workspace-hub-approved-snapshots-v1'").run()
     closeProjectDatabase()
-    initProjectDatabase(projectRoot)
+    initProject(projectRoot)
 
     const migrated = WorkspaceHubRepository.queryFragments({ categories: ['creation_principles'] })
     expect(migrated.map(fragment => fragment.content)).toEqual(['明确批准的旧正文'])
@@ -445,7 +450,7 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
     const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-novel-external-'))
     roots.push(projectRoot, externalRoot)
 
-    initProjectDatabase(projectRoot)
+    initProject(projectRoot)
 
     const fileA = path.join(externalRoot, '01_已确认设定清单.md')
     const fileB = path.join(externalRoot, '02_剧情总纲.md')
@@ -467,11 +472,69 @@ describe('Workspace Hub - SQLite End-to-End & Read-Only Guarantee', () => {
     expect(missingSource).toBeDefined()
     expect(missingSource!.isMissing).toBe(true)
 
-    WorkspaceHubRepository.unbindWorkspaceDirectory()
+    WorkspaceHubRepository.unbindWorkspaceDirectory('main')
     const status = WorkspaceHubRepository.getStatus()
     expect(status.externalWorkspacePath).toBe('')
 
     expect(fs.existsSync(fileA)).toBe(true)
     expect(fs.readFileSync(fileA, 'utf8')).toBe('# 设定A\n内容A')
+  })
+
+  it('transactionally restores the last healthy binding after a cancelled compensation scan without mixing projects', async () => {
+    const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-recovery-project-'))
+    const directoryA = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-recovery-a-'))
+    const directoryB = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-recovery-b-'))
+    roots.push(projectRoot, directoryA, directoryB)
+    initProject(projectRoot)
+
+    const projectId = 'session-recovery-a'
+    const fileA = path.join(directoryA, '00_创作方向.md')
+    const fileB = path.join(directoryB, '00_创作方向.md')
+    fs.writeFileSync(fileA, '# 原则\n目录 A 的已批准健康内容', 'utf8')
+    fs.writeFileSync(fileB, '# 原则\n目录 B 的未批准内容', 'utf8')
+
+    WorkspaceHubRepository.bindWorkspaceDirectory(directoryA, projectId)
+    expect((await WorkspaceScannerService.scanDirectory(directoryA, projectId)).success).toBe(true)
+    const scannedA = WorkspaceHubRepository.listSources(projectId)[0]
+    expect(WorkspaceHubRepository.approveSource(scannedA.id, projectId).success).toBe(true)
+    const healthyA = WorkspaceHubRepository.listSources(projectId)[0]
+    const approvedSnapshotId = healthyA.approvedSnapshotId!
+    expect(approvedSnapshotId).toBeTruthy()
+
+    // B is bound for a compensation attempt, but cancellation happens before
+    // commit; the repository must still remember A as the healthy binding.
+    WorkspaceHubRepository.bindWorkspaceDirectory(directoryB, projectId)
+    const abortController = new AbortController()
+    const pendingScan = WorkspaceScannerService.scanDirectory(directoryB, projectId, { signal: abortController.signal })
+    abortController.abort()
+    const cancelled = await pendingScan
+    expect(cancelled.success).toBe(false)
+    expect(cancelled.error).toContain('取消')
+
+    WorkspaceHubRepository.unbindWorkspaceDirectory(projectId)
+    const restored = WorkspaceHubRepository.restoreWorkspaceDirectory(projectId)
+    expect(restored).toEqual({ success: true })
+
+    const status = WorkspaceHubRepository.getStatus(projectId)
+    expect(status.externalWorkspacePath).toBe(directoryA)
+    expect(status.missingFiles).toBe(0)
+
+    const sourcesAfterRestore = WorkspaceHubRepository.listSources(projectId)
+    expect(sourcesAfterRestore).toHaveLength(1)
+    expect(sourcesAfterRestore[0].absolutePath).toBe(getCanonicalPath(fileA))
+    expect(sourcesAfterRestore[0].isMissing).toBe(false)
+    expect(sourcesAfterRestore[0].approvedSnapshotId).toBe(approvedSnapshotId)
+    expect(WorkspaceHubRepository.listSources('another-session')).toEqual([])
+
+    const db = getProjectDb()!
+    expect(db.prepare(`
+      SELECT snapshot_id FROM workspace_source_snapshots
+      WHERE snapshot_id = ? AND source_id = ? AND project_id = ?
+    `).get(approvedSnapshotId, healthyA.id, projectId)).toBeDefined()
+    const effectiveFragments = WorkspaceHubRepository.queryFragments({ projectId })
+    expect(effectiveFragments.map(fragment => fragment.content)).toEqual(['# 原则\n目录 A 的已批准健康内容'])
+    expect(effectiveFragments.some(fragment => fragment.content.includes('目录 B'))).toBe(false)
+    expect(db.prepare('SELECT COUNT(*) AS count FROM workspace_sources WHERE project_id = ? AND absolute_path = ?')
+      .get(projectId, getCanonicalPath(fileB))).toEqual({ count: 0 })
   })
 })

@@ -17,6 +17,8 @@ import {
 } from '../repositories/workspace-hub-repository'
 import { normalizeCharacterRole } from '../../src/shared/character-role'
 
+export const PARSER_SCHEMA_VERSION = 1
+
 export const SCAN_LIMITS = {
   MAX_DEPTH: 10,
   MAX_FILES: 1000,
@@ -98,33 +100,37 @@ export function validateWorkspacePath(
       return { valid: false, error: '禁止将操作系统磁盘根目录作为创作资料目录' }
     }
 
-    // 2. 拒绝系统核心目录 (Windows, Program Files, System32 等)
-    const lower = canonical.toLocaleLowerCase('en-US')
-    const systemDrive = (process.env.SystemDrive || 'C:').toLocaleLowerCase('en-US')
-    const forbiddenWindowsDirs = [
-      `${systemDrive}\\windows`,
-      `${systemDrive}\\program files`,
-      `${systemDrive}\\program files (x86)`,
-      `${systemDrive}\\programdata`,
+    // 2. 拒绝系统敏感目录
+    const lower = canonical.toLocaleLowerCase('en-US').replace(/\\/g, '/')
+    const forbiddenSubstrings = [
+      '/windows',
+      '/program files',
+      '/program files (x86)',
+      '/programdata',
+      '/system32',
+      '/etc',
+      '/usr',
+      '/bin',
+      '/sbin',
+      '/var',
+      '/proc',
+      '/sys',
     ]
-    for (const forbidden of forbiddenWindowsDirs) {
-      if (lower === forbidden || lower.startsWith(forbidden + '\\')) {
-        return { valid: false, error: '禁止选择系统核心目录作为创作资料目录' }
+
+    for (const sub of forbiddenSubstrings) {
+      if (lower === sub || lower.startsWith(sub + '/') || lower.includes(':' + sub)) {
+        return { valid: false, error: '禁止绑定系统敏感目录' }
       }
     }
 
-    const forbiddenPosixDirs = ['/etc', '/usr', '/bin', '/sbin', '/var', '/system', '/library']
-    for (const forbidden of forbiddenPosixDirs) {
-      if (lower === forbidden || lower.startsWith(forbidden + '/')) {
-        return { valid: false, error: '禁止选择系统核心目录作为创作资料目录' }
-      }
-    }
-
-    // 3. 拒绝当前项目根目录以及当前项目的 .vela 内部目录
+    // 3. 拒绝当前项目自身目录及其子目录（如 .vela）
     if (projectRoot) {
-      const canonicalProj = getCanonicalPath(path.resolve(projectRoot))
-      if (canonical === canonicalProj || isPathContained(canonical, canonicalProj)) {
-        return { valid: false, error: '创作资料目录不能是当前项目目录或其内部目录（如 .vela）' }
+      const canonicalProject = getCanonicalPath(projectRoot)
+      if (isPathContained(canonical, canonicalProject)) {
+        return { valid: false, error: '禁止将当前项目所在目录或其子目录作为外部创作母稿目录' }
+      }
+      if (isPathContained(canonicalProject, canonical)) {
+        return { valid: false, error: '创作资料目录不能包含当前项目目录' }
       }
     }
 
@@ -134,175 +140,146 @@ export function validateWorkspacePath(
   }
 }
 
-/** 中文数字转阿拉伯数字 */
-export function chineseToNumber(cn: string): number | null {
-  const trimmed = cn.trim()
-  if (/^\d+$/.test(trimmed)) return parseInt(trimmed, 10)
-  const map: Record<string, number> = {
-    零: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9,
-    十: 10, 百: 100, 千: 1000,
-  }
-  let total = 0
-  let current = 0
-  for (let i = 0; i < trimmed.length; i++) {
-    const char = trimmed[i]
-    const val = map[char]
-    if (val === undefined) continue
-    if (val === 10 || val === 100 || val === 1000) {
-      total += (current === 0 ? 1 : current) * val
-      current = 0
-    } else {
-      current = val
-    }
-  }
-  total += current
-  return total > 0 ? total : null
+/** 字符串 SHA-256 哈希辅助 */
+function hashString(content: string): string {
+  return createHash('sha256').update(content, 'utf8').digest('hex')
 }
 
-/** 从文本中解析章节序号或结构化范围 */
-export function extractChapterRange(text: string): { start: number | null; end: number | null } {
-  const range1 = /(?:第\s*([一二三四五六七八九十百千零\d]+)|Chapter\s*(\d+))\s*[-—–~～至到]+\s*第?\s*([一二三四五六七八九十百千零\d]+)\s*章?/iu.exec(text)
-  if (range1) {
-    const start = chineseToNumber(range1[1] ?? range1[2])
-    const end = chineseToNumber(range1[3])
-    if (start !== null && end !== null) {
-      return { start: Math.min(start, end), end: Math.max(start, end) }
-    }
-  }
-
-  const range2 = /([一二三四五六七八九十百千零\d]+)\s*[-—–~～至到]+\s*([一二三四五六七八九十百千零\d]+)\s*章/iu.exec(text)
-  if (range2) {
-    const start = chineseToNumber(range2[1])
-    const end = chineseToNumber(range2[2])
-    if (start !== null && end !== null) {
-      return { start: Math.min(start, end), end: Math.max(start, end) }
-    }
-  }
-
-  const single = /(?:第\s*([一二三四五六七八九十百千零\d]+)\s*章|Chapter\s*(\d+))/iu.exec(text)
-  if (single) {
-    const raw = single[1] ?? single[2]
-    const num = chineseToNumber(raw)
-    if (num !== null) {
-      return { start: num, end: num }
-    }
-  }
-
-  return { start: null, end: null }
-}
-
-/** 结构化数值章节区间判定，严禁使用 includes 误匹配 */
-export function isChapterInRange(chapterNumber: number, start: number | null, end: number | null): boolean {
-  if (start === null) return true // 全局通用
-  const maxEnd = end !== null ? end : start
-  return chapterNumber >= start && chapterNumber <= maxEnd
-}
-
-/** Markdown 标题片段解析器 */
-export interface ParsedMarkdownFragment {
+/** Markdown 标题片段解析结果 */
+interface ParsedMarkdownFragment {
   headingPath: string
   content: string
   startLine: number
   endLine: number
-  chapterStart: number | null
-  chapterEnd: number | null
-}
-
-interface HeadingItem {
   level: number
-  title: string
-  chapterStart: number | null
-  chapterEnd: number | null
-}
-
-export function parseMarkdownFragments(
-  fileContent: string,
-  fileName: string,
-): ParsedMarkdownFragment[] {
-  const lines = fileContent.split(/\r?\n/u)
-  const fragments: ParsedMarkdownFragment[] = []
-
-  const fileChapterRange = extractChapterRange(fileName)
-
-  let headingStack: HeadingItem[] = []
-  let currentStartLine = 1
-  let currentContentLines: string[] = []
-  let currentChapterStart = fileChapterRange.start
-  let currentChapterEnd = fileChapterRange.end
-
-  const flushCurrent = (endLine: number) => {
-    const text = currentContentLines.join('\n').trim()
-    if (text.length > 0 || headingStack.length > 0) {
-      const headingPath = headingStack.map(h => h.title).join(' > ')
-      fragments.push({
-        headingPath: headingPath || path.basename(fileName, path.extname(fileName)),
-        content: text,
-        startLine: currentStartLine,
-        endLine: Math.max(currentStartLine, endLine),
-        chapterStart: currentChapterStart,
-        chapterEnd: currentChapterEnd,
-      })
-    }
-    currentContentLines = []
-  }
-
-  for (let i = 0; i < lines.length; i++) {
-    const lineNum = i + 1
-    const line = lines[i]
-    const headingMatch = /^(#{1,6})\s+(.+)$/u.exec(line.trim())
-
-    if (headingMatch) {
-      flushCurrent(lineNum - 1)
-      const level = headingMatch[1].length
-      const title = headingMatch[2].trim()
-
-      headingStack = headingStack.filter(h => h.level < level)
-
-      const explicitRange = extractChapterRange(title)
-      let headingChapterStart: number | null = null
-      let headingChapterEnd: number | null = null
-
-      if (explicitRange.start !== null) {
-        headingChapterStart = explicitRange.start
-        headingChapterEnd = explicitRange.end
-      } else {
-        const ancestorWithRange = [...headingStack].reverse().find(h => h.chapterStart !== null)
-        if (ancestorWithRange) {
-          headingChapterStart = ancestorWithRange.chapterStart
-          headingChapterEnd = ancestorWithRange.chapterEnd
-        } else {
-          headingChapterStart = fileChapterRange.start
-          headingChapterEnd = fileChapterRange.end
-        }
-      }
-
-      headingStack.push({
-        level,
-        title,
-        chapterStart: headingChapterStart,
-        chapterEnd: headingChapterEnd,
-      })
-
-      currentChapterStart = headingChapterStart
-      currentChapterEnd = headingChapterEnd
-      currentStartLine = lineNum
-    } else {
-      currentContentLines.push(line)
-    }
-  }
-
-  flushCurrent(lines.length)
-  return fragments
-}
-
-/** 计算文本哈希 */
-export function hashString(content: string): string {
-  return createHash('sha256').update(content, 'utf8').digest('hex')
 }
 
 /**
- * 候选角色解析（纯文本模式，严禁任何硬编码人名或虚假推测）
- * candidateId 必须包含来源身份、标题路径和内容版本哈希，确保重扫幂等与变更追溯
+ * 将 Markdown 文档按照标题层级切分为片段。
+ * 支持 ATX 标题 (# Title) 与多行内容保留。
+ */
+export function splitMarkdownByHeadings(content: string): ParsedMarkdownFragment[] {
+  const lines = content.split(/\r?\n/)
+  const fragments: ParsedMarkdownFragment[] = []
+
+  interface StackEntry {
+    level: number
+    title: string
+  }
+  const headingStack: StackEntry[] = []
+
+  let currentHeadingPath = '引言'
+  let currentLevel = 0
+  let currentStartLine = 1
+  let currentLines: string[] = []
+
+  const flush = (endLine: number) => {
+    const text = currentLines.join('\n').trim()
+    if (text.length > 0) {
+      fragments.push({
+        headingPath: currentHeadingPath,
+        content: text,
+        startLine: currentStartLine,
+        endLine,
+        level: currentLevel,
+      })
+    }
+    currentLines = []
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const lineNumber = i + 1
+    const headingMatch = line.match(/^(#{1,6})\s+(.+)$/)
+
+    if (headingMatch) {
+      flush(lineNumber - 1)
+
+      const level = headingMatch[1].length
+      const title = headingMatch[2].trim()
+
+      while (headingStack.length > 0 && headingStack[headingStack.length - 1].level >= level) {
+        headingStack.pop()
+      }
+      headingStack.push({ level, title })
+
+      currentHeadingPath = headingStack.map(h => h.title).join(' > ')
+      currentLevel = level
+      currentStartLine = lineNumber
+      currentLines = [line]
+    } else {
+      currentLines.push(line)
+    }
+  }
+
+  flush(lines.length)
+  return fragments
+}
+
+/**
+ * 从文本或标题路径中抽取涉及的章节范围 (如 "第1-10章", "第5章")
+ */
+export function extractChapterRange(text: string): { start: number | null; end: number | null } {
+  const rangeMatch = text.match(/第\s*(\d+)\s*(?:[-~至到—–]\s*(\d+))?\s*章/)
+  if (rangeMatch) {
+    const start = parseInt(rangeMatch[1], 10)
+    const end = rangeMatch[2] ? parseInt(rangeMatch[2], 10) : start
+    return { start, end }
+  }
+  const enMatch = text.match(/\bChapter\s*(\d+)(?:\s*[-~至到—–]\s*(\d+))?\b/i)
+  if (enMatch) {
+    const start = parseInt(enMatch[1], 10)
+    const end = enMatch[2] ? parseInt(enMatch[2], 10) : start
+    return { start, end }
+  }
+  return { start: null, end: null }
+}
+
+/**
+ * 解析 Markdown 文本为结构化片段快照（供测试与独立片段化调用）
+ */
+export function parseMarkdownFragments(
+  markdown: string,
+  sourceFile: string = '',
+  snapshotId: string = 'test-snapshot',
+  projectId: string = 'main',
+): WorkspaceSourceSnapshotFragment[] {
+  const parsed = splitMarkdownByHeadings(markdown)
+  const preset = matchWorkspaceCategory(sourceFile)
+  return parsed.map((f, idx) => {
+    const leafHeading = f.headingPath.split(' > ').pop() || f.headingPath
+    const range = extractChapterRange(leafHeading)
+    return {
+      id: `${snapshotId}-f-${idx + 1}`,
+      snapshotId,
+      sourceId: `src-${hashString(sourceFile).slice(0, 16)}`,
+      projectId,
+      headingPath: f.headingPath,
+      content: f.content,
+      startLine: f.startLine,
+      endLine: f.endLine,
+      fragmentHash: hashString(f.content),
+      chapterStart: range.start,
+      chapterEnd: range.end,
+      purpose: preset.category,
+      status: 'active',
+    }
+  })
+}
+
+/**
+ * 判断目标章节是否在章节范围内
+ */
+export function isChapterInRange(chapter: number, start: number | null, end: number | null): boolean {
+  if (start === null && end === null) return true
+  if (start !== null && end !== null) return chapter >= start && chapter <= end
+  if (start !== null) return chapter >= start
+  if (end !== null) return chapter <= end
+  return true
+}
+
+/**
+ * 从 "05_人物与关系" 片段中提取结构化角色名单导入候选。
  */
 export function extractCharacterCandidates(
   fragments: ParsedMarkdownFragment[],
@@ -312,121 +289,154 @@ export function extractCharacterCandidates(
   const candidates: WorkspaceImportCandidate[] = []
 
   for (const frag of fragments) {
+    const lines = frag.content.split('\n')
+    let name = ''
     const parts = frag.headingPath.split(' > ')
-    const lastHeading = parts[parts.length - 1]?.trim() || ''
+    const lastHeading = parts[parts.length - 1].trim()
 
-    if (
-      !lastHeading
-      || parts.length === 1
-      || /使用原则|原则|总纲|总览|一览|目录|备忘|主角团（待设计）|主要角色|核心人物|次要角色|人物与关系/u.test(lastHeading)
-    ) {
+    const SECTION_TITLE_REGEX = /^(人物|角色|核心人物|主要人物|次要人物|重要人物|反派人物|主要角色|次要角色|重要角色|核心角色|反派角色|配角名单|角色档案|人物档案|人物设定|角色设定|人物列表|角色列表|人物关系|角色关系|人物群像|角色群像|角色总览|人物总览|登场人物|登场角色|其他人物|其他角色|说明|总览|前言|引言|目录|概述|背景设定)$/
+    const isSectionHeader = frag.level === 1
+      || /(角色|人物|总览|说明|概述|列表|档案|群像|设定|名单)$/.test(lastHeading)
+      || SECTION_TITLE_REGEX.test(lastHeading)
+
+    if (isSectionHeader) {
       continue
     }
 
-    const nameMatch = /^([^\s（(【[]+)/u.exec(lastHeading)
-    const characterName = nameMatch ? nameMatch[1].trim() : lastHeading
+    const headingNameMatch = lastHeading.match(/^[\d_\s-]*([^(:：[{]+)/)
+    if (headingNameMatch && headingNameMatch[1].trim().length >= 1 && headingNameMatch[1].trim().length <= 12) {
+      name = headingNameMatch[1].trim()
+    }
 
-    if (!characterName || characterName.length > 25) continue
-
-    const content = frag.content
-    const lines = content.split(/\r?\n/u)
-
+    let role = ''
     let gender = ''
     let age = ''
-    let role = 'supporting'
-    let background = ''
+    let appearance = ''
     let personality = ''
+    let background = ''
     let abilities = ''
     let motivation = ''
     let arc = ''
-    let appearance = ''
-    const notesList: string[] = []
+    const otherNotes: string[] = []
+    const relationships: Array<{ targetName: string; relationship: string }> = []
 
-    for (const rawLine of lines) {
-      const trimmed = rawLine.trim().replace(/^[-*•]\s*/u, '')
-      if (!trimmed) continue
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
 
-      const genderMatch = /^(?:性别|gender)[：:]\s*(男|女|其他|未知|非二元)/iu.exec(trimmed)
-      if (genderMatch) {
-        gender = genderMatch[1]
-        continue
-      }
-
-      const ageMatch = /^(?:年龄|age)[：:]\s*(\d+|[^，,\n]+)/iu.exec(trimmed)
-      if (ageMatch) {
-        age = ageMatch[1].trim()
-        continue
-      }
-
-      const roleMatch = /^(?:定位|角色定位|身份定位|role)[：:]\s*(.+)/iu.exec(trimmed)
-      if (roleMatch) {
-        const roleText = roleMatch[1]
-        if (/主角|领衔|男主|女主|第一主角/u.test(roleText)) role = 'protagonist'
-        else if (/反派|敌对|对手|大boss/u.test(roleText)) role = 'antagonist'
-        else if (/配角|主要配角/u.test(roleText)) role = 'supporting'
-        else if (/客串|龙套|背景/u.test(roleText)) role = 'minor'
-        continue
-      }
-
-      if (/^(?:外貌|容貌|长相|体貌|相貌|形象|穿着)[：:]/u.test(trimmed)) {
-        appearance += (appearance ? '\n' : '') + trimmed.replace(/^(?:外貌|容貌|长相|体貌|相貌|形象|穿着)[：:]\s*/u, '')
-      } else if (/^(?:身份|经历|原身|背景|生平)[：:]/u.test(trimmed)) {
-        background += (background ? '\n' : '') + trimmed.replace(/^(?:身份|经历|原身|背景|生平)[：:]\s*/u, '')
-      } else if (/^(?:性格|特质|特点|性格特征|思维方式|缺点)[：:]/u.test(trimmed)) {
-        personality += (personality ? '\n' : '') + trimmed.replace(/^(?:性格|特质|特点|性格特征|思维方式|缺点)[：:]\s*/u, '')
-      } else if (/^(?:能力|技能|职业|设定|专业|职印|本命)[：:]/u.test(trimmed)) {
-        abilities += (abilities ? '\n' : '') + trimmed.replace(/^(?:能力|技能|职业|设定|专业|职印|本命)[：:]\s*/u, '')
-      } else if (/^(?:动机|目标|追求|欲望|核心矛盾)[：:]/u.test(trimmed)) {
-        motivation += (motivation ? '\n' : '') + trimmed.replace(/^(?:动机|目标|追求|欲望|核心矛盾)[：:]\s*/u, '')
-      } else if (/^(?:弧光|走向|成长|轴|结局)[：:]/u.test(trimmed)) {
-        arc += (arc ? '\n' : '') + trimmed.replace(/^(?:弧光|走向|成长|轴|结局)[：:]\s*/u, '')
+      const fieldMatch = trimmed.match(/^[-*•]?\s*(姓名|角色名|名字|身份|定位|类型|性别|年龄|外貌|容貌|性格|特质|身世|背景|能力|技能|金手指|动机|目标|弧光|成长|关系)[：:]\s*(.+)$/)
+      if (fieldMatch) {
+        const key = fieldMatch[1]
+        const val = fieldMatch[2].trim()
+        switch (key) {
+          case '姓名':
+          case '角色名':
+          case '名字':
+            if (!name) name = val
+            break
+          case '身份':
+            if (val === '主角' || val === '反派' || val === '配角' || val === '龙套' || val === 'protagonist' || val === 'antagonist' || val === 'supporting' || val === 'minor') {
+              role = val
+            } else {
+              background = background ? `${background}; ${val}` : val
+            }
+            break
+          case '定位':
+          case '类型':
+            role = val
+            break
+          case '性别':
+            gender = val
+            break
+          case '年龄':
+            age = val
+            break
+          case '外貌':
+          case '容貌':
+            appearance = val
+            break
+          case '性格':
+          case '特质':
+            personality = val
+            break
+          case '身世':
+          case '背景':
+            background = val
+            break
+          case '能力':
+          case '技能':
+          case '金手指':
+            abilities = val
+            break
+          case '动机':
+          case '目标':
+            motivation = val
+            break
+          case '弧光':
+          case '成长':
+            arc = val
+            break
+          case '关系': {
+            const relMatch = val.match(/([^(:：,\s]+)\s*[(（](.+)[)）]/)
+            if (relMatch) {
+              relationships.push({ targetName: relMatch[1].trim(), relationship: relMatch[2].trim() })
+            } else {
+              otherNotes.push(`关系: ${val}`)
+            }
+            break
+          }
+        }
       } else {
-        notesList.push(trimmed)
+        otherNotes.push(trimmed)
       }
     }
 
-    if (role === 'supporting') {
-      if (/主角|男主|女主/u.test(lastHeading)) role = 'protagonist'
-      else if (/反派|敌对/u.test(lastHeading)) role = 'antagonist'
+    if (!name && lastHeading.length <= 10 && !lastHeading.includes('说明') && !lastHeading.includes('总览')) {
+      name = lastHeading
     }
 
-    const structuredCharacter = {
-      name: characterName,
-      role: normalizeCharacterRole(role),
-      gender,
-      age,
-      appearance: appearance.slice(0, 300),
-      personality: personality.slice(0, 300),
-      background: background.slice(0, 400),
-      abilities: abilities.slice(0, 300),
-      motivation: motivation.slice(0, 300),
-      relationships: [],
-      arc: arc.slice(0, 300),
-      notes: notesList.join('\n').slice(0, 500),
+    if (name && name.length >= 2) {
+      const normalizedRole = normalizeCharacterRole(role)
+      const characterData = {
+        name,
+        role: normalizedRole,
+        gender,
+        age,
+        appearance,
+        personality,
+        background,
+        abilities,
+        motivation,
+        arc,
+        notes: otherNotes.slice(0, 5).join('; '),
+        relationships,
+      }
+
+      const dataHash = hashString(JSON.stringify(characterData)).slice(0, 8)
+      const baseId = hashString(`${sourceFile}:${name}`).slice(0, 8)
+      const candidateId = `cand-char-${baseId}-${dataHash}`
+      candidates.push({
+        candidateId,
+        projectId,
+        candidateType: 'character',
+        rawData: frag.content,
+        suggestedData: JSON.stringify(characterData),
+        sourceFile,
+        sourceHeadingPath: frag.headingPath,
+        sourceLineRange: `${frag.startLine}-${frag.endLine}`,
+        evidence: `检测到角色卡：${name} (${role || '待定'})`,
+        confidence: role && personality ? 0.95 : 0.75,
+        status: 'pending',
+      })
     }
-
-    const contentVersionHash = hashString(frag.content).slice(0, 12)
-    const candidateId = `cand-char-${hashString(`${sourceFile}:${frag.headingPath}:${characterName}`).slice(0, 12)}-${contentVersionHash}`
-
-    candidates.push({
-      candidateId,
-      projectId,
-      candidateType: 'character',
-      rawData: frag.content,
-      suggestedData: JSON.stringify(structuredCharacter, null, 2),
-      sourceFile,
-      sourceHeadingPath: frag.headingPath,
-      sourceLineRange: `${frag.startLine}-${frag.endLine}`,
-      evidence: frag.content.slice(0, 300),
-      confidence: 0.9,
-      status: 'pending',
-    })
   }
 
   return candidates
 }
 
-/** 候选设定规则提取 */
+/**
+ * 从世界资料与设定文档中提取有效设定规则。
+ */
 export function extractSettingRulesFromFragments(
   fragments: ParsedMarkdownFragment[],
   sourceFile: string,
@@ -460,7 +470,7 @@ export function extractSettingRulesFromFragments(
       content: frag.content,
       status,
       constraintType: 'hard',
-      scope: frag.chapterStart ? `第${frag.chapterStart}章` : 'global',
+      scope: extractChapterRange(frag.headingPath).start ? `第${extractChapterRange(frag.headingPath).start}章` : 'global',
       sourceFile,
       sourceHeadingPath: frag.headingPath,
       sourceLineRange: `${frag.startLine}-${frag.endLine}`,
@@ -475,6 +485,8 @@ export function extractSettingRulesFromFragments(
 export interface WorkspaceScanOptions {
   signal?: AbortSignal
   taskId?: string
+  maxFiles?: number
+  maxTotalBytes?: number
 }
 
 export interface WorkspaceScanResult {
@@ -483,6 +495,9 @@ export interface WorkspaceScanResult {
   scannedCount: number
   recognizedCount: number
   error?: string
+  enumerationComplete?: boolean
+  truncated?: boolean
+  truncationReason?: string
 }
 
 interface ActiveScanTask {
@@ -533,29 +548,27 @@ export class WorkspaceScannerService {
   }
 
   static cancelAllForProject(projectId: string): void {
-    for (const [id, task] of activeScanTasks) {
+    for (const [taskId, task] of activeScanTasks.entries()) {
       if (task.projectId === projectId) {
         task.controller.abort()
-        activeScanTasks.delete(id)
+        activeScanTasks.delete(taskId)
       }
     }
   }
 
   /**
-   * 异步、有界、可取消、单事务提交的母稿目录扫描器
-   * 严格只读！应用层级限制，防止假死、溢出与符号链接逃逸。
+   * 执行完整外部工作区扫描
+   * 采用异步非阻塞收集、并发受控解析，并通过单事务 commitScanPayload 提交暂存快照。
    */
   static async scanDirectory(
     workspacePath: string,
     projectId = 'main',
     options?: WorkspaceScanOptions,
   ): Promise<WorkspaceScanResult> {
-    const taskId = options?.taskId
     const signal = options?.signal
-
-    if (signal?.aborted) {
-      return { success: false, taskId, scannedCount: 0, recognizedCount: 0, error: '扫描已取消' }
-    }
+    const taskId = options?.taskId
+    const maxFiles = options?.maxFiles ?? SCAN_LIMITS.MAX_FILES
+    const maxTotalBytes = options?.maxTotalBytes ?? SCAN_LIMITS.MAX_TOTAL_BYTES
 
     const validation = validateWorkspacePath(workspacePath)
     if (!validation.valid || !validation.canonicalPath) {
@@ -564,7 +577,7 @@ export class WorkspaceScannerService {
         taskId,
         scannedCount: 0,
         recognizedCount: 0,
-        error: validation.error || `目录无效: ${workspacePath}`,
+        error: validation.error || '工作区路径无效',
       }
     }
 
@@ -578,34 +591,75 @@ export class WorkspaceScannerService {
         absPath: string
         size: number
         mtimeMs: number
+        oversized?: boolean
       }
 
       const discoveredFiles: DiscoveredFile[] = []
       let totalDiscoveredBytes = 0
       let discoveredFileCount = 0
+      let enumerationComplete = true
+      let truncated = false
+      let truncationReason: string | undefined = undefined
 
       const walkAsync = async (dir: string, depth: number): Promise<void> => {
         if (signal?.aborted) return
-        if (depth > SCAN_LIMITS.MAX_DEPTH) return
-        if (discoveredFileCount >= SCAN_LIMITS.MAX_FILES) return
+        if (depth > SCAN_LIMITS.MAX_DEPTH) {
+          enumerationComplete = false
+          return
+        }
+        if (discoveredFileCount >= maxFiles) {
+          enumerationComplete = false
+          truncated = true
+          truncationReason = 'max_files_limit'
+          return
+        }
 
         let entries: fs.Dirent[]
         try {
           entries = await fs.promises.readdir(dir, { withFileTypes: true })
-        } catch {
-          return // 无权读取子目录时安全跳过
+        } catch (err) {
+          if (dir === canonicalRoot) {
+            throw new Error(`无法读取工作区根目录: ${err instanceof Error ? err.message : String(err)}`)
+          }
+          enumerationComplete = false
+          return // 无权读取子目录时安全跳过，同时标记遍历未完全覆盖
         }
 
-        for (const entry of entries) {
+        // 逐条 await lstat 会让千文件目录的枚举退化成纯串行等待（实测 1000 条
+        // 约 148ms，批处理后约 27ms）。按批并行解析条目元数据，同时严格保持
+        // readdir 顺序与原有短路语义。批次边界处发现已达文件上限即停止解析，
+        // 因此主循环永远不会读取到未解析的条目。
+        const entryStats: Array<fs.Stats | null> = []
+        const LSTAT_BATCH = 64
+        for (let start = 0; start < entries.length; start += LSTAT_BATCH) {
           if (signal?.aborted) return
-          if (discoveredFileCount >= SCAN_LIMITS.MAX_FILES) break
+          if (discoveredFileCount >= maxFiles) break
+          const batch = entries.slice(start, start + LSTAT_BATCH)
+          const resolvedStats = await Promise.all(batch.map(async (entry) => {
+            try {
+              return await fs.promises.lstat(path.join(dir, entry.name))
+            } catch {
+              return null
+            }
+          }))
+          entryStats.push(...resolvedStats)
+        }
+
+        for (let entryIndex = 0; entryIndex < entries.length; entryIndex++) {
+          const entry = entries[entryIndex]
+          if (signal?.aborted) return
+          if (discoveredFileCount >= maxFiles) {
+            enumerationComplete = false
+            truncated = true
+            truncationReason = 'max_files_limit'
+            break
+          }
 
           const fullPath = path.join(dir, entry.name)
 
-          let lstat: fs.Stats
-          try {
-            lstat = await fs.promises.lstat(fullPath)
-          } catch {
+          const lstat = entryStats[entryIndex]
+          if (!lstat) {
+            enumerationComplete = false
             continue
           }
 
@@ -617,6 +671,7 @@ export class WorkspaceScannerService {
                 continue
               }
             } catch {
+              enumerationComplete = false
               continue
             }
           }
@@ -633,15 +688,26 @@ export class WorkspaceScannerService {
               const isWhitelistedReference = matchWorkspaceCategory(relativePath).category === 'reference_novel'
 
               // 白名单参考小说即使超过正文解析上限也必须登记；它只占文件数量，
-              // 不占正文读取/解析总字节预算。其他超限文件继续安全跳过。
+              // 不占正文读取/解析总字节预算。
               if (isWhitelistedReference) {
                 discoveredFiles.push({
                   absPath: fullPath,
                   size: lstat.size,
                   mtimeMs: Math.floor(lstat.mtimeMs),
                 })
-              } else if (lstat.size <= SCAN_LIMITS.MAX_FILE_SIZE_BYTES) {
-                if (totalDiscoveredBytes + lstat.size > SCAN_LIMITS.MAX_TOTAL_BYTES) {
+              } else if (lstat.size > SCAN_LIMITS.MAX_FILE_SIZE_BYTES) {
+                // 超限非参考小说：记录元数据，跳过正文解析，保留在 active 列表中防止误判为 missing
+                discoveredFiles.push({
+                  absPath: fullPath,
+                  size: lstat.size,
+                  mtimeMs: Math.floor(lstat.mtimeMs),
+                  oversized: true,
+                })
+              } else {
+                if (totalDiscoveredBytes + lstat.size > maxTotalBytes) {
+                  enumerationComplete = false
+                  truncated = true
+                  truncationReason = 'max_total_bytes_limit'
                   console.warn(`[WorkspaceScanner] 到达正文解析总字节上限，跳过文件: ${fullPath}`)
                   continue
                 }
@@ -691,13 +757,14 @@ export class WorkspaceScannerService {
 
           const existing = existingSourceMap.get(sourceId)
 
-          // 检查是否为超大参考小说：仅记录元数据，不读全文，不生成全文片段
+          // 检查是否为超大参考小说或超单文件上限文件：仅记录元数据，不读全文，不生成全文片段
           const isLargeReferenceNovel = preset.category === 'reference_novel'
             || file.size > SCAN_LIMITS.MAX_PARSE_TEXT_BYTES
+            || Boolean(file.oversized)
 
           if (isLargeReferenceNovel) {
             const metaHash = hashString(`${relPath}:${file.size}:${file.mtimeMs}`)
-            const snapshotId = `snap-${sourceId}-${metaHash.slice(0, 16)}`
+            const snapshotId = `snap-${sourceId}-v${PARSER_SCHEMA_VERSION}-${metaHash.slice(0, 16)}`
 
             let importStatus: 'scanned' | 'imported' | 'stale' | 'missing' | 'disabled' = 'scanned'
             let approvedContentHash = ''
@@ -727,9 +794,11 @@ export class WorkspaceScannerService {
               approvedSnapshotId,
               parseError: null,
               parseStatus: 'metadata_only',
-              skipReason: preset.category === 'reference_novel'
-                ? 'reference_novel_metadata_only'
-                : 'parse_text_size_limit_exceeded',
+              skipReason: file.oversized
+                ? 'file_size_exceeded_single_limit'
+                : preset.category === 'reference_novel'
+                  ? 'reference_novel_metadata_only'
+                  : 'parse_text_size_limit_exceeded',
               mtime: file.mtimeMs,
               lastScannedAt: new Date().toISOString(),
               importStatus,
@@ -745,6 +814,7 @@ export class WorkspaceScannerService {
               contentHash: metaHash,
               fileSize: file.size,
               fragmentCount: 0,
+              parserSchemaVersion: PARSER_SCHEMA_VERSION,
             }
 
             return {
@@ -760,7 +830,7 @@ export class WorkspaceScannerService {
           try {
             const fileContent = await fs.promises.readFile(file.absPath, 'utf8')
             const observedFileHash = hashString(fileContent)
-            const snapshotId = `snap-${sourceId}-${observedFileHash.slice(0, 16)}`
+            const snapshotId = `snap-${sourceId}-v${PARSER_SCHEMA_VERSION}-${observedFileHash.slice(0, 16)}`
 
             let importStatus: 'scanned' | 'imported' | 'stale' | 'missing' | 'disabled' = 'scanned'
             let approvedContentHash = ''
@@ -776,8 +846,7 @@ export class WorkspaceScannerService {
               }
             }
 
-            const parsedFragments = parseMarkdownFragments(fileContent, relPath)
-
+            const parsedFragments = splitMarkdownByHeadings(fileContent)
             const fragments: WorkspaceSourceSnapshotFragment[] = parsedFragments.map((f, idx) => ({
               id: `${snapshotId}-f-${idx + 1}`,
               snapshotId,
@@ -788,10 +857,10 @@ export class WorkspaceScannerService {
               startLine: f.startLine,
               endLine: f.endLine,
               fragmentHash: hashString(f.content),
-              chapterStart: f.chapterStart,
-              chapterEnd: f.chapterEnd,
-              purpose: preset.purposeZh,
-              status: preset.category === 'deprecated' ? 'deprecated' : 'active',
+              chapterStart: extractChapterRange(f.headingPath.split(' > ').pop() || f.headingPath).start,
+              chapterEnd: extractChapterRange(f.headingPath.split(' > ').pop() || f.headingPath).end,
+              purpose: preset.category,
+              status: 'active',
             }))
 
             let candidates: WorkspaceImportCandidate[] = []
@@ -814,6 +883,7 @@ export class WorkspaceScannerService {
                 return {
                   ...rule,
                   sourceFragmentId: fragment?.id,
+                  sourceSnapshotFragmentId: fragment?.id,
                   sourceId,
                   sourceSnapshotId: snapshotId,
                   originType: 'scan' as const,
@@ -851,6 +921,7 @@ export class WorkspaceScannerService {
               contentHash: observedFileHash,
               fileSize: file.size,
               fragmentCount: fragments.length,
+              parserSchemaVersion: PARSER_SCHEMA_VERSION,
             }
 
             return {
@@ -860,10 +931,9 @@ export class WorkspaceScannerService {
               candidates,
               rules,
             }
-          } catch (err) {
-            // 单文件解析失败隔离：写入独立诊断结果，保留上一份有效快照
-            const errMsg = err instanceof Error ? err.message : String(err)
-            console.error(`[WorkspaceScanner] 单文件读取或解析异常 (${relPath}):`, errMsg)
+          } catch (fileErr) {
+            const errMsg = fileErr instanceof Error ? fileErr.message : String(fileErr)
+            console.error(`[WorkspaceScanner] 解析单个文件失败: ${file.absPath}`, errMsg)
 
             const source: WorkspaceSource = {
               id: sourceId,
@@ -908,6 +978,9 @@ export class WorkspaceScannerService {
         items: stagedItems,
         activeSourceIds,
         scanTime: new Date().toISOString(),
+        enumerationComplete,
+        truncated,
+        truncationReason,
       }
 
       // -----------------------------------------------------------------------
@@ -920,13 +993,15 @@ export class WorkspaceScannerService {
         taskId,
         scannedCount: discoveredFiles.length,
         recognizedCount,
+        enumerationComplete,
+        truncated,
+        truncationReason,
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err)
-      if (errorMsg === 'SCAN_ABORTED' || signal?.aborted) {
+      if (errorMsg === 'SCAN_ABORTED') {
         return { success: false, taskId, scannedCount: 0, recognizedCount: 0, error: '扫描已取消' }
       }
-      console.error('[WorkspaceScanner] 扫描外部目录全局失败:', errorMsg)
       return {
         success: false,
         taskId,

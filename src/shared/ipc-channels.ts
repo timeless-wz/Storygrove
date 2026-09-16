@@ -1239,8 +1239,18 @@ export interface WorkspaceHubChannels {
     return: WorkspaceSource[]
   }
   'workspace:get-source-detail': {
-    args: [sourceId: string, expectedProjectPath?: string]
-    return: { source: WorkspaceSource | null; fragments: WorkspaceSourceFragment[] }
+    args: [
+      sourceId: string,
+      snapshotId?: string | null,
+      fragmentId?: string | null,
+      expectedProjectPath?: string,
+    ]
+    return: {
+      source: WorkspaceSource | null
+      fragments: WorkspaceSourceFragment[]
+      targetSnapshotId?: string | null
+      provenanceStatus?: 'found' | 'provenance-missing'
+    }
   }
   'workspace:list-rules': {
     args: [status?: SettingRuleStatus, expectedProjectPath?: string]

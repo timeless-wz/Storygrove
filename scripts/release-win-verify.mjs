@@ -684,8 +684,9 @@ try {
   if (releaseFinalizationRequired) {
     let nativeRestoreSucceeded = false
     try {
-      // Packaging deliberately rebuilds the shared native module for Electron ABI 145.
-      // Once monitored release work may start, always return the worktree to Node ABI 141.
+      // Packaging deliberately rebuilds the shared native module for the bundled
+      // Electron ABI. Once monitored release work may start, always return the
+      // worktree to the ordinary Node ABI (recorded as process.versions.modules).
       const restoreResult = await restoreNativeWithIndependentFallback({
         restoreMonitored: async () => {
           await restoreAndVerifyNodeNativeAbi({ monitored: true })

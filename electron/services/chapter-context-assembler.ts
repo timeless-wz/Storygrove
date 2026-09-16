@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { getProjectDb } from '../database'
 import { CharacterRosterRepository } from '../repositories/character-roster-repository'
 import { NarrativeThreadRepository } from '../repositories/narrative-thread-repository'
@@ -9,7 +10,185 @@ import type {
   ChapterContextBlock,
   ChapterContextOmission,
   ChapterContextSourceRef,
+  SettingRule,
 } from '../../src/shared/workspace-hub'
+
+declare module '../../src/shared/workspace-hub' {
+  interface ChapterContextSourceRef {
+    projectId?: string
+    sourceId?: string | null
+    approvedSnapshotId?: string | null
+    sourceSnapshotFragmentId?: string | null
+    filePath?: string
+    titlePath?: string
+    provenanceStatus?: 'found' | 'provenance-missing'
+    provenanceError?: string
+  }
+}
+
+function hashString(str: string): string {
+  return createHash('sha256').update(str, 'utf8').digest('hex')
+}
+
+function formatFragmentSourceRef(
+  f: {
+    sourceId?: string
+    approvedSnapshotId?: string | null
+    fragmentId: string
+    sourcePath: string
+    headingPath: string
+    fragmentHash: string
+    startLine: number
+    endLine: number
+  },
+  projectId = 'main',
+): ChapterContextSourceRef {
+  const isMissing = !f.fragmentId || !f.approvedSnapshotId
+  return {
+    projectId,
+    sourceId: f.sourceId || null,
+    approvedSnapshotId: f.approvedSnapshotId || null,
+    snapshotId: f.approvedSnapshotId || null,
+    sourceSnapshotFragmentId: f.fragmentId,
+    fragmentId: f.fragmentId,
+    relativePath: f.sourcePath,
+    filePath: f.sourcePath,
+    headingPath: f.headingPath,
+    titlePath: f.headingPath,
+    contentHash: f.fragmentHash,
+    lineRange: `${f.startLine}-${f.endLine}`,
+    provenanceStatus: isMissing ? 'provenance-missing' : 'found',
+  }
+}
+
+function resolveRuleSourceRef(
+  db: ReturnType<typeof getProjectDb>,
+  r: SettingRule,
+  projectId = 'main',
+): ChapterContextSourceRef {
+  // 1. 禁止跨项目读取来源：若规则显式属于其他项目，立即失败关闭并标记 provenance-missing
+  if (r.projectId && r.projectId !== projectId) {
+    return {
+      projectId,
+      sourceId: null,
+      approvedSnapshotId: null,
+      snapshotId: null,
+      sourceSnapshotFragmentId: undefined,
+      fragmentId: undefined,
+      relativePath: r.sourceFile || 'setting_rules',
+      filePath: r.sourceFile || 'setting_rules',
+      headingPath: r.sourceHeadingPath || r.title,
+      titlePath: r.sourceHeadingPath || r.title,
+      lineRange: r.sourceLineRange,
+      contentHash: '',
+      provenanceStatus: 'provenance-missing',
+      provenanceError: `跨项目读取已禁止：规则所属项目 [${r.projectId}] 与当前装配项目 [${projectId}] 不匹配`,
+    }
+  }
+
+  let fragRow: {
+    id: string
+    snapshot_id: string
+    source_id: string
+    project_id: string
+    fragment_hash: string
+    heading_path: string
+  } | undefined
+
+  const fragId = r.sourceSnapshotFragmentId || r.sourceFragmentId
+  const snapId = r.sourceSnapshotId
+  const srcId = r.sourceId
+
+  // 2. 来源回查：若规则具备快照片段 ID，SQL 查询必须同时严格校验 project_id, source_id, snapshot_id, fragment_id 四要素
+  if (db && fragId) {
+    if (snapId && srcId) {
+      fragRow = db.prepare(`
+        SELECT id, snapshot_id, source_id, project_id, fragment_hash, heading_path
+        FROM workspace_source_snapshot_fragments
+        WHERE id = ? AND snapshot_id = ? AND source_id = ? AND project_id = ?
+      `).get(fragId, snapId, srcId, projectId) as typeof fragRow
+    } else {
+      // 容错：若 snapId 或 srcId 缺失，仍必须限制 project_id 与 id，并进一步校验一致性
+      const candidate = db.prepare(`
+        SELECT id, snapshot_id, source_id, project_id, fragment_hash, heading_path
+        FROM workspace_source_snapshot_fragments
+        WHERE id = ? AND project_id = ?
+      `).get(fragId, projectId) as typeof fragRow
+
+      if (candidate) {
+        const snapMatches = !snapId || candidate.snapshot_id === snapId
+        const srcMatches = !srcId || candidate.source_id === srcId
+        if (snapMatches && srcMatches) {
+          fragRow = candidate
+        }
+      }
+    }
+
+    // 关键收口：若指定了 fragId 但 4 要素校验未通过，绝不允许回退猜测或兜底，必须失败关闭
+    if (!fragRow) {
+      return {
+        projectId,
+        sourceId: srcId || null,
+        approvedSnapshotId: snapId || null,
+        snapshotId: snapId || null,
+        sourceSnapshotFragmentId: undefined,
+        fragmentId: undefined,
+        relativePath: r.sourceFile || 'setting_rules',
+        filePath: r.sourceFile || 'setting_rules',
+        headingPath: r.sourceHeadingPath || r.title,
+        titlePath: r.sourceHeadingPath || r.title,
+        lineRange: r.sourceLineRange,
+        contentHash: '',
+        provenanceStatus: 'provenance-missing',
+        provenanceError: `规则来源与快照片段不一致：在项目 [${projectId}] 中未找到同时满足 fragment_id=[${fragId}], snapshot_id=[${snapId}], source_id=[${srcId}] 的快照片段凭据（已失败关闭）`,
+      }
+    }
+  }
+
+  // 3. 自愈容错路径：仅当未提供 fragId 时，若具备快照 ID、来源 ID 与标题路径，在同一 project_id 下严格按标题路径反查片段 ID
+  if (db && !fragRow && !fragId && snapId && srcId && r.sourceHeadingPath) {
+    const candidate = db.prepare(`
+      SELECT id, snapshot_id, source_id, project_id, fragment_hash, heading_path
+      FROM workspace_source_snapshot_fragments
+      WHERE snapshot_id = ? AND source_id = ? AND project_id = ? AND heading_path = ?
+      LIMIT 1
+    `).get(snapId, srcId, projectId, r.sourceHeadingPath) as typeof fragRow
+
+    if (candidate) {
+      fragRow = candidate
+    }
+  }
+
+  // 4. 严格禁止静默回退到“该快照的第一个片段”！若未找到精确来源，返回明确的 provenance-missing 状态与失败关闭错误
+  const isFound = Boolean(fragRow)
+  const isCandidateOrigin = r.originType !== 'scan'
+  const provenanceStatus: 'found' | 'provenance-missing' = (isFound || isCandidateOrigin) ? 'found' : 'provenance-missing'
+
+  const resolvedFragId = fragRow?.id || (isFound ? (r.sourceSnapshotFragmentId || r.sourceFragmentId) : undefined)
+  const resolvedSnapId = fragRow?.snapshot_id || snapId || null
+  const resolvedSourceId = fragRow?.source_id || srcId || null
+  const resolvedHash = fragRow?.fragment_hash || (isFound ? hashString(r.content) : '')
+  const provenanceError = provenanceStatus === 'provenance-missing'
+    ? `规则来源快照片段未找到或凭据缺失（project: ${projectId}, rule: ${r.ruleId}）`
+    : undefined
+
+  return {
+    projectId,
+    sourceId: resolvedSourceId,
+    approvedSnapshotId: resolvedSnapId,
+    snapshotId: resolvedSnapId,
+    sourceSnapshotFragmentId: resolvedFragId || undefined,
+    fragmentId: resolvedFragId || undefined,
+    relativePath: r.sourceFile || 'setting_rules',
+    filePath: r.sourceFile || 'setting_rules',
+    headingPath: fragRow?.heading_path || r.sourceHeadingPath || r.title,
+    titlePath: fragRow?.heading_path || r.sourceHeadingPath || r.title,
+    lineRange: r.sourceLineRange,
+    contentHash: resolvedHash,
+    provenanceStatus,
+    provenanceError,
+  }
+}
 
 export interface AssembleChapterContextOptions {
   projectId?: string
@@ -38,11 +217,27 @@ export class ChapterContextAssembler {
     const omissions: ChapterContextOmission[] = []
     const staleWarnings: string[] = []
     const candidateWarnings: string[] = []
-    let excludedDeprecatedCount = 0
+
+    // 预先统计废案，为 Stage 13 废案排除保留最低安全预算，确保可选/素材阶段（Stage 3-12）不会挤占安全负向约束
+    const deprecatedRules = WorkspaceHubRepository.listRules(projectId, 'deprecated')
+    const deprecatedFragments = WorkspaceHubRepository.queryFragments({
+      projectId,
+      categories: ['deprecated'],
+      excludeDeprecated: false,
+    })
+    const excludedDeprecatedCount = deprecatedRules.length + deprecatedFragments.length
+    const STAGE13_MIN_RESERVED_BUDGET = excludedDeprecatedCount > 0
+      ? Math.min(400, Math.max(120, excludedDeprecatedCount * 30 + 80))
+      : 0
 
     const tryAddBlock = (block: ChapterContextBlock, isProtected = false): boolean => {
       const len = block.content.length
-      if (!isProtected && len > remainingBudget) {
+      // 非受保护块必须尊重 Stage 13 的最低保留预算，防止素材阶段耗尽额度导致负向安全约束无法加入
+      const availableBudget = (isProtected || block.stage === 13)
+        ? remainingBudget
+        : Math.max(0, remainingBudget - STAGE13_MIN_RESERVED_BUDGET)
+
+      if (!isProtected && len > availableBudget) {
         omissions.push({
           stage: block.stage,
           stageName: block.stageName,
@@ -85,13 +280,7 @@ export class ChapterContextAssembler {
     })
     if (stage1Fragments.length > 0) {
       const combined = stage1Fragments.map(f => f.content).join('\n\n')
-      const sources: ChapterContextSourceRef[] = stage1Fragments.map(f => ({
-        relativePath: f.sourcePath,
-        headingPath: f.headingPath,
-        fragmentId: f.fragmentId,
-        contentHash: f.fragmentHash,
-        lineRange: `${f.startLine}-${f.endLine}`,
-      }))
+      const sources: ChapterContextSourceRef[] = stage1Fragments.map(f => formatFragmentSourceRef(f, projectId))
       tryAddBlock({
         id: 'stage-1-creation-principles',
         stage: 1,
@@ -123,25 +312,56 @@ export class ChapterContextAssembler {
     }
 
     const applicableRules = allConfirmedRules.filter(r => ruleMatchesChapter(r.scope))
-    if (applicableRules.length > 0) {
-      const ruleTexts = applicableRules.map(
+    const validConfirmedRules: SettingRule[] = []
+    const verifiedConfirmedSources: ChapterContextSourceRef[] = []
+
+    for (const r of applicableRules) {
+      // 1. 禁止跨项目规则侵入
+      if (r.projectId && r.projectId !== projectId) {
+        omissions.push({
+          stage: 2,
+          stageName: '已确认设定规则',
+          title: r.title,
+          reason: 'provenance-mismatch',
+          sourceInfo: `跨项目规则拒绝：规则所属项目 [${r.projectId}] 与当前装配项目 [${projectId}] 不符（已失败关闭）`,
+        })
+        staleWarnings.push(`规则【${r.title}】归属跨项目 [${r.projectId}]，已执行安全拦截`)
+        continue
+      }
+
+      const sourceRef = resolveRuleSourceRef(db, r, projectId)
+      // 2. 规则来源与快照片段不一致时必须失败关闭：严禁注入正文上下文
+      if (
+        sourceRef.provenanceStatus === 'provenance-missing' &&
+        (r.originType === 'scan' || r.sourceSnapshotFragmentId || r.sourceSnapshotId || r.sourceId)
+      ) {
+        omissions.push({
+          stage: 2,
+          stageName: '已确认设定规则',
+          title: r.title,
+          reason: 'provenance-mismatch',
+          sourceInfo: sourceRef.provenanceError || `${r.sourceFile || 'setting_rules'} (规则来源与快照片段不一致，已失败关闭)`,
+        })
+        staleWarnings.push(`规则【${r.title}】来源凭据不一致或已失效，已执行失败关闭拦截`)
+      } else {
+        validConfirmedRules.push(r)
+        verifiedConfirmedSources.push(sourceRef)
+      }
+    }
+
+    if (validConfirmedRules.length > 0) {
+      const ruleTexts = validConfirmedRules.map(
         r => `### 【${r.constraintType === 'hard' ? '硬约束' : '软约束'}】${r.title}\n${r.content}（来源：${r.sourceFile || '已确认设定'}）`
       ).join('\n\n')
-      const sources: ChapterContextSourceRef[] = applicableRules.map(r => ({
-        relativePath: r.sourceFile || 'setting_rules',
-        headingPath: r.sourceHeadingPath || r.title,
-        fragmentId: r.sourceFragmentId,
-        lineRange: r.sourceLineRange,
-      }))
       tryAddBlock({
         id: 'stage-2-confirmed-rules',
         stage: 2,
         stageName: '已确认设定规则',
-        title: `已确认世界规则与硬约束 (${applicableRules.length} 条)`,
+        title: `已确认世界规则与硬约束 (${validConfirmedRules.length} 条)`,
         content: `【已确认设定规则与硬约束】\n${ruleTexts}`,
         sourceType: 'database',
         sourceFile: 'setting_rules',
-        sources,
+        sources: verifiedConfirmedSources,
         authorityStatus: 'confirmed',
         isCandidate: false,
         isStale: false,
@@ -154,25 +374,51 @@ export class ChapterContextAssembler {
       ? WorkspaceHubRepository.listRules(projectId, 'candidate').filter(r => ruleMatchesChapter(r.scope))
       : []
 
-    if (candidateRules.length > 0) {
-      const candidateTexts = candidateRules.map(
+    const validCandidateRules: SettingRule[] = []
+    const verifiedCandidateSources: ChapterContextSourceRef[] = []
+
+    for (const r of candidateRules) {
+      if (r.projectId && r.projectId !== projectId) {
+        omissions.push({
+          stage: 2,
+          stageName: '候选设定参考',
+          title: r.title,
+          reason: 'provenance-mismatch',
+          sourceInfo: `跨项目候选规则拒绝：所属项目 [${r.projectId}] 与当前装配项目 [${projectId}] 不符（已失败关闭）`,
+        })
+        continue
+      }
+      const sourceRef = resolveRuleSourceRef(db, r, projectId)
+      if (
+        sourceRef.provenanceStatus === 'provenance-missing' &&
+        (r.originType === 'scan' || r.sourceSnapshotFragmentId || r.sourceSnapshotId || r.sourceId)
+      ) {
+        omissions.push({
+          stage: 2,
+          stageName: '候选设定参考',
+          title: r.title,
+          reason: 'provenance-mismatch',
+          sourceInfo: sourceRef.provenanceError || '候选规则来源快照片段校验失败（已失败关闭）',
+        })
+      } else {
+        validCandidateRules.push(r)
+        verifiedCandidateSources.push(sourceRef)
+      }
+    }
+
+    if (validCandidateRules.length > 0) {
+      const candidateTexts = validCandidateRules.map(
         r => `### 【待确认/候选】${r.title}\n${r.content}（警示：未经作者确认，不得作为硬约束）`
       ).join('\n\n')
-      const sources: ChapterContextSourceRef[] = candidateRules.map(r => ({
-        relativePath: r.sourceFile || 'setting_rules',
-        headingPath: r.sourceHeadingPath || r.title,
-        fragmentId: r.sourceFragmentId,
-        lineRange: r.sourceLineRange,
-      }))
       tryAddBlock({
         id: 'stage-2-candidate-rules',
         stage: 2,
         stageName: '候选设定参考',
-        title: `候选世界设定 [待确认/候选] (${candidateRules.length} 条)`,
+        title: `候选世界设定 [待确认/候选] (${validCandidateRules.length} 条)`,
         content: `【候选世界设定（待确认/软参考）】\n${candidateTexts}`,
         sourceType: 'database',
         sourceFile: 'setting_rules',
-        sources,
+        sources: verifiedCandidateSources,
         authorityStatus: 'candidate',
         isCandidate: true,
         isStale: false,
@@ -191,13 +437,7 @@ export class ChapterContextAssembler {
     })
     if (stage3Fragments.length > 0) {
       const text = stage3Fragments.map(f => `### ${f.headingPath}\n${f.content}`).join('\n\n')
-      const sources: ChapterContextSourceRef[] = stage3Fragments.map(f => ({
-        relativePath: f.sourcePath,
-        headingPath: f.headingPath,
-        fragmentId: f.fragmentId,
-        contentHash: f.fragmentHash,
-        lineRange: `${f.startLine}-${f.endLine}`,
-      }))
+      const sources: ChapterContextSourceRef[] = stage3Fragments.map(f => formatFragmentSourceRef(f, projectId))
       tryAddBlock({
         id: 'stage-3-master-plot',
         stage: 3,
@@ -226,13 +466,7 @@ export class ChapterContextAssembler {
     })
     if (stage4Fragments.length > 0) {
       const text = stage4Fragments.map(f => `### ${f.headingPath}\n${f.content}`).join('\n\n')
-      const sources: ChapterContextSourceRef[] = stage4Fragments.map(f => ({
-        relativePath: f.sourcePath,
-        headingPath: f.headingPath,
-        fragmentId: f.fragmentId,
-        contentHash: f.fragmentHash,
-        lineRange: `${f.startLine}-${f.endLine}`,
-      }))
+      const sources: ChapterContextSourceRef[] = stage4Fragments.map(f => formatFragmentSourceRef(f, projectId))
       tryAddBlock({
         id: 'stage-4-volume-outline',
         stage: 4,
@@ -261,13 +495,7 @@ export class ChapterContextAssembler {
     })
     if (stage5Fragments.length > 0) {
       const text = stage5Fragments.map(f => `### ${f.headingPath}\n${f.content}`).join('\n\n')
-      const sources: ChapterContextSourceRef[] = stage5Fragments.map(f => ({
-        relativePath: f.sourcePath,
-        headingPath: f.headingPath,
-        fragmentId: f.fragmentId,
-        contentHash: f.fragmentHash,
-        lineRange: `${f.startLine}-${f.endLine}`,
-      }))
+      const sources: ChapterContextSourceRef[] = stage5Fragments.map(f => formatFragmentSourceRef(f, projectId))
       tryAddBlock({
         id: 'stage-5-chapter-outline',
         stage: 5,
@@ -525,13 +753,7 @@ export class ChapterContextAssembler {
 
       if (topFragments.length > 0) {
         const text = topFragments.map(f => `### ${f.headingPath}\n${f.content}`).join('\n\n')
-        const sources: ChapterContextSourceRef[] = topFragments.map(f => ({
-          relativePath: f.sourcePath,
-          headingPath: f.headingPath,
-          fragmentId: f.fragmentId,
-          contentHash: f.fragmentHash,
-          lineRange: `${f.startLine}-${f.endLine}`,
-        }))
+        const sources: ChapterContextSourceRef[] = topFragments.map(f => formatFragmentSourceRef(f, projectId))
         tryAddBlock({
           id: 'stage-10-world-events',
           stage: 10,
@@ -561,13 +783,7 @@ export class ChapterContextAssembler {
     })
     if (stage11Fragments.length > 0) {
       const text = stage11Fragments.map(f => `### ${f.headingPath}\n${f.content}`).join('\n\n')
-      const sources: ChapterContextSourceRef[] = stage11Fragments.map(f => ({
-        relativePath: f.sourcePath,
-        headingPath: f.headingPath,
-        fragmentId: f.fragmentId,
-        contentHash: f.fragmentHash,
-        lineRange: `${f.startLine}-${f.endLine}`,
-      }))
+      const sources: ChapterContextSourceRef[] = stage11Fragments.map(f => formatFragmentSourceRef(f, projectId))
       tryAddBlock({
         id: 'stage-11-narrative-goals',
         stage: 11,
@@ -595,13 +811,7 @@ export class ChapterContextAssembler {
     })
     if (stage12Fragments.length > 0) {
       const text = stage12Fragments.map(f => f.content).join('\n\n')
-      const sources: ChapterContextSourceRef[] = stage12Fragments.map(f => ({
-        relativePath: f.sourcePath,
-        headingPath: f.headingPath,
-        fragmentId: f.fragmentId,
-        contentHash: f.fragmentHash,
-        lineRange: `${f.startLine}-${f.endLine}`,
-      }))
+      const sources: ChapterContextSourceRef[] = stage12Fragments.map(f => formatFragmentSourceRef(f, projectId))
       tryAddBlock({
         id: 'stage-12-style-guide',
         stage: 12,
@@ -620,40 +830,33 @@ export class ChapterContextAssembler {
     }
 
     // =========================================================================
-    // 阶段 13: 明确的废案排除清单 (纯负向约束条目，严禁注入废案正文全文)
+    // 阶段 13: 明确的废案排除清单 (纯负向约束条目，严禁注入废案正文全文，受保护)
     // =========================================================================
-    const deprecatedRules = WorkspaceHubRepository.listRules(projectId, 'deprecated')
-    const deprecatedFragments = WorkspaceHubRepository.queryFragments({
-      projectId,
-      categories: ['deprecated'],
-      excludeDeprecated: false,
-    })
-    excludedDeprecatedCount = deprecatedRules.length + deprecatedFragments.length
-
-    if (deprecatedRules.length > 0 || deprecatedFragments.length > 0) {
-      const ruleSummaries = deprecatedRules.slice(0, 20).map(
-        r => `- 废止设定条目：【${r.title}】（约束类型：${r.constraintType === 'hard' ? '硬约束' : '软约束'}，作用域：${r.scope}）`
+    if (excludedDeprecatedCount > 0) {
+      const isCompact = remainingBudget < 300 || budgetLimit < 800
+      const projectDeprecatedRules = deprecatedRules.filter(r => !r.projectId || r.projectId === projectId)
+      const ruleSummaries = projectDeprecatedRules.slice(0, 20).map(r =>
+        isCompact
+          ? `- 废止设定：【${r.title}】（禁止采用）`
+          : `- 废止设定条目：【${r.title}】（约束类型：${r.constraintType === 'hard' ? '硬约束' : '软约束'}，作用域：${r.scope}，禁止采用）`
       )
-      const fragSummaries = deprecatedFragments.slice(0, 20).map(
-        f => `- 废止资料片段：【${f.headingPath}】（来源文件：${f.sourcePath}）`
+      const fragSummaries = deprecatedFragments.slice(0, 20).map(f =>
+        isCompact
+          ? `- 废止片段：【${f.headingPath}】（来源：${f.sourcePath}，禁止采用）`
+          : `- 废止资料片段：【${f.headingPath}】（来源文件：${f.sourcePath}，禁止采用）`
       )
+      const header = isCompact
+        ? '【以下方案与设定已被作者明确废止，严禁在正文与细纲中采用（禁止采用）】：'
+        : '【以下方案与设定已被作者明确废止，严禁在正文与细纲中作为有效事实采用（明确禁止采用）】：'
       const exclusionText = [
-        '【以下方案与设定已被作者明确废止，严禁在正文与细纲中作为有效事实采用】：',
+        header,
         ...ruleSummaries,
         ...fragSummaries,
       ].join('\n')
 
       const sources: ChapterContextSourceRef[] = [
-        ...deprecatedRules.map(r => ({
-          relativePath: r.sourceFile || 'setting_rules',
-          headingPath: r.sourceHeadingPath || r.title,
-          fragmentId: r.sourceFragmentId,
-        })),
-        ...deprecatedFragments.map(f => ({
-          relativePath: f.sourcePath,
-          headingPath: f.headingPath,
-          fragmentId: f.fragmentId,
-        })),
+        ...projectDeprecatedRules.map(r => resolveRuleSourceRef(db, r, projectId)),
+        ...deprecatedFragments.map(f => formatFragmentSourceRef(f, projectId)),
       ]
 
       tryAddBlock({
@@ -669,7 +872,7 @@ export class ChapterContextAssembler {
         isCandidate: false,
         isStale: false,
         charCount: exclusionText.length,
-      })
+      }, true)
     }
 
     // 生成完整装配文本与预算校验

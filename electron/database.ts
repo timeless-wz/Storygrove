@@ -793,6 +793,22 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
     );
     CREATE INDEX IF NOT EXISTS idx_workspace_sources_project_path
       ON workspace_sources(project_id, relative_path);
+    -- commitScanPayload 的“该快照是否已被批准”护栏按 approved_snapshot_id 逐条
+    -- 回查；缺少此索引时会退化为扫描本项目的全部来源行，千文件扫描约 156ms
+    -- （已批准快照的不可变保护会随来源数量呈平方级增长）。
+    CREATE INDEX IF NOT EXISTS idx_workspace_sources_approved_snapshot
+      ON workspace_sources(project_id, approved_snapshot_id);
+
+    CREATE TABLE IF NOT EXISTS workspace_binding_states (
+      project_id TEXT NOT NULL PRIMARY KEY,
+      current_path TEXT NOT NULL DEFAULT '',
+      healthy_path TEXT NOT NULL DEFAULT '',
+      healthy_scanned_at TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspace_binding_states_healthy
+      ON workspace_binding_states(project_id, healthy_path);
 
     CREATE TABLE IF NOT EXISTS workspace_source_snapshots (
       snapshot_id TEXT PRIMARY KEY,
@@ -801,6 +817,7 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
       content_hash TEXT NOT NULL,
       file_size INTEGER NOT NULL DEFAULT 0,
       fragment_count INTEGER NOT NULL DEFAULT 0,
+      parser_schema_version INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (source_id) REFERENCES workspace_sources(id) ON DELETE CASCADE
     );
@@ -906,7 +923,7 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
       ON workspace_source_fragments(chapter_start, chapter_end);
 
     CREATE TABLE IF NOT EXISTS setting_rules (
-      rule_id TEXT PRIMARY KEY,
+      rule_id TEXT NOT NULL,
       project_id TEXT NOT NULL DEFAULT 'main',
       title TEXT NOT NULL,
       content TEXT NOT NULL,
@@ -916,6 +933,7 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
       constraint_type TEXT NOT NULL DEFAULT 'hard' CHECK(constraint_type IN ('hard', 'soft')),
       scope TEXT NOT NULL DEFAULT 'global',
       source_fragment_id TEXT DEFAULT NULL,
+      source_snapshot_fragment_id TEXT DEFAULT NULL,
       source_file TEXT NOT NULL DEFAULT '',
       source_heading_path TEXT NOT NULL DEFAULT '',
       source_line_range TEXT NOT NULL DEFAULT '',
@@ -926,12 +944,15 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
       source_snapshot_id TEXT DEFAULT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (project_id, rule_id),
       FOREIGN KEY (source_fragment_id) REFERENCES workspace_source_fragments(fragment_id) ON DELETE SET NULL
     );
     CREATE INDEX IF NOT EXISTS idx_setting_rules_status
       ON setting_rules(project_id, status);
     CREATE INDEX IF NOT EXISTS idx_setting_rules_scan_source
       ON setting_rules(project_id, origin_type, source_id);
+    CREATE INDEX IF NOT EXISTS idx_setting_rules_source_fragment
+      ON setting_rules(source_fragment_id);
 
     CREATE TABLE IF NOT EXISTS workspace_hub_migration_audit (
       migration_id TEXT PRIMARY KEY,
@@ -942,7 +963,7 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
     );
 
     CREATE TABLE IF NOT EXISTS workspace_import_candidates (
-      candidate_id TEXT PRIMARY KEY,
+      candidate_id TEXT NOT NULL,
       project_id TEXT NOT NULL DEFAULT 'main',
       candidate_type TEXT NOT NULL CHECK(candidate_type IN ('character', 'setting', 'blueprint', 'lead')),
       raw_data TEXT NOT NULL,
@@ -954,7 +975,8 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
       confidence REAL NOT NULL DEFAULT 1.0,
       status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
       actioned_at TEXT DEFAULT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (project_id, candidate_id)
     );
     CREATE INDEX IF NOT EXISTS idx_workspace_candidates_status
       ON workspace_import_candidates(project_id, candidate_type, status);
@@ -1464,6 +1486,17 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
   }
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS workspace_binding_states (
+      project_id TEXT NOT NULL PRIMARY KEY,
+      current_path TEXT NOT NULL DEFAULT '',
+      healthy_path TEXT NOT NULL DEFAULT '',
+      healthy_scanned_at TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_workspace_binding_states_healthy
+      ON workspace_binding_states(project_id, healthy_path);
+
     CREATE TABLE IF NOT EXISTS workspace_source_snapshots (
       snapshot_id TEXT PRIMARY KEY,
       source_id TEXT NOT NULL,
@@ -1471,6 +1504,7 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
       content_hash TEXT NOT NULL,
       file_size INTEGER NOT NULL DEFAULT 0,
       fragment_count INTEGER NOT NULL DEFAULT 0,
+      parser_schema_version INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (source_id) REFERENCES workspace_sources(id) ON DELETE CASCADE
     );
@@ -1522,15 +1556,16 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
       ON workspace_source_snapshot_rules(snapshot_id);
 
     CREATE TABLE IF NOT EXISTS workspace_approval_receipts (
-      candidate_id TEXT PRIMARY KEY,
+      candidate_id TEXT NOT NULL,
       project_id TEXT NOT NULL DEFAULT 'main',
       candidate_type TEXT NOT NULL,
       operation_id TEXT NOT NULL,
       payload_hash TEXT NOT NULL DEFAULT '',
       frozen_payload TEXT NOT NULL DEFAULT '',
-      stage TEXT NOT NULL CHECK(stage IN ('prepared', 'roster_committed', 'completed')),
+      stage TEXT NOT NULL CHECK(stage IN ('prepared', 'roster_committed', 'completed', 'compensated')),
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (project_id, candidate_id)
     );
     CREATE INDEX IF NOT EXISTS idx_workspace_approval_receipts_stage
       ON workspace_approval_receipts(project_id, stage);
@@ -1544,6 +1579,109 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
     );
   `)
 
+  const settingRulePkColumns = (db.prepare('PRAGMA table_info(setting_rules)').all() as Array<{ name: string; pk: number }>)
+    .filter(c => c.pk > 0)
+    .map(c => c.name)
+  if (settingRulePkColumns.length === 1 && settingRulePkColumns[0] === 'rule_id') {
+    const legacySettingRuleColumns = new Set(
+      (db.prepare('PRAGMA table_info(setting_rules)').all() as Array<{ name: string }>).map(c => c.name),
+    )
+    const legacySettingRuleIndexes = db.prepare(`
+      SELECT name, sql
+      FROM sqlite_master
+      WHERE type = 'index' AND tbl_name = 'setting_rules' AND sql IS NOT NULL
+      ORDER BY name
+    `).all() as Array<{ name: string; sql: string }>
+    const settingRuleColumnsToCopy = [
+      'rule_id', 'project_id', 'title', 'content', 'status', 'constraint_type', 'scope',
+      'source_fragment_id', 'source_snapshot_fragment_id', 'source_file',
+      'source_heading_path', 'source_line_range', 'confirmed_at', 'confirmed_by',
+      'origin_type', 'source_id', 'source_snapshot_id', 'created_at', 'updated_at',
+    ]
+    const missingColumnDefaults: Record<string, string> = {
+      rule_id: "''",
+      project_id: "'main'",
+      title: "''",
+      content: "''",
+      status: "'confirmed'",
+      constraint_type: "'hard'",
+      scope: "'global'",
+      source_fragment_id: 'NULL',
+      source_snapshot_fragment_id: 'NULL',
+      source_file: "''",
+      source_heading_path: "''",
+      source_line_range: "''",
+      confirmed_at: 'NULL',
+      confirmed_by: 'NULL',
+      origin_type: "'manual'",
+      source_id: 'NULL',
+      source_snapshot_id: 'NULL',
+      created_at: "datetime('now')",
+      updated_at: "datetime('now')",
+    }
+    const quotedColumns = settingRuleColumnsToCopy.map(column => `"${column}"`).join(', ')
+    const copyExpressions = settingRuleColumnsToCopy.map(column => (
+      legacySettingRuleColumns.has(column) ? `"${column}"` : missingColumnDefaults[column]
+    )).join(', ')
+
+    db.pragma('foreign_keys = OFF')
+    try {
+      db.transaction(() => {
+        db.exec(`
+          CREATE TABLE setting_rules_stage_v2 (
+            rule_id TEXT NOT NULL,
+            project_id TEXT NOT NULL DEFAULT 'main',
+            title TEXT NOT NULL,
+            content TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'confirmed' CHECK(status IN (
+              'confirmed', 'candidate', 'background', 'deprecated'
+            )),
+            constraint_type TEXT NOT NULL DEFAULT 'hard' CHECK(constraint_type IN ('hard', 'soft')),
+            scope TEXT NOT NULL DEFAULT 'global',
+            source_fragment_id TEXT DEFAULT NULL,
+            source_snapshot_fragment_id TEXT DEFAULT NULL,
+            source_file TEXT NOT NULL DEFAULT '',
+            source_heading_path TEXT NOT NULL DEFAULT '',
+            source_line_range TEXT NOT NULL DEFAULT '',
+            confirmed_at TEXT DEFAULT NULL,
+            confirmed_by TEXT DEFAULT NULL,
+            origin_type TEXT NOT NULL DEFAULT 'manual' CHECK(origin_type IN ('manual', 'scan')),
+            source_id TEXT DEFAULT NULL,
+            source_snapshot_id TEXT DEFAULT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (project_id, rule_id),
+            FOREIGN KEY (source_fragment_id) REFERENCES workspace_source_fragments(fragment_id) ON DELETE SET NULL
+          );
+          INSERT INTO setting_rules_stage_v2 (${quotedColumns})
+            SELECT ${copyExpressions} FROM setting_rules;
+          DROP TABLE setting_rules;
+          ALTER TABLE setting_rules_stage_v2 RENAME TO setting_rules;
+        `)
+
+        // Rebuild every named legacy index after the table swap. The required
+        // indexes below are added afterwards so an existing index definition is
+        // never silently replaced by an IF NOT EXISTS collision.
+        for (const index of legacySettingRuleIndexes) db.exec(index.sql)
+        db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_setting_rules_status
+            ON setting_rules(project_id, status);
+          CREATE INDEX IF NOT EXISTS idx_setting_rules_scan_source
+            ON setting_rules(project_id, origin_type, source_id);
+          CREATE INDEX IF NOT EXISTS idx_setting_rules_source_fragment
+            ON setting_rules(source_fragment_id);
+        `)
+
+        const foreignKeyViolations = db.prepare("PRAGMA foreign_key_check('setting_rules')").all()
+        if (foreignKeyViolations.length > 0) {
+          throw new Error('setting_rules 迁移后外键校验失败，已回滚')
+        }
+      })()
+    } finally {
+      db.pragma('foreign_keys = ON')
+    }
+  }
+
   const settingRuleColumns = new Set(
     (db.prepare('PRAGMA table_info(setting_rules)').all() as Array<{ name: string }>).map(c => c.name),
   )
@@ -1556,8 +1694,52 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
   if (!settingRuleColumns.has('source_snapshot_id')) {
     db.exec('ALTER TABLE setting_rules ADD COLUMN source_snapshot_id TEXT DEFAULT NULL')
   }
+  if (!settingRuleColumns.has('source_snapshot_fragment_id')) {
+    db.exec('ALTER TABLE setting_rules ADD COLUMN source_snapshot_fragment_id TEXT DEFAULT NULL')
+  }
   db.exec(`CREATE INDEX IF NOT EXISTS idx_setting_rules_scan_source
     ON setting_rules(project_id, origin_type, source_id)`)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_setting_rules_source_fragment
+    ON setting_rules(source_fragment_id)`)
+
+  const snapshotColumns = new Set(
+    (db.prepare('PRAGMA table_info(workspace_source_snapshots)').all() as Array<{ name: string }>).map(c => c.name),
+  )
+  if (!snapshotColumns.has('parser_schema_version')) {
+    db.exec('ALTER TABLE workspace_source_snapshots ADD COLUMN parser_schema_version INTEGER NOT NULL DEFAULT 1')
+  }
+
+  const approvalReceiptPkColumns = (db.prepare('PRAGMA table_info(workspace_approval_receipts)').all() as Array<{ name: string; pk: number }>)
+    .filter(c => c.pk > 0)
+    .map(c => c.name)
+  if (approvalReceiptPkColumns.length === 1 && approvalReceiptPkColumns[0] === 'candidate_id') {
+    db.pragma('foreign_keys = OFF')
+    try {
+      db.transaction(() => {
+        db.exec(`
+          CREATE TABLE workspace_approval_receipts_stage_v2 (
+            candidate_id TEXT NOT NULL,
+            project_id TEXT NOT NULL DEFAULT 'main',
+            candidate_type TEXT NOT NULL,
+            operation_id TEXT NOT NULL,
+            payload_hash TEXT NOT NULL DEFAULT '',
+            frozen_payload TEXT NOT NULL DEFAULT '',
+            stage TEXT NOT NULL CHECK(stage IN ('prepared', 'roster_committed', 'completed', 'compensated')),
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (project_id, candidate_id)
+          );
+          INSERT OR IGNORE INTO workspace_approval_receipts_stage_v2 SELECT * FROM workspace_approval_receipts;
+          DROP TABLE workspace_approval_receipts;
+          ALTER TABLE workspace_approval_receipts_stage_v2 RENAME TO workspace_approval_receipts;
+          CREATE INDEX IF NOT EXISTS idx_workspace_approval_receipts_stage
+            ON workspace_approval_receipts(project_id, stage);
+        `)
+      })()
+    } finally {
+      db.pragma('foreign_keys = ON')
+    }
+  }
 
   const approvalReceiptColumns = new Set(
     (db.prepare('PRAGMA table_info(workspace_approval_receipts)').all() as Array<{ name: string }>).map(c => c.name),
@@ -1569,7 +1751,64 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
     db.exec("ALTER TABLE workspace_approval_receipts ADD COLUMN frozen_payload TEXT NOT NULL DEFAULT ''")
   }
 
+  const candidatePkColumns = (db.prepare('PRAGMA table_info(workspace_import_candidates)').all() as Array<{ name: string; pk: number }>)
+    .filter(c => c.pk > 0)
+    .map(c => c.name)
+  if (candidatePkColumns.length === 1 && candidatePkColumns[0] === 'candidate_id') {
+    db.pragma('foreign_keys = OFF')
+    try {
+      db.transaction(() => {
+        db.exec(`
+          CREATE TABLE workspace_import_candidates_stage_v2 (
+            candidate_id TEXT NOT NULL,
+            project_id TEXT NOT NULL DEFAULT 'main',
+            candidate_type TEXT NOT NULL CHECK(candidate_type IN ('character', 'setting', 'blueprint', 'lead')),
+            raw_data TEXT NOT NULL,
+            suggested_data TEXT NOT NULL,
+            source_file TEXT NOT NULL DEFAULT '',
+            source_heading_path TEXT NOT NULL DEFAULT '',
+            source_line_range TEXT NOT NULL DEFAULT '',
+            evidence TEXT NOT NULL DEFAULT '',
+            confidence REAL NOT NULL DEFAULT 1.0,
+            status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
+            actioned_at TEXT DEFAULT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (project_id, candidate_id)
+          );
+          INSERT OR IGNORE INTO workspace_import_candidates_stage_v2 SELECT * FROM workspace_import_candidates;
+          DROP TABLE workspace_import_candidates;
+          ALTER TABLE workspace_import_candidates_stage_v2 RENAME TO workspace_import_candidates;
+          CREATE INDEX IF NOT EXISTS idx_workspace_candidates_status
+            ON workspace_import_candidates(project_id, candidate_type, status);
+        `)
+      })()
+    } finally {
+      db.pragma('foreign_keys = ON')
+    }
+  }
+
   migrateLegacyWorkspaceHubData(db)
+
+  // Existing databases only have the legacy project_core path. Backfill the
+  // authoritative per-session state once, after legacy approved snapshots have
+  // been promoted; runtime reads never fall back to legacy fragment tables.
+  db.exec(`
+    INSERT OR IGNORE INTO workspace_binding_states (
+      project_id, current_path, healthy_path, healthy_scanned_at
+    )
+    SELECT 'main',
+           COALESCE(external_workspace_path, ''),
+           CASE WHEN EXISTS (
+             SELECT 1 FROM workspace_sources
+             WHERE project_id = 'main'
+               AND approved_snapshot_id IS NOT NULL
+               AND approved_snapshot_id <> ''
+               AND is_missing = 0
+           ) THEN COALESCE(external_workspace_path, '') ELSE '' END,
+           COALESCE(external_workspace_scanned_at, '')
+    FROM project_core
+    WHERE id = 'main'
+  `)
 
   migrateDraftUnitCounts(db)
 }

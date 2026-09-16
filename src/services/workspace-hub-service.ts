@@ -76,11 +76,22 @@ export const workspaceHubService = {
   async getSourceDetail(
     session: ProjectSessionContext,
     sourceId: string,
+    snapshotId?: string | null,
+    fragmentId?: string | null,
   ): Promise<{
     source: WorkspaceSource | null
     fragments: WorkspaceSourceFragment[]
+    targetSnapshotId?: string | null
+    provenanceStatus?: 'found' | 'provenance-missing'
   }> {
-    return ipc.invokeWithProjectSession(session, 'workspace:get-source-detail', sourceId, session.projectPath)
+    return ipc.invokeWithProjectSession(
+      session,
+      'workspace:get-source-detail',
+      sourceId,
+      snapshotId,
+      fragmentId,
+      session.projectPath,
+    )
   },
 
   /** 列出设定规则 */

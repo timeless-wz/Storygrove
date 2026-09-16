@@ -241,6 +241,7 @@ export interface WorkspaceSourceSnapshot {
   contentHash: string
   fileSize: number
   fragmentCount: number
+  parserSchemaVersion?: number
   createdAt?: string
 }
 
@@ -287,6 +288,7 @@ export interface SettingRule {
   constraintType: SettingRuleConstraint
   scope: string
   sourceFragmentId?: string
+  sourceSnapshotFragmentId?: string | null
   sourceFile: string
   sourceHeadingPath: string
   sourceLineRange: string
@@ -297,6 +299,17 @@ export interface SettingRule {
   sourceSnapshotId?: string | null
   createdAt?: string
   updatedAt?: string
+}
+
+export interface WorkspaceScanResult {
+  success: boolean
+  taskId?: string
+  scannedCount: number
+  recognizedCount: number
+  error?: string
+  enumerationComplete?: boolean
+  truncated?: boolean
+  truncationReason?: string
 }
 
 export type WorkspaceImportCandidateType = 'character' | 'setting' | 'blueprint' | 'lead'
@@ -345,8 +358,17 @@ export interface ChapterContextSourceRef {
   relativePath: string
   headingPath: string
   fragmentId?: string
+  snapshotId?: string | null
   contentHash?: string
   lineRange?: string
+  projectId?: string
+  sourceId?: string | null
+  approvedSnapshotId?: string | null
+  sourceSnapshotFragmentId?: string | null
+  filePath?: string
+  titlePath?: string
+  provenanceStatus?: 'found' | 'provenance-missing'
+  provenanceError?: string
 }
 
 export interface ChapterContextBlock {
@@ -370,7 +392,7 @@ export interface ChapterContextOmission {
   stage: number
   stageName: string
   title: string
-  reason: 'budget' | 'deprecated-exclusion' | 'out-of-scope' | 'stale-rejected'
+  reason: 'budget' | 'deprecated-exclusion' | 'out-of-scope' | 'stale-rejected' | 'provenance-mismatch'
   sourceInfo: string
 }
 

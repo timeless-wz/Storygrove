@@ -274,6 +274,24 @@ describe.runIf(process.platform === 'win32')('Windows handle-bound secure file s
     expect(fs.existsSync(path.join(outsideRoot, 'result.txt'))).toBe(false)
   }, REAL_WINDOWS_MULTI_HELPER_TIMEOUT_MS)
 
+  it('classifies operations directly on a leaf junction stably as SECURE_FS_REPARSE_POINT', async () => {
+    const fixture = fixtureRoot()
+    const selectedRoot = path.join(fixture, 'selected')
+    const outsideRoot = path.join(fixture, 'outside')
+    fs.mkdirSync(selectedRoot)
+    fs.mkdirSync(outsideRoot)
+    fs.writeFileSync(path.join(outsideRoot, 'secret.txt'), 'outside', 'utf8')
+    fs.symlinkSync(outsideRoot, path.join(selectedRoot, 'direct-junction'), 'junction')
+
+    const safeFileSystem = createWindowsSafeFileSystem()
+    const leafJunction = capability(selectedRoot, 'direct-junction')
+
+    await expect(safeFileSystem.readText(leafJunction)).rejects.toThrow('SECURE_FS_REPARSE_POINT')
+    await expect(safeFileSystem.writeTextAtomically(leafJunction, 'attempt overwrite'))
+      .rejects.toThrow('SECURE_FS_REPARSE_POINT')
+    await expect(safeFileSystem.exists(leafJunction)).rejects.toThrow('SECURE_FS_REPARSE_POINT')
+  }, REAL_WINDOWS_MULTI_HELPER_TIMEOUT_MS)
+
   it('lists ordinary entries when the directory also contains a junction without exposing the junction', async () => {
     const fixture = fixtureRoot()
     const selectedRoot = path.join(fixture, 'selected')

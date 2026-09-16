@@ -3,6 +3,10 @@ import {
   Clock,
   Ban,
   Trash2,
+  ExternalLink,
+  Layers,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 import { useWorkspaceHubStore } from '../../stores/workspace-hub-store'
 import { useLocaleStore } from '../../stores/locale-store'
@@ -25,9 +29,32 @@ export default function WorkspaceRulesTab() {
   const setRuleFilterStatus = useWorkspaceHubStore(s => s.setRuleFilterStatus)
   const updateRuleStatus = useWorkspaceHubStore(s => s.updateRuleStatus)
   const deleteRule = useWorkspaceHubStore(s => s.deleteRule)
+  const selectSource = useWorkspaceHubStore(s => s.selectSource)
+  const setActiveTab = useWorkspaceHubStore(s => s.setActiveTab)
+  const sources = useWorkspaceHubStore(s => s.sources)
 
   const [constraintFilter, setConstraintFilter] = useState<'all' | 'hard' | 'soft'>('all')
   const [searchQuery, setSearchQuery] = useState('')
+  const [expandedTraceRuleId, setExpandedTraceRuleId] = useState<string | null>(null)
+
+  const handleLocateSource = async (rule: SettingRule) => {
+    let targetSourceId = rule.sourceId
+    if (!targetSourceId && rule.sourceFile) {
+      const match = sources.find(s => s.relativePath === rule.sourceFile || s.absolutePath === rule.sourceFile)
+      if (match) targetSourceId = match.id
+    }
+    if (targetSourceId) {
+      await selectSource(targetSourceId, {
+        snapshotId: rule.sourceSnapshotId,
+        fragmentId: rule.sourceSnapshotFragmentId || rule.sourceFragmentId,
+        projectId: rule.projectId || 'main',
+      })
+      setActiveTab('sources')
+      toast.success(text(`已跳转定位至母稿资料快照 [${rule.sourceFile}]`, `Navigated to snapshot source [${rule.sourceFile}]`))
+    } else {
+      toast.info(text('未找到关联的母稿文件，可能为手工创建或文件已移除', 'Source file not found or manually created'))
+    }
+  }
 
   const filteredRules = rules.filter(r => {
     if (ruleFilterStatus !== 'all' && r.status !== ruleFilterStatus) return false
@@ -219,7 +246,7 @@ export default function WorkspaceRulesTab() {
 
                 {/* 来源与证明 */}
                 <div className="flex items-center justify-between text-[11px] opacity-75 pt-0.5" style={{ color: 'var(--color-text-muted)' }}>
-                  <div className="flex items-center gap-2 truncate">
+                  <div className="flex items-center gap-2 truncate flex-1">
                     <span>{text('来源: ', 'Source: ')}</span>
                     <span className="font-mono">{r.sourceFile || text('手工创建', 'Manual')}</span>
                     {r.sourceHeadingPath && (
@@ -234,15 +261,95 @@ export default function WorkspaceRulesTab() {
                         <span>行 {r.sourceLineRange}</span>
                       </>
                     )}
+                    {r.sourceSnapshotId && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-blue-500/10 text-[var(--color-info)]">
+                        快照 {r.sourceSnapshotId.slice(0, 8)}
+                      </span>
+                    )}
                   </div>
 
-                  {r.confirmedAt && (
-                    <div className="shrink-0 flex items-center gap-1 text-[10px]">
-                      <Clock size={11} />
-                      <span>{text('确认于: ', 'Confirmed: ')}{new Date(r.confirmedAt).toLocaleDateString()}</span>
-                    </div>
-                  )}
+                  <div className="shrink-0 flex items-center gap-2">
+                    {r.confirmedAt && (
+                      <div className="flex items-center gap-1 text-[10px]">
+                        <Clock size={11} />
+                        <span>{text('确认于: ', 'Confirmed: ')}{new Date(r.confirmedAt).toLocaleDateString()}</span>
+                      </div>
+                    )}
+                    {(r.sourceId || r.sourceSnapshotId || r.sourceSnapshotFragmentId) && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setExpandedTraceRuleId(expandedTraceRuleId === r.ruleId ? null : r.ruleId)}
+                          className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+                          style={{ color: 'var(--color-accent)' }}
+                          title={text('查看快照与片段溯源详情', 'View snapshot and fragment provenance')}
+                        >
+                          <Layers size={10} />
+                          <span>{text('溯源', 'Provenance')}</span>
+                          {expandedTraceRuleId === r.ruleId ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleLocateSource(r)}
+                          className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-accent/10 hover:bg-accent/20 transition-colors"
+                          style={{ color: 'var(--color-accent)' }}
+                          title={text('定位母稿快照文件及片段', 'Locate snapshot source in Materials tab')}
+                        >
+                          <ExternalLink size={10} />
+                          <span>{text('定位原始片段', 'Locate Source')}</span>
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
+
+                {/* 展开的快照溯源详情卡片 */}
+                {expandedTraceRuleId === r.ruleId && (
+                  <div
+                    className="p-2.5 rounded border text-[11px] space-y-1.5 font-mono"
+                    style={{
+                      backgroundColor: 'var(--color-surface)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text-secondary)',
+                    }}
+                  >
+                    <div className="flex items-center justify-between text-[10px] font-semibold pb-1 border-b" style={{ borderColor: 'var(--color-border)' }}>
+                      <span className="flex items-center gap-1" style={{ color: 'var(--color-accent)' }}>
+                        <Layers size={12} />
+                        {text('快照来源追溯凭证', 'Snapshot Provenance Locators')}
+                      </span>
+                      <span className="opacity-70">{r.originType === 'scan' ? text('扫描提取', 'Scanned') : text('手工创建', 'Manual')}</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-[10px]">
+                      <div>
+                        <span className="opacity-60">{text('批准快照 ID: ', 'Approved Snapshot: ')}</span>
+                        <span className="select-all font-medium" style={{ color: 'var(--color-text)' }}>
+                          {r.sourceSnapshotId || text('无', 'None')}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="opacity-60">{text('快照片段 ID: ', 'Fragment ID: ')}</span>
+                        <span className="select-all font-medium" style={{ color: 'var(--color-text)' }}>
+                          {r.sourceSnapshotFragmentId || r.sourceFragmentId || text('无', 'None')}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="opacity-60">{text('来源文件 ID: ', 'Source ID: ')}</span>
+                        <span className="select-all" style={{ color: 'var(--color-text)' }}>
+                          {r.sourceId || text('无', 'None')}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="opacity-60">{text('行号范围: ', 'Line Range: ')}</span>
+                        <span style={{ color: 'var(--color-text)' }}>{r.sourceLineRange || text('未指定', 'N/A')}</span>
+                      </div>
+                    </div>
+                    <div className="text-[10px] truncate">
+                      <span className="opacity-60">{text('标题面包屑路径: ', 'Heading Path: ')}</span>
+                      <span style={{ color: 'var(--color-text)' }}>{r.sourceHeadingPath || r.title}</span>
+                    </div>
+                  </div>
+                )}
               </div>
             )
           })

@@ -139,7 +139,19 @@ export function registerWorkspaceHubController(): void {
           signal: controller.signal,
           taskId,
         })
+        if (!scanResult.success) {
+          const status = WorkspaceHubRepository.getStatus(projectId)
+          if (status.totalFiles === 0) {
+            WorkspaceHubRepository.unbindWorkspaceDirectory(projectId)
+          }
+        }
         return scanResult
+      } catch (scanErr) {
+        const status = WorkspaceHubRepository.getStatus(projectId)
+        if (status.totalFiles === 0) {
+          WorkspaceHubRepository.unbindWorkspaceDirectory(projectId)
+        }
+        throw scanErr
       } finally {
         WorkspaceScannerService.cancelScanTask(taskId)
       }
@@ -211,7 +223,9 @@ export function registerWorkspaceHubController(): void {
   // 8. 来源详情及片段
   registerWorkspaceHubHandler('workspace:get-source-detail', (_event, projectId, ...args) => {
     const sourceId = String(args[0] || '')
-    return WorkspaceHubRepository.getSourceDetail(sourceId, projectId)
+    const snapshotId = args[1] ? String(args[1]) : undefined
+    const fragmentId = args[2] ? String(args[2]) : undefined
+    return WorkspaceHubRepository.getSourceDetail(sourceId, projectId, snapshotId, fragmentId)
   })
 
   // 9. 批准单个来源文件内容快照（消除 stale 状态，原子切换 approved_snapshot_id）
@@ -246,11 +260,11 @@ export function registerWorkspaceHubController(): void {
   })
 
   // 13. 更新规则状态
-  registerWorkspaceHubHandler('workspace:update-rule-status', (_event, _projectId, ...args) => {
+  registerWorkspaceHubHandler('workspace:update-rule-status', (_event, projectId, ...args) => {
     const ruleId = String(args[0] || '')
     const status = args[1] as SettingRuleStatus
     try {
-      WorkspaceHubRepository.updateRuleStatus(ruleId, status)
+      WorkspaceHubRepository.updateRuleStatus(ruleId, projectId, status)
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -258,10 +272,10 @@ export function registerWorkspaceHubController(): void {
   })
 
   // 14. 删除规则
-  registerWorkspaceHubHandler('workspace:delete-rule', (_event, _projectId, ...args) => {
+  registerWorkspaceHubHandler('workspace:delete-rule', (_event, projectId, ...args) => {
     const ruleId = String(args[0] || '')
     try {
-      WorkspaceHubRepository.deleteRule(ruleId)
+      WorkspaceHubRepository.deleteRule(ruleId, projectId)
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
@@ -282,13 +296,13 @@ export function registerWorkspaceHubController(): void {
   })
 
   // 16. 审批/拒绝候选（带回执与崩溃恢复防护）
-  registerWorkspaceHubHandler('workspace:action-candidate', (_event, _projectId, ...args) => {
+  registerWorkspaceHubHandler('workspace:action-candidate', (_event, projectId, ...args) => {
     const candidateId = String(args[0] || '')
     const action = args[1] as 'approve' | 'reject'
     if (action === 'approve') {
-      return WorkspaceHubRepository.approveCandidate(candidateId)
+      return WorkspaceHubRepository.approveCandidate(candidateId, projectId)
     }
-    return WorkspaceHubRepository.rejectCandidate(candidateId)
+    return WorkspaceHubRepository.rejectCandidate(candidateId, projectId)
   })
 
   // 17. 章节上下文包确定性装配（默认 includeCandidates: false）

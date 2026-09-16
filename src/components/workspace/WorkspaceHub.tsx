@@ -41,6 +41,7 @@ export default function WorkspaceHub() {
   const rescan = useWorkspaceHubStore(s => s.rescan)
   const cancelScan = useWorkspaceHubStore(s => s.cancelScan)
   const scanning = useWorkspaceHubStore(s => s.scanning)
+  const cancelling = useWorkspaceHubStore(s => s.cancelling)
 
   useEffect(() => {
     if (currentProject) {
@@ -131,29 +132,30 @@ export default function WorkspaceHub() {
           </div>
 
           <div className="flex items-center gap-2">
-            {status?.externalWorkspacePath ? (
+            {scanning || cancelling ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleCancelScan}
+                disabled={cancelling}
+                className="text-xs gap-1.5 h-8"
+              >
+                <XCircle size={13} className={cancelling ? 'animate-spin' : ''} />
+                {cancelling
+                  ? text('正在取消...', 'Cancelling...')
+                  : text('取消扫描', 'Cancel Scan')}
+              </Button>
+            ) : status?.externalWorkspacePath ? (
               <>
-                {scanning ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handleCancelScan}
-                    className="text-xs gap-1.5 h-8"
-                  >
-                    <XCircle size={13} />
-                    {text('取消扫描', 'Cancel Scan')}
-                  </Button>
-                ) : (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handleRescan}
-                    className="text-xs gap-1.5 h-8"
-                  >
-                    <RefreshCw size={13} />
-                    {text('重新扫描', 'Rescan')}
-                  </Button>
-                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleRescan}
+                  className="text-xs gap-1.5 h-8"
+                >
+                  <RefreshCw size={13} />
+                  {text('重新扫描', 'Rescan')}
+                </Button>
 
                 <Button
                   size="sm"

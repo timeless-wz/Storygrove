@@ -264,7 +264,7 @@ describe('Workspace Hub Security & Boundary Defenses', () => {
     const originalCandId = candidates[0].candidateId
 
     // 作者批准该候选
-    WorkspaceHubRepository.approveCandidate(originalCandId)
+    WorkspaceHubRepository.approveCandidate(originalCandId, 'main')
     expect(WorkspaceHubRepository.listCandidates({ projectId: 'main' })[0].status).toBe('approved')
 
     // 再次扫描（内容未变）：status 必须依然是 approved，不得重置为 pending
@@ -395,7 +395,7 @@ describe('Workspace Hub Security & Boundary Defenses', () => {
     }
 
     // 第一次执行，触发崩溃
-    const firstTry = WorkspaceHubRepository.approveCandidate(candidateId, 'author', crashHook)
+    const firstTry = WorkspaceHubRepository.approveCandidate(candidateId, 'main', 'author', crashHook)
     expect(firstTry.success).toBe(false)
     expect(firstTry.error).toContain('SIMULATED_CRASH')
 
@@ -435,7 +435,7 @@ describe('Workspace Hub Security & Boundary Defenses', () => {
     })
 
     // 重试审批：崩溃恢复机制必须检测到已提交，跳过角色名单重复追加，直接推进到 completed
-    const secondTry = WorkspaceHubRepository.approveCandidate(candidateId, 'author')
+    const secondTry = WorkspaceHubRepository.approveCandidate(candidateId, 'main', 'author')
     expect(secondTry.success).toBe(true)
 
     // 验证角色名单没有被重复插入或追加重复 notes

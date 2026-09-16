@@ -3,8 +3,8 @@
 # handle with OBJ_DONT_REPARSE, so a junction/symlink replacement cannot redirect
 # a later read, mkdir, list, or atomic replacement outside that root.
 $ErrorActionPreference = 'Stop'
+$OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
-[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
 $nativeSource = @'
 using System;
@@ -58,14 +58,23 @@ namespace AiNovelSecureFs {
     private const uint FILE_RENAME_REPLACE_IF_EXISTS = 0x00000001;
     private const uint FILE_RENAME_POSIX_SEMANTICS = 0x00000002;
     private const int STATUS_SUCCESS = 0;
+    private const int STATUS_REPARSE = unchecked((int)0x00000104);
     private const int STATUS_BUFFER_OVERFLOW = unchecked((int)0x80000005);
     private const int STATUS_NO_MORE_FILES = unchecked((int)0x80000006);
+    private const int STATUS_STOPPED_ON_SYMLINK = unchecked((int)0x8000002D);
     private const int STATUS_OBJECT_NAME_NOT_FOUND = unchecked((int)0xC0000034);
     private const int STATUS_OBJECT_PATH_NOT_FOUND = unchecked((int)0xC000003A);
-    private const int STATUS_REPARSE_POINT_ENCOUNTERED = unchecked((int)0xC000050B);
+    private const int STATUS_NOT_A_DIRECTORY = unchecked((int)0xC0000103);
+    private const int STATUS_FILE_IS_A_DIRECTORY = unchecked((int)0xC00000BA);
+    private const int STATUS_NOT_A_REPARSE_POINT = unchecked((int)0xC0000275);
+    private const int STATUS_IO_REPARSE_TAG_INVALID = unchecked((int)0xC0000276);
+    private const int STATUS_IO_REPARSE_TAG_MISMATCH = unchecked((int)0xC0000277);
+    private const int STATUS_IO_REPARSE_DATA_INVALID = unchecked((int)0xC0000278);
+    private const int STATUS_IO_REPARSE_TAG_NOT_HANDLED = unchecked((int)0xC0000279);
     private const int STATUS_REPARSE_POINT_NOT_RESOLVED = unchecked((int)0xC0000280);
     private const int STATUS_DIRECTORY_IS_A_REPARSE_POINT = unchecked((int)0xC0000281);
-    private const int STATUS_ACCESS_DENIED = unchecked((int)0xC0000022);
+    private const int STATUS_REPARSE_ATTRIBUTE_CONFLICT = unchecked((int)0xC00002B2);
+    private const int STATUS_REPARSE_POINT_ENCOUNTERED = unchecked((int)0xC000050B);
     private const int MaxTextBytes = 64 * 1024 * 1024;
     private const int MaxSegments = 256;
     private const int MaxEntries = 16384;
@@ -211,13 +220,64 @@ namespace AiNovelSecureFs {
     }
 
     private static void ThrowForStatus(int status) {
-      if (status == STATUS_REPARSE_POINT_ENCOUNTERED || status == STATUS_REPARSE_POINT_NOT_RESOLVED || status == STATUS_DIRECTORY_IS_A_REPARSE_POINT || status == STATUS_ACCESS_DENIED) {
+      if (status == STATUS_REPARSE
+          || status == STATUS_STOPPED_ON_SYMLINK
+          || status == STATUS_REPARSE_POINT_ENCOUNTERED
+          || status == STATUS_REPARSE_POINT_NOT_RESOLVED
+          || status == STATUS_DIRECTORY_IS_A_REPARSE_POINT
+          || status == STATUS_IO_REPARSE_TAG_NOT_HANDLED
+          || status == STATUS_IO_REPARSE_TAG_INVALID
+          || status == STATUS_IO_REPARSE_DATA_INVALID
+          || status == STATUS_IO_REPARSE_TAG_MISMATCH
+          || status == STATUS_REPARSE_ATTRIBUTE_CONFLICT
+          || status == STATUS_NOT_A_REPARSE_POINT) {
         throw new SecureFsException("SECURE_FS_REPARSE_POINT");
       }
       if (status == STATUS_OBJECT_NAME_NOT_FOUND || status == STATUS_OBJECT_PATH_NOT_FOUND) {
         throw new SecureFsException("SECURE_FS_NOT_FOUND");
       }
       throw new SecureFsException("SECURE_FS_OPEN_FAILED");
+    }
+
+    private static bool IsReparsePoint(IntPtr rootDirectory, string name) {
+      IntPtr handle = IntPtr.Zero;
+      try {
+        handle = OpenRelative(
+          rootDirectory,
+          name,
+          FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+          FILE_ATTRIBUTE_DIRECTORY,
+          FILE_OPEN,
+          FILE_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT,
+          FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+          false);
+        ByHandleFileInformation info;
+        if (GetFileInformationByHandle(handle, out info)) {
+          return (info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+        }
+      } catch {
+      } finally {
+        CloseHandle(ref handle);
+      }
+      try {
+        handle = OpenRelative(
+          rootDirectory,
+          name,
+          FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+          FILE_ATTRIBUTE_NORMAL,
+          FILE_OPEN,
+          FILE_NON_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT,
+          FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+          false);
+        ByHandleFileInformation info;
+        if (GetFileInformationByHandle(handle, out info)) {
+          return (info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+        }
+      } catch {
+      } finally {
+        CloseHandle(ref handle);
+      }
+      return false;
     }
 
     public static RootIdentity ParseRootIdentity(string volumeSerialNumber, string fileIndex) {
@@ -232,15 +292,11 @@ namespace AiNovelSecureFs {
       return new RootIdentity((uint)volume, index);
     }
 
-    private static void VerifyRootIdentity(IntPtr rootHandle, RootIdentity expected, string rootPath) {
+    private static void VerifyRootIdentity(IntPtr rootHandle, RootIdentity expected) {
       if (expected == null) throw new SecureFsException("SECURE_FS_INVALID_PATH");
       ByHandleFileInformation actual;
       if (!GetFileInformationByHandle(rootHandle, out actual)) {
-        // The root identity is the authorization boundary. If the identity
-        // cannot be read, fail as a changed root rather than exposing a
-        // reparse classification (authorized roots may themselves be reached
-        // through a parent/root junction).
-        throw new SecureFsException("SECURE_FS_ROOT_CHANGED");
+        throw new SecureFsException("SECURE_FS_OPEN_FAILED");
       }
       ulong fileIndex = ((ulong)actual.FileIndexHigh << 32) | actual.FileIndexLow;
       if (actual.VolumeSerialNumber != expected.VolumeSerialNumber || fileIndex != expected.FileIndex) {
@@ -406,7 +462,7 @@ namespace AiNovelSecureFs {
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         false);
       try {
-        VerifyRootIdentity(root, rootIdentity, rootPath);
+        VerifyRootIdentity(root, rootIdentity);
         return root;
       } catch {
         CloseHandle(ref root);
@@ -421,31 +477,55 @@ namespace AiNovelSecureFs {
         DirectoryAccess(writable),
         FILE_ATTRIBUTE_DIRECTORY,
         createIfMissing ? FILE_OPEN_IF : FILE_OPEN,
-        FILE_DIRECTORY_FILE,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        true);
+        FILE_DIRECTORY_FILE);
     }
 
     private static IntPtr OpenFile(IntPtr parent, string segment, uint desiredAccess, uint disposition) {
-      return OpenRelative(
-        parent,
-        segment,
-        desiredAccess,
-        FILE_ATTRIBUTE_NORMAL,
-        disposition,
-        FILE_NON_DIRECTORY_FILE,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        true);
+      IntPtr handle = IntPtr.Zero;
+      try {
+        handle = OpenRelative(
+          parent,
+          segment,
+          desiredAccess,
+          FILE_ATTRIBUTE_NORMAL,
+          disposition,
+          FILE_NON_DIRECTORY_FILE);
+      } catch (SecureFsException error) {
+        if (error.Code == "SECURE_FS_OPEN_FAILED") {
+          if (IsReparsePoint(parent, segment)) {
+            throw new SecureFsException("SECURE_FS_REPARSE_POINT");
+          }
+        }
+        throw;
+      }
+      ByHandleFileInformation info;
+      if (GetFileInformationByHandle(handle, out info) && (info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+        CloseHandle(ref handle);
+        throw new SecureFsException("SECURE_FS_REPARSE_POINT");
+      }
+      return handle;
     }
 
     private static List<IntPtr> OpenDirectoryChain(string rootPath, RootIdentity rootIdentity, string[] segments, bool createIfMissing, bool writable) {
+      return OpenDirectoryChain(rootPath, rootIdentity, segments, createIfMissing, writable, false);
+    }
+
+    private static List<IntPtr> OpenDirectoryChain(string rootPath, RootIdentity rootIdentity, string[] segments, bool createIfMissing, bool writable, bool allowLeafReparse) {
       List<IntPtr> handles = new List<IntPtr>();
       try {
         IntPtr current = OpenRoot(rootPath, rootIdentity, writable);
         handles.Add(current);
-        foreach (string segment in segments) {
+        for (int i = 0; i < segments.Length; i++) {
+          string segment = segments[i];
           current = OpenDirectory(current, segment, createIfMissing, writable);
           handles.Add(current);
+          bool isLeaf = (i == segments.Length - 1);
+          if (!isLeaf || !allowLeafReparse) {
+            ByHandleFileInformation info;
+            if (GetFileInformationByHandle(current, out info) && (info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+              throw new SecureFsException("SECURE_FS_REPARSE_POINT");
+            }
+          }
         }
         return handles;
       } catch {
@@ -531,7 +611,12 @@ namespace AiNovelSecureFs {
           buffer,
           checked((uint)(lengthOffset + name.Length)),
           FileRenameInformation);
-        if (status != STATUS_SUCCESS) ThrowForStatus(status);
+        if (status != STATUS_SUCCESS) {
+          if (IsReparsePoint(parentDirectory, targetName)) {
+            throw new SecureFsException("SECURE_FS_REPARSE_POINT");
+          }
+          ThrowForStatus(status);
+        }
       } finally {
         Marshal.FreeHGlobal(buffer);
       }
@@ -559,7 +644,12 @@ namespace AiNovelSecureFs {
         // FileRenameInformationEx/Posix is the only write-only commit path. If
         // this OS or file system rejects it, fail closed instead of falling
         // back to FileRenameInformation, which can create a missing target.
-        if (status != STATUS_SUCCESS) throw new SecureFsException("SECURE_FS_WRITE_FAILED");
+        if (status != STATUS_SUCCESS) {
+          if (IsReparsePoint(parentDirectory, targetName)) {
+            throw new SecureFsException("SECURE_FS_REPARSE_POINT");
+          }
+          throw new SecureFsException("SECURE_FS_WRITE_FAILED");
+        }
       } finally {
         Marshal.FreeHGlobal(buffer);
       }
@@ -602,17 +692,33 @@ namespace AiNovelSecureFs {
     }
 
     private static IntPtr OpenExistingTargetForWriteOnlyCommit(IntPtr parentDirectory, string targetName) {
-      return OpenRelative(
-        parentDirectory,
-        targetName,
-        // A metadata-only handle does not reliably participate in Windows
-        // share-delete arbitration. FILE_WRITE_DATA makes this write-only
-        // no-DELETE share lease effective while it stays open through commit.
-        FILE_WRITE_DATA | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-        FILE_ATTRIBUTE_NORMAL,
-        FILE_OPEN,
-        FILE_NON_DIRECTORY_FILE,
-        FILE_SHARE_READ | FILE_SHARE_WRITE);
+      IntPtr handle = IntPtr.Zero;
+      try {
+        handle = OpenRelative(
+          parentDirectory,
+          targetName,
+          // A metadata-only handle does not reliably participate in Windows
+          // share-delete arbitration. FILE_WRITE_DATA makes this write-only
+          // no-DELETE share lease effective while it stays open through commit.
+          FILE_WRITE_DATA | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+          FILE_ATTRIBUTE_NORMAL,
+          FILE_OPEN,
+          FILE_NON_DIRECTORY_FILE,
+          FILE_SHARE_READ | FILE_SHARE_WRITE);
+      } catch (SecureFsException error) {
+        if (error.Code == "SECURE_FS_OPEN_FAILED") {
+          if (IsReparsePoint(parentDirectory, targetName)) {
+            throw new SecureFsException("SECURE_FS_REPARSE_POINT");
+          }
+        }
+        throw;
+      }
+      ByHandleFileInformation info;
+      if (GetFileInformationByHandle(handle, out info) && (info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+        CloseHandle(ref handle);
+        throw new SecureFsException("SECURE_FS_REPARSE_POINT");
+      }
+      return handle;
     }
 
     /** Holds the temporary file and directory handles until main-process lease validation decides commit/cancel. */
@@ -681,6 +787,9 @@ namespace AiNovelSecureFs {
       IntPtr requiredTarget = IntPtr.Zero;
       try {
         IntPtr parent = directories[directories.Count - 1];
+        if (IsReparsePoint(parent, segments[segments.Length - 1])) {
+          throw new SecureFsException("SECURE_FS_REPARSE_POINT");
+        }
         if (mustAlreadyExist) {
           requiredTarget = OpenExistingTargetForWriteOnlyCommit(parent, segments[segments.Length - 1]);
         }
@@ -738,9 +847,18 @@ namespace AiNovelSecureFs {
           FILE_ATTRIBUTE_NORMAL,
           FILE_OPEN,
           0);
+        ByHandleFileInformation info;
+        if (GetFileInformationByHandle(target, out info) && (info.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+          throw new SecureFsException("SECURE_FS_REPARSE_POINT");
+        }
         return true;
       } catch (SecureFsException error) {
         if (error.Code == "SECURE_FS_NOT_FOUND") return false;
+        if (error.Code == "SECURE_FS_OPEN_FAILED") {
+          if (IsReparsePoint(directories[directories.Count - 1], segments[segments.Length - 1])) {
+            throw new SecureFsException("SECURE_FS_REPARSE_POINT");
+          }
+        }
         throw;
       } finally {
         CloseHandle(ref target);
@@ -750,7 +868,7 @@ namespace AiNovelSecureFs {
 
     public static SecureDirectoryEntry[] ListDirectory(string rootPath, RootIdentity rootIdentity, string relativePath) {
       string[] segments = RelativeSegments(relativePath);
-      List<IntPtr> directories = OpenDirectoryChain(rootPath, rootIdentity, segments, false, false);
+      List<IntPtr> directories = OpenDirectoryChain(rootPath, rootIdentity, segments, false, false, true);
       IntPtr buffer = IntPtr.Zero;
       try {
         IntPtr directory = directories[directories.Count - 1];

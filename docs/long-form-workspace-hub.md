@@ -114,6 +114,32 @@
 - **陈旧预警 (Stale Warnings)**：若外部文件发生修改使得哈希与数据库索引不一致，装配结果会亮起黄灯提示“某文件已修改，建议重新扫描”，但不会中断写作。
 - **无缝衔接工作流**：在【章节上下文】界面点击【存为本章蓝图材料】，即可一键同步至当前章节的“用户指导要求”中，驱动现有生成工作流。
 
+### 溯源命名空间与 Stage 6–9 设计约束
+
+装配结果中每个阶段都带有 `sources` 溯源引用，但**引用来自两个互不相同的身份命名空间**，二者不可混用：
+
+1. **外部母稿快照来源（Stage 1–5、10–13 中的文件类阶段）**：这些阶段的内容来自只读外部母稿文件，因此必须携带完整的
+   `sourceId` + `approvedSnapshotId`（= `snapshotId`）+ `sourceSnapshotFragmentId`（= `fragmentId`），并标记
+   `provenanceStatus: 'found'`。该三元组指向 `workspace_source_snapshot_fragments` 中一条**已批准且不可变**的快照片段记录，
+   装配前会按 `project_id` + `source_id` + `snapshot_id` + `fragment_id` **四要素严格校验**；任一要素不匹配即失败关闭
+   （`provenanceStatus: 'provenance-missing'`，内容不进入正文上下文）。设定规则走同一套校验（`resolveRuleSourceRef`）。
+2. **项目内部数据库来源（Stage 6–9）**：Stage 6（角色名单）、Stage 7（角色动态状态）、Stage 8（叙事线索与伏笔）、
+   Stage 9（前章定稿结尾）分别读取当前项目数据库中的 `characters`、`narrative_thread_plans`、`drafts` 投影，
+   **完全不读取外部母稿**。这些实体不存在 `workspace_sources` / 快照 / 快照片段行，因此：
+
+   - **明确不需要** `sourceId`、`snapshotId`、`fragmentId`，其 `sources` 引用必须**如实缺失**这些字段（`undefined`），
+     且不得声明 `provenanceStatus`；条目以 `sourceType: 'database'` 明确声明来源为项目数据库。
+   - **严禁伪造**外部快照三元组。伪造会让一条项目内部记录伪装成“已批准的外部文件证据”，从而绕过四要素校验，
+     破坏母稿只读与批准快照不可变两条安全前提。
+   - 内部来源以其**自身实体标识**保证可追溯：Stage 6/7 使用角色名，Stage 8 使用线索标题，Stage 9 使用定稿版本号
+     （`lineRange: 'v{version}'`）。
+   - 项目隔离由“单项目单数据库”在结构上保证：这些仓库读取进程当前打开的项目数据库，Stage 2/13 的规则仍按
+     `project_id` 二次校验并拒绝跨项目注入。
+
+   上述约束由 `electron/__tests__/workspace-hub-stage6-9-provenance.test.ts` 行为测试锁定：文件类阶段的三元组必须能在
+   快照片段表中四要素回查命中；Stage 6–9 必须不带任何外部快照溯源、其 `relativePath` 必须落在内部命名空间且无对应
+   `workspace_sources` 行；在完全未绑定外部母稿的项目中 Stage 6–9 仍可独立装配且跨项目规则被拒绝。
+
 ---
 
 ## 六、用户界面（UI）操作指南
