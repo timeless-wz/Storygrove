@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import {
   FolderOpen,
+  Compass,
   BookOpen,
   Users,
   Settings,
@@ -23,6 +24,7 @@ import { useLocaleStore } from '../../stores/locale-store'
 /** 活动栏按钮配置 */
 const activities: Array<{ id: SidebarView; icon: typeof FolderOpen; zh: string; en: string }> = [
   { id: 'project', icon: FolderOpen, zh: '项目结构', en: 'Project' },
+  { id: 'workspace', icon: Compass, zh: '中枢', en: 'Workspace' },
   { id: 'knowledge', icon: BookOpen, zh: '知识库', en: 'Knowledge' },
   { id: 'characters', icon: Users, zh: '角色管理', en: 'Characters' },
 ]

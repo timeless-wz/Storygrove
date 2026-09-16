@@ -12,6 +12,7 @@ import KnowledgePanel from './KnowledgePanel'
 import HomeSidebarPanel from './sidebar/HomeSidebarPanel'
 import ProjectTree from './sidebar/ProjectTree'
 import CharactersView from './sidebar/CharactersView'
+import WorkspaceSidebarPanel from './sidebar/WorkspaceSidebarPanel'
 import {
   registerMenuSetter, unregisterMenuSetter,
   type SidebarMenuState,
@@ -34,6 +35,7 @@ export default function Sidebar() {
   const viewTitles: Record<string, string> = {
     home:       text('主页', 'Home'),
     project:    text('项目结构', 'Project'),
+    workspace:  text('创作中枢', 'Workspace Hub'),
     knowledge:  text('知识库', 'Knowledge'),
     characters: text('角色管理', 'Characters'),
   }
@@ -52,6 +54,7 @@ export default function Sidebar() {
       <div className="flex-1 overflow-y-auto py-1">
         {sidebarView === 'home'       && <HomeSidebarPanel />}
         {sidebarView === 'project'    && <ProjectTree />}
+        {sidebarView === 'workspace'  && <WorkspaceSidebarPanel />}
         {sidebarView === 'knowledge'  && <KnowledgePanel />}
         {sidebarView === 'characters' && <CharactersView />}
       </div>

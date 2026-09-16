@@ -7,6 +7,9 @@ import { registerLLMController } from './controllers/llm-controller'
 import { registerDatabaseController } from './controllers/db-controller'
 import { registerKBController } from './controllers/kb-controller'
 import { registerImportController } from './controllers/import-controller'
+import { registerWorkspaceHubController } from './controllers/workspace-hub-controller'
+import { registerStoryDataController } from './controllers/story-data-controller'
+import { registerPhase3To8Controller } from './controllers/phase3-8-controller'
 import { registerWindowController } from './controllers/window-controller'
 import { registerOfficialHomepageController } from './controllers/official-homepage-controller'
 import { registerModelProviderResourceController } from './controllers/model-provider-resource-controller'
@@ -15,6 +18,7 @@ import { registerChapterLifecycleController } from './controllers/chapter-lifecy
 import { registerExternalFileGrantController } from './controllers/external-file-grant-controller'
 import { registerAppDataController } from './controllers/app-data-controller'
 import { registerSkinController } from './controllers/skin-controller'
+import { registerBackupController } from './controllers/backup-controller'
 import { skinService } from './services/skin-service'
 
 /**
@@ -48,6 +52,10 @@ export function registerIPCHandlers() {
   registerChapterLifecycleController()
   registerKBController()
   registerImportController()
+  registerWorkspaceHubController()
+  registerStoryDataController()
+  registerPhase3To8Controller()
+  registerBackupController()
 
   console.log(`[Vela IPC] 所有 Controller 已注册完成 | 全局工作区: ${VELA_HOME}`)
 }

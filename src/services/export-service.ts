@@ -23,9 +23,10 @@ import {
 } from '../shared/project-session-context'
 import type { WritingLanguage } from '../shared/writing-language'
 import { randomUUID } from '../utils/id'
+import { createDocxBase64 } from './docx-export'
 
 
-export type ExportFormat = 'merged-md' | 'split-md' | 'txt'
+export type ExportFormat = 'merged-md' | 'split-md' | 'txt' | 'word'
 
 interface ExportOptions {
   format: ExportFormat
@@ -423,6 +424,35 @@ export async function exportNovel(
         }
         break
       }
+
+      case 'word': {
+        const content = createDocxBase64(
+          project.name,
+          project.novelConfig.writingLanguage,
+          chapterContents,
+        )
+        outputPath = `${projectFileStem}.docx`
+        const authorityCurrent = await ipc.invokeWithProjectSession(
+          projectSession,
+          'db:draft-export-authority-current',
+          authorityReceipt,
+          projectSession.projectPath,
+        )
+        if (!isProjectSessionCurrent(projectSession)) return staleExportResult(uiLocale)
+        if (!authorityCurrent) return changedFinalizationResult(uiLocale)
+        activeWritePath = outputPath
+        const writeResult = await ipc.invoke('fs:grant-write-base64-file', options.grantId, outputPath, content)
+        requireExportWriteSuccess(
+          writeResult,
+          text('写入 Word 导出文件', 'Write Word export file'),
+          text('写入 Word 导出文件失败', 'Failed to write the Word export file.'),
+        )
+        activeWritePath = undefined
+        if (!isProjectSessionCurrent(projectSession)) {
+          return staleCommittedSingleExportResult(uiLocale, outputPath)
+        }
+        break
+      }
     }
 
     if (!isProjectSessionCurrent(projectSession)) return staleExportResult(uiLocale)
@@ -479,6 +509,7 @@ function formatLabel(format: ExportFormat, locale: Locale): string {
     'merged-md': ['合并 Markdown', 'Merged Markdown'],
     'split-md': ['分章 Markdown', 'Split Markdown'],
     'txt': ['纯文本 TXT', 'Plain text (TXT)'],
+    'word': ['Word 文档', 'Word document'],
   }
   return labels[format][locale === 'en-US' ? 1 : 0]
 }

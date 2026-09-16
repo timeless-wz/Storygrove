@@ -65,6 +65,7 @@ namespace AiNovelSecureFs {
     private const int STATUS_REPARSE_POINT_ENCOUNTERED = unchecked((int)0xC000050B);
     private const int STATUS_REPARSE_POINT_NOT_RESOLVED = unchecked((int)0xC0000280);
     private const int STATUS_DIRECTORY_IS_A_REPARSE_POINT = unchecked((int)0xC0000281);
+    private const int STATUS_ACCESS_DENIED = unchecked((int)0xC0000022);
     private const int MaxTextBytes = 64 * 1024 * 1024;
     private const int MaxSegments = 256;
     private const int MaxEntries = 16384;
@@ -210,7 +211,7 @@ namespace AiNovelSecureFs {
     }
 
     private static void ThrowForStatus(int status) {
-      if (status == STATUS_REPARSE_POINT_ENCOUNTERED || status == STATUS_REPARSE_POINT_NOT_RESOLVED || status == STATUS_DIRECTORY_IS_A_REPARSE_POINT) {
+      if (status == STATUS_REPARSE_POINT_ENCOUNTERED || status == STATUS_REPARSE_POINT_NOT_RESOLVED || status == STATUS_DIRECTORY_IS_A_REPARSE_POINT || status == STATUS_ACCESS_DENIED) {
         throw new SecureFsException("SECURE_FS_REPARSE_POINT");
       }
       if (status == STATUS_OBJECT_NAME_NOT_FOUND || status == STATUS_OBJECT_PATH_NOT_FOUND) {
@@ -231,11 +232,15 @@ namespace AiNovelSecureFs {
       return new RootIdentity((uint)volume, index);
     }
 
-    private static void VerifyRootIdentity(IntPtr rootHandle, RootIdentity expected) {
+    private static void VerifyRootIdentity(IntPtr rootHandle, RootIdentity expected, string rootPath) {
       if (expected == null) throw new SecureFsException("SECURE_FS_INVALID_PATH");
       ByHandleFileInformation actual;
       if (!GetFileInformationByHandle(rootHandle, out actual)) {
-        throw new SecureFsException("SECURE_FS_OPEN_FAILED");
+        // The root identity is the authorization boundary. If the identity
+        // cannot be read, fail as a changed root rather than exposing a
+        // reparse classification (authorized roots may themselves be reached
+        // through a parent/root junction).
+        throw new SecureFsException("SECURE_FS_ROOT_CHANGED");
       }
       ulong fileIndex = ((ulong)actual.FileIndexHigh << 32) | actual.FileIndexLow;
       if (actual.VolumeSerialNumber != expected.VolumeSerialNumber || fileIndex != expected.FileIndex) {
@@ -401,7 +406,7 @@ namespace AiNovelSecureFs {
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         false);
       try {
-        VerifyRootIdentity(root, rootIdentity);
+        VerifyRootIdentity(root, rootIdentity, rootPath);
         return root;
       } catch {
         CloseHandle(ref root);
@@ -416,7 +421,9 @@ namespace AiNovelSecureFs {
         DirectoryAccess(writable),
         FILE_ATTRIBUTE_DIRECTORY,
         createIfMissing ? FILE_OPEN_IF : FILE_OPEN,
-        FILE_DIRECTORY_FILE);
+        FILE_DIRECTORY_FILE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        true);
     }
 
     private static IntPtr OpenFile(IntPtr parent, string segment, uint desiredAccess, uint disposition) {
@@ -426,7 +433,9 @@ namespace AiNovelSecureFs {
         desiredAccess,
         FILE_ATTRIBUTE_NORMAL,
         disposition,
-        FILE_NON_DIRECTORY_FILE);
+        FILE_NON_DIRECTORY_FILE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        true);
     }
 
     private static List<IntPtr> OpenDirectoryChain(string rootPath, RootIdentity rootIdentity, string[] segments, bool createIfMissing, bool writable) {

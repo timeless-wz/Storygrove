@@ -1,8 +1,11 @@
-import { Sparkles, FolderOpen, Clock, BookOpen, FileUp } from 'lucide-react'
+import { Sparkles, FolderOpen, Clock, BookOpen, FileUp, Compass } from 'lucide-react'
 import { useProjectStore } from '../../stores/project-store'
+import { useWorkspaceHubStore } from '../../stores/workspace-hub-store'
+import { useLayoutStore } from '../../stores/layout-store'
 import { APP_BRAND } from '../../shared/brand'
 import { useLocaleStore } from '../../stores/locale-store'
 import { UpdateSection } from '../updates/UpdateSection'
+import { Button } from '../ui/Button'
 
 interface WelcomePageProps {
   onNewProject: () => void
@@ -15,6 +18,7 @@ export default function WelcomePage({ onNewProject, onOpenProject, onImportNovel
   const recentProjects = useProjectStore(s => s.recentProjects)
   const openProject = useProjectStore(s => s.openProject)
   const currentProject = useProjectStore(s => s.currentProject)
+  const workspaceStatus = useWorkspaceHubStore(s => s.status)
   const text = useLocaleStore(s => s.text)
 
   return (
@@ -23,7 +27,7 @@ export default function WelcomePage({ onNewProject, onOpenProject, onImportNovel
     >
       <div className="max-w-lg w-full mx-auto px-8 py-16">
         {/* Logo 区域 — 品牌极光光环 */}
-        <div className="text-center mb-12">
+        <div className="text-center mb-8">
           <div
             className="writer-primary-button inline-flex items-center justify-center w-20 h-20 rounded-2xl mb-5"
             style={{
@@ -39,6 +43,49 @@ export default function WelcomePage({ onNewProject, onOpenProject, onImportNovel
             {currentProject ? currentProject.path : text(APP_BRAND.tagline, APP_BRAND.taglineEn)}
           </p>
         </div>
+
+        {/* 创作中枢状态摘要卡片 */}
+        {currentProject && (
+          <div
+            onClick={() => useLayoutStore.getState().setSidebarView('workspace')}
+            className="writer-panel-card p-4 mb-8 rounded-xl border flex items-center justify-between cursor-pointer hover:border-accent transition-all text-xs"
+            style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}
+          >
+            <div className="flex items-center gap-3 min-w-0 flex-1 mr-2">
+              <div
+                className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
+                style={{ backgroundColor: 'var(--color-accent-subtle, rgba(59, 130, 246, 0.15))', color: 'var(--color-accent)' }}
+              >
+                <Compass size={18} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="font-medium text-xs flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                  <span>{text('长篇创作中枢', 'Long-form Fiction Workspace')}</span>
+                  {workspaceStatus?.externalWorkspacePath ? (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-[var(--color-success-text)] font-medium">
+                      {text('已关联母稿', 'Folder Bound')}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-black/10 dark:bg-white/10 opacity-70">
+                      {text('未关联外部目录', 'Not Bound')}
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11px] opacity-70 mt-0.5 truncate" style={{ color: 'var(--color-text-muted)' }}>
+                  {workspaceStatus?.externalWorkspacePath
+                    ? text(
+                        `已索引 ${workspaceStatus.recognizedFiles} / ${workspaceStatus.totalFiles} 个文件 · ${workspaceStatus.confirmedRulesCount} 条已确认规则`,
+                        `Indexed ${workspaceStatus.recognizedFiles} / ${workspaceStatus.totalFiles} files · ${workspaceStatus.confirmedRulesCount} rules`,
+                      )
+                    : text('点击关联外部 Markdown 创作工作区，自动提取事实与装配上下文', 'Click to bind external Markdown workspace and assemble chapter context')}
+                </div>
+              </div>
+            </div>
+            <Button size="sm" variant="ghost" className="text-xs shrink-0">
+              {text('进入中枢', 'Open Hub')}
+            </Button>
+          </div>
+        )}
 
         {/* 操作按钮 */}
         <div className="grid grid-cols-3 gap-3 mb-10">

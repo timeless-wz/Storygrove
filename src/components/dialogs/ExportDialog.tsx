@@ -75,6 +75,7 @@ export default function ExportDialog({ isOpen, onClose }: Props) {
     { value: 'merged-md', label: text('合并 Markdown', 'Merged Markdown'), desc: text('全书合并为单个 .md 文件', 'Combine the novel into one .md file'), icon: <FileText size={18} /> },
     { value: 'split-md', label: text('分章 Markdown', 'Chapter Markdown'), desc: text('每章一个独立 .md 文件', 'Create one .md file per chapter'), icon: <Files size={18} /> },
     { value: 'txt', label: text('纯文本 TXT', 'Plain text'), desc: text('去除格式标记的纯文本', 'Export plain text without formatting'), icon: <Type size={18} /> },
+    { value: 'word', label: text('Word 文档', 'Word document'), desc: text('导出可用 Word 打开的文档', 'Export a document that opens in Word'), icon: <FileText size={18} /> },
   ]
 
   return (

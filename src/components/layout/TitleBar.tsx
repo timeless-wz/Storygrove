@@ -10,6 +10,7 @@ import {
   Minus,
   Moon,
   ScrollText,
+  RotateCcw,
   Settings,
   Sparkles,
   Square,
@@ -37,6 +38,8 @@ import {
 } from '../ui/Dialog'
 import { Button } from '../ui/Button'
 import { alertError } from '../ui/AlertDialog'
+import { confirm } from '../ui/Confirm'
+import { toast } from '../ui/Toast'
 
 const isMac = navigator.userAgent.includes('Mac')
 
@@ -68,6 +71,52 @@ export default function TitleBar() {
   const [exitRequest, setExitRequest] = useState<{ requestId: string; workflowBlocked?: boolean } | null>(null)
   const [exitBusy, setExitBusy] = useState(false)
   const [exitError, setExitError] = useState<string | null>(null)
+  const [backupBusy, setBackupBusy] = useState(false)
+
+  const handleBackup = async () => {
+    if (backupBusy || !currentProject) return
+    setBackupBusy(true)
+    try {
+      const destination = await ipc.invoke('dialog:select-export-directory')
+      if (!destination) return
+      const result = await ipc.invoke('project:backup', destination.grantId)
+      if (!result.success) throw new Error(result.error ?? text('备份失败', 'Backup failed'))
+      toast.success(text(`项目状态已备份（${result.fileCount ?? 0} 个文件）`, `Project state backed up (${result.fileCount ?? 0} files)`))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : text('备份失败', 'Backup failed'))
+    } finally {
+      setBackupBusy(false)
+    }
+  }
+
+  const handleRestoreBackup = async () => {
+    if (backupBusy) return
+    const accepted = await confirm(
+      text(
+        '恢复只会写入你随后选择的“新项目目录”，不会覆盖已有 .vela 数据，也不会修改小说母稿。是否继续？',
+        'Restore writes only to the new project directory you choose next. It never overwrites existing .vela data or modifies a linked manuscript. Continue?',
+      ),
+      { title: text('恢复项目备份', 'Restore project backup'), confirmText: text('选择备份', 'Choose backup') },
+    )
+    if (!accepted) return
+    setBackupBusy(true)
+    try {
+      const backup = await ipc.invoke('dialog:select-backup-directory')
+      if (!backup) return
+      const target = await ipc.invoke('dialog:select-restore-directory')
+      if (!target) return
+      const result = await ipc.invoke('project:restore-backup', backup.grantId, target.grantId)
+      if (!result.success) throw new Error(result.error ?? text('恢复失败', 'Restore failed'))
+      toast.success(text(
+        `项目状态已恢复（${result.fileCount ?? 0} 个文件）。可打开恢复目录继续使用。`,
+        `Project state restored (${result.fileCount ?? 0} files). Open the restored directory to continue.`,
+      ))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : text('恢复失败', 'Restore failed'))
+    } finally {
+      setBackupBusy(false)
+    }
+  }
 
   useEffect(() => ipc.on('window:close-requested', ({ requestId }) => {
     const projectPath = useProjectStore.getState().currentProject?.path
@@ -264,9 +313,18 @@ export default function TitleBar() {
 
         <div className="writer-command-divider h-5 w-px" />
 
-        <button className="writer-command-button" title={t('project.backupUnavailable')} disabled>
+        <button className="writer-command-button" title={t('common.backup')} onClick={() => void handleBackup()} disabled={backupBusy || !currentProject}>
           <Archive size={14} strokeWidth={1.75} />
           {t('common.backup')}
+        </button>
+        <button
+          className="writer-command-button"
+          title={text('恢复项目备份', 'Restore project backup')}
+          onClick={() => void handleRestoreBackup()}
+          disabled={backupBusy}
+        >
+          <RotateCcw size={14} strokeWidth={1.75} />
+          {text('恢复', 'Restore')}
         </button>
         <button className="writer-command-button" title={t('project.imitation')} onClick={openImportNovel}>
           <Import size={14} strokeWidth={1.75} />

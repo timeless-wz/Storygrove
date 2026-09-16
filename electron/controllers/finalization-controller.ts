@@ -6,6 +6,7 @@ import { FinalizationService } from '../services/finalization-service'
 import type { ProjectSessionContext } from '../../src/shared/ipc-channels'
 import { isProjectSessionContext } from '../../src/shared/project-session-context'
 import type { FinalizationSnapshot } from '../../src/services/finalization-snapshot'
+import { auditChapter } from '../services/continuity-audit-service'
 
 const finalizationService = new FinalizationService()
 
@@ -53,6 +54,22 @@ export function registerFinalizationController(): void {
         throw new Error('定稿快照与项目会话不匹配')
       }
       const active = projectAccess.assertCurrentProjectContext(context, getCurrentProjectPath())
+      const audit = auditChapter({
+        projectId: active.projectId,
+        chapterNumber: candidate.chapterNumber,
+        content: candidate.content,
+        ruleSet: 'deterministic-pre-finalization-v1',
+      })
+      const blocking = audit.findings.filter(finding =>
+        (finding.severity === 'error' || finding.severity === 'high') && finding.status === 'open',
+      )
+      if (blocking.length > 0) {
+        return {
+          success: false,
+          committed: false,
+          error: `定稿被连续性审核阻止：${blocking.map(finding => finding.ruleCode).join('、')}（运行 ${audit.runId}）`,
+        }
+      }
       return await finalizationService.finalize({
         projectRoot: active.rootPath,
         draftId: candidate.draftId,

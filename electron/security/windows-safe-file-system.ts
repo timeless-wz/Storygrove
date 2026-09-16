@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { existsSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, lstatSync, realpathSync, statSync } from 'node:fs'
 import path from 'node:path'
 import * as electron from 'electron'
 
@@ -43,6 +43,13 @@ export interface SecureFileSystem {
   writeTextAtomically(
     capability: SecureFileCapability,
     content: string,
+    beforeReplace?: () => void | Promise<void>,
+    constraints?: AtomicWriteConstraints,
+  ): Promise<void>
+  /** Binary counterpart used by native document exports. Optional preserves test seams. */
+  writeBytesAtomically?(
+    capability: SecureFileCapability,
+    content: Buffer,
     beforeReplace?: () => void | Promise<void>,
     constraints?: AtomicWriteConstraints,
   ): Promise<void>
@@ -492,6 +499,20 @@ function responseError(response: HelperResponse): never {
   throw secureError(code)
 }
 
+function isReparsePath(rootPath: string, relativePath: string): boolean {
+  try {
+    let current = rootPath
+    if (lstatSync(current).isSymbolicLink()) return true
+    for (const segment of relativePath.split('\\').filter(Boolean)) {
+      current = path.join(current, segment)
+      if (lstatSync(current).isSymbolicLink()) return true
+    }
+    return false
+  } catch {
+    return false
+  }
+}
+
 function parseDirectoryEntries(entries: unknown): SecureDirectoryEntry[] {
   if (!Array.isArray(entries) || entries.length > MAX_DIRECTORY_ENTRIES) {
     throw secureError('SECURE_FS_HELPER_INVALID_RESPONSE')
@@ -606,9 +627,9 @@ export function createSecureFileSystem(
       }
     },
 
-    async writeTextAtomically(capability, content, beforeReplace, constraints) {
-      if (typeof content !== 'string') throw secureError('SECURE_FS_INVALID_TEXT')
-      const buffer = Buffer.from(content, 'utf8')
+    async writeBytesAtomically(capability, content, beforeReplace, constraints) {
+      if (!Buffer.isBuffer(content)) throw secureError('SECURE_FS_INVALID_OPERATION')
+      const buffer = content
       if (buffer.length > MAX_TEXT_BYTES) throw secureError('SECURE_FS_FILE_TOO_LARGE')
       const safeCapability = validateCapability(capability)
       const request: HelperRequest = {
@@ -626,14 +647,31 @@ export function createSecureFileSystem(
         return
       }
       const supportedPlatform = securePlatform()
-      const response = await invokeBundledAtomicWrite(
-        request,
-        supportedPlatform,
-        resolveHelperPath(),
-        timeoutMs,
-        beforeReplace,
-      )
-      if (!response.ok) responseError(response)
+      try {
+        const response = await invokeBundledAtomicWrite(
+          request,
+          supportedPlatform,
+          resolveHelperPath(),
+          timeoutMs,
+          beforeReplace,
+        )
+        if (!response.ok) responseError(response)
+      } catch (error) {
+        // Some Windows builds report an atomic-open failure rather than the
+        // reparse status after the authorized root is replaced by a junction.
+        // Classify only when lstat confirms the root itself is a link.
+        if (error instanceof Error && error.message === 'SECURE_FS_OPEN_FAILED' && isReparsePath(safeCapability.rootPath, safeCapability.relativePath)) {
+          throw atomicWriteError(secureError('SECURE_FS_REPARSE_POINT'), 'not_committed')
+        }
+        throw error
+      }
+    },
+
+    async writeTextAtomically(capability, content, beforeReplace, constraints) {
+      if (typeof content !== 'string') throw secureError('SECURE_FS_INVALID_TEXT')
+      const writeBytes = this.writeBytesAtomically
+      if (!writeBytes) throw secureError('SECURE_FS_HELPER_UNAVAILABLE')
+      await writeBytes(capability, Buffer.from(content, 'utf8'), beforeReplace, constraints)
     },
 
     async mkdir(capability) {
