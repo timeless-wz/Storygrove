@@ -5,6 +5,7 @@ import {
   BookOpen,
   PenTool,
   Clock3,
+  ShieldCheck,
   ArrowRight,
 } from 'lucide-react'
 import { useProjectStore } from '../../stores/project-store'
@@ -426,14 +427,14 @@ export default function ProjectOverviewPage() {
             </span>
           </Card>
 
-          {/* 卡片 5: 故事时间线。保留在总览的主工作位，而非仅作为导航快捷入口。 */}
+          {/* 卡片 5: 故事时间线 */}
           <Card
             role="button"
             tabIndex={0}
             aria-label={text('打开故事时间线', 'Open story timeline')}
             onClick={handleOpenStoryTimeline}
             onKeyDown={(event) => activateCardOnKey(event, handleOpenStoryTimeline)}
-            className="p-5 flex flex-col justify-between hover:border-[var(--color-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)] cursor-pointer group md:col-span-2 lg:col-span-2"
+            className="p-5 flex flex-col justify-between hover:border-[var(--color-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)] cursor-pointer group"
           >
             <div>
               <div className="flex items-center justify-between mb-3">
@@ -497,6 +498,59 @@ export default function ProjectOverviewPage() {
                 <ArrowRight size={13} className="ml-1 group-hover:translate-x-0.5 transition-transform" />
               </span>
             </div>
+          </Card>
+
+          {/* 卡片 6: 只读一致性审核。入口只导航到正文草稿，绝不在总览中自动改写内容。 */}
+          <Card
+            role="button"
+            tabIndex={0}
+            aria-label={text('前往正文草稿进行只读一致性审核', 'Open a prose draft for read-only consistency audit')}
+            onClick={handleResumeDrafting}
+            onKeyDown={(event) => activateCardOnKey(event, handleResumeDrafting)}
+            className="p-5 flex flex-col justify-between hover:border-[var(--color-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)] cursor-pointer group"
+          >
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-lg bg-[var(--color-hover)] text-[var(--color-warning-text)] border border-[var(--color-border)]">
+                    <ShieldCheck size={18} />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-sm text-[var(--color-text)]">{text('只读一致性审核', 'Read-only Consistency Audit')}</h3>
+                    <span className="text-[0.7rem] text-[var(--color-text-muted)]">
+                      {text('发现偏差，绝不自动改写正文', 'Find deviations, never rewrite prose')}
+                    </span>
+                  </div>
+                </div>
+                <span className="text-xs font-mono px-2 py-0.5 rounded bg-[var(--color-hover)] text-[var(--color-text-secondary)] border border-[var(--color-border)] font-medium">
+                  {text('作者决策', 'Author decides')}
+                </span>
+              </div>
+              <p className="text-xs leading-relaxed mb-3 text-[var(--color-text-secondary)]">
+                {text(
+                  '将当前草稿与章节蓝图、世界设定及叙事线索逐项比对；审核结果只生成报告和跳转线索，是否修订始终由作者决定。',
+                  'Compare the current draft against blueprints, world rules, and narrative threads. Results only create a report and navigation clues; every revision remains the author’s decision.',
+                )}
+              </p>
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                <span className="rounded-md border border-[var(--color-border)] bg-[var(--color-hover)] px-2 py-1.5 text-[10px] text-[var(--color-text-secondary)]">
+                  {text('蓝图兑现', 'Blueprint delivery')}
+                </span>
+                <span className="rounded-md border border-[var(--color-border)] bg-[var(--color-hover)] px-2 py-1.5 text-[10px] text-[var(--color-text-secondary)]">
+                  {text('未授权事件', 'Unauthorized events')}
+                </span>
+                <span className="rounded-md border border-[var(--color-border)] bg-[var(--color-hover)] px-2 py-1.5 text-[10px] text-[var(--color-text-secondary)]">
+                  {text('设定与地图冲突', 'Setting and map conflicts')}
+                </span>
+                <span className="rounded-md border border-[var(--color-border)] bg-[var(--color-hover)] px-2 py-1.5 text-[10px] text-[var(--color-text-secondary)]">
+                  {text('证据链完整性', 'Evidence-chain integrity')}
+                </span>
+              </div>
+            </div>
+            <span className="writer-overview-card-action w-full justify-between">
+              <span>{text('前往正文草稿审核', 'Open prose draft for audit')}</span>
+              <ArrowRight size={13} className="group-hover:translate-x-0.5 transition-transform" />
+            </span>
           </Card>
         </div>
       </div>
