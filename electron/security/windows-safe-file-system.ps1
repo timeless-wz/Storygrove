@@ -66,6 +66,8 @@ namespace AiNovelSecureFs {
     private const int STATUS_OBJECT_PATH_NOT_FOUND = unchecked((int)0xC000003A);
     private const int STATUS_NOT_A_DIRECTORY = unchecked((int)0xC0000103);
     private const int STATUS_FILE_IS_A_DIRECTORY = unchecked((int)0xC00000BA);
+    // Never a reparse-point classification: this status means the object is NOT a
+    // reparse point. Kept named so that ThrowForStatus documents the distinction.
     private const int STATUS_NOT_A_REPARSE_POINT = unchecked((int)0xC0000275);
     private const int STATUS_IO_REPARSE_TAG_INVALID = unchecked((int)0xC0000276);
     private const int STATUS_IO_REPARSE_TAG_MISMATCH = unchecked((int)0xC0000277);
@@ -220,6 +222,16 @@ namespace AiNovelSecureFs {
     }
 
     private static void ThrowForStatus(int status) {
+      // Only statuses that assert a reparse point was encountered belong here.
+      // STATUS_NOT_A_REPARSE_POINT is deliberately NOT in this set: it means the
+      // object is not a reparse point at all, so reporting SECURE_FS_REPARSE_POINT
+      // for it would invert the security verdict. It fails closed below as
+      // SECURE_FS_OPEN_FAILED instead. A raw NtCreateFile probe over this helper's
+      // exact flag matrix (OBJ_DONT_REPARSE plus FILE_OPEN_REPARSE_POINT, with
+      // FILE_DIRECTORY_FILE or FILE_NON_DIRECTORY_FILE, against ordinary files,
+      // ordinary directories, junctions, and missing names) never produced
+      // 0xC0000275: the leaf-junction case returns STATUS_FILE_IS_A_DIRECTORY and
+      // is classified as a reparse point by the attribute check in OpenFile.
       if (status == STATUS_REPARSE
           || status == STATUS_STOPPED_ON_SYMLINK
           || status == STATUS_REPARSE_POINT_ENCOUNTERED
@@ -229,8 +241,7 @@ namespace AiNovelSecureFs {
           || status == STATUS_IO_REPARSE_TAG_INVALID
           || status == STATUS_IO_REPARSE_DATA_INVALID
           || status == STATUS_IO_REPARSE_TAG_MISMATCH
-          || status == STATUS_REPARSE_ATTRIBUTE_CONFLICT
-          || status == STATUS_NOT_A_REPARSE_POINT) {
+          || status == STATUS_REPARSE_ATTRIBUTE_CONFLICT) {
         throw new SecureFsException("SECURE_FS_REPARSE_POINT");
       }
       if (status == STATUS_OBJECT_NAME_NOT_FOUND || status == STATUS_OBJECT_PATH_NOT_FOUND) {

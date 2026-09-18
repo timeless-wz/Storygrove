@@ -292,6 +292,42 @@ describe.runIf(process.platform === 'win32')('Windows handle-bound secure file s
     await expect(safeFileSystem.exists(leafJunction)).rejects.toThrow('SECURE_FS_REPARSE_POINT')
   }, REAL_WINDOWS_MULTI_HELPER_TIMEOUT_MS)
 
+  it('never classifies STATUS_NOT_A_REPARSE_POINT as a reparse-point rejection', () => {
+    const source = fs.readFileSync(
+      path.resolve('electron/security/windows-safe-file-system.ps1'),
+      'utf8',
+    )
+    const classifierStart = source.indexOf('private static void ThrowForStatus(int status)')
+    const classifierEnd = source.indexOf('private static bool IsReparsePoint(')
+
+    expect(classifierStart).toBeGreaterThan(-1)
+    expect(classifierEnd).toBeGreaterThan(classifierStart)
+    const classifier = source.slice(classifierStart, classifierEnd)
+    const conditionStart = classifier.indexOf('if (status == STATUS_REPARSE')
+    const branchThrow = classifier.indexOf(
+      'throw new SecureFsException("SECURE_FS_REPARSE_POINT")',
+      conditionStart,
+    )
+
+    expect(conditionStart).toBeGreaterThan(-1)
+    expect(branchThrow).toBeGreaterThan(conditionStart)
+    const reparseCondition = classifier.slice(conditionStart, branchThrow)
+
+    // STATUS_NOT_A_REPARSE_POINT (0xC0000275) means the object is NOT a reparse
+    // point, so reporting SECURE_FS_REPARSE_POINT for it inverts the verdict.
+    // A raw NtCreateFile probe over this helper's exact flag matrix never
+    // produced that status: the leaf-junction case returns
+    // STATUS_FILE_IS_A_DIRECTORY and is classified as a reparse point by the
+    // handle attribute check in OpenFile instead. Both statuses still fail
+    // closed, so this guard removes a misclassification without relaxing the
+    // security assertion.
+    expect(reparseCondition).not.toContain('STATUS_NOT_A_REPARSE_POINT')
+    // The genuine reparse-positive statuses must still reach the reparse verdict.
+    expect(reparseCondition).toContain('STATUS_REPARSE_POINT_ENCOUNTERED')
+    expect(reparseCondition).toContain('STATUS_DIRECTORY_IS_A_REPARSE_POINT')
+    expect(reparseCondition).toContain('STATUS_REPARSE_POINT_NOT_RESOLVED')
+  })
+
   it('lists ordinary entries when the directory also contains a junction without exposing the junction', async () => {
     const fixture = fixtureRoot()
     const selectedRoot = path.join(fixture, 'selected')
