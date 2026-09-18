@@ -402,17 +402,6 @@ export default function ProjectTree() {
       />
 
       <ProjectTreeSection
-        title={text('正文创作', 'Manuscript')}
-        detail={text('草稿与已定稿章节', 'Drafts and finalized chapters')}
-      />
-
-      {/* 草稿箱 */}
-      <DraftBoxGroup draftsByChapter={draftsByChapter} />
-
-      {/* 正文章节 — 仅显示已定稿 */}
-      <ManuscriptGroup files={manuscriptFiles} projectPath={p} />
-
-      <ProjectTreeSection
         title={text('资料与设定', 'Sources & Setup')}
         detail={text('小说配置、故事架构与资料中枢', 'Novel configuration, story architecture, and sources')}
       />
@@ -492,6 +481,17 @@ export default function ProjectTree() {
         badge={backupBusy ? text('处理中', 'Working') : undefined}
         onClick={() => void handleRestoreBackup()}
       />
+
+      <ProjectTreeSection
+        title={text('正文创作', 'Manuscript')}
+        detail={text('草稿与已定稿章节', 'Drafts and finalized chapters')}
+      />
+
+      {/* 草稿箱 */}
+      <DraftBoxGroup draftsByChapter={draftsByChapter} />
+
+      {/* 正文章节 — 仅显示已定稿 */}
+      <ManuscriptGroup files={manuscriptFiles} projectPath={p} />
     </div>
   )
 }
