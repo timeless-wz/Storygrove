@@ -1346,7 +1346,7 @@ internal static class ExactNsisProbeParent {
 
   private static int RunProbe(string powerShellPath, string payload, bool quoteImage) {
     string argvZero = quoteImage ? "\"" + powerShellPath + "\"" : powerShellPath;
-    return RunCommand(powerShellPath, argvZero + " -C \"" + payload + "\"");
+    return RunCommand(powerShellPath, argvZero + " -NoProfile -NonInteractive -C \"" + payload + "\"");
   }
 
   private static int RunCmdProcessCheck(string cmdPath) {

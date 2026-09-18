@@ -1177,33 +1177,44 @@ function Test-AiNovelGateKnownNsisPowerShellProbeCommand {
   if ($null -eq $arguments) {
     return $false
   }
-  $availabilityArguments =
-    ' -C "if (Get-Command Get-CimInstance -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }"'
-  $policyArguments =
-    ' -C "if ((Get-ExecutionPolicy -Scope Process) -eq ''Restricted'') { exit 1 } else { exit 0 }"'
-  if (
-    [string]::Equals($arguments, $availabilityArguments, [System.StringComparison]::Ordinal) -or
-    [string]::Equals($arguments, $policyArguments, [System.StringComparison]::Ordinal)
-  ) {
-    return $true
+  # The NSIS helper may launch PowerShell with its explicit non-interactive
+  # switches. Accept only that one additional argv prefix; the command payload
+  # and captured image binding remain exact.
+  $argumentPrefixes = @(
+    ' -C ',
+    ' -NoProfile -NonInteractive -C '
+  )
+  $availabilityPayload = '"if (Get-Command Get-CimInstance -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }"'
+  $policyPayload = '"if ((Get-ExecutionPolicy -Scope Process) -eq ''Restricted'') { exit 1 } else { exit 0 }"'
+  foreach ($prefix in $argumentPrefixes) {
+    if (
+      [string]::Equals($arguments, $prefix + $availabilityPayload, [System.StringComparison]::Ordinal) -or
+      [string]::Equals($arguments, $prefix + $policyPayload, [System.StringComparison]::Ordinal)
+    ) {
+      return $true
+    }
   }
 
-  $runningProcessPrefix =
-    ' -C "if ((Get-CimInstance -ClassName Win32_Process | ? {$_.Path -and $_.Path.StartsWith('''
+  $runningProcessPrefixSuffix =
+    '"if ((Get-CimInstance -ClassName Win32_Process | ? {$_.Path -and $_.Path.StartsWith('''
   $runningProcessSuffix =
     ''', ''CurrentCultureIgnoreCase'')}).Count -gt 0) { exit 0 } else { exit 1 }"'
-  if (
-    -not $arguments.StartsWith($runningProcessPrefix, [System.StringComparison]::Ordinal) -or
-    -not $arguments.EndsWith($runningProcessSuffix, [System.StringComparison]::Ordinal)
-  ) {
-    return $false
+  foreach ($prefix in $argumentPrefixes) {
+    $runningProcessPrefix = $prefix + $runningProcessPrefixSuffix
+    if (
+      $arguments.StartsWith($runningProcessPrefix, [System.StringComparison]::Ordinal) -and
+      $arguments.EndsWith($runningProcessSuffix, [System.StringComparison]::Ordinal)
+    ) {
+      $installPathLength = $arguments.Length - $runningProcessPrefix.Length - $runningProcessSuffix.Length
+      if ($installPathLength -gt 0) {
+        $installPath = $arguments.Substring($runningProcessPrefix.Length, $installPathLength)
+        if ($installPath -notmatch "['`r`n]") {
+          return $true
+        }
+      }
+    }
   }
-  $installPathLength = $arguments.Length - $runningProcessPrefix.Length - $runningProcessSuffix.Length
-  if ($installPathLength -le 0) {
-    return $false
-  }
-  $installPath = $arguments.Substring($runningProcessPrefix.Length, $installPathLength)
-  return $installPath -notmatch "['`r`n]"
+  return $false
 }
 
 function Test-AiNovelGateSameAbsolutePath {

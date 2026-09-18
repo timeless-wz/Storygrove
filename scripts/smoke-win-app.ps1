@@ -45,8 +45,177 @@ namespace AiNovelSmoke {
     [DllImport("user32.dll")]
     public static extern bool IsWindowVisible(IntPtr handle);
   }
+
+  // Child enumeration for the process lineage proof. Win32_Process queries need
+  // WMI permissions and fail with "access denied" on restricted hosts, which
+  // would abort a terminal lineage refresh for a reason unrelated to the
+  // application under test. The Toolhelp snapshot needs no such permission and
+  // reports the same kernel-recorded parent PID even after that parent exits.
+  public static class ProcessTreeProbe {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct ProcessEntry32 {
+      public uint dwSize;
+      public uint cntUsage;
+      public uint th32ProcessID;
+      public IntPtr th32DefaultHeapID;
+      public uint th32ModuleID;
+      public uint cntThreads;
+      public uint th32ParentProcessID;
+      public int pcPriClassBase;
+      public uint dwFlags;
+      [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+      public string szExeFile;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileTime {
+      public uint dwLowDateTime;
+      public uint dwHighDateTime;
+    }
+
+    public sealed class ChildProcessIdentity {
+      public int ProcessId { get; set; }
+      public long CreationTimeTicks { get; set; }
+    }
+
+    private const uint TH32CS_SNAPPROCESS = 0x00000002;
+    private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+    private const int ERROR_NO_MORE_FILES = 18;
+    private static readonly IntPtr INVALID_HANDLE_VALUE = new IntPtr(-1);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint processId);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool Process32First(IntPtr snapshot, ref ProcessEntry32 entry);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool Process32Next(IntPtr snapshot, ref ProcessEntry32 entry);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr OpenProcess(uint desiredAccess, [MarshalAs(UnmanagedType.Bool)] bool inheritHandle, uint processId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetProcessTimes(
+      IntPtr process,
+      out FileTime creationTime,
+      out FileTime exitTime,
+      out FileTime kernelTime,
+      out FileTime userTime);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    public static int GetParentProcessId(int processId) {
+      IntPtr snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+      if (snapshot == INVALID_HANDLE_VALUE) return 0;
+      try {
+        ProcessEntry32 entry = new ProcessEntry32();
+        entry.dwSize = (uint)Marshal.SizeOf(typeof(ProcessEntry32));
+        if (!Process32First(snapshot, ref entry)) return 0;
+        do {
+          if (unchecked((int)entry.th32ProcessID) == processId) {
+            return unchecked((int)entry.th32ParentProcessID);
+          }
+          entry.dwSize = (uint)Marshal.SizeOf(typeof(ProcessEntry32));
+        } while (Process32Next(snapshot, ref entry));
+        return 0;
+      }
+      finally {
+        CloseHandle(snapshot);
+      }
+    }
+
+    public static ChildProcessIdentity[] GetChildren(int parentProcessId) {
+      System.Collections.Generic.List<ChildProcessIdentity> children =
+        new System.Collections.Generic.List<ChildProcessIdentity>();
+      IntPtr snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+      if (snapshot == INVALID_HANDLE_VALUE) {
+        throw new InvalidOperationException(
+          "CreateToolhelp32Snapshot failed with Win32 error " + Marshal.GetLastWin32Error());
+      }
+      try {
+        ProcessEntry32 entry = new ProcessEntry32();
+        entry.dwSize = (uint)Marshal.SizeOf(typeof(ProcessEntry32));
+        if (!Process32First(snapshot, ref entry)) {
+          int error = Marshal.GetLastWin32Error();
+          if (error == ERROR_NO_MORE_FILES) return children.ToArray();
+          throw new InvalidOperationException("Process32First failed with Win32 error " + error);
+        }
+        do {
+          int childProcessId = unchecked((int)entry.th32ProcessID);
+          if (unchecked((int)entry.th32ParentProcessID) != parentProcessId) continue;
+          if (childProcessId == parentProcessId) continue;
+          if (childProcessId <= 0) continue;
+          long creationTicks = 0;
+          IntPtr handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, entry.th32ProcessID);
+          if (handle == IntPtr.Zero) {
+            // The child exited between the snapshot and the open, or its
+            // identity is not queryable. Without a creation time it cannot be
+            // proven to belong to the parent instance, so it is not tracked.
+            continue;
+          }
+          try {
+            FileTime creationTime;
+            FileTime exitTime;
+            FileTime kernelTime;
+            FileTime userTime;
+            if (!GetProcessTimes(handle, out creationTime, out exitTime, out kernelTime, out userTime)) continue;
+            long rawFileTime = ((long)creationTime.dwHighDateTime << 32) | creationTime.dwLowDateTime;
+            if (rawFileTime <= 0) continue;
+            creationTicks = DateTime.FromFileTimeUtc(rawFileTime).Ticks;
+          }
+          finally {
+            CloseHandle(handle);
+          }
+          ChildProcessIdentity identity = new ChildProcessIdentity();
+          identity.ProcessId = childProcessId;
+          identity.CreationTimeTicks = creationTicks;
+          children.Add(identity);
+          entry.dwSize = (uint)Marshal.SizeOf(typeof(ProcessEntry32));
+        } while (Process32Next(snapshot, ref entry));
+        return children.ToArray();
+      }
+      finally {
+        CloseHandle(snapshot);
+      }
+    }
+  }
 }
 '@
+}
+
+function Get-AiNovelProcessChildren {
+  param([Parameter(Mandatory = $true)][int]$ParentProcessId)
+
+  if (-not ([System.Management.Automation.PSTypeName]'AiNovelSmoke.ProcessTreeProbe').Type) {
+    throw 'The native process-tree probe is unavailable.'
+  }
+  $children = [System.Collections.Generic.List[object]]::new()
+  foreach ($child in @([AiNovelSmoke.ProcessTreeProbe]::GetChildren($ParentProcessId))) {
+    $children.Add([pscustomobject]@{
+      ProcessId = [int]$child.ProcessId
+      CreationDate = [DateTime]::new([long]$child.CreationTimeTicks, [DateTimeKind]::Utc)
+    })
+  }
+  return @($children)
+}
+
+function Get-AiNovelProcessParentProcessId {
+  param([Parameter(Mandatory = $true)][int]$ProcessId)
+
+  if (-not ([System.Management.Automation.PSTypeName]'AiNovelSmoke.ProcessTreeProbe').Type) {
+    return $null
+  }
+  $parentProcessId = [int][AiNovelSmoke.ProcessTreeProbe]::GetParentProcessId($ProcessId)
+  if ($parentProcessId -le 0) {
+    return $null
+  }
+  return $parentProcessId
 }
 
 function Get-AiNovelProcessTreeIds {
@@ -125,13 +294,12 @@ function Get-AiNovelProcessTreeIds {
       if ($null -ne $ProcessChildrenProvider) {
         $children = @(& $ProcessChildrenProvider $parentProcessId)
       }
-      elseif ($RequireSuccessfulTerminalRefresh) {
-        # A terminal refresh is a proof obligation: an unavailable CIM query is
-        # not evidence that the exited root had no descendants.
-        $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $parentProcessId" -ErrorAction Stop)
-      }
       else {
-        $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $parentProcessId" -ErrorAction SilentlyContinue)
+        # A terminal refresh is a proof obligation: an unavailable child query is
+        # not evidence that the exited root had no descendants. The permission-free
+        # native snapshot supplies that proof on hosts where Win32_Process queries
+        # are denied, so restricted WMI never masquerades as a clean process tree.
+        $children = @(Get-AiNovelProcessChildren -ParentProcessId $parentProcessId)
       }
     }
     catch {
@@ -167,8 +335,53 @@ function Get-AiNovelProcessTreeIds {
   return @($processIds)
 }
 
+function Get-AiNovelSystemProcessNameMap {
+  # A desktop snapshot must resolve the owner name for every top-level window.
+  # [System.Diagnostics.Process]::GetProcessById() costs roughly 13 ms per call
+  # on a loaded desktop, so resolving it once per window made a 600-window
+  # snapshot take ~9.5 seconds. The release gate polls this snapshot inside its
+  # 100 ms control loop, which let the 5/15/30 second gate windows expire while
+  # the monitor was still inside a single snapshot. One bulk enumeration keeps
+  # the same per-PID answer at ~1% of the cost.
+  $processNames = @{}
+  try {
+    foreach ($candidate in @(Get-Process -ErrorAction SilentlyContinue)) {
+      if ($null -eq $candidate) {
+        continue
+      }
+      $candidateId = 0
+      try {
+        $candidateId = [int]$candidate.Id
+      }
+      catch {
+        continue
+      }
+      if ($candidateId -le 0 -or $processNames.ContainsKey($candidateId)) {
+        continue
+      }
+      try {
+        $processNames[$candidateId] = [string]$candidate.ProcessName
+      }
+      catch {
+        # The process may exit between enumeration and the name read.
+      }
+      finally {
+        try { $candidate.Dispose() } catch { }
+      }
+    }
+  }
+  catch {
+    # A partial snapshot is still usable: unresolved PIDs fall back below.
+  }
+  return $processNames
+}
+
 function Get-AiNovelTopLevelWindowSnapshot {
   $windows = [System.Collections.Generic.List[object]]::new()
+  $processNames = Get-AiNovelSystemProcessNameMap
+  # PIDs that the bulk read could not resolve are retired or inaccessible
+  # processes; cache their per-PID fallback so each PID is queried at most once.
+  $fallbackProcessNames = @{}
   [AiNovelSmoke.TopLevelWindowProbe]::EnumWindows({
     param($handle, $state)
     $length = [AiNovelSmoke.TopLevelWindowProbe]::GetWindowTextLength($handle)
@@ -180,14 +393,25 @@ function Get-AiNovelTopLevelWindowSnapshot {
     [void][AiNovelSmoke.TopLevelWindowProbe]::GetClassName($handle, $className, $className.Capacity)
     $windowProcessId = 0
     [void][AiNovelSmoke.TopLevelWindowProbe]::GetWindowThreadProcessId($handle, [ref]$windowProcessId)
-    $processName = '<exited>'
-    try {
-      $owner = [System.Diagnostics.Process]::GetProcessById([int]$windowProcessId)
-      $processName = $owner.ProcessName
-      $owner.Dispose()
+    $ownerProcessId = [int]$windowProcessId
+    $processName = $null
+    if ($processNames.ContainsKey($ownerProcessId)) {
+      $processName = [string]$processNames[$ownerProcessId]
     }
-    catch {
-      # The owner may exit between EnumWindows and process lookup; retain the PID as evidence.
+    elseif ($fallbackProcessNames.ContainsKey($ownerProcessId)) {
+      $processName = [string]$fallbackProcessNames[$ownerProcessId]
+    }
+    else {
+      $processName = '<exited>'
+      try {
+        $owner = [System.Diagnostics.Process]::GetProcessById($ownerProcessId)
+        $processName = $owner.ProcessName
+        $owner.Dispose()
+      }
+      catch {
+        # The owner may exit between EnumWindows and process lookup; retain the PID as evidence.
+      }
+      $fallbackProcessNames[$ownerProcessId] = $processName
     }
 
     $windows.Add([pscustomobject]@{
@@ -336,23 +560,44 @@ function Test-AiNovelErrorWindowTargetsProduct {
     return $false
   }
 
+  $ownerParentProcessId = $null
+  # Resolve the parent through the permission-free native process snapshot first.
+  # A restricted WMI host must not turn a refresh into a terminating error.
+  $ownerParentProcessId = Get-AiNovelProcessParentProcessId -ProcessId ([int]$Window.ProcessId)
   $ownerInfo = $Window
-  if (-not $Window.PSObject.Properties['ParentProcessId'] -or
-      -not $Window.PSObject.Properties['CommandLine']) {
-    $ownerInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $($Window.ProcessId)" -ErrorAction SilentlyContinue
+  if ($null -eq $ownerParentProcessId -and
+      (-not $Window.PSObject.Properties['ParentProcessId'] -or
+       -not $Window.PSObject.Properties['CommandLine'])) {
+    try {
+      $ownerInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $($Window.ProcessId)" -ErrorAction Stop
+    }
+    catch {
+      # Access-denied WMI is an unavailable enrichment, never evidence that the
+      # dialog belongs to the product. Keep the native result (which is null)
+      # and continue fail-closed.
+      $ownerInfo = $Window
+    }
   }
-  if ($ownerInfo -and $TargetProcessIds.Contains([int]$ownerInfo.ParentProcessId)) {
+  if ($null -eq $ownerParentProcessId -and
+      $ownerInfo -and $ownerInfo.PSObject.Properties['ParentProcessId'] -and
+      $null -ne $ownerInfo.ParentProcessId) {
+    $ownerParentProcessId = [int]$ownerInfo.ParentProcessId
+  }
+  if ($null -ne $ownerParentProcessId -and $TargetProcessIds.Contains([int]$ownerParentProcessId)) {
     $matchesTrackedParent = $TargetProcessStartTimeTicks.Count -eq 0
     if (-not $matchesTrackedParent) {
       $matchesTrackedParent = Test-AiNovelHistoricalProcessIdentity `
-        -ProcessId ([int]$ownerInfo.ParentProcessId) `
+        -ProcessId ([int]$ownerParentProcessId) `
         -StartTimeTicks $TargetProcessStartTimeTicks
     }
     if ($matchesTrackedParent) {
       return $true
     }
   }
-  $commandLine = [string]$ownerInfo.CommandLine
+  $commandLine = ''
+  if ($ownerInfo -and $ownerInfo.PSObject.Properties['CommandLine']) {
+    $commandLine = [string]$ownerInfo.CommandLine
+  }
   foreach ($targetProcessId in $TargetProcessIds) {
     if ($commandLine -match "(?<!\d)$([regex]::Escape([string]$targetProcessId))(?!\d)") {
       $matchesTrackedCommandTarget = $TargetProcessStartTimeTicks.Count -eq 0
