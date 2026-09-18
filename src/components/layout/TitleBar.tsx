@@ -1,73 +1,28 @@
-import { useEffect, useState, type CSSProperties, type MouseEvent } from 'react'
-import {
-  Archive,
-  CheckCircle2,
-  FilePlus2,
-  FolderOpen,
-  Import,
-  Languages,
-  Menu,
-  Minus,
-  Moon,
-  ScrollText,
-  RotateCcw,
-  Settings,
-  Sparkles,
-  Square,
-  Sun,
-  Upload,
-  X,
-  ZoomIn,
-  ZoomOut,
-} from 'lucide-react'
+import { useEffect, useState, type CSSProperties } from 'react'
+import { Languages, Minus, Square, X } from 'lucide-react'
 import { useProjectStore } from '../../stores/project-store'
 import { useWorkflowStore } from '../../stores/workflow-store'
-import { useThemeStore, type Theme } from '../../stores/theme-store'
 import { useEditorStore, saveDirtyEditorChangesForExit } from '../../stores/editor-store'
 import { countUnsavedEditorItems } from '../../stores/editor-unsaved'
 import { discardAllEditorChanges } from '../../stores/editor-discard'
-import { useLayoutStore } from '../../stores/layout-store'
 import { APP_BRAND } from '../../shared/brand'
 import { ipc } from '../../services/ipc-client'
 import { useLocaleStore } from '../../stores/locale-store'
-import type { MessageKey } from '../../i18n/core'
 import { sameProjectPathKey } from '../../shared/project-session-context'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '../ui/Dialog'
 import { Button } from '../ui/Button'
 import { alertError } from '../ui/AlertDialog'
-import { confirm } from '../ui/Confirm'
-import { toast } from '../ui/Toast'
 
 const isMac = navigator.userAgent.includes('Mac')
-const themeIcons: Record<Theme, typeof Sun> = {
-  light: Sun,
-  galaxy: Sparkles,
-  paper: ScrollText,
-  dark: Moon,
-}
-const themeOrder: Theme[] = ['galaxy', 'dark', 'light', 'paper']
-const themeLabelKeys: Record<Theme, MessageKey> = {
-  light: 'theme.light',
-  galaxy: 'theme.galaxy',
-  paper: 'theme.paper',
-  dark: 'theme.dark',
-}
+const windowControlStyle: CSSProperties = { minHeight: 22, padding: '0 6px' }
 
 /**
  * 极简应用栏：只承担品牌、拖拽区和系统窗口控制。
  * 项目状态与创作操作都在底部状态栏或项目资源树中，避免抢占编辑空间。
  */
 export default function TitleBar() {
-  const currentProject = useProjectStore((s) => s.currentProject)
-  const openProject = useProjectStore((s) => s.openProject)
-  const { theme, setTheme, zoom, zoomIn, zoomOut, zoomReset } = useThemeStore()
-  const hasDirty = useEditorStore((s) => countUnsavedEditorItems(s.tabs, s.draftLedgers) > 0)
-  const openSettings = useLayoutStore(s => s.openSettings)
-  const openNewProject = useLayoutStore(s => s.openNewProject)
-  const openExport = useLayoutStore(s => s.openExport)
-  const openImportNovel = useLayoutStore(s => s.openImportNovel)
   const text = useLocaleStore(s => s.text)
   const t = useLocaleStore(s => s.t)
   const locale = useLocaleStore(s => s.locale)
@@ -75,52 +30,6 @@ export default function TitleBar() {
   const [exitRequest, setExitRequest] = useState<{ requestId: string; workflowBlocked?: boolean } | null>(null)
   const [exitBusy, setExitBusy] = useState(false)
   const [exitError, setExitError] = useState<string | null>(null)
-  const [backupBusy, setBackupBusy] = useState(false)
-
-  const handleBackup = async () => {
-    if (backupBusy || !currentProject) return
-    setBackupBusy(true)
-    try {
-      const destination = await ipc.invoke('dialog:select-export-directory')
-      if (!destination) return
-      const result = await ipc.invoke('project:backup', destination.grantId)
-      if (!result.success) throw new Error(result.error ?? text('备份失败', 'Backup failed'))
-      toast.success(text(`项目状态已备份（${result.fileCount ?? 0} 个文件）`, `Project state backed up (${result.fileCount ?? 0} files)`))
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : text('备份失败', 'Backup failed'))
-    } finally {
-      setBackupBusy(false)
-    }
-  }
-
-  const handleRestoreBackup = async () => {
-    if (backupBusy) return
-    const accepted = await confirm(
-      text(
-        '恢复只会写入你随后选择的“新项目目录”，不会覆盖已有 .vela 数据，也不会修改小说母稿。是否继续？',
-        'Restore writes only to the new project directory you choose next. It never overwrites existing .vela data or modifies a linked manuscript. Continue?',
-      ),
-      { title: text('恢复项目备份', 'Restore project backup'), confirmText: text('选择备份', 'Choose backup') },
-    )
-    if (!accepted) return
-    setBackupBusy(true)
-    try {
-      const backup = await ipc.invoke('dialog:select-backup-directory')
-      if (!backup) return
-      const target = await ipc.invoke('dialog:select-restore-directory')
-      if (!target) return
-      const result = await ipc.invoke('project:restore-backup', backup.grantId, target.grantId)
-      if (!result.success) throw new Error(result.error ?? text('恢复失败', 'Restore failed'))
-      toast.success(text(
-        `项目状态已恢复（${result.fileCount ?? 0} 个文件）。可打开恢复目录继续使用。`,
-        `Project state restored (${result.fileCount ?? 0} files). Open the restored directory to continue.`,
-      ))
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : text('恢复失败', 'Restore failed'))
-    } finally {
-      setBackupBusy(false)
-    }
-  }
 
   useEffect(() => ipc.on('window:close-requested', ({ requestId }) => {
     const projectPath = useProjectStore.getState().currentProject?.path
@@ -199,210 +108,48 @@ export default function TitleBar() {
     }
   }
 
-  const ThemeIcon = themeIcons[theme] || Sun
-  const cycleTheme = (event: MouseEvent) => {
-    const nextTheme = themeOrder[(themeOrder.indexOf(theme) + 1) % themeOrder.length]
-    if (!('startViewTransition' in document) || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      setTheme(nextTheme)
-      return
-    }
-
-    const x = event.clientX
-    const y = event.clientY
-    const endRadius = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y))
-    const transition = (document as Document & {
-      startViewTransition?: (callback: () => void) => { ready: Promise<void> }
-    }).startViewTransition!(() => setTheme(nextTheme))
-    transition.ready.then(() => {
-      document.documentElement.animate(
-        { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${endRadius}px at ${x}px ${y}px)`] },
-        { duration: 450, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', pseudoElement: '::view-transition-new(root)' },
-      )
-    })
-  }
-
-  useEffect(() => {
-    const handleKey = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey)) return
-      if (event.key === '=' || event.key === '+') {
-        event.preventDefault()
-        zoomIn()
-      } else if (event.key === '-') {
-        event.preventDefault()
-        zoomOut()
-      } else if (event.key === '0') {
-        event.preventDefault()
-        zoomReset()
-      }
-    }
-    window.addEventListener('keydown', handleKey)
-    return () => window.removeEventListener('keydown', handleKey)
-  }, [zoomIn, zoomOut, zoomReset])
-
-  const handleOpenProject = async () => {
-    const folder = await ipc.invoke('dialog:select-folder')
-    if (folder) openProject(folder)
-  }
-
-  const zoomLabel = `${Math.round(zoom * 100)}%`
-
   return (
     <>
       <div
-        className="writer-topbar no-select flex items-center gap-2"
+        className="writer-topbar writer-topbar--minimal no-select flex items-center justify-between"
         style={{
           height: 'var(--height-titlebar)',
-          paddingLeft: isMac ? 78 : 14,
-          paddingRight: 10,
+          paddingLeft: isMac ? 78 : 12,
+          paddingRight: 8,
           WebkitAppRegion: 'drag',
         } as CSSProperties}
       >
-        <div className="flex items-center gap-2 flex-shrink-0 min-w-0">
-          <div className="writer-brand-mark flex h-8 w-8 items-center justify-center rounded-md">
+        <div className="flex items-center gap-2">
+          <div className="writer-brand-mark flex h-5 w-5 items-center justify-center rounded-[var(--radius-sm)]">
             <img className="writer-brand-image" src="/brand-icon.png" alt="" />
           </div>
-          <div className="leading-tight min-w-[112px]">
-            <div className="text-sm font-semibold brand-gradient">
-              {locale === 'zh-CN' ? APP_BRAND.zhName : APP_BRAND.enName}
-            </div>
-            {locale === 'zh-CN' && (
-              <div className="text-[0.68rem] opacity-75">{APP_BRAND.enName}</div>
-            )}
-          </div>
+          <span className="brand-gradient text-[12px] font-semibold">
+            {locale === 'zh-CN' ? APP_BRAND.zhName : APP_BRAND.enName}
+          </span>
         </div>
 
-      <div className="flex items-center gap-2 min-w-0 flex-1">
-        <button className="writer-command-button" title={t('common.settings')} onClick={() => openSettings()}>
-          <Menu size={17} strokeWidth={1.8} />
-        </button>
-
-        <span className="text-xs font-semibold opacity-90 whitespace-nowrap">{t('project.currentLabel')}</span>
-        <button
-          className="writer-command-button max-w-[280px]"
-          title={t('project.switch')}
-          onClick={handleOpenProject}
-        >
-          <span className="truncate">{currentProject?.name ?? t('project.none')}</span>
-        </button>
-
-        <span
-          className="inline-flex items-center gap-1 text-xs font-medium whitespace-nowrap"
-          title={hasDirty ? t('save.dirty') : t('save.saved')}
-          style={{ color: hasDirty ? 'var(--color-warning-text)' : 'var(--color-success-text)' }}
-        >
-          <CheckCircle2 size={14} strokeWidth={1.9} />
-          {hasDirty ? t('save.modified') : t('save.saved')}
-        </span>
-
-        <div className="writer-command-divider h-5 w-px" />
-
-        <button className="writer-command-button" title={t('common.backup')} onClick={() => void handleBackup()} disabled={backupBusy || !currentProject}>
-          <Archive size={14} strokeWidth={1.75} />
-          {t('common.backup')}
-        </button>
-        <button
-          className="writer-command-button"
-          title={text('恢复项目备份', 'Restore project backup')}
-          onClick={() => void handleRestoreBackup()}
-          disabled={backupBusy}
-        >
-          <RotateCcw size={14} strokeWidth={1.75} />
-          {text('恢复', 'Restore')}
-        </button>
-        <button className="writer-command-button" title={t('project.imitation')} onClick={openImportNovel}>
-          <Import size={14} strokeWidth={1.75} />
-          {t('project.imitationShort')}
-        </button>
-        <button className="writer-command-button" title={t('project.export')} onClick={openExport}>
-          <Upload size={14} strokeWidth={1.75} />
-          {t('common.export')}
-        </button>
-        <button className="writer-command-button" title={t('project.new')} onClick={openNewProject}>
-          <FilePlus2 size={14} strokeWidth={1.75} />
-          {t('common.new')}
-        </button>
-        <button className="writer-command-button" title={t('project.open')} onClick={handleOpenProject}>
-          <FolderOpen size={14} strokeWidth={1.75} />
-          {t('common.open')}
-        </button>
-      </div>
-
-      <div className="flex items-center gap-1 flex-shrink-0">
-        <button
-          onClick={zoomOut}
-          title={t('zoom.out')}
-          className="writer-command-button"
-          style={{ minHeight: 24, padding: '0 6px' }}
-        >
-          <ZoomOut size={13} strokeWidth={1.5} />
-        </button>
-        <button
-          onClick={zoomReset}
-          title={t('zoom.reset')}
-          className="writer-command-button"
-          style={{ minHeight: 24, minWidth: 42, padding: '0 6px', fontFamily: 'var(--font-mono)' }}
-        >
-          {zoomLabel}
-        </button>
-        <button
-          onClick={zoomIn}
-          title={t('zoom.in')}
-          className="writer-command-button"
-          style={{ minHeight: 24, padding: '0 6px' }}
-        >
-          <ZoomIn size={13} strokeWidth={1.5} />
-        </button>
-        <button
-          onClick={cycleTheme}
-          title={t('theme.label', { name: t(themeLabelKeys[theme]) })}
-          className="writer-command-button"
-          style={{ minHeight: 24, padding: '0 7px' }}
-        >
-          <ThemeIcon size={13} strokeWidth={1.5} />
-        </button>
-        <button
-          onClick={() => void toggleLocale()}
-          title={t('language.switch')}
-          className="writer-command-button"
-          style={{ minHeight: 24, padding: '0 7px' }}
-        >
-          <Languages size={13} strokeWidth={1.5} />
-          <span>{locale === 'zh-CN' ? 'EN' : '中文'}</span>
-        </button>
-        <button
-          onClick={() => openSettings()}
-          title={t('common.settings')}
-          className="writer-command-button"
-          style={{ minHeight: 24, padding: '0 7px' }}
-        >
-          <Settings size={13} strokeWidth={1.5} />
-        </button>
-        <div className="writer-command-divider h-5 w-px mx-1" />
-        <button
-          className="writer-command-button"
-          title={t('common.minimize')}
-          onClick={() => ipc.invoke('window:minimize')}
-          style={{ minHeight: 24, padding: '0 7px' }}
-        >
-          <Minus size={13} />
-        </button>
-        <button
-          className="writer-command-button"
-          title={t('common.maximizeRestore')}
-          onClick={() => ipc.invoke('window:toggle-maximize')}
-          style={{ minHeight: 24, padding: '0 7px' }}
-        >
-          <Square size={12} />
-        </button>
-        <button
-          className="writer-command-button"
-          title={t('common.close')}
-          onClick={() => ipc.invoke('window:close')}
-          style={{ minHeight: 24, padding: '0 7px' }}
-        >
-          <X size={14} />
-        </button>
-      </div>
+        <div className="flex items-center gap-0.5">
+          <button
+            type="button"
+            className="writer-command-button flex items-center gap-1 text-xs"
+            title={t('language.switch')}
+            onClick={() => void toggleLocale()}
+            style={windowControlStyle}
+          >
+            <Languages size={13} strokeWidth={1.5} />
+            <span>{locale === 'zh-CN' ? 'EN' : '中文'}</span>
+          </button>
+          <div className="writer-command-divider h-3.5 w-px mx-0.5" />
+          <button className="writer-command-button" aria-label={text('最小化', 'Minimize')} onClick={() => ipc.invoke('window:minimize')} style={windowControlStyle}>
+            <Minus size={13} />
+          </button>
+          <button className="writer-command-button" aria-label={text('最大化或还原', 'Maximize or restore')} onClick={() => ipc.invoke('window:toggle-maximize')} style={windowControlStyle}>
+            <Square size={12} />
+          </button>
+          <button className="writer-command-button" aria-label={text('关闭', 'Close')} onClick={() => ipc.invoke('window:close')} style={windowControlStyle}>
+            <X size={14} />
+          </button>
+        </div>
       </div>
       <Dialog open={exitRequest !== null} onOpenChange={(open) => {
         if (!open) void cancelExit()

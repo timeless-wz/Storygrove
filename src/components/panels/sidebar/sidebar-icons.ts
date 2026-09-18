@@ -2,7 +2,7 @@ import { createElement, type ComponentType, type CSSProperties, type ReactNode }
 import {
   Target, Users, Globe, Map, BookOpen, FolderTree, LayoutList,
   FilePen, PenTool, BrainCircuit, Sparkles, FolderOpen, Zap,
-  FileText, MessageCircle, RefreshCw, GitCompare, GitBranch,
+  FileText, MessageCircle, RefreshCw, GitCompare, GitBranch, Archive, RotateCcw,
   Compass, LayoutDashboard, Clock3,
 } from 'lucide-react'
 
@@ -30,6 +30,8 @@ const ICON_MAP: Record<string, SidebarIcon> = {
   'refresh-cw': RefreshCw,
   'git-compare': GitCompare,
   'git-branch': GitBranch,
+  archive: Archive,
+  'rotate-ccw': RotateCcw,
 }
 
 /** 根据 iconName 渲染 Lucide 图标；未找到时返回空占位。 */

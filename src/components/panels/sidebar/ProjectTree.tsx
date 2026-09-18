@@ -68,6 +68,7 @@ export default function ProjectTree() {
   const [blueprintCount, setBlueprintCount] = useState<number>(-1)
   const [refreshing, setRefreshing] = useState(false)
   const [clearDialogOpen, setClearDialogOpen] = useState(false)
+  const [backupBusy, setBackupBusy] = useState(false)
   const refreshRequestGate = useRef(new LatestRequestGate())
   const mapNodes = useWorldMapStore(s => s.nodes)
   const setSidebarView = useLayoutStore(s => s.setSidebarView)
@@ -251,6 +252,54 @@ export default function ProjectTree() {
     projectKey: currentProject.path,
   })
 
+  const handleBackup = async () => {
+    if (backupBusy) return
+    setBackupBusy(true)
+    try {
+      const destination = await ipc.invoke('dialog:select-export-directory')
+      if (!destination) return
+      const result = await ipc.invoke('project:backup', destination.grantId)
+      if (!result.success) throw new Error(result.error ?? text('备份失败', 'Backup failed'))
+      toast.success(text(
+        `项目状态已备份（${result.fileCount ?? 0} 个文件）`,
+        `Project state backed up (${result.fileCount ?? 0} files)`,
+      ))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : text('备份失败', 'Backup failed'))
+    } finally {
+      setBackupBusy(false)
+    }
+  }
+
+  const handleRestoreBackup = async () => {
+    if (backupBusy) return
+    const accepted = await confirm(
+      text(
+        '恢复只会写入你随后选择的“新项目目录”，不会覆盖已有 .vela 数据，也不会修改小说母稿。是否继续？',
+        'Restore writes only to the new project directory you choose next. It never overwrites existing .vela data or modifies a linked manuscript. Continue?',
+      ),
+      { title: text('恢复项目备份', 'Restore project backup'), confirmText: text('选择备份', 'Choose backup') },
+    )
+    if (!accepted) return
+    setBackupBusy(true)
+    try {
+      const backup = await ipc.invoke('dialog:select-backup-directory')
+      if (!backup) return
+      const target = await ipc.invoke('dialog:select-restore-directory')
+      if (!target) return
+      const result = await ipc.invoke('project:restore-backup', backup.grantId, target.grantId)
+      if (!result.success) throw new Error(result.error ?? text('恢复失败', 'Restore failed'))
+      toast.success(text(
+        `项目状态已恢复（${result.fileCount ?? 0} 个文件）。可打开恢复目录继续使用。`,
+        `Project state restored (${result.fileCount ?? 0} files). Open the restored directory to continue.`,
+      ))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : text('恢复失败', 'Restore failed'))
+    } finally {
+      setBackupBusy(false)
+    }
+  }
+
   return (
     <div className="writer-project-tree min-h-full text-sm py-1">
       {/* 项目名 + 刷新 */}
@@ -428,6 +477,20 @@ export default function ProjectTree() {
         label={text('导出项目', 'Export project')}
         desc={text('导出当前项目的创作成果', 'Export this project’s work')}
         onClick={() => useLayoutStore.getState().openExport()}
+      />
+      <LeafItem
+        iconName="archive"
+        label={text('备份项目', 'Back up project')}
+        desc={text('将当前项目状态备份到你选择的目录', 'Back up the current project state to a directory you choose')}
+        badge={backupBusy ? text('处理中', 'Working') : undefined}
+        onClick={() => void handleBackup()}
+      />
+      <LeafItem
+        iconName="rotate-ccw"
+        label={text('恢复项目备份', 'Restore project backup')}
+        desc={text('恢复到新项目目录，不覆盖已有项目', 'Restore to a new project directory without overwriting an existing project')}
+        badge={backupBusy ? text('处理中', 'Working') : undefined}
+        onClick={() => void handleRestoreBackup()}
       />
     </div>
   )
