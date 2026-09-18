@@ -165,5 +165,22 @@ describe('authoritative finalized export integration', () => {
     if (!second.path) throw new Error('Expected second export path')
     expect(fs.readdirSync(path.join(exportPath, second.path)))
       .toEqual(['chapter_1.md'])
+
+    const word = await exportNovel(
+      { format: 'word', grantId: grant.grantId },
+      {
+        id: projectSession.projectId,
+        sessionLease: projectSession.leaseId,
+        path: projectPath,
+        name: 'Sparse Novel',
+        novelConfig: { genre: 'fantasy', targetAudience: 'general', writingLanguage: 'zh-CN' },
+      },
+      projectSession,
+    )
+    expect(word).toMatchObject({ success: true, path: 'Sparse Novel.docx' })
+    if (!word.path) throw new Error('Expected Word export path')
+    const wordContent = fs.readFileSync(path.join(exportPath, word.path))
+    expect(wordContent.subarray(0, 4).toString('hex')).toBe('504b0304')
+    expect(wordContent.toString('utf8')).toContain('第1章 起航')
   }, 15_000)
 })

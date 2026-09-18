@@ -28,6 +28,16 @@ export interface ChunkRecord {
   totalChunks: number
   importedAt: string
   corpusKind: KnowledgeCorpusKind
+  /** Traceability metadata shared with the structured story ledger. */
+  factId?: string
+  sourceSnapshotId?: string
+  sourceFragmentId?: string
+  versionId?: string
+  sourceType?: string
+  authorityStatus?: string
+  startLine?: number
+  endLine?: number
+  stale?: number
 }
 
 export type KnowledgeCorpusKind = 'reference' | 'project-knowledge' | 'unknown'
@@ -48,6 +58,14 @@ export interface SearchResult {
   text: string
   score: number
   fileName: string
+  docId?: string
+  chapterNumber?: number
+  sourceSnapshotId?: string
+  sourceFragmentId?: string
+  versionId?: string
+  authorityStatus?: string
+  startLine?: number
+  endLine?: number
 }
 
 /** 知识库统计 */
@@ -482,6 +500,9 @@ function recordsForSchema(records: ReadonlyArray<Record<string, unknown>>, schem
 
 async function appendCompatibleRecords(table: lancedb.Table, records: ReadonlyArray<Record<string, unknown>>): Promise<void> {
   if (records.length === 0) return
+  // Existing installations may have the pre-traceability schema.  Filter to
+  // the table's actual fields rather than mutating old Lance tables during a
+  // normal append; traceability columns are present on newly-created tables.
   await ensureCorpusKindColumn(table)
   const schema = await table.schema()
   await table.add(recordsForSchema(records, schema))
@@ -492,6 +513,7 @@ async function ensureCorpusKindColumn(table: lancedb.Table): Promise<void> {
   if (schema.fields.some(field => field.name === 'corpusKind')) return
   await table.addColumns([{ name: 'corpusKind', valueSql: "'unknown'" }])
 }
+
 
 async function appendCanonicalRecords(
   db: lancedb.Connection,
@@ -969,6 +991,15 @@ export async function addChunks(
     chapterTitle?: string
     corpusKind?: KnowledgeCorpusKind
     replacementMode?: 'by-file-name' | 'stable-id'
+    factId?: string
+    sourceSnapshotId?: string
+    sourceFragmentId?: string
+    versionId?: string
+    sourceType?: string
+    authorityStatus?: string
+    startLine?: number
+    endLine?: number
+    stale?: boolean
   },
   embeddingSpace?: EmbeddingSpaceIdentity,
 ): Promise<{ success: boolean; chunkCount: number; error?: string }> {
@@ -999,6 +1030,15 @@ export async function addChunks(
       chapterNumber: metadata?.chapterNumber,
       chapterTitle: metadata?.chapterTitle,
       corpusKind,
+      factId: metadata?.factId,
+      sourceSnapshotId: metadata?.sourceSnapshotId,
+      sourceFragmentId: metadata?.sourceFragmentId,
+      versionId: metadata?.versionId,
+      sourceType: metadata?.sourceType,
+      authorityStatus: metadata?.authorityStatus,
+      startLine: metadata?.startLine,
+      endLine: metadata?.endLine,
+      ...(metadata?.stale !== undefined ? { stale: metadata.stale ? 1 : 0 } : {}),
     }))
     chunkIds = canonicalRecords.map(record => record.id)
     const tableNames = await db.tableNames()
@@ -1237,10 +1277,18 @@ export async function searchWithScope(
           if (vectorFilters.length > 0) query = query.where(vectorFilters.join(' AND '))
           const results = await query.toArray()
           if (results.length > 0) {
-            return results.map((row: { text: string; _distance?: number; fileName: string }) => ({
+            return results.map((row: { text: string; _distance?: number; fileName: string; docId?: string; chapterNumber?: number; sourceSnapshotId?: string; sourceFragmentId?: string; versionId?: string; authorityStatus?: string; startLine?: number; endLine?: number }) => ({
               text: row.text,
               score: row._distance != null ? 1 / (1 + row._distance) : 0.5,
               fileName: row.fileName,
+              docId: row.docId,
+              chapterNumber: row.chapterNumber,
+              sourceSnapshotId: row.sourceSnapshotId,
+              sourceFragmentId: row.sourceFragmentId,
+              versionId: row.versionId,
+              authorityStatus: row.authorityStatus,
+              startLine: row.startLine,
+              endLine: row.endLine,
             }))
           }
         }
@@ -1274,8 +1322,8 @@ export async function searchWithScope(
       const results = await canonicalTable.query().filter(filter).toArray()
       const normalizedTerms = searchTerms.map(term => term.toLocaleLowerCase())
       const ftsResults = results
-        .map((row: { text: string; fileName: string }) => ({
-          result: { text: row.text, score: 0.5, fileName: row.fileName },
+        .map((row: { text: string; fileName: string; docId?: string; chapterNumber?: number; sourceSnapshotId?: string; sourceFragmentId?: string; versionId?: string; authorityStatus?: string; startLine?: number; endLine?: number }) => ({
+          result: { text: row.text, score: 0.5, fileName: row.fileName, docId: row.docId, chapterNumber: row.chapterNumber, sourceSnapshotId: row.sourceSnapshotId, sourceFragmentId: row.sourceFragmentId, versionId: row.versionId, authorityStatus: row.authorityStatus, startLine: row.startLine, endLine: row.endLine },
           relevance: normalizedTerms.reduce((score, term, index) => (
             row.text.toLocaleLowerCase().includes(term)
               ? score + normalizedTerms.length - index

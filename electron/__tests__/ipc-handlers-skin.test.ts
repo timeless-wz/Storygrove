@@ -35,6 +35,9 @@ vi.mock('../controllers/chapter-lifecycle-controller', () => ({ registerChapterL
 vi.mock('../controllers/external-file-grant-controller', () => ({ registerExternalFileGrantController: vi.fn() }))
 vi.mock('../controllers/app-data-controller', () => ({ registerAppDataController: vi.fn() }))
 vi.mock('../controllers/workspace-hub-controller', () => ({ registerWorkspaceHubController: vi.fn() }))
+vi.mock('../controllers/story-data-controller', () => ({ registerStoryDataController: vi.fn() }))
+vi.mock('../controllers/phase3-8-controller', () => ({ registerPhase3To8Controller: vi.fn() }))
+vi.mock('../controllers/backup-controller', () => ({ registerBackupController: vi.fn() }))
 
 import { registerIPCHandlers } from '../ipc-handlers'
 

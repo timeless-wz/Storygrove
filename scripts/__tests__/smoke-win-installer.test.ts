@@ -2932,9 +2932,11 @@ $matches = @(Get-AiNovelNewErrorWindows -BaselineIdentities $baseline -CurrentWi
   windowsPowerShellIt('does not follow a stale parent PID into a process that predates the current parent instance', () => {
     const output = runProbeLibrary(`
 $rootStart = [DateTime]::UtcNow.Ticks
-function Get-CimInstance {
-  param($ClassName, [string]$Filter, $ErrorAction)
-  if ($Filter -eq 'ParentProcessId = 777') {
+# Child enumeration is injected through the supported provider seam so this test
+# keeps exercising the PID-reuse guard in the tree walk itself.
+$childrenProvider = {
+  param([int]$ParentProcessId)
+  if ($ParentProcessId -eq 777) {
     return @(
       [pscustomobject]@{
         ProcessId = 778
@@ -2954,7 +2956,7 @@ $identityProvider = {
   if ($ProcessId -eq 779) { return $rootStart + 10000 }
   return $null
 }
-$tree = @(Get-AiNovelProcessTreeIds -RootProcessId 777 -RootStartTimeTicks $rootStart -ProcessStartTimeProvider $identityProvider)
+$tree = @(Get-AiNovelProcessTreeIds -RootProcessId 777 -RootStartTimeTicks $rootStart -ProcessStartTimeProvider $identityProvider -ProcessChildrenProvider $childrenProvider)
 [pscustomobject]@{
   ContainsRoot = $tree -contains 777
   ContainsOlderStaleChild = $tree -contains 778
@@ -2972,15 +2974,15 @@ $tree = @(Get-AiNovelProcessTreeIds -RootProcessId 777 -RootStartTimeTicks $root
     const output = runProbeLibrary(`
 $rootStart = [DateTime]::UtcNow.Ticks
 $childStart = $rootStart + 10000
-function Get-CimInstance {
-  param($ClassName, [string]$Filter, $ErrorAction)
-  if ($Filter -eq 'ParentProcessId = 777') {
+$childrenProvider = {
+  param([int]$ParentProcessId)
+  if ($ParentProcessId -eq 777) {
     return @([pscustomobject]@{
       ProcessId = 778
       CreationDate = [DateTime]::new($childStart, [DateTimeKind]::Utc)
     })
   }
-  if ($Filter -eq 'ParentProcessId = 778') {
+  if ($ParentProcessId -eq 778) {
     return @([pscustomobject]@{
       ProcessId = 779
       CreationDate = [DateTime]::new($childStart + 10000, [DateTimeKind]::Utc)
@@ -2995,7 +2997,7 @@ $identityProvider = {
   return $null
 }
 $discovered = @{}
-$tree = @(Get-AiNovelProcessTreeIds -RootProcessId 777 -RootStartTimeTicks $rootStart -ProcessStartTimeProvider $identityProvider -DiscoveredStartTimeTicks $discovered)
+$tree = @(Get-AiNovelProcessTreeIds -RootProcessId 777 -RootStartTimeTicks $rootStart -ProcessStartTimeProvider $identityProvider -DiscoveredStartTimeTicks $discovered -ProcessChildrenProvider $childrenProvider)
 $tracked = [System.Collections.Generic.HashSet[int]]::new()
 $trackedStarts = @{}
 $addReused = Add-AiNovelTrackedProcess -ProcessIds $tracked -StartTimeTicks $trackedStarts -ProcessId $PID -ExpectedStartTimeTicks 1
@@ -3140,6 +3142,122 @@ try {
     expect(result.ChildAliveAfterRefresh).toBe(true)
     expect(result.Failure).toContain('Application process tree did not terminate')
   }, 15_000)
+
+  windowsPowerShellIt('keeps the terminal lineage refresh provable when every Win32_Process query is access denied', () => {
+    // A restricted-WMI host (the real 拒绝访问 condition) must not turn a clean
+    // post-exit proof into a lineage failure. The child below is a genuine
+    // descendant of an already exited root, so only the real enumeration path is
+    // exercised; replacing Get-CimInstance makes a WMI-based implementation fail
+    // closed with the wrong reason while the native process table keeps working.
+    const output = runProbeLibrary(`
+$rootProcess = $null
+$childProcess = $null
+$marker = Join-Path ([System.IO.Path]::GetTempPath()) ('ai-novel-wmi-denied-' + [guid]::NewGuid().ToString('N') + '.txt')
+try {
+  $rootBody = @'
+$c = Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-Command','Start-Sleep -Seconds 30') -PassThru
+Set-Content -LiteralPath '__MARKER__' -Value $c.Id
+Start-Sleep -Milliseconds 400
+exit 0
+'@
+  $rootBody = $rootBody.Replace('__MARKER__', $marker)
+  $encodedRoot = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($rootBody))
+  $rootProcess = Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile', '-EncodedCommand', $encodedRoot) -PassThru
+  $rootStart = $rootProcess.StartTime.ToUniversalTime().Ticks
+
+  $deadline = [DateTime]::UtcNow.AddSeconds(10)
+  while (-not (Test-Path -LiteralPath $marker) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 50 }
+  if (-not (Test-Path -LiteralPath $marker)) { throw 'The lineage root never published its child PID.' }
+  $childPid = [int](Get-Content -LiteralPath $marker -Raw).Trim()
+  $childProcess = [System.Diagnostics.Process]::GetProcessById($childPid)
+  [void]$rootProcess.WaitForExit(8000)
+  $rootProcess.Refresh()
+
+  function Get-CimInstance {
+    param($ClassName, [string]$Filter, $ErrorAction)
+    throw '拒绝访问'
+  }
+
+  $processIds = [System.Collections.Generic.HashSet[int]]::new()
+  [void]$processIds.Add($rootProcess.Id)
+  $startTimeTicks = @{ ([string]$rootProcess.Id) = $rootStart }
+  $failure = ''
+  try {
+    Assert-AiNovelProcessTreeExited -ProcessIds $processIds -StartTimeTicks $startTimeTicks -RootProcessId $rootProcess.Id -TimeoutSeconds 1
+  } catch {
+    $failure = $_.Exception.Message
+  }
+  $childProcess.Refresh()
+  [pscustomobject]@{
+    RootExitedBeforeRefresh = $rootProcess.HasExited
+    ChildTracked = $processIds.Contains($childPid)
+    ChildAliveAfterRefresh = -not $childProcess.HasExited
+    Failure = $failure
+  } | ConvertTo-Json -Compress
+} finally {
+  Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue
+  foreach ($candidate in @($rootProcess, $childProcess)) {
+    if ($null -eq $candidate) { continue }
+    try {
+      $candidate.Refresh()
+      if (-not $candidate.HasExited) { Stop-Process -Id $candidate.Id -Force -ErrorAction SilentlyContinue }
+    } finally {
+      $candidate.Dispose()
+    }
+  }
+}
+`)
+    const result = parseLastJsonLine(output)
+
+    expect(result.RootExitedBeforeRefresh).toBe(true)
+    expect(result.ChildTracked).toBe(true)
+    expect(result.ChildAliveAfterRefresh).toBe(true)
+    expect(result.Failure).toContain('Application process tree did not terminate')
+    expect(result.Failure).not.toContain('terminal process lineage refresh')
+  }, 20_000)
+
+  windowsPowerShellIt('resolves every window owner name exactly as the authoritative per-process read does', () => {
+    // The desktop snapshot resolves owner names in bulk for speed. This proves the
+    // cached answer is identical to a direct GetProcessById read for every live
+    // owner, so the optimisation cannot mis-attribute an error dialog.
+    const output = runProbeLibrary(`
+$snapshot = @(Get-AiNovelTopLevelWindowSnapshot)
+$uniqueOwnerIds = @($snapshot | ForEach-Object { [int]$_.ProcessId } | Where-Object { $_ -gt 0 } | Select-Object -Unique)
+$mismatches = [System.Collections.Generic.List[string]]::new()
+$compared = 0
+foreach ($ownerId in $uniqueOwnerIds) {
+  $authoritative = $null
+  try {
+    $owner = [System.Diagnostics.Process]::GetProcessById([int]$ownerId)
+    $authoritative = [string]$owner.ProcessName
+    $owner.Dispose()
+  } catch {
+    $authoritative = $null
+  }
+  if ($null -eq $authoritative) { continue }
+  $compared += 1
+  $reported = @($snapshot | Where-Object { [int]$_.ProcessId -eq [int]$ownerId } | Select-Object -First 1)
+  if ($reported.Count -eq 0) { continue }
+  if ([string]$reported[0].ProcessName -ne $authoritative) {
+    $mismatches.Add(('{0}:{1}!={2}' -f $ownerId, [string]$reported[0].ProcessName, $authoritative))
+  }
+}
+[pscustomobject]@{
+  WindowCount = $snapshot.Count
+  ComparedOwnerCount = $compared
+  MismatchCount = $mismatches.Count
+  Mismatches = @($mismatches | Select-Object -First 5)
+} | ConvertTo-Json -Compress
+`)
+    const result = parseLastJsonLine(output) as {
+      WindowCount: number
+      ComparedOwnerCount: number
+      MismatchCount: number
+    }
+
+    expect(result.MismatchCount).toBe(0)
+    expect(result.ComparedOwnerCount).toBeGreaterThan(0)
+  }, 30_000)
 
   windowsPowerShellIt('waits at least five seconds after the application process tree is terminated', () => {
     const output = runProbeLibrary(`

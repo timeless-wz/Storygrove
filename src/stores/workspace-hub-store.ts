@@ -16,9 +16,20 @@ import type {
   WorkspaceImportCandidateStatus,
   ChapterContextBundle,
   ChapterContextSnapshot,
+  WorkspaceScanResult,
 } from '../shared/workspace-hub'
 
-export type WorkspaceHubTab = 'sources' | 'rules' | 'context'
+// Phase 1 views share this store with the Phase 2–8 authoring surfaces.
+// Keep the richer tab set while retaining the Phase 1 scan and provenance state.
+export type WorkspaceHubTab =
+  | 'sources'
+  | 'rules'
+  | 'context'
+  | 'story-data'
+  | 'workbench'
+  | 'control'
+  | 'audit'
+  | 'revision'
 
 interface WorkspaceHubState {
   status: WorkspaceHubStatus | null
@@ -45,6 +56,8 @@ interface WorkspaceHubState {
   scanning: boolean
   cancelling: boolean
   scanRunId: number
+  scanEpoch: number
+  lastScanResult: WorkspaceScanResult | null
   actioningCandidateId: string | null
   error: string | null
   activeTab: WorkspaceHubTab
@@ -79,6 +92,13 @@ interface WorkspaceHubState {
   reset: () => void
 }
 
+interface ActiveScanToken {
+  epoch: number
+  runId: number
+}
+
+const activeScanTokens = new Map<string, ActiveScanToken>()
+
 export const useWorkspaceHubStore = create<WorkspaceHubState>((set, get) => ({
   status: null,
   sources: [],
@@ -99,6 +119,8 @@ export const useWorkspaceHubStore = create<WorkspaceHubState>((set, get) => ({
   scanning: false,
   cancelling: false,
   scanRunId: 0,
+  scanEpoch: 0,
+  lastScanResult: null,
   actioningCandidateId: null,
   error: null,
   activeTab: 'sources',
@@ -135,6 +157,7 @@ export const useWorkspaceHubStore = create<WorkspaceHubState>((set, get) => ({
   },
 
   selectDirectory: async () => {
+    if (get().scanning || get().cancelling) return null
     const session = getActiveProjectSessionContext()
     if (!session) return null
     try {
@@ -146,48 +169,72 @@ export const useWorkspaceHubStore = create<WorkspaceHubState>((set, get) => ({
   },
 
   bindDirectory: async (grantId: string) => {
+    if (get().scanning || get().cancelling) return false
     const session = getActiveProjectSessionContext()
     if (!session) {
       set({ error: '缺少当前项目会话' })
       return false
     }
     const runId = get().scanRunId + 1
+    const epoch = get().scanEpoch
+    activeScanTokens.set(session.projectId, { epoch, runId })
     set({ scanning: true, cancelling: false, scanRunId: runId, error: null })
     try {
       const res = await workspaceHubService.bindDirectory(session, grantId)
-      if (get().scanRunId !== runId) return false
+      if (get().scanRunId !== runId || get().scanEpoch !== epoch) return false
       if (!sameProjectSessionContext(session, getActiveProjectSessionContext())) return false
-      if (get().cancelling) {
-        set({ scanning: false, cancelling: false })
+      if (get().cancelling || res.error?.includes('取消') || res.error === 'SCAN_ABORTED' || res.error?.includes('aborted')) {
+        set({ scanning: false, cancelling: false, error: '扫描已取消' })
         return false
       }
       if (!res.success) {
-        const isCancelled = res.error?.includes('取消') || res.error === 'SCAN_ABORTED'
         set({
           scanning: false,
           cancelling: false,
-          error: isCancelled ? '扫描已取消' : (res.error || '扫描失败'),
+          error: res.error || '扫描失败',
         })
         return false
       }
+      const rawRes = res as Record<string, unknown>
+      const hasCompleteField = typeof rawRes.enumerationComplete === 'boolean'
+      const normalizedResult: WorkspaceScanResult = {
+        ...res,
+        enumerationComplete: hasCompleteField ? (rawRes.enumerationComplete as boolean) : false,
+        truncated: typeof rawRes.truncated === 'boolean' ? (rawRes.truncated as boolean) : !hasCompleteField,
+        truncationReason: typeof rawRes.truncationReason === 'string' ? (rawRes.truncationReason as string) : (!hasCompleteField ? 'unknown' : undefined),
+      }
+      set({ lastScanResult: normalizedResult })
       await get().loadAll()
-      if (get().scanRunId !== runId) return false
+      if (get().scanRunId !== runId || get().scanEpoch !== epoch) return false
       if (!sameProjectSessionContext(session, getActiveProjectSessionContext())) return false
       set({ scanning: false, cancelling: false, error: null })
       return true
     } catch (err) {
-      if (get().scanRunId !== runId) return false
+      if (get().scanRunId !== runId || get().scanEpoch !== epoch) return false
       if (!sameProjectSessionContext(session, getActiveProjectSessionContext())) return false
+      const errMsg = err instanceof Error ? err.message : String(err)
+      const isCancelled = get().cancelling || errMsg.includes('取消') || errMsg.includes('SCAN_ABORTED')
       set({
         scanning: false,
         cancelling: false,
-        error: err instanceof Error ? err.message : String(err),
+        error: isCancelled ? '扫描已取消' : errMsg,
       })
       return false
+    } finally {
+      const token = activeScanTokens.get(session.projectId)
+      if (token?.epoch === epoch && token?.runId === runId) {
+        activeScanTokens.delete(session.projectId)
+      }
+      if (get().scanRunId === runId && get().scanEpoch === epoch && sameProjectSessionContext(session, getActiveProjectSessionContext())) {
+        if (get().cancelling || get().scanning) {
+          set({ scanning: false, cancelling: false })
+        }
+      }
     }
   },
 
   unbindDirectory: async () => {
+    if (get().scanning || get().cancelling) return false
     const session = getActiveProjectSessionContext()
     if (!session) return false
     set({ loading: true, error: null })
@@ -215,64 +262,96 @@ export const useWorkspaceHubStore = create<WorkspaceHubState>((set, get) => ({
   },
 
   rescan: async () => {
+    if (get().scanning || get().cancelling) return false
     const session = getActiveProjectSessionContext()
     if (!session) return false
     const runId = get().scanRunId + 1
+    const epoch = get().scanEpoch
+    activeScanTokens.set(session.projectId, { epoch, runId })
     set({ scanning: true, cancelling: false, scanRunId: runId, error: null })
     try {
       const res = await workspaceHubService.rescan(session)
-      if (get().scanRunId !== runId) return false
+      if (get().scanRunId !== runId || get().scanEpoch !== epoch) return false
       if (!sameProjectSessionContext(session, getActiveProjectSessionContext())) return false
-      if (get().cancelling) {
-        set({ scanning: false, cancelling: false })
+      if (get().cancelling || res.error?.includes('取消') || res.error === 'SCAN_ABORTED' || res.error?.includes('aborted')) {
+        set({ scanning: false, cancelling: false, error: '扫描已取消' })
         return false
       }
       if (!res.success) {
-        const isCancelled = res.error?.includes('取消') || res.error === 'SCAN_ABORTED'
         set({
           scanning: false,
           cancelling: false,
-          error: isCancelled ? '扫描已取消' : (res.error || '扫描失败'),
+          error: res.error || '扫描失败',
         })
         return false
       }
+      const rawRes = res as Record<string, unknown>
+      const hasCompleteField = typeof rawRes.enumerationComplete === 'boolean'
+      const normalizedResult: WorkspaceScanResult = {
+        ...res,
+        enumerationComplete: hasCompleteField ? (rawRes.enumerationComplete as boolean) : false,
+        truncated: typeof rawRes.truncated === 'boolean' ? (rawRes.truncated as boolean) : !hasCompleteField,
+        truncationReason: typeof rawRes.truncationReason === 'string' ? (rawRes.truncationReason as string) : (!hasCompleteField ? 'unknown' : undefined),
+      }
+      set({ lastScanResult: normalizedResult })
       await get().loadAll()
-      if (get().scanRunId !== runId) return false
+      if (get().scanRunId !== runId || get().scanEpoch !== epoch) return false
       if (!sameProjectSessionContext(session, getActiveProjectSessionContext())) return false
       set({ scanning: false, cancelling: false, error: null })
       return true
     } catch (err) {
-      if (get().scanRunId !== runId) return false
+      if (get().scanRunId !== runId || get().scanEpoch !== epoch) return false
       if (!sameProjectSessionContext(session, getActiveProjectSessionContext())) return false
+      const errMsg = err instanceof Error ? err.message : String(err)
+      const isCancelled = get().cancelling || errMsg.includes('取消') || errMsg.includes('SCAN_ABORTED')
       set({
         scanning: false,
         cancelling: false,
-        error: err instanceof Error ? err.message : String(err),
+        error: isCancelled ? '扫描已取消' : errMsg,
       })
       return false
+    } finally {
+      const token = activeScanTokens.get(session.projectId)
+      if (token?.epoch === epoch && token?.runId === runId) {
+        activeScanTokens.delete(session.projectId)
+      }
+      if (get().scanRunId === runId && get().scanEpoch === epoch && sameProjectSessionContext(session, getActiveProjectSessionContext())) {
+        if (get().cancelling || get().scanning) {
+          set({ scanning: false, cancelling: false })
+        }
+      }
     }
   },
 
   cancelScan: async () => {
     const session = getActiveProjectSessionContext()
     if (!session) return false
+    const epoch = get().scanEpoch
     set({ cancelling: true })
     try {
       const res = await workspaceHubService.cancelScan(session)
-      if (!sameProjectSessionContext(session, getActiveProjectSessionContext())) return false
-      set({
-        scanning: false,
-        cancelling: false,
-        error: res.success ? '扫描已取消' : (res.error || '取消扫描失败'),
-      })
+      if (get().scanEpoch !== epoch || !sameProjectSessionContext(session, getActiveProjectSessionContext())) return false
+      const token = activeScanTokens.get(session.projectId)
+      const hasActiveScan = token !== undefined && token.epoch === epoch && token.runId === get().scanRunId
+      if (!hasActiveScan) {
+        set({
+          scanning: false,
+          cancelling: false,
+          error: res.success ? '扫描已取消' : (res.error || '取消扫描失败'),
+        })
+      }
       return res.success
     } catch (err) {
-      if (!sameProjectSessionContext(session, getActiveProjectSessionContext())) return false
-      set({
-        scanning: false,
-        cancelling: false,
-        error: err instanceof Error ? err.message : String(err),
-      })
+      if (get().scanEpoch !== epoch || !sameProjectSessionContext(session, getActiveProjectSessionContext())) return false
+      const token = activeScanTokens.get(session.projectId)
+      const hasActiveScan = token !== undefined && token.epoch === epoch && token.runId === get().scanRunId
+      if (!hasActiveScan) {
+        set({
+          scanning: false,
+          cancelling: false,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
       return false
     }
   },
@@ -554,30 +633,38 @@ export const useWorkspaceHubStore = create<WorkspaceHubState>((set, get) => ({
   setActiveTab: (tab: WorkspaceHubTab) => set({ activeTab: tab }),
   setRuleFilterStatus: (status) => set({ ruleFilterStatus: status }),
   setCandidateFilterStatus: (status) => set({ candidateFilterStatus: status }),
-  reset: () => set({
-    status: null,
-    sources: [],
-    selectedSourceId: null,
-    selectedSnapshotId: null,
-    selectedFragmentId: null,
-    selectedSourceDetail: null,
-    provenanceStatus: null,
-    rules: [],
-    candidates: [],
-    ruleFilterStatus: 'all',
-    candidateFilterStatus: 'all',
-    chapterContextBundle: null,
-    targetChapterNumber: 1,
-    budgetChars: 16000,
-    includeCandidates: false,
-    loading: false,
-    scanning: false,
-    cancelling: false,
-    scanRunId: 0,
-    actioningCandidateId: null,
-    error: null,
-    activeTab: 'sources',
-  }),
+  reset: () => {
+    const session = getActiveProjectSessionContext()
+    if (session) {
+      activeScanTokens.delete(session.projectId)
+    }
+    set(state => ({
+      status: null,
+      sources: [],
+      selectedSourceId: null,
+      selectedSnapshotId: null,
+      selectedFragmentId: null,
+      selectedSourceDetail: null,
+      provenanceStatus: null,
+      rules: [],
+      candidates: [],
+      ruleFilterStatus: 'all',
+      candidateFilterStatus: 'all',
+      chapterContextBundle: null,
+      targetChapterNumber: 1,
+      budgetChars: 16000,
+      includeCandidates: false,
+      loading: false,
+      scanning: false,
+      cancelling: false,
+      scanRunId: state.scanRunId + 1,
+      scanEpoch: state.scanEpoch + 1,
+      lastScanResult: null,
+      actioningCandidateId: null,
+      error: null,
+      activeTab: 'sources',
+    }))
+  },
 }))
 
 let lastTrackedProjectId: string | null = null

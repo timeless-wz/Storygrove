@@ -40,6 +40,7 @@ import type {
   StoryTimelineSettings,
   StoryTimelineSnapshot,
 } from './story-timeline'
+import type { Phase38Channels } from './phase3-8'
 import type {
   UpdateActionResponse,
   UpdateCheckResponse,
@@ -87,6 +88,21 @@ import type {
   ChapterContextBundle,
   ChapterContextSnapshot,
 } from './workspace-hub'
+import type {
+  StoryEntityType,
+  StoryFact,
+  StoryFactCandidate,
+  StoryFactCandidateInput,
+  StoryFactImpact,
+  StoryFactRelation,
+  StoryFactRelationInput,
+  StoryFactVersion,
+  StoryFactVersionCommitInput,
+  StoryRecordStatus,
+  StoryCandidateReviewStatus,
+} from './story-domain'
+import type { StoryDataApprovalRequest, StoryDataApprovalResult } from './story-data-approval'
+import type { StoryChangeProposal } from './story-candidate'
 
 // ===== 全局配置 =====
 export interface ConfigChannels {
@@ -304,6 +320,16 @@ export interface ProjectChannels {
     args: [projectId: string, data: Partial<ProjectData>, expectedProjectPath: string]
     return: { success: boolean; error?: string }
   }
+  /** 将当前项目的 .vela 状态备份到用户明确选择的外部目录；不会复制外部母稿。 */
+  'project:backup': {
+    args: [grantId: string]
+    return: { success: boolean; backupId?: string; fileCount?: number; error?: string }
+  }
+  /** Restore an app-owned backup into a user-selected new project directory. */
+  'project:restore-backup': {
+    args: [backupGrantId: string, targetGrantId: string]
+    return: { success: boolean; backupId?: string; projectId?: string; fileCount?: number; error?: string }
+  }
   'project:recent-list': {
     args: []
     return: Array<{ name: string; path: string; updatedAt: string }>
@@ -379,11 +405,26 @@ export interface FileChannels {
       | { success: true }
       | { success: false; commitState: Exclude<FileWriteCommitState, 'committed'>; error?: string }
   }
+  /** Binary payloads are base64 so renderer never receives a writable path. */
+  'fs:grant-write-base64-file': {
+    args: [grantId: string, relativePath: string, base64: string]
+    return:
+      | { success: true }
+      | { success: false; commitState: Exclude<FileWriteCommitState, 'committed'>; error?: string }
+  }
   'fs:grant-mkdir': {
     args: [grantId: string, relativePath: string]
     return: { success: boolean; error?: string }
   }
   'dialog:select-export-directory': {
+    args: []
+    return: ExternalDirectoryGrant | null
+  }
+  'dialog:select-backup-directory': {
+    args: []
+    return: ExternalDirectoryGrant | null
+  }
+  'dialog:select-restore-directory': {
     args: []
     return: ExternalDirectoryGrant | null
   }
@@ -1265,8 +1306,65 @@ export interface WorkspaceHubChannels {
   }
 }
 
+// ===== 第二阶段故事资料管理中心 =====
+export interface StoryDataChannels {
+  'story-data:persist-proposal': {
+    args: [proposal: StoryChangeProposal, expectedProjectPath?: string]
+    return: StoryFactCandidate[] | { success: false; error: string }
+  }
+  'story-data:create-candidate': {
+    args: [input: StoryFactCandidateInput, expectedProjectPath?: string]
+    return: StoryFactCandidate | { success: false; error: string }
+  }
+  /** Candidate-only extraction from immutable finalized author prose. */
+  'story-data:extract-finalized-draft': {
+    args: [draftId: number, expectedProjectPath?: string]
+    return: StoryFactCandidate[] | { success: false; error: string }
+  }
+  'story-data:list-candidates': {
+    args: [entityType?: StoryEntityType, reviewStatus?: StoryCandidateReviewStatus, expectedProjectPath?: string]
+    return: StoryFactCandidate[]
+  }
+  'story-data:list-facts': {
+    args: [status?: StoryRecordStatus, entityType?: StoryEntityType, expectedProjectPath?: string]
+    return: StoryFact[]
+  }
+  'story-data:list-versions': {
+    args: [factId: string, expectedProjectPath?: string]
+    return: StoryFactVersion[]
+  }
+  'story-data:commit-fact-version': {
+    args: [input: StoryFactVersionCommitInput, expectedProjectPath?: string]
+    return: StoryFactVersion | { success: false; error: string }
+  }
+  'story-data:list-relations': {
+    args: [factId?: string, expectedProjectPath?: string]
+    return: StoryFactRelation[]
+  }
+  'story-data:add-relation': {
+    args: [input: StoryFactRelationInput, expectedProjectPath?: string]
+    return: StoryFactRelation | { success: false; error: string }
+  }
+  'story-data:list-impacts': {
+    args: [factId?: string, expectedProjectPath?: string]
+    return: StoryFactImpact[]
+  }
+  'story-data:approve-candidate': {
+    args: [request: StoryDataApprovalRequest, expectedProjectPath?: string]
+    return: StoryDataApprovalResult
+  }
+  'story-data:reject-candidate': {
+    args: [candidateId: string, expectedProjectPath?: string]
+    return: { success: boolean; error?: string }
+  }
+  'story-data:approve-agent-proposal': {
+    args: [proposalId: string, approvedBy: string, expectedProjectPath?: string]
+    return: { success: boolean; proposalId?: string; error?: string }
+  }
+}
+
 // ===== 合并所有频道 =====
-export type AllInvokeChannels = WindowChannels & OfficialHomepageChannels & ModelProviderResourceChannels & ConfigChannels & UpdateChannels & SkinChannels & ProjectChannels & FileChannels & AppDataChannels & LLMChannels & DatabaseChannels & KnowledgeBaseChannels & ChapterLifecycleChannels & ImportChannels & MCPChannels & WorkspaceHubChannels
+export type AllInvokeChannels = WindowChannels & OfficialHomepageChannels & ModelProviderResourceChannels & ConfigChannels & UpdateChannels & SkinChannels & ProjectChannels & FileChannels & AppDataChannels & LLMChannels & DatabaseChannels & KnowledgeBaseChannels & ChapterLifecycleChannels & ImportChannels & MCPChannels & WorkspaceHubChannels & StoryDataChannels & Phase38Channels
 export type AllEventChannels = LLMStreamEvents & UpdateStateEvents & WindowEvents
 
 /** 提取 invoke 频道名 */

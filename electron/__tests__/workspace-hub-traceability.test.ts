@@ -897,5 +897,3 @@ describe('Workspace Hub - End-to-End Traceability & Snapshot Context Isolation',
     expect(fragAInDetail.content).toContain('绝密A')
   })
 })
-
-

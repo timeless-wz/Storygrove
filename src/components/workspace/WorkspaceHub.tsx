@@ -10,6 +10,10 @@ import {
   Clock,
   ShieldCheck,
   XCircle,
+  Database,
+  Gauge,
+  FileCheck2,
+  AlertTriangle,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { useWorkspaceHubStore } from '../../stores/workspace-hub-store'
@@ -20,11 +24,17 @@ import { toast } from '../ui/Toast'
 import WorkspaceSourcesTab from './WorkspaceSourcesTab'
 import WorkspaceRulesTab from './WorkspaceRulesTab'
 import WorkspaceChapterContextTab from './WorkspaceChapterContextTab'
+import StoryDataCenter from './StoryDataCenter'
+import LongFormControlPanel from './LongFormControlPanel'
+import PhaseAuditPanel from './PhaseAuditPanel'
+import BookRevisionPanel from './BookRevisionPanel'
+import ChapterWorkflowPanel from './ChapterWorkflowPanel'
 
 export default function WorkspaceHub() {
   const text = useLocaleStore(s => s.text)
   const currentProject = useProjectStore(s => s.currentProject)
   const status = useWorkspaceHubStore(s => s.status)
+  const lastScanResult = useWorkspaceHubStore(s => s.lastScanResult)
   const activeTab = useWorkspaceHubStore(s => s.activeTab)
   const setActiveTab = useWorkspaceHubStore(s => s.setActiveTab)
   const loadAll = useWorkspaceHubStore(s => s.loadAll)
@@ -48,10 +58,19 @@ export default function WorkspaceHub() {
       const selected = await selectDirectory()
       if (selected && selected.grantId) {
         const ok = await bindDirectory(selected.grantId)
+        const lastScan = useWorkspaceHubStore.getState().lastScanResult
         if (ok) {
-          toast.success(text('已关联创作母稿目录并完成初次扫描', 'Folder bound and initial scan complete'))
-        } else if (!useWorkspaceHubStore.getState().error?.includes('扫描已取消')) {
-          toast.error(text('关联目录扫描失败', 'Failed to scan directory'))
+          const isIncomplete = lastScan?.truncated || lastScan?.enumerationComplete === false || (lastScan?.success && lastScan.enumerationComplete === undefined)
+          if (isIncomplete) {
+            toast.warning(text('扫描未完整覆盖', 'Scan coverage incomplete'))
+          } else {
+            toast.success(text('已关联创作母稿目录并完成初次扫描', 'Folder bound and initial scan complete'))
+          }
+        } else {
+          const isCancelled = useWorkspaceHubStore.getState().error?.includes('扫描已取消')
+          if (!isCancelled) {
+            toast.error(text('关联目录扫描失败', 'Failed to scan directory'))
+          }
         }
       }
     } catch (err) {
@@ -80,10 +99,19 @@ export default function WorkspaceHub() {
 
   const handleRescan = async () => {
     const ok = await rescan()
+    const lastScan = useWorkspaceHubStore.getState().lastScanResult
     if (ok) {
-      toast.success(text('重新扫描完成', 'Rescan complete'))
-    } else if (!useWorkspaceHubStore.getState().error?.includes('扫描已取消')) {
-      toast.error(text('扫描失败', 'Scan failed'))
+      const isIncomplete = lastScan?.truncated || lastScan?.enumerationComplete === false || (lastScan?.success && lastScan.enumerationComplete === undefined)
+      if (isIncomplete) {
+        toast.warning(text('扫描未完整覆盖', 'Scan coverage incomplete'))
+      } else {
+        toast.success(text('重新扫描完成', 'Rescan complete'))
+      }
+    } else {
+      const isCancelled = useWorkspaceHubStore.getState().error?.includes('扫描已取消')
+      if (!isCancelled) {
+        toast.error(text('扫描失败', 'Scan failed'))
+      }
     }
   }
 
@@ -119,7 +147,7 @@ export default function WorkspaceHub() {
                 color: 'var(--color-accent)',
               }}
             >
-              {text('阶段一：创作中枢', 'Phase 1: Workspace Hub')}
+              {text('阶段 2–5：故事与长篇控制', 'Phases 2–5: Story & long-form control')}
             </span>
           </div>
 
@@ -197,6 +225,31 @@ export default function WorkspaceHub() {
             </div>
 
             <div className="flex items-center gap-4 shrink-0 font-medium">
+              {(lastScanResult?.truncated || lastScanResult?.enumerationComplete === false || (lastScanResult?.success && lastScanResult.enumerationComplete === undefined)) && (
+                <div
+                  className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold"
+                  style={{
+                    backgroundColor: 'rgba(234, 179, 8, 0.15)',
+                    color: '#ca8a04',
+                    border: '1px solid rgba(234, 179, 8, 0.3)',
+                  }}
+                  title={
+                    lastScanResult?.truncationReason === 'max_files_limit'
+                      ? text('已达单次最大文件数量上限 (1000)', 'Reached maximum files limit (1000)')
+                      : lastScanResult?.truncationReason === 'max_total_bytes_limit'
+                        ? text('已达正文解析总字节预算上限', 'Reached maximum total bytes budget')
+                        : lastScanResult?.truncationReason === 'max_depth_limit'
+                          ? text('超过最大目录遍历深度', 'Exceeded maximum directory depth')
+                          : lastScanResult?.truncationReason === 'access_error'
+                            ? text('部分子目录或文件访问受限', 'Some subdirectories or files were unreadable')
+                            : text('扫描未完整覆盖', 'Scan coverage incomplete')
+                  }
+                >
+                  <AlertTriangle size={11} />
+                  <span>{text('扫描未完整覆盖', 'Scan coverage incomplete')}</span>
+                </div>
+              )}
+
               <div>
                 <span className="opacity-70">{text('文件: ', 'Files: ')}</span>
                 <span>{status.recognizedFiles} / {status.totalFiles}</span>
@@ -289,6 +342,64 @@ export default function WorkspaceHub() {
             <Layers size={13} />
             <span>{text('章节上下文装配包', 'Chapter Context Package')}</span>
           </button>
+
+          <button
+            onClick={() => setActiveTab('story-data')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+              activeTab === 'story-data'
+                ? 'bg-accent/20 text-accent font-semibold'
+                : 'hover:bg-black/5 dark:hover:bg-white/5 opacity-80'
+            }`}
+          >
+            <Database size={13} />
+            <span>{text('故事资料中心', 'Story Data Center')}</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('control')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+              activeTab === 'control'
+                ? 'bg-accent/20 text-accent font-semibold'
+                : 'hover:bg-black/5 dark:hover:bg-white/5 opacity-80'
+            }`}
+          >
+            <Gauge size={13} />
+            <span>{text('长篇控制台', 'Long-form Console')}</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('workbench')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+              activeTab === 'workbench'
+                ? 'bg-accent/20 text-accent font-semibold'
+                : 'hover:bg-black/5 dark:hover:bg-white/5 opacity-80'
+            }`}
+          >
+            <FileText size={13} />
+            <span>{text('章节创作工作台', 'Chapter Workbench')}</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('audit')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+              activeTab === 'audit'
+                ? 'bg-accent/20 text-accent font-semibold'
+                : 'hover:bg-black/5 dark:hover:bg-white/5 opacity-80'
+            }`}
+          >
+            <ShieldCheck size={13} />
+            <span>{text('审核与检索', 'Audit & Search')}</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('revision')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+              activeTab === 'revision'
+                ? 'bg-accent/20 text-accent font-semibold'
+                : 'hover:bg-black/5 dark:hover:bg-white/5 opacity-80'
+            }`}
+          >
+            <FileCheck2 size={13} />
+            <span>{text('全书修订', 'Book Revision')}</span>
+          </button>
         </div>
       </div>
 
@@ -297,6 +408,11 @@ export default function WorkspaceHub() {
         {activeTab === 'sources' && <WorkspaceSourcesTab />}
         {activeTab === 'rules' && <WorkspaceRulesTab />}
         {activeTab === 'context' && <WorkspaceChapterContextTab />}
+        {activeTab === 'story-data' && <StoryDataCenter />}
+        {activeTab === 'workbench' && <ChapterWorkflowPanel />}
+        {activeTab === 'control' && <LongFormControlPanel />}
+        {activeTab === 'audit' && <PhaseAuditPanel />}
+        {activeTab === 'revision' && <BookRevisionPanel />}
       </div>
     </div>
   )

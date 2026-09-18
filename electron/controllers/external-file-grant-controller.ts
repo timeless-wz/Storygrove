@@ -14,6 +14,7 @@ import {
 
 const EXPORT_GRANT_TTL_MS = 10 * 60 * 1_000
 const EXPORT_GRANT_MAX_USES = 4_096
+const MAX_BINARY_EXPORT_BYTES = 64 * 1024 * 1024
 
 function text(zhCNText: string, enUSText: string): string {
   return mainText(app.getLocale(), zhCNText, enUSText)
@@ -66,6 +67,20 @@ function resolveGrantPath(
   })
 }
 
+function decodeCanonicalBase64(value: unknown): Buffer {
+  if (
+    typeof value !== 'string'
+    || value.length === 0
+    || value.length > Math.ceil(MAX_BINARY_EXPORT_BYTES / 3) * 4
+    || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value)
+  ) throw new Error('SECURE_FS_INVALID_OPERATION')
+  const bytes = Buffer.from(value, 'base64')
+  if (bytes.length === 0 || bytes.length > MAX_BINARY_EXPORT_BYTES || bytes.toString('base64') !== value) {
+    throw new Error('SECURE_FS_INVALID_OPERATION')
+  }
+  return bytes
+}
+
 /**
  * 授权型外部文件入口。这里永远不接受渲染层提供的绝对路径；路径只来自
  * 主进程文件选择器，并被转换为绑定 webContents 的短期授权标识。
@@ -94,6 +109,45 @@ export function registerExternalFileGrantController(
       grantId: grant.grantId,
       displayName: path.basename(directoryPath),
     }
+  })
+
+  // Backup restoration intentionally uses two independent, short-lived
+  // capabilities: a read-only backup source and a write-only fresh project
+  // destination.  Neither absolute path is ever sent to the renderer.
+  ipcMain.handle('dialog:select-backup-directory', async (event: GrantEvent) => {
+    const result = await dialog.showOpenDialog({
+      title: text('选择项目备份目录', 'Choose a project backup directory'),
+      properties: ['openDirectory'],
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    const directoryPath = result.filePaths[0]
+    const grant = grants.issueDirectory({
+      webContentsId: event.sender.id,
+      directoryPath,
+      operations: ['read', 'list'],
+      ttlMs: EXPORT_GRANT_TTL_MS,
+      maxUses: 8,
+    })
+    revokeWhenSenderIsDestroyed(event, grants)
+    return { grantId: grant.grantId, displayName: path.basename(directoryPath) }
+  })
+
+  ipcMain.handle('dialog:select-restore-directory', async (event: GrantEvent) => {
+    const result = await dialog.showOpenDialog({
+      title: text('选择新的恢复项目目录', 'Choose a new project restore directory'),
+      properties: ['openDirectory', 'createDirectory'],
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    const directoryPath = result.filePaths[0]
+    const grant = grants.issueDirectory({
+      webContentsId: event.sender.id,
+      directoryPath,
+      operations: ['write', 'create'],
+      ttlMs: EXPORT_GRANT_TTL_MS,
+      maxUses: 8,
+    })
+    revokeWhenSenderIsDestroyed(event, grants)
+    return { grantId: grant.grantId, displayName: path.basename(directoryPath) }
   })
 
   ipcMain.handle(
@@ -133,6 +187,38 @@ export function registerExternalFileGrantController(
           if (canCreate) {
             resolveGrantPath(grants, event, grantId, 'create', relativePath, false)
           }
+        }, { mustAlreadyExist: !canCreate })
+        return { success: true }
+      } catch (error) {
+        return {
+          success: false,
+          commitState: atomicWriteFailureCommitState(error) ?? 'not_committed',
+          error: grantErrorText(error),
+        }
+      }
+    },
+  )
+
+  ipcMain.handle(
+    'fs:grant-write-base64-file',
+    async (event: GrantEvent, grantId: string, relativePath: string, base64: string) => {
+      try {
+        const content = decodeCanonicalBase64(base64)
+        const target = resolveGrantPath(grants, event, grantId, 'write', relativePath)
+        const targetExists = await fileSystem.exists(target)
+        let canCreate = false
+        let createPermissionError: unknown
+        try {
+          resolveGrantPath(grants, event, grantId, 'create', relativePath, false)
+          canCreate = true
+        } catch (error) {
+          createPermissionError = error
+        }
+        if (!targetExists && !canCreate) throw createPermissionError
+        if (!fileSystem.writeBytesAtomically) throw new Error('SECURE_FS_HELPER_UNAVAILABLE')
+        await fileSystem.writeBytesAtomically(target, content, () => {
+          resolveGrantPath(grants, event, grantId, 'write', relativePath, false)
+          if (canCreate) resolveGrantPath(grants, event, grantId, 'create', relativePath, false)
         }, { mustAlreadyExist: !canCreate })
         return { success: true }
       } catch (error) {
