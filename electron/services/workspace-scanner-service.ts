@@ -16,6 +16,7 @@ import {
   type StagedSourceItem,
 } from '../repositories/workspace-hub-repository'
 import { normalizeCharacterRole } from '../../src/shared/character-role'
+import { getProjectDb } from '../database'
 
 export const PARSER_SCHEMA_VERSION = 1
 
@@ -487,23 +488,36 @@ export interface WorkspaceScanOptions {
   taskId?: string
   maxFiles?: number
   maxTotalBytes?: number
+  autoBindPath?: string
 }
 
-export interface WorkspaceScanResult {
-  success: boolean
-  taskId?: string
-  scannedCount: number
-  recognizedCount: number
-  error?: string
-  enumerationComplete?: boolean
-  truncated?: boolean
-  truncationReason?: string
-}
+export type WorkspaceScanResult =
+  | {
+      success: true
+      taskId?: string
+      scannedCount: number
+      recognizedCount: number
+      enumerationComplete: boolean
+      truncated: boolean
+      truncationReason?: string
+      error?: never
+    }
+  | {
+      success: false
+      taskId?: string
+      scannedCount: number
+      recognizedCount: number
+      error: string
+      enumerationComplete: boolean
+      truncated: boolean
+      truncationReason?: string
+    }
 
 interface ActiveScanTask {
   taskId: string
   projectId: string
   controller: AbortController
+  promise?: Promise<unknown>
 }
 
 const activeScanTasks = new Map<string, ActiveScanTask>()
@@ -533,26 +547,55 @@ export class WorkspaceScannerService {
   /** 单一权威路径验证实现 */
   static validateWorkspacePath = validateWorkspacePath
 
-  static registerScanTask(taskId: string, projectId: string, controller: AbortController): void {
-    activeScanTasks.set(taskId, { taskId, projectId, controller })
+  static registerScanTask(
+    taskId: string,
+    projectId: string,
+    controller: AbortController,
+    promise?: Promise<unknown>,
+  ): void {
+    activeScanTasks.set(taskId, { taskId, projectId, controller, promise })
+  }
+
+  static attachTaskPromise(taskId: string, promise: Promise<unknown>): void {
+    const task = activeScanTasks.get(taskId)
+    if (task) {
+      task.promise = promise
+    }
+  }
+
+  static cleanupScanTask(taskId: string): void {
+    activeScanTasks.delete(taskId)
   }
 
   static cancelScanTask(taskId: string): boolean {
     const task = activeScanTasks.get(taskId)
     if (task) {
       task.controller.abort()
-      activeScanTasks.delete(taskId)
       return true
     }
     return false
   }
 
-  static cancelAllForProject(projectId: string): void {
-    for (const [taskId, task] of activeScanTasks.entries()) {
+  static abortAllForProject(projectId: string): void {
+    for (const [_, task] of activeScanTasks.entries()) {
       if (task.projectId === projectId) {
         task.controller.abort()
-        activeScanTasks.delete(taskId)
       }
+    }
+  }
+
+  static async cancelAllForProject(projectId: string): Promise<void> {
+    const pendingPromises: Promise<unknown>[] = []
+    for (const [_, task] of activeScanTasks.entries()) {
+      if (task.projectId === projectId) {
+        task.controller.abort()
+        if (task.promise) {
+          pendingPromises.push(task.promise.catch(() => {}))
+        }
+      }
+    }
+    if (pendingPromises.length > 0) {
+      await Promise.all(pendingPromises)
     }
   }
 
@@ -578,6 +621,9 @@ export class WorkspaceScannerService {
         scannedCount: 0,
         recognizedCount: 0,
         error: validation.error || '工作区路径无效',
+        enumerationComplete: false,
+        truncated: true,
+        truncationReason: 'invalid_path',
       }
     }
 
@@ -605,12 +651,14 @@ export class WorkspaceScannerService {
         if (signal?.aborted) return
         if (depth > SCAN_LIMITS.MAX_DEPTH) {
           enumerationComplete = false
+          truncated = true
+          truncationReason = truncationReason ?? 'max_depth_limit'
           return
         }
         if (discoveredFileCount >= maxFiles) {
           enumerationComplete = false
           truncated = true
-          truncationReason = 'max_files_limit'
+          truncationReason = truncationReason ?? 'max_files_limit'
           return
         }
 
@@ -622,15 +670,19 @@ export class WorkspaceScannerService {
             throw new Error(`无法读取工作区根目录: ${err instanceof Error ? err.message : String(err)}`)
           }
           enumerationComplete = false
+          truncated = true
+          truncationReason = truncationReason ?? 'access_error'
           return // 无权读取子目录时安全跳过，同时标记遍历未完全覆盖
         }
+
+        if (signal?.aborted) return
 
         for (const entry of entries) {
           if (signal?.aborted) return
           if (discoveredFileCount >= maxFiles) {
             enumerationComplete = false
             truncated = true
-            truncationReason = 'max_files_limit'
+            truncationReason = truncationReason ?? 'max_files_limit'
             break
           }
 
@@ -641,6 +693,8 @@ export class WorkspaceScannerService {
             lstat = await fs.promises.lstat(fullPath)
           } catch {
             enumerationComplete = false
+            truncated = true
+            truncationReason = truncationReason ?? 'access_error'
             continue
           }
 
@@ -653,6 +707,8 @@ export class WorkspaceScannerService {
               }
             } catch {
               enumerationComplete = false
+              truncated = true
+              truncationReason = truncationReason ?? 'access_error'
               continue
             }
           }
@@ -688,7 +744,7 @@ export class WorkspaceScannerService {
                 if (totalDiscoveredBytes + lstat.size > maxTotalBytes) {
                   enumerationComplete = false
                   truncated = true
-                  truncationReason = 'max_total_bytes_limit'
+                  truncationReason = truncationReason ?? 'max_total_bytes_limit'
                   console.warn(`[WorkspaceScanner] 到达正文解析总字节上限，跳过文件: ${fullPath}`)
                   continue
                 }
@@ -707,7 +763,16 @@ export class WorkspaceScannerService {
       await walkAsync(canonicalRoot, 0)
 
       if (signal?.aborted) {
-        return { success: false, taskId, scannedCount: 0, recognizedCount: 0, error: '扫描已取消' }
+        return {
+          success: false,
+          taskId,
+          scannedCount: 0,
+          recognizedCount: 0,
+          error: '扫描已取消',
+          enumerationComplete: false,
+          truncated: true,
+          truncationReason: 'aborted',
+        }
       }
 
       // -----------------------------------------------------------------------
@@ -948,7 +1013,16 @@ export class WorkspaceScannerService {
       )
 
       if (signal?.aborted) {
-        return { success: false, taskId, scannedCount: 0, recognizedCount: 0, error: '扫描已取消' }
+        return {
+          success: false,
+          taskId,
+          scannedCount: 0,
+          recognizedCount: 0,
+          error: '扫描已取消',
+          enumerationComplete: false,
+          truncated: true,
+          truncationReason: 'aborted',
+        }
       }
 
       // -----------------------------------------------------------------------
@@ -965,9 +1039,22 @@ export class WorkspaceScannerService {
       }
 
       // -----------------------------------------------------------------------
-      // 阶段 5: 单事务原子提交（若取消或出错，完整回滚）
+      // 阶段 5: 单事务原子提交（若指定 autoBindPath，与绑定路径在同事务内原子更新）
       // -----------------------------------------------------------------------
-      WorkspaceHubRepository.commitScanPayload(stagedPayload)
+      if (options?.autoBindPath) {
+        const db = getProjectDb()
+        if (db) {
+          db.transaction(() => {
+            WorkspaceHubRepository.commitScanPayload(stagedPayload)
+            WorkspaceHubRepository.bindWorkspaceDirectory(options.autoBindPath!, projectId)
+          })()
+        } else {
+          WorkspaceHubRepository.commitScanPayload(stagedPayload)
+          WorkspaceHubRepository.bindWorkspaceDirectory(options.autoBindPath, projectId)
+        }
+      } else {
+        WorkspaceHubRepository.commitScanPayload(stagedPayload)
+      }
 
       return {
         success: true,
@@ -980,15 +1067,21 @@ export class WorkspaceScannerService {
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err)
-      if (errorMsg === 'SCAN_ABORTED') {
-        return { success: false, taskId, scannedCount: 0, recognizedCount: 0, error: '扫描已取消' }
-      }
+      const isAborted = errorMsg === 'SCAN_ABORTED' || signal?.aborted
+      const isRootReadError = errorMsg.includes('无法读取工作区根目录')
       return {
         success: false,
         taskId,
         scannedCount: 0,
         recognizedCount: 0,
-        error: errorMsg,
+        error: isAborted ? '扫描已取消' : errorMsg,
+        enumerationComplete: false,
+        truncated: true,
+        truncationReason: isAborted ? 'aborted' : (isRootReadError ? 'root_read_error' : 'scan_error'),
+      }
+    } finally {
+      if (taskId) {
+        WorkspaceScannerService.cleanupScanTask(taskId)
       }
     }
   }

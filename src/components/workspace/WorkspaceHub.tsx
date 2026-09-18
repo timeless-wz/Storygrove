@@ -10,6 +10,7 @@ import {
   Clock,
   ShieldCheck,
   XCircle,
+  AlertTriangle,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { useWorkspaceHubStore } from '../../stores/workspace-hub-store'
@@ -25,6 +26,7 @@ export default function WorkspaceHub() {
   const text = useLocaleStore(s => s.text)
   const currentProject = useProjectStore(s => s.currentProject)
   const status = useWorkspaceHubStore(s => s.status)
+  const lastScanResult = useWorkspaceHubStore(s => s.lastScanResult)
   const activeTab = useWorkspaceHubStore(s => s.activeTab)
   const setActiveTab = useWorkspaceHubStore(s => s.setActiveTab)
   const loadAll = useWorkspaceHubStore(s => s.loadAll)
@@ -48,10 +50,19 @@ export default function WorkspaceHub() {
       const selected = await selectDirectory()
       if (selected && selected.grantId) {
         const ok = await bindDirectory(selected.grantId)
+        const lastScan = useWorkspaceHubStore.getState().lastScanResult
         if (ok) {
-          toast.success(text('已关联创作母稿目录并完成初次扫描', 'Folder bound and initial scan complete'))
-        } else if (!useWorkspaceHubStore.getState().error?.includes('扫描已取消')) {
-          toast.error(text('关联目录扫描失败', 'Failed to scan directory'))
+          const isIncomplete = lastScan?.truncated || lastScan?.enumerationComplete === false || (lastScan?.success && lastScan.enumerationComplete === undefined)
+          if (isIncomplete) {
+            toast.warning(text('扫描未完整覆盖', 'Scan coverage incomplete'))
+          } else {
+            toast.success(text('已关联创作母稿目录并完成初次扫描', 'Folder bound and initial scan complete'))
+          }
+        } else {
+          const isCancelled = useWorkspaceHubStore.getState().error?.includes('扫描已取消')
+          if (!isCancelled) {
+            toast.error(text('关联目录扫描失败', 'Failed to scan directory'))
+          }
         }
       }
     } catch (err) {
@@ -80,10 +91,19 @@ export default function WorkspaceHub() {
 
   const handleRescan = async () => {
     const ok = await rescan()
+    const lastScan = useWorkspaceHubStore.getState().lastScanResult
     if (ok) {
-      toast.success(text('重新扫描完成', 'Rescan complete'))
-    } else if (!useWorkspaceHubStore.getState().error?.includes('扫描已取消')) {
-      toast.error(text('扫描失败', 'Scan failed'))
+      const isIncomplete = lastScan?.truncated || lastScan?.enumerationComplete === false || (lastScan?.success && lastScan.enumerationComplete === undefined)
+      if (isIncomplete) {
+        toast.warning(text('扫描未完整覆盖', 'Scan coverage incomplete'))
+      } else {
+        toast.success(text('重新扫描完成', 'Rescan complete'))
+      }
+    } else {
+      const isCancelled = useWorkspaceHubStore.getState().error?.includes('扫描已取消')
+      if (!isCancelled) {
+        toast.error(text('扫描失败', 'Scan failed'))
+      }
     }
   }
 
@@ -197,6 +217,31 @@ export default function WorkspaceHub() {
             </div>
 
             <div className="flex items-center gap-4 shrink-0 font-medium">
+              {(lastScanResult?.truncated || lastScanResult?.enumerationComplete === false || (lastScanResult?.success && lastScanResult.enumerationComplete === undefined)) && (
+                <div
+                  className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold"
+                  style={{
+                    backgroundColor: 'rgba(234, 179, 8, 0.15)',
+                    color: '#ca8a04',
+                    border: '1px solid rgba(234, 179, 8, 0.3)',
+                  }}
+                  title={
+                    lastScanResult?.truncationReason === 'max_files_limit'
+                      ? text('已达单次最大文件数量上限 (1000)', 'Reached maximum files limit (1000)')
+                      : lastScanResult?.truncationReason === 'max_total_bytes_limit'
+                        ? text('已达正文解析总字节预算上限', 'Reached maximum total bytes budget')
+                        : lastScanResult?.truncationReason === 'max_depth_limit'
+                          ? text('超过最大目录遍历深度', 'Exceeded maximum directory depth')
+                          : lastScanResult?.truncationReason === 'access_error'
+                            ? text('部分子目录或文件访问受限', 'Some subdirectories or files were unreadable')
+                            : text('扫描未完整覆盖', 'Scan coverage incomplete')
+                  }
+                >
+                  <AlertTriangle size={11} />
+                  <span>{text('扫描未完整覆盖', 'Scan coverage incomplete')}</span>
+                </div>
+              )}
+
               <div>
                 <span className="opacity-70">{text('文件: ', 'Files: ')}</span>
                 <span>{status.recognizedFiles} / {status.totalFiles}</span>

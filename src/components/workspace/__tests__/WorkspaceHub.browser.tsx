@@ -6,6 +6,7 @@ import { useLocaleStore } from '../../../stores/locale-store'
 import { useProjectStore } from '../../../stores/project-store'
 import { useWorkspaceHubStore } from '../../../stores/workspace-hub-store'
 import type { ProjectData } from '../../../shared/ipc-channels'
+import { toast } from '../../ui/Toast'
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -139,5 +140,237 @@ describe('WorkspaceHub scan cancellation UI', () => {
 
     // 验证旧项目的绑定路径已从渲染树中完全清除
     expect(container.textContent).not.toContain('C:\\project-A-novel')
+  })
+})
+
+describe('WorkspaceHub scan coverage and truncation UI behavior', () => {
+  it('renders "扫描未完整覆盖" badge when truncated is true', async () => {
+    await act(async () => {
+      useWorkspaceHubStore.setState({
+        scanning: false,
+        status: {
+          externalWorkspacePath: 'C:\\external-novel',
+          lastScannedAt: '2026-09-15',
+          totalFiles: 10,
+          recognizedFiles: 10,
+          missingFiles: 0,
+          changedFiles: 0,
+          pendingCandidates: 0,
+          confirmedRulesCount: 0,
+        },
+        lastScanResult: {
+          success: true,
+          scannedCount: 10,
+          recognizedCount: 10,
+          enumerationComplete: false,
+          truncated: true,
+          truncationReason: 'unknown',
+        },
+      })
+    })
+
+    expect(container.textContent).toContain('扫描未完整覆盖')
+  })
+
+  it('blocks normal success toast and shows warning when enumerationComplete is false on rescan', async () => {
+    const toastWarningSpy = vi.spyOn(toast, 'warning')
+    const toastSuccessSpy = vi.spyOn(toast, 'success')
+
+    const rescan = vi.fn(async () => {
+      useWorkspaceHubStore.setState({
+        lastScanResult: {
+          success: true,
+          scannedCount: 50,
+          recognizedCount: 40,
+          enumerationComplete: false,
+          truncated: true,
+          truncationReason: 'max_files_limit',
+        },
+      })
+      return true
+    })
+
+    await act(async () => {
+      useWorkspaceHubStore.setState({
+        scanning: false,
+        rescan,
+        status: {
+          externalWorkspacePath: 'C:\\external-novel',
+          lastScannedAt: '2026-09-15',
+          totalFiles: 50,
+          recognizedFiles: 40,
+          missingFiles: 0,
+          changedFiles: 0,
+          pendingCandidates: 0,
+          confirmedRulesCount: 0,
+        },
+      })
+    })
+
+    const rescanButton = [...container.querySelectorAll('button')]
+      .find(b => b.textContent?.includes('重新扫描'))
+    expect(rescanButton).toBeDefined()
+
+    await act(async () => {
+      rescanButton!.click()
+    })
+
+    expect(rescan).toHaveBeenCalledTimes(1)
+    expect(toastSuccessSpy).not.toHaveBeenCalledWith(expect.stringContaining('完成'))
+    expect(toastWarningSpy).toHaveBeenCalledWith('扫描未完整覆盖')
+    expect(container.textContent).toContain('扫描未完整覆盖')
+  })
+
+  it('displays accurate tooltips and badge for max_files_limit', async () => {
+    await act(async () => {
+      useWorkspaceHubStore.setState({
+        scanning: false,
+        status: {
+          externalWorkspacePath: 'C:\\external-novel',
+          lastScannedAt: '2026-09-15',
+          totalFiles: 1000,
+          recognizedFiles: 800,
+          missingFiles: 0,
+          changedFiles: 0,
+          pendingCandidates: 0,
+          confirmedRulesCount: 0,
+        },
+        lastScanResult: {
+          success: true,
+          scannedCount: 1000,
+          recognizedCount: 800,
+          enumerationComplete: false,
+          truncated: true,
+          truncationReason: 'max_files_limit',
+        },
+      })
+    })
+
+    const badge = [...container.querySelectorAll('div')]
+      .find(el => el.textContent?.includes('扫描未完整覆盖') && el.getAttribute('title'))
+    expect(badge).toBeDefined()
+    expect(badge?.getAttribute('title')).toBe('已达单次最大文件数量上限 (1000)')
+  })
+
+  it('displays accurate tooltips and badge for max_total_bytes_limit', async () => {
+    await act(async () => {
+      useWorkspaceHubStore.setState({
+        scanning: false,
+        status: {
+          externalWorkspacePath: 'C:\\external-novel',
+          lastScannedAt: '2026-09-15',
+          totalFiles: 200,
+          recognizedFiles: 150,
+          missingFiles: 0,
+          changedFiles: 0,
+          pendingCandidates: 0,
+          confirmedRulesCount: 0,
+        },
+        lastScanResult: {
+          success: true,
+          scannedCount: 200,
+          recognizedCount: 150,
+          enumerationComplete: false,
+          truncated: true,
+          truncationReason: 'max_total_bytes_limit',
+        },
+      })
+    })
+
+    const badge = [...container.querySelectorAll('div')]
+      .find(el => el.textContent?.includes('扫描未完整覆盖') && el.getAttribute('title'))
+    expect(badge).toBeDefined()
+    expect(badge?.getAttribute('title')).toBe('已达正文解析总字节预算上限')
+  })
+
+  it('displays accurate tooltips and badge for max_depth_limit', async () => {
+    await act(async () => {
+      useWorkspaceHubStore.setState({
+        scanning: false,
+        status: {
+          externalWorkspacePath: 'C:\\external-novel',
+          lastScannedAt: '2026-09-15',
+          totalFiles: 100,
+          recognizedFiles: 80,
+          missingFiles: 0,
+          changedFiles: 0,
+          pendingCandidates: 0,
+          confirmedRulesCount: 0,
+        },
+        lastScanResult: {
+          success: true,
+          scannedCount: 100,
+          recognizedCount: 80,
+          enumerationComplete: false,
+          truncated: true,
+          truncationReason: 'max_depth_limit',
+        },
+      })
+    })
+
+    const badge = [...container.querySelectorAll('div')]
+      .find(el => el.textContent?.includes('扫描未完整覆盖') && el.getAttribute('title'))
+    expect(badge).toBeDefined()
+    expect(badge?.getAttribute('title')).toBe('超过最大目录遍历深度')
+  })
+
+  it('displays accurate tooltips and badge for access_error', async () => {
+    await act(async () => {
+      useWorkspaceHubStore.setState({
+        scanning: false,
+        status: {
+          externalWorkspacePath: 'C:\\external-novel',
+          lastScannedAt: '2026-09-15',
+          totalFiles: 50,
+          recognizedFiles: 40,
+          missingFiles: 0,
+          changedFiles: 0,
+          pendingCandidates: 0,
+          confirmedRulesCount: 0,
+        },
+        lastScanResult: {
+          success: true,
+          scannedCount: 50,
+          recognizedCount: 40,
+          enumerationComplete: false,
+          truncated: true,
+          truncationReason: 'access_error',
+        },
+      })
+    })
+
+    const badge = [...container.querySelectorAll('div')]
+      .find(el => el.textContent?.includes('扫描未完整覆盖') && el.getAttribute('title'))
+    expect(badge).toBeDefined()
+    expect(badge?.getAttribute('title')).toBe('部分子目录或文件访问受限')
+  })
+
+  it('fail-close: marks coverage incomplete when successful scan result lacks enumerationComplete', async () => {
+    await act(async () => {
+      useWorkspaceHubStore.setState({
+        scanning: false,
+        status: {
+          externalWorkspacePath: 'C:\\external-novel',
+          lastScannedAt: '2026-09-15',
+          totalFiles: 20,
+          recognizedFiles: 20,
+          missingFiles: 0,
+          changedFiles: 0,
+          pendingCandidates: 0,
+          confirmedRulesCount: 0,
+        },
+        lastScanResult: {
+          success: true,
+          scannedCount: 20,
+          recognizedCount: 20,
+          enumerationComplete: undefined as unknown as boolean,
+          truncated: undefined as unknown as boolean,
+        },
+      })
+    })
+
+    const badge = [...container.querySelectorAll('div')]
+      .find(el => el.textContent?.includes('扫描未完整覆盖'))
+    expect(badge).toBeDefined()
   })
 })

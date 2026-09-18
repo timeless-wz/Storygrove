@@ -301,16 +301,27 @@ export interface SettingRule {
   updatedAt?: string
 }
 
-export interface WorkspaceScanResult {
-  success: boolean
-  taskId?: string
-  scannedCount: number
-  recognizedCount: number
-  error?: string
-  enumerationComplete?: boolean
-  truncated?: boolean
-  truncationReason?: string
-}
+export type WorkspaceScanResult =
+  | {
+      success: true
+      taskId?: string
+      scannedCount: number
+      recognizedCount: number
+      enumerationComplete: boolean
+      truncated: boolean
+      truncationReason?: string
+      error?: never
+    }
+  | {
+      success: false
+      taskId?: string
+      scannedCount?: number
+      recognizedCount?: number
+      error: string
+      enumerationComplete?: boolean
+      truncated?: boolean
+      truncationReason?: string
+    }
 
 export type WorkspaceImportCandidateType = 'character' | 'setting' | 'blueprint' | 'lead'
 export type WorkspaceImportCandidateStatus = 'pending' | 'approved' | 'rejected'

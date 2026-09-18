@@ -38,6 +38,58 @@ type WorkspaceHubHandler = (
   ...args: unknown[]
 ) => unknown
 
+/**
+ * 扫描提交成功后绑定更新失败时的补偿扫描。
+ *
+ * 安全契约：
+ * - 补偿扫描必须继承当前控制器的取消信号（用户取消原始扫描时必须同样停止补偿）；
+ * - 补偿扫描必须注册独立 taskId 生命周期，使 workspace:cancel-scan 能真正中止它；
+ * - 只有在“补偿扫描成功 **且** 绑定路径已恢复为原目录”时才认为补偿完成；
+ * - 任何其他情况（补偿失败、补偿被取消、补偿后绑定仍未恢复）都必须显式解绑，
+ *   绝不留下“旧绑定路径 + 新目录来源”或“新绑定路径 + 旧目录来源”的混合状态。
+ */
+async function rollbackToPreviousWorkspace(
+  projectId: string,
+  previousBoundPath: string,
+  parentSignal: AbortSignal,
+): Promise<void> {
+  const compensationTaskId = randomUUID()
+  const compensationController = new AbortController()
+  const abortCompensation = () => compensationController.abort()
+  if (parentSignal.aborted) {
+    abortCompensation()
+  } else {
+    parentSignal.addEventListener('abort', abortCompensation, { once: true })
+  }
+
+  WorkspaceScannerService.registerScanTask(compensationTaskId, projectId, compensationController)
+
+  try {
+    let compensationSuccess = false
+    try {
+      const compensationScan = WorkspaceScannerService.scanDirectory(previousBoundPath, projectId, {
+        signal: compensationController.signal,
+        taskId: compensationTaskId,
+        autoBindPath: previousBoundPath,
+      })
+      WorkspaceScannerService.attachTaskPromise(compensationTaskId, compensationScan)
+      const compensationResult = await compensationScan
+      compensationSuccess = compensationResult.success
+    } catch {
+      compensationSuccess = false
+    }
+
+    const boundAfterCompensation = WorkspaceHubRepository.getBoundWorkspacePath(projectId)
+    if (!compensationSuccess || boundAfterCompensation !== previousBoundPath) {
+      // 补偿未完整恢复既有健康状态：解绑是唯一不会产生混合来源/混合绑定的终态。
+      WorkspaceHubRepository.unbindWorkspaceDirectory(projectId)
+    }
+  } finally {
+    parentSignal.removeEventListener('abort', abortCompensation)
+    WorkspaceScannerService.cleanupScanTask(compensationTaskId)
+  }
+}
+
 function registerWorkspaceHubHandler(
   channel: string,
   handler: WorkspaceHubHandler,
@@ -65,6 +117,15 @@ function registerWorkspaceHubHandler(
   })
 }
 
+interface ActiveProjectScanLifecycle {
+  taskId: string
+  controller: AbortController
+  promise: Promise<unknown>
+  cancelling: boolean
+}
+
+const activeProjectScanLifecycles = new Map<string, ActiveProjectScanLifecycle>()
+
 export function registerWorkspaceHubController(): void {
   // 1. 获取中枢状态
   registerWorkspaceHubHandler('workspace:get-status', (_event, projectId) => {
@@ -72,7 +133,11 @@ export function registerWorkspaceHubController(): void {
   })
 
   // 2. 主进程工作区目录选择并签发只读/列举短期授权
-  registerWorkspaceHubHandler('workspace:select-directory', async event => {
+  registerWorkspaceHubHandler('workspace:select-directory', async (event, projectId) => {
+    if (activeProjectScanLifecycles.has(projectId)) {
+      throw new Error('当前工作区有正在进行或正在取消的扫描任务，禁止更换目录')
+    }
+
     const currentProjectPath = getCurrentProjectPath()
     const result = await dialog.showOpenDialog({
       title: '选择外部小说创作资料目录',
@@ -104,6 +169,10 @@ export function registerWorkspaceHubController(): void {
 
   // 3. 绑定外部创作母稿目录（仅接收 grantId，严禁直接接收渲染进程伪造绝对路径）
   registerWorkspaceHubHandler('workspace:bind-directory', async (event, projectId, ...args) => {
+    if (activeProjectScanLifecycles.has(projectId)) {
+      return { success: false, error: '当前工作区有正在进行或正在取消的扫描任务，请稍候' }
+    }
+
     const grantId = String(args[0] || '').trim()
     if (!grantId) {
       return { success: false, error: '缺少目录授权标识' }
@@ -111,7 +180,28 @@ export function registerWorkspaceHubController(): void {
 
     const currentProjectPath = getCurrentProjectPath()
 
+    // 同步初始化生命周期并锁定，杜绝并发竞争窗口
+    const taskId = randomUUID()
+    const controller = new AbortController()
+    let resolveLifecyclePromise!: (val: unknown) => void
+    const lifecyclePromise = new Promise(resolve => {
+      resolveLifecyclePromise = resolve
+    })
+
+    const lifecycle: ActiveProjectScanLifecycle = {
+      taskId,
+      controller,
+      promise: lifecyclePromise,
+      cancelling: false,
+    }
+    activeProjectScanLifecycles.set(projectId, lifecycle)
+    WorkspaceScannerService.registerScanTask(taskId, projectId, controller, lifecyclePromise)
+
     try {
+      if (controller.signal.aborted || lifecycle.cancelling) {
+        return { success: false, error: '扫描已取消' }
+      }
+
       // 解析授权：非当前窗口、过期、伪造或未授予 list 的 grantId 均被抛错拒绝
       const resolved = externalFileGrants.resolve({
         grantId,
@@ -126,44 +216,68 @@ export function registerWorkspaceHubController(): void {
         return { success: false, error: validation.error || '工作区路径校验未通过' }
       }
 
+      const previousBoundPath = WorkspaceHubRepository.getBoundWorkspacePath(projectId)
       const canonicalPath = validation.canonicalPath
-      WorkspaceHubRepository.bindWorkspaceDirectory(canonicalPath, projectId)
+
+      if (controller.signal.aborted || lifecycle.cancelling) {
+        return { success: false, error: '扫描已取消' }
+      }
 
       // 发起异步、有界、可取消扫描
-      const taskId = randomUUID()
-      const controller = new AbortController()
-      WorkspaceScannerService.registerScanTask(taskId, projectId, controller)
+      const scanPromise = WorkspaceScannerService.scanDirectory(canonicalPath, projectId, {
+        signal: controller.signal,
+        taskId,
+        autoBindPath: canonicalPath,
+      })
+      scanPromise.then(resolveLifecyclePromise, resolveLifecyclePromise)
 
       try {
-        const scanResult = await WorkspaceScannerService.scanDirectory(canonicalPath, projectId, {
-          signal: controller.signal,
-          taskId,
-        })
+        const scanResult = await scanPromise
         if (!scanResult.success) {
-          const status = WorkspaceHubRepository.getStatus(projectId)
-          if (status.totalFiles === 0) {
+          // 扫描失败或被取消：绝不更新绑定路径。若之前未绑定任何目录，确保处于完全解绑状态
+          if (!previousBoundPath) {
             WorkspaceHubRepository.unbindWorkspaceDirectory(projectId)
           }
+          return scanResult
         }
-        return scanResult
+
+        // 验证与补偿保证：若因特殊环境或 mock 未在事务内完成绑定，执行显式绑定；
+        // 若绑定更新失败，必须执行补偿回滚，绝不留下“旧绑定路径 + 新目录来源”的混合状态。
+        try {
+          WorkspaceHubRepository.bindWorkspaceDirectory(canonicalPath, projectId)
+          return scanResult
+        } catch (bindErr) {
+          // 补偿扫描在原始扫描 Promise 结束前完成，生命周期锁在此期间保持不放。
+          if (previousBoundPath) {
+            await rollbackToPreviousWorkspace(projectId, previousBoundPath, controller.signal)
+          } else {
+            WorkspaceHubRepository.unbindWorkspaceDirectory(projectId)
+          }
+          throw bindErr
+        }
       } catch (scanErr) {
-        const status = WorkspaceHubRepository.getStatus(projectId)
-        if (status.totalFiles === 0) {
+        if (!previousBoundPath) {
           WorkspaceHubRepository.unbindWorkspaceDirectory(projectId)
         }
         throw scanErr
-      } finally {
-        WorkspaceScannerService.cancelScanTask(taskId)
       }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
+    } finally {
+      resolveLifecyclePromise(null)
+      activeProjectScanLifecycles.delete(projectId)
+      WorkspaceScannerService.cleanupScanTask?.(taskId)
+      WorkspaceScannerService.cancelScanTask?.(taskId)
     }
   })
 
   // 4. 解除目录绑定（仅清空数据库索引与配置，绝不删除外部任何文件）
-  registerWorkspaceHubHandler('workspace:unbind-directory', (_event, projectId) => {
+  registerWorkspaceHubHandler('workspace:unbind-directory', async (_event, projectId) => {
+    if (activeProjectScanLifecycles.has(projectId)) {
+      return { success: false, error: '当前工作区有正在进行或正在取消的扫描任务，禁止解绑' }
+    }
     try {
-      WorkspaceScannerService.cancelAllForProject(projectId)
+      await WorkspaceScannerService.cancelAllForProject(projectId)
       WorkspaceHubRepository.unbindWorkspaceDirectory(projectId)
       return { success: true }
     } catch (error) {
@@ -173,45 +287,107 @@ export function registerWorkspaceHubController(): void {
 
   // 5. 手动重新扫描（只能使用主进程数据库中持久化的授权绑定路径，绝不接受渲染进程临时覆盖）
   registerWorkspaceHubHandler('workspace:scan', async (_event, projectId) => {
-    const boundPath = WorkspaceHubRepository.getBoundWorkspacePath(projectId)
-    if (!boundPath) {
-      return { success: false, scannedCount: 0, recognizedCount: 0, error: '未关联创作母稿目录' }
-    }
-
-    const currentProjectPath = getCurrentProjectPath()
-    const validation = validateWorkspacePath(boundPath, currentProjectPath)
-    if (!validation.valid || !validation.canonicalPath) {
+    if (activeProjectScanLifecycles.has(projectId)) {
       return {
         success: false,
         scannedCount: 0,
         recognizedCount: 0,
-        error: validation.error || '关联目录已失效或不安全',
+        enumerationComplete: false,
+        truncated: true,
+        truncationReason: 'concurrent_operation_blocked',
+        error: '当前工作区有正在进行或正在取消的扫描任务，请稍候',
       }
     }
 
     const taskId = randomUUID()
     const controller = new AbortController()
-    WorkspaceScannerService.registerScanTask(taskId, projectId, controller)
+    let resolveLifecyclePromise!: (val: unknown) => void
+    const lifecyclePromise = new Promise(resolve => {
+      resolveLifecyclePromise = resolve
+    })
+
+    const lifecycle: ActiveProjectScanLifecycle = {
+      taskId,
+      controller,
+      promise: lifecyclePromise,
+      cancelling: false,
+    }
+    activeProjectScanLifecycles.set(projectId, lifecycle)
+    WorkspaceScannerService.registerScanTask(taskId, projectId, controller, lifecyclePromise)
 
     try {
-      const scanResult = await WorkspaceScannerService.scanDirectory(validation.canonicalPath, projectId, {
+      const boundPath = WorkspaceHubRepository.getBoundWorkspacePath(projectId)
+      if (!boundPath) {
+        return {
+          success: false,
+          scannedCount: 0,
+          recognizedCount: 0,
+          enumerationComplete: false,
+          truncated: true,
+          truncationReason: 'not_bound',
+          error: '未关联创作母稿目录',
+        }
+      }
+
+      const currentProjectPath = getCurrentProjectPath()
+      const validation = validateWorkspacePath(boundPath, currentProjectPath)
+      if (!validation.valid || !validation.canonicalPath) {
+        return {
+          success: false,
+          scannedCount: 0,
+          recognizedCount: 0,
+          enumerationComplete: false,
+          truncated: true,
+          truncationReason: 'invalid_bound_path',
+          error: validation.error || '关联目录已失效或不安全',
+        }
+      }
+
+      if (controller.signal.aborted || lifecycle.cancelling) {
+        return {
+          success: false,
+          scannedCount: 0,
+          recognizedCount: 0,
+          enumerationComplete: false,
+          truncated: true,
+          truncationReason: 'aborted',
+          error: '扫描已取消',
+        }
+      }
+
+      const scanPromise = WorkspaceScannerService.scanDirectory(validation.canonicalPath, projectId, {
         signal: controller.signal,
         taskId,
       })
+      scanPromise.then(resolveLifecyclePromise, resolveLifecyclePromise)
+
+      const scanResult = await scanPromise
       return scanResult
     } finally {
-      WorkspaceScannerService.cancelScanTask(taskId)
+      resolveLifecyclePromise(null)
+      activeProjectScanLifecycles.delete(projectId)
+      WorkspaceScannerService.cleanupScanTask?.(taskId)
+      WorkspaceScannerService.cancelScanTask?.(taskId)
     }
   })
 
   // 6. 取消扫描任务
-  registerWorkspaceHubHandler('workspace:cancel-scan', (_event, projectId, ...args) => {
+  registerWorkspaceHubHandler('workspace:cancel-scan', async (_event, projectId, ...args) => {
     const taskId = args[0] as string | undefined
-    if (taskId) {
-      const cancelled = WorkspaceScannerService.cancelScanTask(taskId)
-      return { success: cancelled }
+    const lifecycle = activeProjectScanLifecycles.get(projectId)
+    if (lifecycle) {
+      lifecycle.cancelling = true
+      lifecycle.controller.abort()
     }
-    WorkspaceScannerService.cancelAllForProject(projectId)
+    if (taskId) {
+      const cancelled = WorkspaceScannerService.cancelScanTask?.(taskId)
+      return { success: cancelled || Boolean(lifecycle) }
+    }
+    if (typeof WorkspaceScannerService.abortAllForProject === 'function') {
+      WorkspaceScannerService.abortAllForProject(projectId)
+    } else {
+      await WorkspaceScannerService.cancelAllForProject?.(projectId)
+    }
     return { success: true }
   })
 
