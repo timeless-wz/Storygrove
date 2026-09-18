@@ -1,12 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Sparkles, Search, BadgeCheck, Save, FileStack, FileText, Wrench, Check } from 'lucide-react'
+import { Search, BadgeCheck, Save, FileText, Wrench, Check } from 'lucide-react'
 
 import { useProjectStore } from '../../stores/project-store'
 import { registerEditorExitSaveHandler, useEditorStore } from '../../stores/editor-store'
 import { useWorkflowStore } from '../../stores/workflow-store'
 import { useLocaleStore } from '../../stores/locale-store'
 import CodeMirrorEditor from './CodeMirrorEditor'
-import ThreeWayMerge from './ThreeWayMerge'
 import { Button } from '../ui/Button'
 import { toast } from '../ui/Toast'
 import { confirm } from '../ui/Confirm'
@@ -19,8 +18,7 @@ import {
   type DraftStatus,
   type FrozenDraftSourceIdentity,
 } from '../../services/workflows/chapter-workflow'
-import { getPendingRevisions, getReviewsForVersion, type RevisionEntry } from '../../services/draft-index'
-import { readDraftBody } from '../../stores/draft-store'
+import { getReviewsForVersion } from '../../services/draft-index'
 import { ipc } from '../../services/ipc-client'
 import { requireIpcSuccess } from '../../services/ipc-result'
 import { retryFinalizationPublication } from '../../services/finalization-client'
@@ -36,6 +34,7 @@ import {
   isProjectSessionCurrent,
   isProjectSessionPath,
 } from '../project-session-gate'
+import { readDraftBody } from '../../stores/draft-store'
 
 const DRAFT_STATUS_EN: Record<string, string> = {
   draft: 'Draft',
@@ -79,17 +78,7 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
   const locale = useLocaleStore(s => s.locale)
   const projectMatches = currentProject?.path === projectKey
   const tabDraftStatus = editorTab?.draftStatus
-  const [pendingRevisions, setPendingRevisions] = useState<RevisionEntry[]>([])
   const [reviewCount, setReviewCount] = useState(0)
-
-  // 【BUG1&2 修复】合并视图弹窗数据（不再占用 Tab）
-  const [mergeData, setMergeData] = useState<{
-    originalContent: string
-    modifiedContent: string
-    revisionPath: string
-    targetSnapshot: { content: string; contentRevision: number }
-    staleReason: string | null
-  } | null>(null)
 
   // 后处理失败状态（用于控制是否展示修复按钮）
   const [hasProcessFailure, setHasProcessFailure] = useState(false)
@@ -111,9 +100,6 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
       setMeta({ ...m, chapterTitle: bp ? (bp as { title?: string }).title : undefined, filePath, fileName: `v${m.version}`, createdAt: m.updatedAt ?? m.createdAt })
       // 使用 DB 化的虚拟 chapterDir（用于 draft-index 兼容层解析章节号）
       const chapterDir = `vela://draft/ch${m.chapterNumber}`
-      // 检查待合并修稿
-      const pending = await getPendingRevisions(chapterDir, m.version, projectKey)
-      if (!cancelled && isProjectSessionCurrent(projectSession)) setPendingRevisions(pending)
       // 检查审稿报告
       const reviews = await getReviewsForVersion(chapterDir, m.version, projectKey)
       if (!cancelled && isProjectSessionCurrent(projectSession)) setReviewCount(reviews.length)
@@ -142,33 +128,32 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
   const isChapterBusy = !!activeChapterRun
 
   const [saving, setSaving] = useState(false)
-  const [confirmAction, setConfirmAction] = useState<'refine' | 'review' | null>(null)
-  const [userRefinePrompt, setUserRefinePrompt] = useState('')
-  // 审稿维度多选
+  const [confirmAction, setConfirmAction] = useState<'review' | null>(null)
+  // 审稿维度多选（聚焦 4 类核心问题）
   const REVIEW_DIMS = [
     {
-      key: 'continuity',
-      label: text('剧情连贯性', 'Story continuity'),
-      desc: text('与前文是否矛盾', 'Consistency with earlier chapters'),
-      promptLabel: '剧情连贯性',
+      key: 'blueprint_unfulfilled',
+      label: text('蓝图未兑现', 'Blueprint unfulfilled'),
+      desc: text('蓝图规划的关键事件、出场人物、小目标正文未体现', 'Planned events, characters, or goals not reflected in prose'),
+      promptLabel: '蓝图未兑现',
     },
     {
-      key: 'logic',
-      label: text('剧情合理性', 'Story logic'),
-      desc: text('因果逻辑、动机、常识', 'Causality, motivation, and plausibility'),
-      promptLabel: '剧情合理性',
+      key: 'unauthorized_events',
+      label: text('正文未授权事件', 'Unauthorized prose events'),
+      desc: text('正文中出现了蓝图未记录的重大事件或新设定', 'Major unrecorded events or setting additions in prose'),
+      promptLabel: '正文未授权新增事件',
     },
     {
-      key: 'character',
-      label: text('角色状态', 'Character state'),
-      desc: text('能力/位置/情感一致性', 'Ability, location, and emotional consistency'),
-      promptLabel: '角色状态',
+      key: 'conflict',
+      label: text('设定/地图/状态冲突', 'Setting/map/state conflicts'),
+      desc: text('角色状态、据点属性、战力、前后文规则矛盾', 'Character state, location attributes, rules contradictions'),
+      promptLabel: '设定/地图/状态冲突',
     },
     {
-      key: 'foreshadow',
-      label: text('前后章节串联', 'Chapter connections'),
-      desc: text('伏笔、悬念连贯', 'Foreshadowing and suspense continuity'),
-      promptLabel: '前后章节串联',
+      key: 'evidence',
+      label: text('证据链审查', 'Evidence check'),
+      desc: text('无法从正文或蓝图中找到支撑结论的段落需明确提示', 'Explicitly flag assertions without concrete text evidence'),
+      promptLabel: '证据不足',
     },
   ]
   const [reviewDims, setReviewDims] = useState<Record<string, boolean>>(
@@ -299,32 +284,6 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
     return true
   }
 
-  /** 执行 AI 修稿（含用户自定义提示词） */
-  const doRefine = async () => {
-    const projectSession = captureProjectSession(currentProject)
-    if (!projectMatches || !currentProject || !meta || !projectSession || !isProjectSessionPath(projectSession, projectKey)) return
-    try {
-      const source = await freezeDraftSourceForAI(projectSession)
-      if (!source || !isProjectSessionCurrent(projectSession)) return
-      const { useWorkflowStore } = await import('../../stores/workflow-store')
-      const { createRefineOnlyWorkflow } = await import('../../services/workflows/chapter-workflow')
-      if (!isProjectSessionCurrent(projectSession)) return
-      if (!isFrozenAISourceCurrent(source.body, source.sourceDraft)) return
-
-      useWorkflowStore.getState().startWorkflow(createRefineOnlyWorkflow({
-        projectPath: projectSession.projectPath,
-        chapterNumber: meta.chapterNumber,
-        chapterTitle: meta.chapterTitle ?? '未知标题',
-        draftPath: filePath,
-        draftContent: source.body,
-        sourceDraft: source.sourceDraft,
-        userRefinePrompt: userRefinePrompt.trim() || undefined,
-      }, projectSession), false)
-    } catch (e) {
-      if (!isProjectSessionCurrent(projectSession)) return
-      toast.error(text(`修稿启动失败：${e}`, 'Could not start AI revision.'))
-    }
-  }
 
   /** 执行 AI 审稿 */
   const doReview = async () => {
@@ -472,133 +431,6 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
     }
   }, [currentProject, isChapterBusy, locale, meta, projectKey, projectMatches, text])
 
-  /** 打开待合并修稿 —— 弹出式合并视图，不占用原草稿 Tab */
-  const openPendingRevision = async (rev: RevisionEntry) => {
-    const projectSession = captureProjectSession(currentProject)
-    if (!meta || !projectSession || !isProjectSessionPath(projectSession, projectKey)) return
-    const targetTab = useEditorStore.getState().tabs.find(
-      tab => tab.id === tabId && tab.projectKey === projectKey,
-    )
-    if (!targetTab || targetTab.dirty) {
-      toast.warning(text(
-        '当前正文有未保存修改，请先保存并重新打开修订对比',
-        'The draft has unsaved changes. Save it and reopen the revision comparison.',
-      ))
-      return
-    }
-    const targetSnapshot = {
-      content: targetTab.content ?? content,
-      contentRevision: targetTab.contentRevision ?? 0,
-    }
-    // 使用 vela://revision/{id} 协议路径读取修稿内容
-    const revPath = `vela://revision/${rev.id}`
-
-    // 读取原稿和修稿
-    const [currentSavedContent, revision] = await Promise.all([
-      readDraftBody(filePath, projectKey, projectSession),
-      ipc.invokeWithProjectSession(projectSession, 'db:revision-get-full', rev.id, projectKey),
-    ])
-    if (!isProjectSessionCurrent(projectSession)) return
-    if (!revision) return
-    const currentTarget = useEditorStore.getState().tabs.find(
-      tab => tab.id === tabId && tab.projectKey === projectKey,
-    )
-    if (
-      !currentTarget
-      || currentTarget.dirty
-      || currentTarget.content !== targetSnapshot.content
-      || (currentTarget.contentRevision ?? 0) !== targetSnapshot.contentRevision
-    ) {
-      toast.warning(text(
-        '读取修订期间正文已变化，请保存后重新打开修订对比',
-        'The draft changed while the revision was loading. Save it and reopen the comparison.',
-      ))
-      return
-    }
-
-    const source = revision.sourceDraft
-    const staleReason = !source
-      ? text(
-          '旧修订稿缺少生成时源稿，修订仍可查看但不能合并。',
-          'This legacy revision has no generation source. It remains viewable but cannot be merged.',
-        )
-      : source.id !== meta.id
-        || source.chapterNumber !== meta.chapterNumber
-        || source.version !== meta.version
-        || source.status !== (currentTarget.draftStatus ?? meta.status)
-        || source.content !== currentSavedContent
-        ? text(
-            '当前草稿已不是该修订稿的生成时源稿，修订仍可查看但不能合并。',
-            'The current draft no longer matches this revision’s generation source. It remains viewable but cannot be merged.',
-          )
-        : null
-
-    // 始终展示修订与其真实冻结源；旧行或 stale 源只读，不用当前正文重基。
-    setMergeData({
-      originalContent: source?.content ?? '',
-      modifiedContent: revision.content,
-      revisionPath: revPath,
-      targetSnapshot,
-      staleReason,
-    })
-  }
-
-  /** 合并完成回调 —— 就地覆写原草稿（不新建版本，仅蓝图写稿时才产生新版本） */
-  const handleMergeComplete = async (mergedText: string) => {
-    const projectSession = captureProjectSession(currentProject)
-    if (!meta || !mergeData || !projectSession || !isProjectSessionPath(projectSession, projectKey)) return
-    if (mergeData.staleReason) {
-      toast.warning(mergeData.staleReason)
-      return
-    }
-    const chapterDir = `vela://draft/ch${meta.chapterNumber}`
-    const currentTarget = useEditorStore.getState().tabs.find(
-      tab => tab.id === tabId && tab.projectKey === projectKey,
-    )
-    if (
-      !currentTarget
-      || currentTarget.dirty
-      || currentTarget.content !== mergeData.targetSnapshot.content
-      || (currentTarget.contentRevision ?? 0) !== mergeData.targetSnapshot.contentRevision
-    ) {
-      toast.warning(text(
-        '打开对比后正文已变化，未提交修订；请保存后重新打开',
-        'The draft changed after the comparison opened. The revision was not committed; save and reopen it.',
-      ))
-      return
-    }
-
-    try {
-      const { useDraftStore } = await import('../../stores/draft-store')
-      const result = await useDraftStore.getState().applyMergedRevision(
-        chapterDir,
-        meta.chapterNumber,
-        filePath,
-        mergeData.revisionPath,
-        mergedText,
-        mergeData.originalContent,
-        projectKey,
-        projectSession,
-      )
-
-      if (!isProjectSessionCurrent(projectSession)) return
-      if (result.success) {
-        // 关闭弹窗 + 刷新待合并列表 + 更新本地元数据
-        setMergeData(null)
-        setMeta(prev => prev ? { ...prev, status: 'revised' } : prev)
-        toast.success(text('合并完成，草稿已更新', 'Merge complete. The draft is updated.'))
-        const { getPendingRevisions } = await import('../../services/draft-index')
-        const pending = await getPendingRevisions(chapterDir, meta.version, projectKey)
-        if (isProjectSessionCurrent(projectSession)) setPendingRevisions(pending)
-      } else {
-        toast.error(text(`合并失败：${result.error}`, 'Could not merge the revision.'))
-      }
-    } catch (e) {
-      if (!isProjectSessionCurrent(projectSession)) return
-      toast.error(text(`合并出错：${e}`, 'An error occurred while merging the revision.'))
-    }
-  }
-
   /** 打开最新的审稿报告 */
   const openLatestReview = async () => {
     const projectSession = captureProjectSession(currentProject)
@@ -723,19 +555,6 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
               </Button>
             )}
 
-            {/* Pending revisions */}
-            {pendingRevisions.length > 0 && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => openPendingRevision(pendingRevisions[0])}
-                title={text('有待合并的修稿，点击打开三栏合并视图', 'Open the three-way merge view for pending revisions')}
-              >
-                <FileStack size={12} />
-                {text(`待合并(${pendingRevisions.length})`, `Pending (${pendingRevisions.length})`)}
-              </Button>
-            )}
-
             {/* Review report */}
             {reviewCount > 0 && (
               <Button
@@ -749,28 +568,16 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
               </Button>
             )}
 
-            {/* AI 修稿 */}
-            <Button
-              variant="ai"
-              size="sm"
-              onClick={() => { setUserRefinePrompt(''); setConfirmAction('refine') }}
-              disabled={isChapterBusy}
-                title={text('AI 修稿 — 专业精修章节，生成修订并打开合并视图', 'AI revision — professionally refine the chapter, create a revision, and open the merge view')}
-            >
-              <Sparkles size={12} />
-                {text('AI 修稿', 'AI revise')}
-            </Button>
-
             {/* AI 审稿 */}
             <Button
               variant="ai"
               size="sm"
               onClick={() => setConfirmAction('review')}
               disabled={isChapterBusy}
-                title={text('AI 审稿 — 一致性检查，生成审稿报告', 'AI review — run a consistency check and create a review report')}
+              title={text('AI 审稿 — 一致性检查（蓝图兑现/未授权事件/设定冲突/证据链）', 'AI review — Consistency check (blueprint/events/setting conflict/evidence)')}
             >
               <Search size={12} />
-                {text('AI 审稿', 'AI review')}
+              {text('AI 审稿', 'AI review')}
             </Button>
 
             {/* 定稿 */}
@@ -858,15 +665,13 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
 
       </div>
 
-      {/* AI 操作确认弹窗（修稿含自定义提示词输入框） */}
+      {/* AI 一致性审核确认弹窗（只读） */}
       <Dialog open={confirmAction !== null} onOpenChange={(v) => !v && setConfirmAction(null)}>
-        <DialogContent className="max-w-[440px]">
+        <DialogContent className="max-w-[460px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Sparkles size={15} className="text-[var(--color-accent)]" />
-              {confirmAction === 'refine'
-                ? text('AI 修稿确认', 'Confirm AI revision')
-                : text('AI 审稿确认', 'Confirm AI review')}
+              <Search size={15} className="text-[var(--color-accent)]" />
+              {text('AI 一致性审核确认', 'Confirm AI consistency audit')}
             </DialogTitle>
             <DialogDescription>
               {text('对象：', 'Target: ')}{meta
@@ -874,136 +679,54 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
                 : text('当前草稿', 'Current draft')}
             </DialogDescription>
           </DialogHeader>
-          <div className="px-5 py-2 text-sm space-y-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-            {confirmAction === 'refine' ? (
-              <>
-                <div className="font-medium text-[var(--color-text)]">{text('本次【直接修稿】范围：', 'This direct revision will:')}</div>
-                <div>{text('1. 全文基础润色、词汇优化，增强画面与表现力。', '1. Polish the full chapter, improve wording, and strengthen imagery and expression.')}</div>
-                <div>{text('2. 可在下方指定的额外修稿要求。', '2. Follow any additional revision instructions below.')}</div>
-              </>
-            ) : (
-              <>
-                <div>{text('将调用 AI 对本章草稿进行一致性检查，并生成审稿报告。', 'AI will check this chapter for consistency and generate a review report.')}</div>
-                <div className="mt-3">
-                  <div className="text-xs font-medium mb-2" style={{ color: 'var(--color-text)' }}>{text('重点检查维度：', 'Review focus:')}</div>
-                  <div className="flex flex-wrap gap-2">
-                    {REVIEW_DIMS.map(d => (
-                      <label
-                        key={d.key}
-                        className="flex items-center gap-1.5 cursor-pointer select-none px-2 py-1 rounded-md text-xs"
-                        style={{
-                          border: `1px solid ${reviewDims[d.key] ? 'var(--color-accent)' : 'var(--color-border)'}`,
-                          backgroundColor: reviewDims[d.key] ? 'rgba(var(--color-accent-rgb),0.1)' : 'transparent',
-                          color: reviewDims[d.key] ? 'var(--color-accent)' : 'var(--color-text-muted)',
-                        }}
-                        onClick={() => setReviewDims(prev => ({ ...prev, [d.key]: !prev[d.key] }))}
-                      >
-                        <div
-                          className="w-3 h-3 rounded flex items-center justify-center flex-shrink-0"
-                          style={{
-                            backgroundColor: reviewDims[d.key] ? 'var(--color-accent)' : 'transparent',
-                            border: `1.5px solid ${reviewDims[d.key] ? 'var(--color-accent)' : 'var(--color-border)'}`,
-                          }}
-                        >
-                          {reviewDims[d.key] && (
-                            <Check size={9} strokeWidth={3} color="white" aria-hidden="true" />
-                          )}
-                        </div>
-                        {d.label}
-                      </label>
-                    ))}
+          <div className="px-5 py-2 text-sm space-y-2" style={{ color: 'var(--color-text-secondary)' }}>
+            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+              {text('将对本章草稿进行只读一致性审核，绝不会自动修改正文或蓝图。重点检查以下维度：', 'A read-only consistency check will be performed on this draft. It will never modify prose or blueprints. Focus dimensions:')}
+            </p>
+            <div className="flex flex-col gap-2 pt-1">
+              {REVIEW_DIMS.map(d => (
+                <label
+                  key={d.key}
+                  className="flex items-start gap-2 cursor-pointer select-none p-2 rounded-md border text-xs"
+                  style={{
+                    borderColor: reviewDims[d.key] ? 'var(--color-accent)' : 'var(--color-border)',
+                    backgroundColor: reviewDims[d.key] ? 'rgba(var(--color-accent-rgb, 99 102 241), 0.08)' : 'transparent',
+                  }}
+                  onClick={() => setReviewDims(prev => ({ ...prev, [d.key]: !prev[d.key] }))}
+                >
+                  <div
+                    className="w-3.5 h-3.5 mt-0.5 rounded flex items-center justify-center flex-shrink-0"
+                    style={{
+                      backgroundColor: reviewDims[d.key] ? 'var(--color-accent)' : 'transparent',
+                      border: `1.5px solid ${reviewDims[d.key] ? 'var(--color-accent)' : 'var(--color-border)'}`,
+                    }}
+                  >
+                    {reviewDims[d.key] && (
+                      <Check size={9} strokeWidth={3} color="white" aria-hidden="true" />
+                    )}
                   </div>
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* 修稿时显示自定义提示词输入框 */}
-          {confirmAction === 'refine' && (
-            <div className="px-5 pb-2">
-              <label className="text-xs font-medium block mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                {text('附加修稿要求（可选）：', 'Additional revision guidance (optional):')}
-              </label>
-              <textarea
-                className="w-full px-3 py-2 rounded-md text-sm"
-                style={{
-                  background: 'var(--color-bg-elevated)',
-                  border: '1px solid var(--color-border)',
-                  color: 'var(--color-text)',
-                  minHeight: 72,
-                  resize: 'vertical',
-                  outline: 'none',
-                }}
-                placeholder={text(
-                  '例如：加强打斗场面的画面感；把结尾的伏笔改为更隐晦的暗示；对白太书面化，改为口语化风格...',
-                  'For example: make action scenes more vivid; make the final foreshadowing subtler; make dialogue less formal...',
-                )}
-                value={userRefinePrompt}
-                onChange={e => setUserRefinePrompt(e.target.value)}
-              />
+                  <div>
+                    <div className="font-semibold" style={{ color: 'var(--color-text)' }}>{d.label}</div>
+                    <div className="text-[0.7rem]" style={{ color: 'var(--color-text-muted)' }}>{d.desc}</div>
+                  </div>
+                </label>
+              ))}
             </div>
-          )}
+          </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmAction(null)}>{text('取消', 'Cancel')}</Button>
             <Button
               variant="ai"
               onClick={() => {
-                const act = confirmAction
                 setConfirmAction(null)
-                if (act === 'refine') doRefine()
-                else if (act === 'review') doReview()
+                doReview()
               }}
             >
-              {text('确认执行', 'Run')}
+              <Search size={13} />
+              {text('开始一致性审核', 'Start consistency check')}
             </Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* 弹出式三栏合并视图 —— 使用统一 Dialog 组件 */}
-      <Dialog open={mergeData !== null} onOpenChange={(v) => !v && setMergeData(null)}>
-        <DialogContent
-          className="p-0"
-          style={{
-            width: '90vw',
-            maxWidth: '90vw',
-            height: '85vh',
-            maxHeight: '85vh',
-            overflow: 'hidden',
-          }}
-          /* 阻止点击遮罩关闭，防止误触丢失合并进度 */
-          onPointerDownOutside={(e) => e.preventDefault()}
-          onEscapeKeyDown={(e) => e.preventDefault()}
-        >
-          <DialogHeader className="px-4 py-0" style={{ height: 38, display: 'flex', alignItems: 'center' }}>
-            <DialogTitle className="flex items-center gap-2 text-[0.8rem]">
-              {text(
-                `修稿合并 — 第${meta?.chapterNumber ?? ''}章 ${meta?.chapterTitle || '未知标题'}`,
-                `Revision merge — Chapter ${meta?.chapterNumber ?? ''} ${meta?.chapterTitle || 'Untitled'}`,
-              )}
-            </DialogTitle>
-          </DialogHeader>
-          {/* 合并视图主体 */}
-          <div className="flex-1 overflow-hidden" style={{ height: 'calc(85vh - 38px - 1px)' }}>
-            {mergeData && (
-              <div className="flex h-full flex-col">
-                {mergeData.staleReason && (
-                  <div role="alert" className="border-b border-[var(--color-border)] px-4 py-2 text-sm text-[var(--color-warning-text)]">
-                    {mergeData.staleReason}
-                  </div>
-                )}
-                <div className="min-h-0 flex-1">
-                  <ThreeWayMerge
-                    originalContent={mergeData.originalContent}
-                    modifiedContent={mergeData.modifiedContent}
-                    onComplete={handleMergeComplete}
-                    onCancel={() => setMergeData(null)}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
         </DialogContent>
       </Dialog>
     </div>

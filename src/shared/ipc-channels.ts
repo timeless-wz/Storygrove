@@ -34,6 +34,12 @@ import type {
   NarrativeThreadView,
 } from './narrative-thread'
 import type { PlotTreeSnapshot, PlotTreeSourceBundle } from './plot-tree'
+import type { WorldMapNode, WorldMapEdge, WorldMapCandidate, WorldMapLayer } from './world-map'
+import type {
+  StoryTimelineEvent,
+  StoryTimelineSettings,
+  StoryTimelineSnapshot,
+} from './story-timeline'
 import type {
   UpdateActionResponse,
   UpdateCheckResponse,
@@ -1029,6 +1035,20 @@ export interface DatabaseChannels {
   'db:get-llm-history': { args: [limit: number | undefined, expectedProjectPath: string]; return: unknown[] }
   'db:save-summary-snapshot': { args: [chapterNumber: number, characterStates: string, expectedProjectPath: string]; return: { success: boolean } }
   'db:get-latest-summary': { args: [expectedProjectPath: string]; return: { characterStates: string; chapterNumber: number } | null }
+  'db:map-get-all': { args: [expectedProjectPath: string]; return: { nodes: WorldMapNode[]; edges: WorldMapEdge[]; layers: WorldMapLayer[] } }
+  'db:map-node-upsert': { args: [node: WorldMapNode, expectedProjectPath: string]; return: { success: boolean; node?: WorldMapNode; error?: string } }
+  'db:map-node-delete': { args: [id: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:map-edge-upsert': { args: [edge: WorldMapEdge, expectedProjectPath: string]; return: { success: boolean; edge?: WorldMapEdge; error?: string } }
+  'db:map-edge-delete': { args: [id: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:map-candidates-get': { args: [expectedProjectPath: string]; return: WorldMapCandidate[] }
+  'db:map-layer-upsert': { args: [layer: WorldMapLayer, expectedProjectPath: string]; return: { success: boolean; layer?: WorldMapLayer; error?: string } }
+  'db:map-layer-delete': { args: [id: string, fallbackLayerId: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:map-layers-reorder': { args: [orderedIds: string[], expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:timeline-get-all': { args: [expectedProjectPath: string]; return: StoryTimelineSnapshot }
+  'db:timeline-settings-save': { args: [settings: StoryTimelineSettings, expectedProjectPath: string]; return: { success: boolean; settings?: StoryTimelineSettings; error?: string } }
+  'db:timeline-event-upsert': { args: [event: StoryTimelineEvent, expectedProjectPath: string]; return: { success: boolean; event?: StoryTimelineEvent; error?: string } }
+  'db:timeline-event-delete': { args: [id: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:timeline-events-reorder': { args: [orderedIds: string[], expectedProjectPath: string]; return: { success: boolean; error?: string } }
 }
 
 // ===== 知识库频道 =====

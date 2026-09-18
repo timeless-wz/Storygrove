@@ -69,6 +69,9 @@ export interface PlotTreeSourceBundle {
     title: string
     purpose: string
     keyEvents: string
+    userGuidance?: string
+    volumeNumber?: number
+    volumeTitle?: string
   }>
   finalizedChapters: Array<{
     draftId: number

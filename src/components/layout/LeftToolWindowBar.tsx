@@ -4,9 +4,6 @@ import {
   BookOpen,
   Users,
   Home,
-  ListTree,
-  Globe2,
-  GitBranch,
   ListChecks,
   Settings,
   ScrollText,
@@ -14,15 +11,15 @@ import {
 } from 'lucide-react'
 import { useLayoutStore, type SidebarView, type BottomTab } from '../../stores/layout-store'
 import { useWorkflowStore } from '../../stores/workflow-store'
-import { openBuiltinEditor } from '../panels/sidebar/sidebar-file-openers'
 import { useLocaleStore } from '../../stores/locale-store'
+import { IconTooltip } from '../ui/Tooltip'
 
 /** 左侧侧边栏视图按钮配置（不含 Home，它单独渲染） */
 const sidebarActivities: Array<{ id: SidebarView; icon: typeof FolderOpen; zh: string; en: string }> = [
-  { id: 'project', icon: FolderOpen, zh: '项目', en: 'Project' },
-  { id: 'workspace', icon: Compass, zh: '中枢', en: 'Workspace' },
-  { id: 'knowledge', icon: BookOpen, zh: '小说', en: 'Novel' },
-  { id: 'characters', icon: Users, zh: '角色', en: 'Cast' },
+  { id: 'project', icon: FolderOpen, zh: '创作', en: 'Writing' },
+  { id: 'workspace', icon: Compass, zh: '资料', en: 'Sources' },
+  { id: 'knowledge', icon: BookOpen, zh: '知识库', en: 'Knowledge' },
+  { id: 'characters', icon: Users, zh: '角色', en: 'Characters' },
 ]
 
 /** 底部面板 Tab 按钮配置 */
@@ -49,14 +46,15 @@ function LeftNavButton({
 }) {
   return (
     <div className="relative w-full px-1">
-      <button
-        onClick={onClick}
-        title={title ?? label}
-        className={`left-nav-button${active ? ' is-active' : ''}`}
-      >
-        <Icon size={22} strokeWidth={active ? 2 : 1.75} />
-        <span className="left-nav-label">{label}</span>
-      </button>
+      <IconTooltip label={title ?? label} side="right">
+        <button
+          onClick={onClick}
+          className={`left-nav-button${active ? ' is-active' : ''}`}
+        >
+          <Icon size={20} strokeWidth={active ? 2 : 1.7} />
+          <span className="left-nav-label">{label}</span>
+        </button>
+      </IconTooltip>
       {pulse && (
         <span
           className="absolute top-[5px] right-[5px] w-[5px] h-[5px] rounded-full animate-pulse pointer-events-none"
@@ -81,7 +79,6 @@ export default function LeftToolWindowBar() {
 
   /** Home 按钮是否激活 */
   const homeActive = activeRailItem === 'home'
-  const plotTreeActive = activeRailItem === 'plot-tree'
 
   return (
     <div
@@ -122,40 +119,6 @@ export default function LeftToolWindowBar() {
           )
         })}
 
-        <div className="writer-nav-divider w-8 my-1" style={{ height: 1 }} />
-
-        <LeftNavButton
-          icon={ListTree}
-          label={text('蓝图', 'Plot')}
-          active={activeRailItem === 'blueprint'}
-          title={text('章节蓝图', 'Chapter blueprint')}
-          onClick={() => {
-            setSidebarView('project', 'blueprint')
-            openBuiltinEditor('chapter-card-editor', text('章节蓝图', 'Chapter blueprint'), 'chapter-card')
-          }}
-        />
-        <LeftNavButton
-          icon={Globe2}
-          label={text('世界', 'World')}
-          active={activeRailItem === 'world'}
-          title={text('世界观', 'World building')}
-          onClick={() => setSidebarView('knowledge', 'world')}
-        />
-        <LeftNavButton
-          icon={GitBranch}
-          label={text('剧情', 'Plot tree')}
-          active={plotTreeActive}
-          title={text('剧情树', 'Plot tree')}
-          onClick={() => {
-            setSidebarView('project', 'plot-tree')
-            openBuiltinEditor(
-              'narrative-thread-editor',
-              text('剧情树与叙事线索', 'Plot tree & narrative threads'),
-              'narrative-thread',
-              'plot-tree',
-            )
-          }}
-        />
       </div>
 
       {/* 弹性间隔 */}

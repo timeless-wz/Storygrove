@@ -1,10 +1,11 @@
-import { X, FileText, Settings, Users, ArrowLeftRight, MoreHorizontal, BookOpen, History, ClipboardCheck, Globe, Save, ChevronLeft, ChevronRight, PenTool, Check } from 'lucide-react'
+import { X, FileText, Settings, Users, ArrowLeftRight, MoreHorizontal, BookOpen, History, ClipboardCheck, Globe, Save, ChevronLeft, ChevronRight, Check, Focus, Compass, LayoutDashboard, Clock3 } from 'lucide-react'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
 import {
   Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription,
 } from '../ui/Dialog'
 import { Button } from '../ui/Button'
+import { IconTooltip } from '../ui/Tooltip'
 import CodeMirrorEditor from '../editor/CodeMirrorEditor'
 import NovelConfigEditor from '../editor/NovelConfigEditor'
 import CharacterEditor from '../editor/CharacterEditor'
@@ -19,6 +20,9 @@ import ThreeWayMerge from '../editor/ThreeWayMerge'  // 保留引用以防其他
 import WelcomePage from '../pages/WelcomePage'
 import KnowledgeOverview from '../pages/KnowledgeOverview'
 import WorkspaceHub from '../workspace/WorkspaceHub'
+import WorldMapView from '../map/WorldMapView'
+import StoryTimelineView from '../timeline/StoryTimelineView'
+import ProjectOverviewPage from '../pages/ProjectOverviewPage'
 import { useProjectStore } from '../../stores/project-store'
 import { registerEditorExitSaveHandler, useEditorStore, type EditorTab } from '../../stores/editor-store'
 import { discardAndCloseEditorTab } from '../../stores/editor-discard'
@@ -163,21 +167,23 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
   const closeTab = useEditorStore(s => s.closeTab)
   const setActiveTab = useEditorStore(s => s.setActiveTab)
   const sidebarView = useLayoutStore((s) => s.sidebarView)
+  const focusMode = useLayoutStore((s) => s.focusMode)
+  const toggleFocusMode = useLayoutStore((s) => s.toggleFocusMode)
 
 
 
   // ===== 所有 Hooks 必须在条件 return 之前 =====
 
-  // 打开或切换项目后，激活该项目自己的配置 Tab。
+  // 打开或切换项目后，先进入项目总览；小说配置仍可从项目树和上下文入口打开。
   // project.id 对所有项目都可能相同，因此必须以绝对路径作为切换身份。
-  // openFile 会复用同项目的现有配置 Tab，同时保留其他项目的未保存 Tab。
+  // openFile 会复用同项目的现有总览 Tab，同时保留其他项目的未保存 Tab。
   useEffect(() => {
     const projectPath = currentProject?.path
     if (!projectPath) return
     openFile({
-      id: 'config',
-      name: useLocaleStore.getState().text('小说配置', 'Novel configuration'),
-      type: 'config',
+      id: 'project-overview',
+      name: useLocaleStore.getState().text('项目总览', 'Project overview'),
+      type: 'overview',
       projectKey: projectPath,
     })
   }, [currentProject?.path, openFile])
@@ -477,21 +483,14 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
     )
   }
 
-  // 有项目但没有打开的 Tab
+  // 有项目但没有打开的 Tab：展示项目总览面板
   if (tabs.length === 0) {
     return (
       <div
         className="skin-workspace-page w-full h-full flex flex-col overflow-hidden"
         style={{ backgroundColor: 'var(--color-editor-bg)' }}
       >
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center opacity-40">
-            <PenTool size={36} style={{ color: 'var(--color-text-muted)', opacity: 0.5, display: 'block', margin: '0 auto 12px' }} />
-            <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-              {text('在左侧项目树中单击文件开始编辑', 'Select a file in the project tree to start editing.')}
-            </span>
-          </div>
-        </div>
+        <ProjectOverviewPage />
       </div>
     )
   }
@@ -503,6 +502,9 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
     if (type === 'diff') return <ArrowLeftRight size={14} />
     if (type === 'chapter-card') return <BookOpen size={14} />
     if (type === 'world-building') return <Globe size={14} />
+    if (type === 'world-map') return <Compass size={14} />
+    if (type === 'story-timeline') return <Clock3 size={14} />
+    if (type === 'overview') return <LayoutDashboard size={14} />
     if (type === 'version-history') return <History size={14} />
     if (type === 'review-report') return <ClipboardCheck size={14} />
     return <FileText size={14} />
@@ -522,110 +524,80 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
           borderBottom: '1px solid var(--color-border)',
         }}
       >
-        {/* Tab 列表可滚动区域 */}
-        <div
-          ref={tabBarRef}
-          className="flex items-center flex-1 h-full overflow-x-auto"
-          style={{ scrollbarWidth: 'none' }}
-        >
-          {tabs.map((tab) => (
-            <div
-              key={tab.id}
-              ref={tab.id === activeTabId ? activeTabRef : undefined}
-              className="flex items-center gap-1.5 px-3 h-full text-sm cursor-pointer group flex-shrink-0 relative transition-colors"
-              style={{
-                backgroundColor: activeTabId === tab.id
-                  ? 'var(--color-tab-active)'
-                  : 'transparent',
-                /* JetBrains 激活 Tab：顶部 2px 葵紫色指示线 */
-                boxShadow: activeTabId === tab.id
-                  ? 'inset 0 2px 0 var(--color-tab-indicator)'
-                  : 'none',
-                /* 无竖分割线 */
-                borderRight: 'none',
-                color: activeTabId === tab.id
-                  ? 'var(--color-text)'
-                  : 'var(--color-text-secondary)',
-              }}
-              onClick={() => setActiveTab(tab.id)}
-              onContextMenu={e => {
-                e.preventDefault()
-                setActiveTab(tab.id)
-                setTabMenu({ tabId: tab.id, position: { x: e.clientX, y: e.clientY } })
-              }}
-              onMouseEnter={e => {
-                if (tab.id !== activeTabId) {
-                  e.currentTarget.style.backgroundColor = 'var(--color-hover)'
-                  e.currentTarget.style.color = 'var(--color-text)'
-                }
-              }}
-              onMouseLeave={e => {
-                if (tab.id !== activeTabId) {
-                  e.currentTarget.style.backgroundColor = 'transparent'
-                  e.currentTarget.style.color = 'var(--color-text-secondary)'
-                }
-              }}
-            >
-              <TabIcon type={tab.type} />
-              <span className="max-w-[120px] truncate">{tab.name}</span>
+        {/* Tab 列表可滚动区域 — 扁平标签，激活态只用 2px 细底线 */}
+        <div ref={tabBarRef} className="writer-tab-list">
+          {tabs.map((tab) => {
+            const isActive = activeTabId === tab.id
+            return (
+              <div
+                key={tab.id}
+                ref={isActive ? activeTabRef : undefined}
+                role="tab"
+                aria-selected={isActive}
+                className={`writer-tab group/tab${isActive ? ' is-active' : ''}`}
+                onClick={() => setActiveTab(tab.id)}
+                onContextMenu={e => {
+                  e.preventDefault()
+                  setActiveTab(tab.id)
+                  setTabMenu({ tabId: tab.id, position: { x: e.clientX, y: e.clientY } })
+                }}
+              >
+                <TabIcon type={tab.type} />
+                <span className="writer-tab-name">{tab.name}</span>
 
-              {/* 关闭按钮区域：dirty 时显示实心圆点（英文黑点），鼠标悬停展示关闭按钮 */}
-              {tab.dirty ? (
-                <span
-                  className="relative w-3.5 h-3.5 flex items-center justify-center ml-0.5 flex-shrink-0 rounded group/close hover:bg-[var(--color-hover)] cursor-pointer transition-colors"
-                  onClick={e => { e.stopPropagation(); tryCloseTab(tab.id) }}
-                  title={text('有未保存的修改，点击关闭', 'Unsaved changes; click to close')}
-                >
-                  {/* 默认显示实心圆点，颜色与标题栏警示灯一致 */}
+                {/* 关闭区：未保存时显示实心圆点，悬停切换为关闭按钮 */}
+                {tab.dirty ? (
                   <span
-                    className="w-1.5 h-1.5 rounded-full group-hover/close:hidden"
-                    style={{ backgroundColor: 'var(--color-warning)' }}
-                  />
-                  {/* hover 时显示 X */}
-                  <X size={10} className="hidden group-hover/close:block" style={{ color: 'var(--color-text-muted)' }} />
-                </span>
-              ) : (
-                <button
-                  className="opacity-0 group-hover:opacity-100 ml-0.5 p-0.5 rounded transition-opacity"
-                  style={{ color: 'var(--color-text-muted)' }}
-                  onClick={e => { e.stopPropagation(); tryCloseTab(tab.id) }}
-                  onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'var(--color-hover)')}
-                  onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-                >
-                  <X size={11} />
-                </button>
-              )}
-            </div>
-          ))}
+                    className="writer-tab-close group/close"
+                    onClick={e => { e.stopPropagation(); tryCloseTab(tab.id) }}
+                    title={text('有未保存的修改，点击关闭', 'Unsaved changes; click to close')}
+                  >
+                    <span className="writer-tab-dirty group-hover/close:hidden" />
+                    <X size={10} className="hidden group-hover/close:block" />
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className="writer-tab-close opacity-0 transition-opacity group-hover/tab:opacity-100"
+                    aria-label={text('关闭标签页', 'Close tab')}
+                    onClick={e => { e.stopPropagation(); tryCloseTab(tab.id) }}
+                  >
+                    <X size={11} />
+                  </button>
+                )}
+              </div>
+            )
+          })}
         </div>
 
-        {/* 右侧操作区：左箭头 + 右箭头 + 三个点菜单（始终显示，类似 VSCode） */}
+        {/* 右侧操作区：专注模式 + 上一个/下一个 + 已打开编辑器列表 */}
         <div
-          className="flex items-center flex-shrink-0 h-full"
+          className="flex items-center flex-shrink-0 h-full gap-0.5 px-1"
           style={{ borderLeft: '1px solid var(--color-border)' }}
         >
-          <button
-            className="icon-btn flex-shrink-0"
-            onClick={() => switchTab('left')}
-            title={text('上一个编辑器', 'Previous editor')}
-          >
-            <ChevronLeft size={14} />
-          </button>
-          <button
-            className="icon-btn flex-shrink-0"
-            onClick={() => switchTab('right')}
-            title={text('下一个编辑器', 'Next editor')}
-          >
-            <ChevronRight size={14} />
-          </button>
-          <button
-            ref={moreButtonRef}
-            className="icon-btn flex-shrink-0"
-            title={text('已打开的编辑器', 'Open editors')}
-            onClick={toggleMoreMenu}
-          >
-            <MoreHorizontal size={14} />
-          </button>
+          <IconTooltip label={focusMode ? text('退出专注模式', 'Exit focus mode') : text('专注模式', 'Focus mode')}>
+            <button
+              className="icon-btn flex-shrink-0"
+              onClick={toggleFocusMode}
+            >
+              <Focus size={14} />
+            </button>
+          </IconTooltip>
+          <IconTooltip label={text('上一个编辑器', 'Previous editor')}>
+            <button className="icon-btn flex-shrink-0" onClick={() => switchTab('left')}>
+              <ChevronLeft size={14} />
+            </button>
+          </IconTooltip>
+          <IconTooltip label={text('下一个编辑器', 'Next editor')}>
+            <button className="icon-btn flex-shrink-0" onClick={() => switchTab('right')}>
+              <ChevronRight size={14} />
+            </button>
+          </IconTooltip>
+          <IconTooltip label={text('已打开的编辑器', 'Open editors')}>
+            <button ref={moreButtonRef} className="icon-btn flex-shrink-0" onClick={toggleMoreMenu}>
+              <MoreHorizontal size={14} />
+            </button>
+          </IconTooltip>
         </div>
       </div>
 
@@ -758,7 +730,16 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
             projectKey={activeTab.projectKey}
           />
         )}
-        {/* diff 合并视图 — 统一使用弹出式 Dialog（与 DraftEditor 一致） */}
+        {activeTab?.type === 'world-map' && activeTab.projectKey === currentProject.path && (
+          <WorldMapView key={activeTab.id} projectKey={activeTab.projectKey} />
+        )}
+        {activeTab?.type === 'story-timeline' && activeTab.projectKey === currentProject.path && (
+          <StoryTimelineView key={activeTab.id} projectKey={activeTab.projectKey} />
+        )}
+        {activeTab?.type === 'overview' && (
+          <ProjectOverviewPage key={activeTab.id} />
+        )}
+        {/* AI 建议预览 — 只读对比，统一使用弹出式 Dialog（与 DraftEditor 一致） */}
         <Dialog
           open={
             activeTab?.type === 'diff'
@@ -784,12 +765,15 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
             onPointerDownOutside={(e) => e.preventDefault()}
             onEscapeKeyDown={(e) => e.preventDefault()}
           >
-            <DialogHeader className="px-4 py-0" style={{ height: 38, display: 'flex', alignItems: 'center' }}>
+            <DialogHeader className="px-4 py-0" style={{ height: 50, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1 }}>
               <DialogTitle className="flex items-center gap-2 text-[0.8rem]">
-                {text(`修稿合并 — ${activeTab?.name ?? '对比视图'}`, `Revision merge — ${activeTab?.name ?? 'Comparison'}`)}
+                {text(`AI 建议预览 — ${activeTab?.name ?? '对比视图'}`, `AI suggestion preview — ${activeTab?.name ?? 'Comparison'}`)}
               </DialogTitle>
+              <DialogDescription className="text-[11px]">
+                {text('只读对比：不会自动写入正文，采用与否由作者决定。', 'Read-only comparison: it is never written to the manuscript automatically.')}
+              </DialogDescription>
             </DialogHeader>
-            <div className="flex-1 overflow-hidden" style={{ height: 'calc(85vh - 38px - 1px)' }}>
+            <div className="flex-1 overflow-hidden" style={{ height: 'calc(85vh - 50px - 1px)' }}>
               {activeTab?.type === 'diff'
                 && activeTab.projectKey === currentProject.path
                 && activeTab.originalContent
@@ -797,68 +781,9 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
                 <ThreeWayMerge
                   originalContent={activeTab.originalContent}
                   modifiedContent={activeTab.content}
-                  onComplete={async (mergedText) => {
-                    const mergeTab = activeTab
-                    const projectSession = captureProjectSession(currentProject)
-                    if (!mergeTab || !projectSession || !isProjectSessionPath(projectSession, mergeTab.projectKey)) {
-                      toast.error(text('项目会话已失效，未合并修订内容', 'The project session is no longer active; the revision was not merged.'))
-                      return
-                    }
-
-                    let mergeCommitted = false
-                    try {
-                      const chapterDir = mergeTab.chapterDir
-                      const filePath = mergeTab.filePath
-                      const revPath = mergeTab.revisionPath
-                      const chapterNum = mergeTab.chapterNumber
-                      const expectedDraftContent = mergeTab.originalContent
-
-                      if (chapterDir && filePath && revPath && expectedDraftContent !== undefined) {
-                        const targetTab = useEditorStore.getState().tabs.find(tab => (
-                          tab.type === 'chapter'
-                          && tab.projectKey === mergeTab.projectKey
-                          && tab.filePath === filePath
-                        ))
-                        if (targetTab && (
-                          targetTab.dirty
-                          || targetTab.content !== expectedDraftContent
-                        )) {
-                          toast.warning(text(
-                            '打开对比后正文已变化，未提交修订；请保存后重新打开',
-                            'The draft changed after the comparison opened. The revision was not committed; save and reopen it.',
-                          ))
-                          return
-                        }
-                        const { useDraftStore } = await import('../../stores/draft-store')
-                        if (!isProjectSessionCurrent(projectSession)) return
-
-                        const result = await useDraftStore.getState().applyMergedRevision(
-                          chapterDir,
-                          chapterNum,
-                          filePath,
-                          revPath,
-                          mergedText,
-                          expectedDraftContent,
-                          projectSession.projectPath,
-                          projectSession,
-                        )
-                        if (!isProjectSessionCurrent(projectSession)) return
-
-                        if (result.success) {
-                          mergeCommitted = true
-                          toast.success(text('合并完成，草稿已更新', 'Merge complete; draft updated'))
-                        } else {
-                          toast.error(text(`合并失败：${result.error}`, `Merge failed: ${result.error}`))
-                        }
-                      }
-                    } catch (e) {
-                      if (!isProjectSessionCurrent(projectSession)) return
-                      toast.error(text(`合并出错：${e}`, `Merge error: ${e}`))
-                    } finally {
-                      if (mergeCommitted && isProjectSessionCurrent(projectSession)) {
-                        useEditorStore.getState().closeTab(mergeTab.id)
-                      }
-                    }
+                  onComplete={() => {
+                    toast.info(text('Codex 创作工作台已禁用自动修稿回写，请由作者手工编辑正文。', 'Automated revision write-back is disabled in Codex creative workbench. Please edit prose manually.'))
+                    useEditorStore.getState().closeTab(activeTab.id)
                   }}
                   onCancel={() => useEditorStore.getState().closeTab(activeTab.id)}
                 />

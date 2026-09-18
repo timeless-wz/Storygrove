@@ -8,23 +8,24 @@ const css = readFileSync(cssPath, 'utf8')
 const root = postcss.parse(css, { from: cssPath })
 
 const approvedPaperPalette = {
-  '--color-bg': '#F7F3E8',
-  '--color-raised': '#FCFAF3',
-  '--color-sidebar': '#F0EADA',
-  '--color-panel': '#F0EADA',
-  '--color-titlebar': '#FCFAF3',
-  '--color-activity-bar': '#F0EADA',
-  '--color-hover': '#EAE3D2',
-  '--color-active': '#E3DCC9',
-  '--color-text': '#2B2A26',
-  '--color-text-secondary': '#6E6A5F',
-  '--color-text-muted': '#655F55',
-  '--color-border': '#E3DCC9',
-  '--color-accent': '#B5402C',
-  '--color-accent-hover': '#9A3524',
-  '--color-editor-bg': '#FCFAF3',
-  '--color-statusbar': '#FCFAF3',
-  '--color-titlebar-text': '#2B2A26',
+  '--color-bg': '#F7F8FA',
+  '--color-raised': '#FFFFFF',
+  '--color-sidebar': '#FFFFFF',
+  '--color-panel': '#FFFFFF',
+  '--color-titlebar': '#FFFFFF',
+  '--color-activity-bar': '#FFFFFF',
+  '--color-hover': '#F4F5F7',
+  '--color-active': '#EDF2FB',
+  '--color-text': '#1F2937',
+  '--color-text-secondary': '#5F6B78',
+  '--color-text-muted': '#5F6874',
+  '--color-border': '#E9ECF0',
+  // Codex / shadcn 收敛：浅色主题唯一强调色改为克制蓝（原朱砂 #E85B52）。
+  '--color-accent': '#2563EB',
+  '--color-accent-hover': '#1D4ED8',
+  '--color-editor-bg': '#FFFFFF',
+  '--color-statusbar': '#FFFFFF',
+  '--color-titlebar-text': '#1F2937',
 }
 
 function declarationsFor(selector: string) {

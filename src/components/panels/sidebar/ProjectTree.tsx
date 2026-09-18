@@ -11,8 +11,10 @@ import { useWorkflowStore } from '../../../stores/workflow-store'
 import { useDraftStore } from '../../../stores/draft-store'
 import { useEditorStore } from '../../../stores/editor-store'
 import { useLayoutStore } from '../../../stores/layout-store'
+import { useWorldMapStore } from '../../../stores/world-map-store'
 import { ipc } from '../../../services/ipc-client'
 import { Button } from '../../ui/Button'
+import { IconTooltip } from '../../ui/Tooltip'
 import { EmptyState } from '../../ui/EmptyState'
 import { confirm } from '../../ui/Confirm'
 import { toast } from '../../ui/Toast'
@@ -67,6 +69,8 @@ export default function ProjectTree() {
   const [refreshing, setRefreshing] = useState(false)
   const [clearDialogOpen, setClearDialogOpen] = useState(false)
   const refreshRequestGate = useRef(new LatestRequestGate())
+  const mapNodes = useWorldMapStore(s => s.nodes)
+  const setSidebarView = useLayoutStore(s => s.setSidebarView)
 
   /** 统一刷新：文件树 + 架构状态 + 草稿列表 + 蓝图数量 */
   // 用 getState() 获取最新的 action，不作为依赖项，避免重建导致 useEffect 循环
@@ -89,6 +93,7 @@ export default function ProjectTree() {
         useDraftStore.getState().loadAllDrafts(projectPath, projectSession),
         checkArchStatus(projectSession),
         getBlueprintCount(projectSession),
+        useWorldMapStore.getState().loadAll(projectPath),
       ])
       if (
         !refreshRequestGate.current.isLatest(requestId)
@@ -235,6 +240,10 @@ export default function ProjectTree() {
   // 故事架构进度
   const archDone = ARCH_FILES.filter(f => archStatus[f.key]).length
   const clearDisabled = activeRuns.length > 0
+
+  const openOverview = () => openBuiltinEditor('project-overview', text('项目总览', 'Project overview'), 'overview')
+  const openWorldMap = () => openBuiltinEditor('world-map-editor', text('世界地图', 'World map'), 'world-map')
+  const openStoryTimeline = () => openBuiltinEditor('story-timeline-editor', text('故事时间线', 'Story timeline'), 'story-timeline')
   const openConfigEditor = () => useEditorStore.getState().openFile({
     id: 'config',
     name: text('小说配置', 'Novel configuration'),
@@ -262,15 +271,16 @@ export default function ProjectTree() {
             <Trash2 size={12} />
             {text('清除全部', 'Clear all')}
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => { void refreshAll() }}
-            title={text('刷新', 'Refresh')}
-            disabled={refreshing}
-          >
-            <RefreshCw size={12} />
-          </Button>
+          <IconTooltip label={text('刷新项目资源', 'Refresh project resources')}>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => { void refreshAll() }}
+              disabled={refreshing}
+            >
+              <RefreshCw size={12} />
+            </Button>
+          </IconTooltip>
         </div>
       </div>
 
@@ -280,32 +290,34 @@ export default function ProjectTree() {
         onCleared={refreshAll}
       />
 
-      {/* 1. 小说配置 */}
+      {/* 顶层导航 */}
       <LeafItem
-        iconName="book-open"
-        label={text('小说配置', 'Novel configuration')}
-        desc={text('基础参数与写作要求', 'Core parameters and writing guidance')}
-        badge={configDone ? text('已完成', 'Complete') : text('待配置', 'Pending')}
-        badgeDone={configDone}
-        onClick={openConfigEditor}
-        onContextMenu={e => showSidebarMenu([
-          {
-            key: 'open',
-            label: text('打开小说配置', 'Open novel configuration'),
-            icon: <FolderOpen size={13} />,
-            onClick: openConfigEditor,
-          },
-        ], e)}
+        iconName="layout-dashboard"
+        label={text('项目总览', 'Project overview')}
+        desc={text('小说创作进度与核心看板', 'Novel creative dashboard and progress')}
+        onClick={openOverview}
       />
 
-      {/* 2. 故事架构 — 点击标题行打开编辑器，子文件仍可单独点开 */}
-      <WorldBuildingGroup archStatus={archStatus} archDone={archDone} onCleared={refreshAll} />
+      <ProjectTreeSection
+        title={text('创作规划', 'Writing plan')}
+        detail={text('章节蓝图与叙事线索', 'Chapter blueprints and narrative threads')}
+      />
 
-      {/* 3. 章节蓝图 — 点击打开编辑器页 */}
+      <LeafItem
+        iconName="compass"
+        label={text('世界地图', 'World map')}
+        desc={text('地点、势力与空间拓扑网络', 'Locations, factions, and spatial network')}
+        badge={mapNodes.length > 0 ? text(`${mapNodes.length} 处地点`, `${mapNodes.length} locations`) : text('待创建', 'Empty')}
+        badgeColor={mapNodes.length > 0 ? 'var(--color-accent)' : undefined}
+        badgeDone={mapNodes.length > 0}
+        onClick={openWorldMap}
+      />
+
+      {/* 章节蓝图 */}
       <LeafItem
         iconName="layout-list"
         label={text('章节蓝图', 'Chapter blueprints')}
-        desc={text('AI 生成的章节目录，可编辑', 'Editable AI-generated chapter plans')}
+        desc={text('1~58 章细纲与关键事件，可直接写正文', 'Chapters 1-58 detailed outlines, direct prose drafting')}
         badge={blueprintCount > 0 ? text(`${blueprintCount}/${nc.totalChapters} 章`, `${blueprintCount}/${nc.totalChapters} chapters`) : text('待生成', 'Pending')}
         badgeColor={
           blueprintCount >= nc.totalChapters
@@ -328,16 +340,104 @@ export default function ProjectTree() {
 
       <LeafItem
         iconName="git-branch"
-        label={text('伏笔与叙事线索', 'Foreshadowing & narrative threads')}
-        desc={text('规划埋设/回收章节，自动注入写作并提示逾期', 'Plan setup/payoff chapters, inject active threads, and flag overdue ones')}
+        label={text('剧情树', 'Plot tree')}
+        desc={text('查看主线、支线与章节事件投影', 'View main plots, subplots, and chapter event projection')}
         onClick={() => openBuiltinEditor('narrative-thread-editor', text('伏笔与叙事线索', 'Foreshadowing & narrative threads'), 'narrative-thread')}
       />
 
-      {/* 4. 草稿箱 — 独立分区，按章节分组展示草稿 */}
+      <LeafItem
+        iconName="clock-3"
+        label={text('故事时间线', 'Story timeline')}
+        desc={text('手动刻度、自定义时间与故事事件', 'Manual ruler, custom time labels, and story events')}
+        onClick={openStoryTimeline}
+      />
+
+      <ProjectTreeSection
+        title={text('正文创作', 'Manuscript')}
+        detail={text('草稿与已定稿章节', 'Drafts and finalized chapters')}
+      />
+
+      {/* 草稿箱 */}
       <DraftBoxGroup draftsByChapter={draftsByChapter} />
 
-      {/* 5. 正文章节 — 仅显示已定稿 */}
+      {/* 正文章节 — 仅显示已定稿 */}
       <ManuscriptGroup files={manuscriptFiles} projectPath={p} />
+
+      <ProjectTreeSection
+        title={text('资料与设定', 'Sources & Setup')}
+        detail={text('小说配置、故事架构与资料中枢', 'Novel configuration, story architecture, and sources')}
+      />
+
+      {/* 小说配置 */}
+      <LeafItem
+        iconName="book-open"
+        label={text('小说配置', 'Novel configuration')}
+        desc={text('基础参数与写作要求', 'Core parameters and writing guidance')}
+        badge={configDone ? text('已完成', 'Complete') : text('待配置', 'Pending')}
+        badgeDone={configDone}
+        onClick={openConfigEditor}
+        onContextMenu={e => showSidebarMenu([
+          {
+            key: 'open',
+            label: text('打开小说配置', 'Open novel configuration'),
+            icon: <FolderOpen size={13} />,
+            onClick: openConfigEditor,
+          },
+        ], e)}
+      />
+
+      {/* 故事架构 */}
+      <WorldBuildingGroup archStatus={archStatus} archDone={archDone} onCleared={refreshAll} />
+
+      {/* 角色档案 */}
+      <LeafItem
+        iconName="users"
+        label={text('角色档案', 'Character roster')}
+        desc={text('主要人物、配角与人际关系', 'Characters, roles and relationships')}
+        onClick={() => setSidebarView('characters')}
+      />
+
+      {/* 创作资料中枢 */}
+      <LeafItem
+        iconName="target"
+        label={text('创作资料中枢', 'Writing sources hub')}
+        desc={text('批准资料、快照追溯与规则中枢', 'Approved sources, snapshot provenance and rules')}
+        onClick={() => setSidebarView('workspace')}
+      />
+
+      <LeafItem
+        iconName="brain-circuit"
+        label={text('项目知识库', 'Project knowledge')}
+        desc={text('仅查看和管理当前项目绑定的知识资料', 'Browse and manage knowledge bound to this project only')}
+        onClick={() => setSidebarView('knowledge')}
+      />
+
+      <ProjectTreeSection
+        title={text('项目管理', 'Project management')}
+        detail={text('本项目的导入、导出与配置', 'Import, export, and configuration for this project')}
+      />
+
+      <LeafItem
+        iconName="folder-open"
+        label={text('导入创作资料', 'Import writing material')}
+        desc={text('导入内容前会显示项目范围与确认步骤', 'Import content with project scope and confirmation')}
+        onClick={() => useLayoutStore.getState().openImportNovel()}
+      />
+      <LeafItem
+        iconName="file-text"
+        label={text('导出项目', 'Export project')}
+        desc={text('导出当前项目的创作成果', 'Export this project’s work')}
+        onClick={() => useLayoutStore.getState().openExport()}
+      />
+    </div>
+  )
+}
+
+function ProjectTreeSection({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div className="writer-project-section-title" title={detail}>
+      <span>{title}</span>
+      <span>{detail}</span>
     </div>
   )
 }
@@ -512,18 +612,19 @@ function ArchFileRow({
         </span>
       )}
       {isGenerated && !isCharacterProjection && (
-        <button
-          type="button"
-          className="opacity-70 hover:opacity-100 rounded p-0.5"
-          title={text(`清空${f.label}`, `Clear ${english.label}`)}
-          onClick={(e) => {
-            e.stopPropagation()
-            clearArchFile()
-          }}
-          style={{ color: 'var(--color-text-muted)' }}
-        >
-          <Trash2 size={11} />
-        </button>
+        <IconTooltip label={text(`清空${f.label}`, `Clear ${english.label}`)}>
+          <button
+            type="button"
+            className="opacity-70 hover:opacity-100 rounded p-0.5"
+            onClick={(e) => {
+              e.stopPropagation()
+              clearArchFile()
+            }}
+            style={{ color: 'var(--color-text-muted)' }}
+          >
+            <Trash2 size={11} />
+          </button>
+        </IconTooltip>
       )}
     </div>
   )

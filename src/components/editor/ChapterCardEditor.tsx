@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Save, BookOpen, RefreshCw, Plus, Trash2,
-  Sparkles, PenLine, ListChecks, AlertTriangle
+  PenLine, AlertTriangle, MapPin
 } from 'lucide-react'
 import { useProjectStore } from '../../stores/project-store'
 import { useWorkflowStore } from '../../stores/workflow-store'
-import { useLayoutStore } from '../../stores/layout-store'
+import { useDraftStore, readDraftBody } from '../../stores/draft-store'
+import { useWorldMapStore } from '../../stores/world-map-store'
+import { WORLD_MAP_NODE_TYPE_LABELS } from '../../shared/world-map'
 import { ipc } from '../../services/ipc-client'
 import { clearProjectData } from '../../services/project-clear-service'
 import type { ProjectSessionContext } from '../../shared/ipc-channels'
@@ -19,12 +21,7 @@ import {
   saveChapterBlueprint,
   saveAllBlueprints,
   type ChapterBlueprint,
-  type DirectoryWorkflowParams,
 } from '../../services/workflows/directory-workflow'
-import { launchCreativeWorkflow } from '../../services/workflows/creative-workflow-launcher'
-import { guardDirectoryGeneration } from '../../services/workflow-guards'
-import DirectoryConfigDialog from '../dialogs/DirectoryConfigDialog'
-import BatchChapterCreationDialog from '../dialogs/BatchChapterCreationDialog'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
 import { Textarea } from '../ui/Textarea'
@@ -101,6 +98,8 @@ export default function ChapterCardEditor({
   const text = useLocaleStore(s => s.text)
   const locale = useLocaleStore(s => s.locale)
   const currentProject = useProjectStore(s => s.currentProject)
+  const draftsByChapter = useDraftStore(s => s.draftsByChapter)
+  const worldMapNodes = useWorldMapStore(s => s.nodes)
   // ✅ action 用 getState() 获取，不订阅 workflow store 高频更新
   const addLog = useWorkflowStore.getState().addLog
   const [blueprints, setBlueprints] = useState<ChapterBlueprint[]>([])
@@ -129,9 +128,6 @@ export default function ChapterCardEditor({
   // 旧版仿写导入可能造成“前章未写、后续正文已定稿”的异常状态；该状态只能由用户确认恢复。
   const [legacyImportedTextRecoveryChapter, setLegacyImportedTextRecoveryChapter] = useState<number | null>(null)
 
-  // 蓝图生成弹窗（替代原 inline 批量面板）
-  const [showBlueprintDialog, setShowBlueprintDialog] = useState(false)
-  const [showBatchCreationDialog, setShowBatchCreationDialog] = useState(false)
   const [recoveringLegacyImportedText, setRecoveringLegacyImportedText] = useState(false)
 
   useEffect(() => {
@@ -585,61 +581,77 @@ export default function ChapterCardEditor({
     toast.success(text('已清空全部蓝图', 'All chapter blueprints cleared'))
   }
 
-  /** 触发蓝图批量生成（来自 DirectoryConfigDialog 的确认回调） */
-  const handleBatchGenerate = async (params: DirectoryWorkflowParams) => {
-    const projectSession = currentProjectSessionForPath(projectKey)
-    if (!projectMatches || !projectSession) throw new Error(text('项目会话已切换，未启动章节蓝图生成', 'The project changed, so blueprint generation was not started.'))
-    const expectedProjectPath = projectKey
-
-    // 前置校验：故事架构是否就绪
-    const guard = await guardDirectoryGeneration(expectedProjectPath, projectSession)
-    if (!isCurrentProjectSession(projectSession)) return
-    if (!guard.ok) {
-      // 校验失败：阻断并提示
-      addLog('error', text(`前置条件未满足：${guard.message}`, 'A required precondition is not met.'))
-      throw new Error(guard.message || text('章节蓝图生成前置条件未满足', 'Blueprint prerequisites are not met.'))
-    }
-    if (guard.message) {
-      // 有警告但允许继续：弹出确认
-      const yes = await confirm(text(
-        `${guard.message}\n\n是否仍要继续生成？`,
-        'A precondition warning was reported. Continue generating anyway?',
-      ), {
-        title: text('前置条件警告', 'Precondition warning'),
-        confirmText: text('继续生成', 'Continue'),
-      })
-      if (!yes) throw new Error(text('已取消启动章节蓝图生成', 'Blueprint generation was cancelled.'))
-    }
-
-    if (!isCurrentProjectSession(projectSession)) {
-      addLog('error', text('项目已切换，未启动章节蓝图生成', 'The project changed, so chapter blueprint generation was not started.'))
-      throw new Error(text('项目已切换，未启动章节蓝图生成', 'The project changed, so blueprint generation was not started.'))
-    }
-    await launchCreativeWorkflow({ workflow: 'generate_blueprint', params }, projectSession)
-    addLog('info', text('已启动章节蓝图生成', 'Chapter blueprint generation started'))
-  }
-
   /**
-   * 写作此章 — 将当前蓝图信息注入创作弹窗
-   * 支持指定章节（默认为当前选中章）
+   * 新建或打开此章正文草稿 — 直达正文写作
    */
-  const handleWriteChapter = (bp: ChapterBlueprint) => {
+  const handleOpenOrNewDraft = async (bp: ChapterBlueprint) => {
     const projectSession = currentProjectSessionForPath(projectKey)
     if (
       !projectSession
       || !sameProjectSessionContext(dataProjectSessionRef.current, projectSession)
     ) return
-    // 通过 layout-store openChapterCreation 传递预填参数，替代 window.dispatchEvent
-    useLayoutStore.getState().openChapterCreation({
-      chapterNumber: bp.chapterNumber,
-      title: bp.title,
-      role: bp.role,
-      purpose: bp.purpose,
-      keyEvents: bp.keyEvents,
-      characters: bp.characters.join('、'),
-      userGuidance: bp.userGuidance || '',
-    })
+    const drafts = draftsByChapter[bp.chapterNumber] || []
+    const existingDraft = drafts.find(d => d.status !== 'archived') || drafts[0]
+
+    if (existingDraft) {
+      const content = await readDraftBody(existingDraft.filePath, projectKey, projectSession)
+      if (!isCurrentProjectSession(projectSession)) return
+      useEditorStore.getState().openFile({
+        id: existingDraft.filePath,
+        name: `第${bp.chapterNumber}章 · ${bp.title || '未命名'} v${existingDraft.version}`,
+        type: 'chapter',
+        filePath: existingDraft.filePath,
+        content,
+        savedContent: content,
+        draftId: existingDraft.id,
+        chapterNumber: bp.chapterNumber,
+        draftStatus: existingDraft.status,
+        projectKey,
+        projectSessionLease: projectSession.leaseId,
+      })
+      toast.success(text(`已打开第 ${bp.chapterNumber} 章正文草稿`, `Opened draft for Chapter ${bp.chapterNumber}`))
+    } else {
+      const result = await ipc.invokeWithProjectSession(
+        projectSession,
+        'db:draft-create',
+        {
+          chapterNumber: bp.chapterNumber,
+          version: 1,
+          source: 'write',
+          content: '',
+          wordCount: 0,
+        },
+        projectKey,
+      )
+      if (!isCurrentProjectSession(projectSession)) return
+      if (!result.success || !result.id) {
+        toast.error(text(`创建正文草稿失败：${result.error || '未知错误'}`, `Failed to create draft: ${result.error || 'Unknown error'}`))
+        return
+      }
+      await useDraftStore.getState().loadChapterDrafts(bp.chapterNumber, projectKey, projectSession)
+      globalEventBus.emit('REFRESH_RESOURCE', {
+        resources: ['drafts', 'fileTree'],
+        projectPath: projectKey,
+        projectSession,
+      })
+      const draftPath = `vela://draft/${result.id}`
+      useEditorStore.getState().openFile({
+        id: draftPath,
+        name: `第${bp.chapterNumber}章 · ${bp.title || '未命名'} v1`,
+        type: 'chapter',
+        filePath: draftPath,
+        content: '',
+        savedContent: '',
+        draftId: result.id,
+        chapterNumber: bp.chapterNumber,
+        draftStatus: 'draft',
+        projectKey,
+        projectSessionLease: projectSession.leaseId,
+      })
+      toast.success(text(`已为第 ${bp.chapterNumber} 章创建空白草稿并打开`, `Created and opened blank draft for Chapter ${bp.chapterNumber}`))
+    }
   }
+
 
   /**
    * 旧版“小说拆解与仿写”曾把参考原文误写为草稿和定稿；此处只给用户一个
@@ -704,9 +716,6 @@ export default function ChapterCardEditor({
 
   const visibleBlueprints = projectDataReady ? blueprints : []
   const visibleDirty = projectDataReady && dirty
-  const nextWritableBlueprint = nextWriteChapter === null
-    ? null
-    : visibleBlueprints.find(blueprint => blueprint.chapterNumber === nextWriteChapter)
   const canRecoverLegacyImportedText = projectDataReady
     && legacyImportedTextRecoveryChapter !== null
 
@@ -739,39 +748,24 @@ export default function ChapterCardEditor({
           )}
         </div>
         <div className="flex items-center gap-1">
-          {/* 写作入口 — 仅下一章可写时显示 */}
-          {projectDataReady && nextWritableBlueprint && (
+          {/* 正文写作入口 — 当前选中章节直接打开或新建正文 */}
+          {projectDataReady && selected && (
             <Button
-              variant="ai"
+              variant="default"
               size="sm"
-              onClick={() => handleWriteChapter(nextWritableBlueprint)}
+              onClick={() => handleOpenOrNewDraft(selected)}
+              title={
+                (draftsByChapter[selected.chapterNumber]?.length ?? 0) > 0
+                  ? text(`打开第 ${selected.chapterNumber} 章正文草稿`, `Open Chapter ${selected.chapterNumber} draft`)
+                  : text(`为第 ${selected.chapterNumber} 章新建空白草稿并直接开始写作`, `Create blank draft and write Chapter ${selected.chapterNumber}`)
+              }
             >
               <PenLine size={12} />
-              {text(`写作第${nextWritableBlueprint.chapterNumber}章`, `Write Chapter ${nextWritableBlueprint.chapterNumber}`)}
+              {(draftsByChapter[selected.chapterNumber]?.length ?? 0) > 0
+                ? text(`打开第${selected.chapterNumber}章正文`, `Open Chapter ${selected.chapterNumber}`)
+                : text(`新建第${selected.chapterNumber}章正文`, `New Chapter ${selected.chapterNumber}`)}
             </Button>
           )}
-          {projectDataReady && nextWritableBlueprint && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowBatchCreationDialog(true)}
-              title={text('按连续章节蓝图启动受控批量创作任务（最高10章）', 'Start a controlled batch writing task from consecutive chapter blueprints (maximum 10 chapters).')}
-            >
-              <ListChecks size={12} />
-              {text('批量创作', 'Batch write')}
-            </Button>
-          )}
-          {/* AI 生成蓝图 → 弹出 DirectoryConfigDialog */}
-          <Button
-            variant="ai"
-            size="sm"
-            onClick={() => setShowBlueprintDialog(true)}
-            disabled={!projectDataReady || Boolean(authorityError)}
-            title={text('AI 生成章节蓝图（选择范围和模式）', 'Generate chapter blueprints with AI (choose the range and mode)')}
-          >
-            <Sparkles size={12} />
-            {text('AI 生成蓝图', 'AI generate blueprints')}
-          </Button>
           <Button variant="ghost" size="icon" onClick={() => loadBlueprints()} title={text('重新加载', 'Reload')} disabled={loading}>
             <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
           </Button>
@@ -841,19 +835,6 @@ export default function ChapterCardEditor({
         </div>
       )}
 
-      {/* 蓝图生成配置弹窗 */}
-        <DirectoryConfigDialog
-        isOpen={showBlueprintDialog}
-        onClose={() => setShowBlueprintDialog(false)}
-        existingCount={visibleBlueprints.length}
-          onConfirm={handleBatchGenerate}
-        />
-          <BatchChapterCreationDialog
-          isOpen={showBatchCreationDialog}
-          startChapterNumber={nextWritableBlueprint?.chapterNumber ?? null}
-          onClose={() => setShowBatchCreationDialog(false)}
-        />
-
       {/* 主区域：左侧列表 + 右侧编辑 */}
       <div className="flex-1 flex overflow-hidden">
         {/* 左侧章节列表 */}
@@ -881,6 +862,8 @@ export default function ChapterCardEditor({
                     : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]'
                 )}
                 onClick={() => setSelectedIdx(idx)}
+                onDoubleClick={() => void handleOpenOrNewDraft(bp)}
+                title={text('单击查看/编辑蓝图，双击打开正文', 'Click to view/edit blueprint, double click to open draft')}
               >
                 <div className="flex items-center gap-1.5">
                   <span className="font-mono text-[0.7rem] opacity-40 flex-shrink-0">
@@ -888,13 +871,29 @@ export default function ChapterCardEditor({
                   </span>
                   <span className="font-medium truncate flex-1">{bp.title || text('未命名', 'Untitled')}</span>
                 </div>
-                <div className="flex items-center gap-1 mt-0.5">
+                <div className="flex items-center gap-1 mt-0.5 flex-wrap">
                   <span className={cn(
                     'text-[0.7rem] px-1 py-0.5 rounded',
                     ROLE_COLORS[bp.role] || 'bg-[var(--color-hover)] text-[var(--color-text-muted)]'
                   )}>
                     {roleLabel(bp.role)}
                   </span>
+                  {(draftsByChapter[bp.chapterNumber]?.length ?? 0) > 0 ? (
+                    <span
+                      className="text-[0.7rem] px-1 py-0.5 rounded font-mono"
+                      style={{ backgroundColor: 'rgba(34,197,94,0.15)', color: 'rgb(34,197,94)' }}
+                      title={text('已有正文草稿', 'Draft exists')}
+                    >
+                      {text('有正文', 'Draft')}
+                    </span>
+                  ) : (
+                    <span
+                      className="text-[0.7rem] px-1 py-0.5 rounded font-mono opacity-40"
+                      style={{ backgroundColor: 'var(--color-hover)', color: 'var(--color-text-muted)' }}
+                    >
+                      {text('待写作', 'No draft')}
+                    </span>
+                  )}
                   {bp.userGuidance && (
                     <span
                       className="text-[0.7rem] px-1 py-0.5 rounded"
@@ -933,17 +932,21 @@ export default function ChapterCardEditor({
                   )}
                 </h3>
                 <div className="flex items-center gap-1.5">
-                  {/* 仅下一章允许写作 */}
-                  {nextWritableBlueprint && selected.chapterNumber === nextWritableBlueprint.chapterNumber && (
-                    <Button
-                      variant="ai"
-                      size="sm"
-                      onClick={() => handleWriteChapter(selected)}
-                      title={text('以当前蓝图信息生成草稿', 'Create a draft from this blueprint')}
-                    >
-                      <PenLine size={12} /> {text('写作此章', 'Write this chapter')}
-                    </Button>
-                  )}
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => handleOpenOrNewDraft(selected)}
+                    title={
+                      (draftsByChapter[selected.chapterNumber]?.length ?? 0) > 0
+                        ? text('打开已有正文草稿', 'Open existing draft')
+                        : text('新建空白草稿直接开始创作', 'Create blank draft and write')
+                    }
+                  >
+                    <PenLine size={12} />
+                    {(draftsByChapter[selected.chapterNumber]?.length ?? 0) > 0
+                      ? text('打开正文草稿', 'Open draft')
+                      : text('新建正文草稿', 'New draft')}
+                  </Button>
                   <Button variant="destructive" size="sm" onClick={handleDeleteChapter} title={text('删除此章', 'Delete this chapter')}>
                     <Trash2 size={12} />
                     {text('删除此章', 'Delete chapter')}
@@ -1084,6 +1087,83 @@ export default function ChapterCardEditor({
                     )}
                     rows={4}
                   />
+                </div>
+
+                {/* 关联世界地图节点 */}
+                <div
+                  className="p-3 rounded-lg border"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    backgroundColor: 'var(--color-panel)',
+                  }}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <Label className="flex items-center gap-1.5 font-medium">
+                      <MapPin size={13} style={{ color: 'var(--color-accent)' }} />
+                      <span>{text('关联地图节点', 'Linked map nodes')}</span>
+                      <span className="text-[0.7rem] font-normal" style={{ color: 'var(--color-text-muted)' }}>
+                        {text('（根据本章细纲与事件中提及的地点自动关联）', '(Automatically recognized from chapter text and outline)')}
+                      </span>
+                    </Label>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        useEditorStore.getState().openFile({
+                          id: 'world-map',
+                          name: text('世界地图', 'World map'),
+                          type: 'world-map',
+                          projectKey,
+                        })
+                      }}
+                    >
+                      {text('在世界地图中查看', 'View in world map')}
+                    </Button>
+                  </div>
+                  {(() => {
+                    const matched = worldMapNodes.filter(node =>
+                      node.name && (
+                        (selected.title || '').includes(node.name)
+                        || (selected.purpose || '').includes(node.name)
+                        || (selected.keyEvents || '').includes(node.name)
+                        || (selected.userGuidance || '').includes(node.name)
+                      )
+                    )
+                    if (matched.length === 0) {
+                      return (
+                        <p className="text-xs py-1" style={{ color: 'var(--color-text-muted)' }}>
+                          {text('本章细纲或事件中未提及已收录的地图节点。', 'No recognized world map nodes mentioned in this chapter.')}
+                        </p>
+                      )
+                    }
+                    return (
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {matched.map(node => (
+                          <div
+                            key={node.id}
+                            className="text-xs px-2.5 py-1.5 rounded border flex items-center gap-2"
+                            style={{
+                              borderColor: 'var(--color-border)',
+                              backgroundColor: 'var(--color-bg)',
+                            }}
+                          >
+                            <span className="font-semibold">{node.name}</span>
+                            <span className="text-[0.7rem] px-1 rounded" style={{ backgroundColor: 'var(--color-panel)' }}>
+                              {WORLD_MAP_NODE_TYPE_LABELS[node.type]?.[locale === 'zh-CN' ? 'zh' : 'en'] || node.type}
+                            </span>
+                            <span className="text-[0.7rem]" style={{ color: 'var(--color-text-muted)' }}>
+                              {node.mapLayer}
+                            </span>
+                            {node.description && (
+                              <span className="text-[0.7rem] truncate max-w-[200px]" style={{ color: 'var(--color-text-muted)' }}>
+                                {node.description}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  })()}
                 </div>
               </div>
             </div>

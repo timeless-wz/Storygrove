@@ -28,14 +28,11 @@ export default function WelcomePage({ onNewProject, onOpenProject, onImportNovel
       <div className="max-w-lg w-full mx-auto px-8 py-16">
         {/* Logo 区域 — 品牌极光光环 */}
         <div className="text-center mb-8">
-          <div
-            className="writer-primary-button inline-flex items-center justify-center w-20 h-20 rounded-2xl mb-5"
-            style={{
-              boxShadow: '0 8px 28px rgba(82, 52, 22, 0.18)',
-            }}
-          >
-            <BookOpen size={36} color="#fff" style={{ position: 'relative', zIndex: 1 }} />
-          </div>
+          <img
+            className="writer-welcome-brand-image mb-5"
+            src="/brand-icon.png"
+            alt=""
+          />
           <h1 className="text-2xl font-bold mb-2" style={{ color: 'var(--color-text)' }}>
             {currentProject ? currentProject.name : text(`欢迎使用 ${APP_BRAND.zhName}`, `Welcome to ${APP_BRAND.enName}`)}
           </h1>

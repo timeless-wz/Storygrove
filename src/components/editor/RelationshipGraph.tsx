@@ -1,447 +1,378 @@
-import { useRef, useEffect, useMemo, useState } from 'react'
-import { Maximize2, ZoomIn, ZoomOut } from 'lucide-react'
-import { parseRelationshipEdges } from '../../shared/relationship-presentation'
+import { useCallback, useMemo, useRef, useState } from 'react'
+import {
+  applyNodeChanges,
+  Background,
+  BackgroundVariant,
+  BaseEdge,
+  Controls,
+  EdgeLabelRenderer,
+  Handle,
+  MarkerType,
+  MiniMap,
+  Panel,
+  Position,
+  ReactFlow,
+  type Edge,
+  type EdgeProps,
+  type Node,
+  type NodeChange,
+  type NodeProps,
+  type ReactFlowInstance,
+} from '@xyflow/react'
+import '@xyflow/react/dist/style.css'
+import { Maximize2, RotateCcw } from 'lucide-react'
 import { useLocaleStore } from '../../stores/locale-store'
-
-interface CharacterNode {
-  name: string
-  role: string
-  x: number
-  y: number
-  vx: number
-  vy: number
-}
-
-interface RelationshipGraphEdge {
-  from: string
-  to: string
-  relations: Array<{
-    from: string
-    to: string
-    label: string
-  }>
-}
-
-type DragState =
-  | { kind: 'view'; x: number; y: number }
-  | { kind: 'node'; name: string; offsetX: number; offsetY: number }
+import {
+  buildRelationshipGraphModel,
+  readRelationshipGraphPositions,
+  relationshipGraphLayoutStorageKey,
+  writeRelationshipGraphPositions,
+  type RelationshipGraphCharacter,
+  type RelationshipGraphEdgeModel,
+  type RelationshipGraphEdgeTone,
+  type RelationshipGraphModel,
+  type RelationshipGraphNodeModel,
+  type RelationshipGraphPosition,
+} from './relationship-graph-model'
 
 interface RelationshipGraphProps {
-  characters: Array<{
-    name: string
-    role: string
-    relationships: string
-  }>
+  characters: RelationshipGraphCharacter[]
+  /** Local-only layout preferences are scoped to the project, never to character facts. */
+  projectKey?: string
+  onCharacterSelect?: (name: string) => void
 }
 
-const NODE_LABEL_MAX_CHARACTERS = 8
-const RELATIONSHIP_LABEL_MAX_CHARACTERS = 6
+interface RelationshipGraphSurfaceProps extends RelationshipGraphProps {
+  graphModel: RelationshipGraphModel
+}
 
-function compactOverviewLabel(value: string, maxCharacters: number): string {
+type CharacterGraphNodeData = Record<string, unknown> & {
+  name: string
+  role: string
+  relationships: number
+}
+
+type CharacterGraphNode = Node<CharacterGraphNodeData, 'character'>
+
+type RelationshipFlowEdgeData = Record<string, unknown> & {
+  label: string
+  tone: RelationshipGraphEdgeTone
+  lane: number
+  sourceName: string
+  targetName: string
+}
+
+type RelationshipFlowEdge = Edge<RelationshipFlowEdgeData, 'relationship'>
+
+const ROLE_COLORS: Record<string, string> = {
+  protagonist: 'var(--color-role-protagonist, #2563eb)',
+  antagonist: 'var(--color-role-antagonist, #dc2626)',
+  supporting: 'var(--color-role-supporting, #7c3aed)',
+  minor: 'var(--color-role-minor, #64748b)',
+}
+
+const EDGE_COLORS: Record<RelationshipGraphEdgeTone, string> = {
+  family: '#a16207',
+  conflict: '#dc2626',
+  alliance: '#059669',
+  neutral: '#64748b',
+}
+
+const ROLE_LABELS: Record<string, [string, string]> = {
+  protagonist: ['主角', 'Protagonist'],
+  antagonist: ['反派', 'Antagonist'],
+  supporting: ['配角', 'Supporting'],
+  minor: ['次要角色', 'Minor'],
+}
+
+const HANDLE_POSITIONS = {
+  left: Position.Left,
+  right: Position.Right,
+  top: Position.Top,
+  bottom: Position.Bottom,
+} as const
+
+function compactLabel(value: string, maxCharacters = 15): string {
   const characters = Array.from(value.trim())
   return characters.length > maxCharacters
     ? `${characters.slice(0, maxCharacters).join('')}…`
     : characters.join('')
 }
 
-function pointerWorldPosition(
-  canvas: HTMLCanvasElement,
-  clientX: number,
-  clientY: number,
-  view: { scale: number; offsetX: number; offsetY: number },
-) {
-  const bounds = canvas.getBoundingClientRect()
-  const pixelX = (clientX - bounds.left) * canvas.width / (bounds.width || canvas.clientWidth || 1)
-  const pixelY = (clientY - bounds.top) * canvas.height / (bounds.height || canvas.clientHeight || 1)
-  return {
-    x: canvas.width / 2 + (pixelX - view.offsetX - canvas.width / 2) / view.scale,
-    y: canvas.height / 2 + (pixelY - view.offsetY - canvas.height / 2) / view.scale,
+function handleForDirection(
+  source: RelationshipGraphPosition,
+  target: RelationshipGraphPosition,
+  kind: 'source' | 'target',
+): string {
+  const dx = target.x - source.x
+  const dy = target.y - source.y
+  let direction: 'left' | 'right' | 'top' | 'bottom'
+  if (Math.abs(dx) >= Math.abs(dy)) direction = dx >= 0 ? 'right' : 'left'
+  else direction = dy >= 0 ? 'bottom' : 'top'
+
+  if (kind === 'target') {
+    direction = ({ left: 'right', right: 'left', top: 'bottom', bottom: 'top' } as const)[direction]
   }
+  return `${kind}-${direction}`
 }
 
-/** 角色关系网 Canvas 可视化 */
-export default function RelationshipGraph({ characters }: RelationshipGraphProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const nodesRef = useRef<CharacterNode[]>([])
-  const animRef = useRef<number>(0)
-  const drawRef = useRef<(() => void) | null>(null)
-  const viewRef = useRef({ scale: 1, offsetX: 0, offsetY: 0 })
-  const dragRef = useRef<DragState | null>(null)
-  const [zoomPercent, setZoomPercent] = useState(100)
+function toFlowNodes(nodes: RelationshipGraphNodeModel[], edges: RelationshipGraphEdgeModel[]): CharacterGraphNode[] {
+  const relationshipCounts = new Map<string, number>()
+  for (const edge of edges) {
+    relationshipCounts.set(edge.source, (relationshipCounts.get(edge.source) ?? 0) + 1)
+    relationshipCounts.set(edge.target, (relationshipCounts.get(edge.target) ?? 0) + 1)
+  }
+  return nodes.map(node => ({
+    id: node.id,
+    type: 'character',
+    position: node.position,
+    data: {
+      name: node.name,
+      role: node.role,
+      relationships: relationshipCounts.get(node.id) ?? 0,
+    },
+  }))
+}
+
+function toFlowEdges(
+  edges: RelationshipGraphEdgeModel[],
+  nodes: readonly CharacterGraphNode[],
+): RelationshipFlowEdge[] {
+  const positions = new Map(nodes.map(node => [node.id, node.position]))
+  return edges.flatMap((edge) => {
+    const sourcePosition = positions.get(edge.source)
+    const targetPosition = positions.get(edge.target)
+    if (!sourcePosition || !targetPosition) return []
+    return [{
+      id: edge.id,
+      type: 'relationship',
+      source: edge.source,
+      target: edge.target,
+      sourceHandle: handleForDirection(sourcePosition, targetPosition, 'source'),
+      targetHandle: handleForDirection(sourcePosition, targetPosition, 'target'),
+      markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: EDGE_COLORS[edge.tone] },
+      data: {
+        label: edge.label,
+        tone: edge.tone,
+        lane: edge.lane,
+        sourceName: edge.sourceName,
+        targetName: edge.targetName,
+      },
+    }]
+  })
+}
+
+function CharacterGraphNodeView({ data, selected }: NodeProps<CharacterGraphNode>) {
   const text = useLocaleStore(state => state.text)
+  const color = ROLE_COLORS[data.role] ?? ROLE_COLORS.minor
+  const relationshipCount = data.relationships
+  const [roleZhCN, roleEnUS] = ROLE_LABELS[data.role] ?? ROLE_LABELS.minor
+  return (
+    <div
+      className="min-w-32 max-w-48 rounded-lg border px-3 py-2 shadow-sm transition-shadow"
+      style={{
+        borderColor: selected ? color : 'var(--color-border)',
+        background: 'var(--color-raised)',
+        boxShadow: selected ? `0 0 0 2px color-mix(in srgb, ${color} 24%, transparent)` : undefined,
+      }}
+      title={data.name}
+    >
+      {(['left', 'right', 'top', 'bottom'] as const).flatMap(side => [
+        <Handle key={`source-${side}`} id={`source-${side}`} type="source" position={HANDLE_POSITIONS[side]} isConnectable={false} style={{ opacity: 0 }} />,
+        <Handle key={`target-${side}`} id={`target-${side}`} type="target" position={HANDLE_POSITIONS[side]} isConnectable={false} style={{ opacity: 0 }} />,
+      ])}
+      <div className="flex items-center gap-2">
+        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} />
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--color-text)]">{data.name}</span>
+      </div>
+      <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-[var(--color-text-muted)]">
+        <span>{text(roleZhCN, roleEnUS)}</span>
+        {relationshipCount > 0 && <span>{text(`${relationshipCount} 条关系`, `${relationshipCount} relations`)}</span>}
+      </div>
+    </div>
+  )
+}
 
-  const edges = useMemo<RelationshipGraphEdge[]>(() => {
-    const knownNames = characters.map((character) => character.name)
-    const overviewEdges = new Map<string, RelationshipGraphEdge>()
-    for (const character of characters) {
-      for (const edge of parseRelationshipEdges(character.relationships, {
-        knownNames,
-        selfName: character.name,
-      })) {
-        const key = [character.name, edge.target].sort().join('\u0000')
-        const relation = {
-          from: character.name,
-          to: edge.target,
-          label: edge.relation,
-        }
-        const overviewEdge = overviewEdges.get(key)
-        if (overviewEdge) {
-          const isDuplicate = overviewEdge.relations.some(candidate => (
-            candidate.from === relation.from
-            && candidate.to === relation.to
-            && candidate.label === relation.label
-          ))
-          if (!isDuplicate) overviewEdge.relations.push(relation)
-          continue
-        }
-        overviewEdges.set(key, {
-          from: character.name,
-          to: edge.target,
-          relations: [relation],
-        })
-      }
-    }
-    return Array.from(overviewEdges.values())
-  }, [characters])
+function RelationshipEdgeView({
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  markerEnd,
+  data,
+}: EdgeProps<RelationshipFlowEdge>) {
+  const lane = typeof data?.lane === 'number' ? data.lane : 0
+  const tone = data?.tone ?? 'neutral'
+  const color = EDGE_COLORS[tone]
+  const dx = targetX - sourceX
+  const dy = targetY - sourceY
+  const distance = Math.max(Math.hypot(dx, dy), 1)
+  const normalX = -dy / distance
+  const normalY = dx / distance
+  const curveOffset = Math.max(-56, Math.min(56, lane * 18))
+  const controlX = (sourceX + targetX) / 2 + normalX * curveOffset
+  const controlY = (sourceY + targetY) / 2 + normalY * curveOffset
+  const labelX = (sourceX + 2 * controlX + targetX) / 4
+  const labelY = (sourceY + 2 * controlY + targetY) / 4
+  const path = `M ${sourceX},${sourceY} Q ${controlX},${controlY} ${targetX},${targetY}`
+  const label = data?.label ?? ''
 
-  // 初始化节点布局
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
+  return (
+    <>
+      <BaseEdge path={path} markerEnd={markerEnd} style={{ stroke: color, strokeWidth: 1.8, opacity: 0.9 }} />
+      <EdgeLabelRenderer>
+        <span
+          className="nodrag nopan absolute rounded border px-1.5 py-0.5 text-[10px] leading-none shadow-sm"
+          data-testid="relationship-edge-label"
+          title={label}
+          style={{
+            transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
+            borderColor: color,
+            background: 'var(--color-raised)',
+            color,
+            pointerEvents: 'all',
+          }}
+        >
+          {compactLabel(label)}
+        </span>
+      </EdgeLabelRenderer>
+    </>
+  )
+}
 
-    const w = canvas.offsetWidth
-    const h = canvas.offsetHeight
-    canvas.width = w * 2
-    canvas.height = h * 2
+const nodeTypes = { character: CharacterGraphNodeView }
+const edgeTypes = { relationship: RelationshipEdgeView }
 
-    const centerX = w
-    const centerY = h
-    const radius = Math.min(w, h) * 0.6
+/**
+ * Relationship visualisation deliberately remains a projection of the approved
+ * roster. It gives every directed relation a separate labelled curve, while
+ * editing facts continues to go through CharacterEditor and its revision guard.
+ */
+function RelationshipGraphSurface({
+  characters,
+  projectKey,
+  onCharacterSelect,
+  graphModel,
+}: RelationshipGraphSurfaceProps) {
+  const text = useLocaleStore(state => state.text)
+  const [nodes, setNodes] = useState<CharacterGraphNode[]>(() => toFlowNodes(graphModel.nodes, graphModel.edges))
+  const [edges, setEdges] = useState<RelationshipFlowEdge[]>(() => {
+    const initialNodes = toFlowNodes(graphModel.nodes, graphModel.edges)
+    return toFlowEdges(graphModel.edges, initialNodes)
+  })
+  const flowRef = useRef<ReactFlowInstance<CharacterGraphNode, RelationshipFlowEdge> | null>(null)
 
-    // 环形初始布局
-    nodesRef.current = characters.map((c, i) => {
-      const angle = (i / characters.length) * Math.PI * 2 - Math.PI / 2
-      return {
-        name: c.name,
-        role: c.role,
-        x: centerX + radius * Math.cos(angle),
-        y: centerY + radius * Math.sin(angle),
-        vx: 0,
-        vy: 0,
-      }
+  const fitGraph = useCallback(() => {
+    requestAnimationFrame(() => {
+      flowRef.current?.fitView({ padding: 0.24, maxZoom: 1.15, duration: 180 })
     })
+  }, [])
 
-    // 启动力导向模拟
-    let iteration = 0
-    const maxIterations = 120
+  const onNodesChange = useCallback((changes: NodeChange<CharacterGraphNode>[]) => {
+    setNodes(current => applyNodeChanges(changes, current))
+  }, [])
 
-    const drawFrame = () => {
-      const canvas = canvasRef.current
-      if (!canvas) return
-      const ctx = canvas.getContext('2d')
-      if (!ctx) return
-      const canvasStyles = getComputedStyle(canvas)
-      const readableTextColor = canvasStyles.color
-      const relationshipLabelColor = canvasStyles.getPropertyValue('--color-text-secondary').trim()
+  const persistLayout = useCallback((nextNodes: readonly CharacterGraphNode[]) => {
+    writeRelationshipGraphPositions(
+      projectKey,
+      Object.fromEntries(nextNodes.map(node => [node.id, { x: node.position.x, y: node.position.y }])),
+    )
+  }, [projectKey])
 
-      const nodes = nodesRef.current
+  const onNodeDragStop = useCallback((_event: React.MouseEvent, _node: CharacterGraphNode, nextNodes: CharacterGraphNode[]) => {
+    setEdges(toFlowEdges(graphModel.edges, nextNodes))
+    persistLayout(nextNodes)
+  }, [graphModel.edges, persistLayout])
 
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-      ctx.save()
-      const view = viewRef.current
-      ctx.translate(view.offsetX, view.offsetY)
-      ctx.translate(canvas.width / 2, canvas.height / 2)
-      ctx.scale(view.scale, view.scale)
-      ctx.translate(-canvas.width / 2, -canvas.height / 2)
-
-      // 绘制连线
-      ctx.lineWidth = 1.5
-      for (const edge of edges) {
-        const a = nodes.find((n) => n.name === edge.from)
-        const b = nodes.find((n) => n.name === edge.to)
-        if (!a || !b) continue
-
-        ctx.beginPath()
-        ctx.moveTo(a.x, a.y)
-        ctx.lineTo(b.x, b.y)
-        ctx.strokeStyle = 'rgba(148,163,184,0.3)'
-        ctx.stroke()
-
-        // 关系标签
-        const firstRelation = edge.relations[0]?.label
-        if (firstRelation) {
-          const mx = (a.x + b.x) / 2
-          const my = (a.y + b.y) / 2
-          const compactLabel = compactOverviewLabel(
-            firstRelation,
-            RELATIONSHIP_LABEL_MAX_CHARACTERS,
-          )
-          const additionalCount = edge.relations.length - 1
-          ctx.font = '18px system-ui'
-          ctx.fillStyle = relationshipLabelColor
-          ctx.textAlign = 'center'
-          ctx.fillText(
-            additionalCount > 0 ? `${compactLabel} +${additionalCount}` : compactLabel,
-            mx,
-            my - 4,
-          )
-        }
+  const resetLayout = useCallback(() => {
+    if (projectKey && typeof window !== 'undefined') {
+      try {
+        window.localStorage.removeItem(relationshipGraphLayoutStorageKey(projectKey))
+      } catch {
+        // Resetting a local presentation preference is best-effort only.
       }
-
-      // 绘制节点
-      for (const node of nodes) {
-        const role = ['protagonist', 'antagonist', 'supporting', 'minor'].includes(node.role)
-          ? node.role
-          : 'minor'
-        const color = canvasStyles.getPropertyValue(`--color-role-${role}`).trim()
-          || canvasStyles.getPropertyValue('--color-text-secondary').trim()
-
-        // 光晕
-        ctx.beginPath()
-        ctx.arc(node.x, node.y, 28, 0, Math.PI * 2)
-        ctx.fillStyle = color + '25'
-        ctx.fill()
-
-        // 节点
-        ctx.beginPath()
-        ctx.arc(node.x, node.y, 20, 0, Math.PI * 2)
-        ctx.fillStyle = color + '40'
-        ctx.fill()
-        ctx.strokeStyle = color
-        ctx.lineWidth = 2
-        ctx.stroke()
-
-        // 名字
-        ctx.font = 'bold 22px system-ui'
-        ctx.fillStyle = readableTextColor
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
-        ctx.fillText(compactOverviewLabel(node.name, NODE_LABEL_MAX_CHARACTERS), node.x, node.y + 36)
-      }
-      ctx.restore()
     }
-    drawRef.current = drawFrame
-
-    const themeObserver = new MutationObserver(drawFrame)
-    const skinRoot = canvas.closest<HTMLElement>('.app-skin-root')
-    const observedThemeRoots = new Set<HTMLElement>([
-      document.documentElement,
-      ...(skinRoot ? [skinRoot] : []),
-    ])
-    for (const themeRoot of observedThemeRoots) themeObserver.observe(themeRoot, {
-      attributes: true,
-      attributeFilter: ['class', 'style', 'data-theme', 'data-skin', 'data-skin-readability'],
-    })
-
-    const simulate = () => {
-      const nodes = nodesRef.current
-      if (iteration >= maxIterations) {
-        drawFrame()
-        return
-      }
-
-      // 斥力（节点间）
-      for (let i = 0; i < nodes.length; i++) {
-        for (let j = i + 1; j < nodes.length; j++) {
-          const dx = nodes[j].x - nodes[i].x
-          const dy = nodes[j].y - nodes[i].y
-          const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1)
-          const force = 8000 / (dist * dist)
-          const fx = (dx / dist) * force
-          const fy = (dy / dist) * force
-          nodes[i].vx -= fx
-          nodes[i].vy -= fy
-          nodes[j].vx += fx
-          nodes[j].vy += fy
-        }
-      }
-
-      // 引力（连线间）
-      for (const edge of edges) {
-        const a = nodes.find((n) => n.name === edge.from)
-        const b = nodes.find((n) => n.name === edge.to)
-        if (!a || !b) continue
-        const dx = b.x - a.x
-        const dy = b.y - a.y
-        const dist = Math.sqrt(dx * dx + dy * dy)
-        const force = (dist - 300) * 0.01
-        const fx = (dx / dist) * force
-        const fy = (dy / dist) * force
-        a.vx += fx
-        a.vy += fy
-        b.vx -= fx
-        b.vy -= fy
-      }
-
-      // 向心力
-      for (const node of nodes) {
-        node.vx += (centerX - node.x) * 0.002
-        node.vy += (centerY - node.y) * 0.002
-      }
-
-      // 应用速度 + 阻尼
-      const damping = 0.85
-      for (const node of nodes) {
-        node.vx *= damping
-        node.vy *= damping
-        node.x += node.vx
-        node.y += node.vy
-        // 边界约束
-        node.x = Math.max(40, Math.min(w * 2 - 40, node.x))
-        node.y = Math.max(40, Math.min(h * 2 - 40, node.y))
-      }
-
-      iteration++
-      drawFrame()
-      animRef.current = requestAnimationFrame(simulate)
-    }
-
-    simulate()
-
-    return () => {
-      themeObserver.disconnect()
-      cancelAnimationFrame(animRef.current)
-      drawRef.current = null
-    }
-  }, [characters, edges])
-
-  const updateZoom = (nextScale: number) => {
-    const scale = Math.min(2, Math.max(0.5, Math.round(nextScale * 10) / 10))
-    viewRef.current.scale = scale
-    setZoomPercent(Math.round(scale * 100))
-    drawRef.current?.()
-  }
-
-  const fitView = () => {
-    viewRef.current = { scale: 1, offsetX: 0, offsetY: 0 }
-    setZoomPercent(100)
-    drawRef.current?.()
-  }
+    const resetModel = buildRelationshipGraphModel(characters)
+    const resetNodes = toFlowNodes(resetModel.nodes, resetModel.edges)
+    setNodes(resetNodes)
+    setEdges(toFlowEdges(resetModel.edges, resetNodes))
+    fitGraph()
+  }, [characters, fitGraph, projectKey])
 
   if (characters.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full text-xs text-[var(--color-text-muted)]">
+      <div className="flex h-full items-center justify-center text-xs text-[var(--color-text-muted)]">
         {text('暂无角色数据', 'No character data')}
       </div>
     )
   }
 
-  const relationshipDetails = edges
-    .flatMap(edge => edge.relations)
-    .map(relation => text(
-      `${relation.from} 对 ${relation.to}：${relation.label}`,
-      `${relation.from} to ${relation.to}: ${relation.label}`,
-    ))
-    .join(text('；', '; '))
-  const graphLabel = relationshipDetails
-    ? text(
-        `角色关系图谱。完整关系：${relationshipDetails}`,
-        `Character relationship graph. Full relationships: ${relationshipDetails}`,
-      )
-    : text('角色关系图谱', 'Character relationship graph')
+  return (
+    <div className="h-full min-h-100 w-full" aria-label={text('角色关系图谱', 'Character relationship graph')}>
+      <ReactFlow<CharacterGraphNode, RelationshipFlowEdge>
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
+        onNodesChange={onNodesChange}
+        onNodeDragStop={onNodeDragStop}
+        onNodeClick={(_event, node) => onCharacterSelect?.(node.data.name)}
+        onInit={(instance) => {
+          flowRef.current = instance
+          fitGraph()
+        }}
+        fitView
+        minZoom={0.25}
+        maxZoom={2}
+        nodesConnectable={false}
+        edgesFocusable
+        elementsSelectable
+        proOptions={{ hideAttribution: true }}
+        className="bg-[var(--color-bg)]"
+      >
+        <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="var(--color-border)" />
+        <Controls showInteractive={false} position="bottom-right" />
+        {nodes.length > 6 && (
+          <MiniMap
+            position="bottom-left"
+            maskColor="rgba(15, 23, 42, 0.08)"
+            nodeColor={(node) => ROLE_COLORS[(node.data as CharacterGraphNodeData).role] ?? ROLE_COLORS.minor}
+          />
+        )}
+        <Panel position="top-right" className="flex items-center gap-1 rounded-md border p-1 shadow-sm" style={{ borderColor: 'var(--color-border)', background: 'var(--color-panel)' }}>
+          <span className="px-1 text-[11px] text-[var(--color-text-muted)]">
+            {text(`${edges.length} 条有向关系`, `${edges.length} directed relations`)}
+          </span>
+          <button type="button" className="rounded p-1 hover:bg-[var(--color-hover)]" title={text('适合视图', 'Fit graph')} aria-label={text('适合视图', 'Fit graph')} onClick={fitGraph}>
+            <Maximize2 size={14} />
+          </button>
+          <button type="button" className="rounded p-1 hover:bg-[var(--color-hover)]" title={text('重置布局', 'Reset layout')} aria-label={text('重置布局', 'Reset layout')} onClick={resetLayout}>
+            <RotateCcw size={14} />
+          </button>
+        </Panel>
+      </ReactFlow>
+    </div>
+  )
+}
+
+export default function RelationshipGraph({ characters, projectKey, onCharacterSelect }: RelationshipGraphProps) {
+  const graphKey = [projectKey ?? '', JSON.stringify(characters.map(character => [
+    character.name,
+    character.role,
+    character.relationships,
+  ]))].join('\u0000')
+  const graphModel = useMemo(
+    () => buildRelationshipGraphModel(characters, readRelationshipGraphPositions(projectKey)),
+    [characters, projectKey],
+  )
 
   return (
-    <div className="relative h-full overflow-hidden">
-      <div
-        className="absolute right-3 top-3 z-10 flex items-center gap-1 rounded-md border px-1 py-1"
-        style={{
-          borderColor: 'var(--color-border)',
-          backgroundColor: 'var(--color-panel)',
-          color: 'var(--color-text)',
-        }}
-      >
-        <button
-          type="button"
-          className="rounded p-1 hover:bg-[var(--color-hover)]"
-          aria-label={text('缩小关系图谱', 'Zoom out of character graph')}
-          onClick={() => updateZoom(viewRef.current.scale - 0.1)}
-        >
-          <ZoomOut size={14} aria-hidden="true" />
-        </button>
-        <span className="min-w-10 text-center text-[11px] tabular-nums">{zoomPercent}%</span>
-        <button
-          type="button"
-          className="rounded p-1 hover:bg-[var(--color-hover)]"
-          aria-label={text('放大关系图谱', 'Zoom in to character graph')}
-          onClick={() => updateZoom(viewRef.current.scale + 0.1)}
-        >
-          <ZoomIn size={14} aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className="rounded p-1 hover:bg-[var(--color-hover)]"
-          aria-label={text('适合视图', 'Fit character graph to view')}
-          onClick={fitView}
-        >
-          <Maximize2 size={14} aria-hidden="true" />
-        </button>
-      </div>
-      <canvas
-        ref={canvasRef}
-        role="img"
-        aria-label={graphLabel}
-        className="h-full w-full cursor-grab active:cursor-grabbing"
-        style={{ background: 'transparent', color: 'var(--color-text)' }}
-        onWheel={(event) => {
-          event.preventDefault()
-          updateZoom(viewRef.current.scale + (event.deltaY < 0 ? 0.1 : -0.1))
-        }}
-        onPointerDown={(event) => {
-          const point = pointerWorldPosition(
-            event.currentTarget,
-            event.clientX,
-            event.clientY,
-            viewRef.current,
-          )
-          const node = nodesRef.current.find(candidate => (
-            (candidate.x - point.x) ** 2 + (candidate.y - point.y) ** 2 <= 28 ** 2
-          ))
-          if (node) {
-            cancelAnimationFrame(animRef.current)
-            node.vx = 0
-            node.vy = 0
-            dragRef.current = {
-              kind: 'node',
-              name: node.name,
-              offsetX: node.x - point.x,
-              offsetY: node.y - point.y,
-            }
-          } else {
-            dragRef.current = { kind: 'view', x: event.clientX, y: event.clientY }
-          }
-          event.currentTarget.setPointerCapture(event.pointerId)
-        }}
-        onPointerMove={(event) => {
-          const drag = dragRef.current
-          if (!drag) return
-          if (drag.kind === 'node') {
-            const node = nodesRef.current.find(candidate => candidate.name === drag.name)
-            if (!node) return
-            const point = pointerWorldPosition(
-              event.currentTarget,
-              event.clientX,
-              event.clientY,
-              viewRef.current,
-            )
-            node.x = Math.max(40, Math.min(event.currentTarget.width - 40, point.x + drag.offsetX))
-            node.y = Math.max(40, Math.min(event.currentTarget.height - 40, point.y + drag.offsetY))
-            node.vx = 0
-            node.vy = 0
-            drawRef.current?.()
-            return
-          }
-          const pixelRatio = event.currentTarget.width / Math.max(event.currentTarget.clientWidth, 1)
-          viewRef.current.offsetX += (event.clientX - drag.x) * pixelRatio
-          viewRef.current.offsetY += (event.clientY - drag.y) * pixelRatio
-          dragRef.current = { kind: 'view', x: event.clientX, y: event.clientY }
-          drawRef.current?.()
-        }}
-        onPointerUp={(event) => {
-          dragRef.current = null
-          event.currentTarget.releasePointerCapture(event.pointerId)
-        }}
-        onPointerCancel={() => { dragRef.current = null }}
-      />
-    </div>
+    <RelationshipGraphSurface
+      key={graphKey}
+      characters={characters}
+      projectKey={projectKey}
+      onCharacterSelect={onCharacterSelect}
+      graphModel={graphModel}
+    />
   )
 }

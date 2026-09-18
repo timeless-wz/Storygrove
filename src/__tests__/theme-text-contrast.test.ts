@@ -111,7 +111,7 @@ describe('readable theme text contrast contract', () => {
   ] as const)('keeps %s information-bearing muted text at WCAG AA on content surfaces', (_theme, selector) => {
     const declarations = declarationsFor(selector)
     const mutedText = declarations.get('--color-text-muted')
-    expect(mutedText).toBe('#655F55')
+    expect(mutedText).toBe('#5F6874')
 
     for (const surfaceToken of [
       '--color-bg',

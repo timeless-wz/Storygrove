@@ -8,31 +8,30 @@ import { useMCPStore } from './stores/mcp-store'
 import { useWorkflowStore } from './stores/workflow-store'
 import { useLocaleStore } from './stores/locale-store'
 import { useSkinStore } from './stores/skin-store'
+import { useEditorStore } from './stores/editor-store'
 import { ipc } from './services/ipc-client'
 import TitleBar from './components/layout/TitleBar'
 import StatusBar from './components/layout/StatusBar'
-import LeftToolWindowBar from './components/layout/LeftToolWindowBar'
-import RightToolWindowBar from './components/layout/RightToolWindowBar'
 import Sidebar from './components/panels/Sidebar'
 import EditorArea from './components/panels/EditorArea'
 import AIPanel from './components/panels/AIPanel'
 import AIOutputPanel from './components/panels/AIOutputPanel'
-import BottomPanel from './components/panels/BottomPanel'
+import ProjectReferencePanel from './components/panels/ProjectReferencePanel'
 import NewProjectDialog from './components/dialogs/NewProjectDialog'
 import ImportNovelDialog from './components/dialogs/ImportNovelDialog'
-import ChapterCreationDialog from './components/dialogs/ChapterCreationDialog'
 import ExportDialog from './components/dialogs/ExportDialog'
 import SettingsModal from './components/settings/SettingsModal'
 import { ANIME_SKIN_URL } from './components/settings/AppearanceSettings'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { actionToast } from './components/ui/ActionToast'
+import { TooltipProvider } from './components/ui/Tooltip'
 import { UpdateNotifier } from './components/updates/UpdateNotifier'
+import { useResponsiveWorkbenchLayout } from './hooks/useResponsiveWorkbenchLayout'
 import { globalEventBus } from './shared/event-bus'
 import {
   projectSessionContextFromProject,
   sameProjectSessionContext,
 } from './shared/project-session-context'
-import { getAutoNextChapterPrefill, type NextChapterBlueprint } from './services/auto-next-chapter'
 import type { SkinId } from './shared/skin-types'
 
 // eslint-disable-next-line react-refresh/only-export-components
@@ -96,7 +95,11 @@ export default function App() {
   const initLocale = useLocaleStore((s) => s.init)
   const text = useLocaleStore((s) => s.text)
   const sidebarOpen = useLayoutStore(s => s.sidebarOpen)
+  const sidebarView = useLayoutStore(s => s.sidebarView)
   const aiPanelOpen = useLayoutStore(s => s.aiPanelOpen)
+  const referencePanelOpen = useLayoutStore(s => s.referencePanelOpen)
+  const focusMode = useLayoutStore(s => s.focusMode)
+  const currentProject = useProjectStore(s => s.currentProject)
   const rightView = useLayoutStore(s => s.rightView)
   const settingsOpen = useLayoutStore(s => s.settingsOpen)
   const closeSettings = useLayoutStore(s => s.closeSettings)
@@ -106,9 +109,6 @@ export default function App() {
   const closeExport = useLayoutStore(s => s.closeExport)
   const importNovelOpen = useLayoutStore(s => s.importNovelOpen)
   const closeImportNovel = useLayoutStore(s => s.closeImportNovel)
-  const chapterCreationOpen = useLayoutStore(s => s.chapterCreationOpen)
-  const chapterCreationPrefill = useLayoutStore(s => s.chapterCreationPrefill)
-  const closeChapterCreation = useLayoutStore(s => s.closeChapterCreation)
   const initLLM = useLLMStore((s) => s.init)
   const loadRecentProjects = useProjectStore((s) => s.loadRecentProjects)
   const skinState = useSkinStore((s) => s.skinState)
@@ -116,6 +116,9 @@ export default function App() {
   const initSkin = useSkinStore((s) => s.init)
   const disposeSkin = useSkinStore((s) => s.dispose)
   const recoverFromImageFailure = useSkinStore((s) => s.recoverFromImageFailure)
+
+  // 窄屏策略：右栏优先收起，1280px 起三栏完整可用
+  useResponsiveWorkbenchLayout()
 
   // 初始化：主题 + LLM 模型 + 最近项目 + 缩放级别
   useEffect(() => {
@@ -147,7 +150,7 @@ export default function App() {
       if (!completedRun) return
       actionToast.workflowComplete(
         text(`「${completedRun.title}」已完成`, `“${completedRun.title}” completed`),
-        () => useLayoutStore.getState().openRightPanel('ai-output')
+        () => useLayoutStore.getState().openBottomTab('tasks')
       )
     })
 
@@ -183,16 +186,20 @@ export default function App() {
               projectSession.projectPath,
             ),
           ])
-          if (!isCurrentProjectSession()) return
-          const prefill = getAutoNextChapterPrefill(
-            true,
-            chapterNumber,
-            blueprint as NextChapterBlueprint | null,
-            existingDraft !== null,
-          )
-          if (prefill) useLayoutStore.getState().openChapterCreation(prefill)
+          if (existingDraft && typeof existingDraft === 'object' && 'id' in existingDraft) {
+            const draftObj = existingDraft as { id: number }
+            useEditorStore.getState().openFile({
+              id: `draft-${draftObj.id}`,
+              name: `第${nextChapterNumber}章 ${(blueprint as { title?: string } | null)?.title || ''}`.trim(),
+              type: 'chapter',
+              filePath: `vela://draft/${draftObj.id}`,
+              draftId: draftObj.id,
+              chapterNumber: nextChapterNumber,
+              projectKey: projectSession.projectPath,
+            })
+          }
         } catch (error) {
-          console.warn('[AutoNextChapter] 无法打开下一章创作窗口:', error)
+          console.warn('[AutoNextChapter] 无法自动打开下一章:', error)
         }
       })()
     })
@@ -246,6 +253,7 @@ export default function App() {
   }, [])
 
   return (
+    <TooltipProvider delayDuration={400} skipDelayDuration={300}>
     <AppSkinRoot theme={resolvedTheme} skinId={skinState.activeSkin}>
       <SkinBackgroundLayer
         skinId={skinState.activeSkin}
@@ -256,28 +264,13 @@ export default function App() {
       {/* 标题栏 */}
       <TitleBar />
 
-      {/*
-        主体：flex 行 = LeftBar | 纵向PanelGroup | RightBar
-        ┌───┬──────────────────────────────┬───┐
-        │   │  Sidebar | Editor | AIPanel  │   │
-        │ L │──────────────────────────────│ R │
-        │   │     BottomPanel (全宽)        │   │
-        └───┴──────────────────────────────┴───┘
-      */}
-      <div className="app-skin-main-region flex flex-1 overflow-hidden">
+      {/* 项目工作台：资源树 | 编辑器 | 按需上下文。任务以状态栏悬浮窗展示，不占工作区高度。 */}
+      <div className={`app-skin-main-region writer-desktop-shell flex flex-1 overflow-hidden${focusMode ? ' is-focus-mode' : ''}`}>
 
-        {/* 左侧工具窗口栏（全高，包括底部面板区域） */}
-        <LeftToolWindowBar />
-
-        {/* 纵向 PanelGroup：上层主区域 + 下层底部面板 */}
-        <PanelGroup orientation="vertical" className="flex-1">
-
-          {/* 上层：侧边栏 | 编辑区 | AI 面板（水平分割） */}
-          <Panel id="top" defaultSize={75} minSize={30}>
-            <PanelGroup orientation="horizontal" className="flex-1 h-full">
+        <PanelGroup orientation="horizontal" className="flex-1 h-full">
 
               {/* 左侧边栏 */}
-              {sidebarOpen && (
+              {sidebarOpen && !focusMode && (
                 <>
                   <Panel id="sidebar" defaultSize={20} minSize={10}>
                     <ErrorBoundary fallbackLabel={text('侧边栏渲染失败', 'Sidebar failed to render')}>
@@ -295,8 +288,20 @@ export default function App() {
                 </ErrorBoundary>
               </Panel>
 
-              {/* 右侧面板（Agent 对话 / AI 输出） */}
-              {aiPanelOpen && (
+              {/* 项目参考栏：真实入口指向角色、蓝图、世界、剧情、任务和工作区中枢。 */}
+              {currentProject && sidebarView !== 'home' && referencePanelOpen && !focusMode && (
+                <>
+                  <PanelResizeHandle />
+                  <Panel id="project-reference" defaultSize={22} minSize={16}>
+                    <ErrorBoundary fallbackLabel={text('项目参考栏渲染失败', 'Project reference panel failed to render')}>
+                      <ProjectReferencePanel />
+                    </ErrorBoundary>
+                  </Panel>
+                </>
+              )}
+
+              {/* 右侧 AI 面板按需展开，保留既有 Agent 与工作流输出。 */}
+              {currentProject && sidebarView !== 'home' && aiPanelOpen && !focusMode && (
                 <>
                   <PanelResizeHandle />
                   <Panel id="ai-panel" defaultSize={20} minSize={10}>
@@ -306,18 +311,7 @@ export default function App() {
                   </Panel>
                 </>
               )}
-            </PanelGroup>
-          </Panel>
-
-          {/* 下层：底部面板（铺满整个 PanelGroup 宽度）— 始终挂载，面板控制显隐 */}
-          <PanelResizeHandle />
-          <Panel id="bottom" defaultSize={25} minSize={8}>
-            <BottomPanel />
-          </Panel>
         </PanelGroup>
-
-        {/* 右侧工具窗口栏（全高，包括底部面板区域） */}
-        <RightToolWindowBar />
       </div>
 
 
@@ -333,11 +327,6 @@ export default function App() {
         open={importNovelOpen}
         onClose={closeImportNovel}
       />
-      <ChapterCreationDialog
-        isOpen={chapterCreationOpen}
-        prefill={chapterCreationPrefill}
-        onClose={closeChapterCreation}
-      />
       <ExportDialog
         isOpen={exportOpen}
         onClose={closeExport}
@@ -349,5 +338,6 @@ export default function App() {
       />
 
     </AppSkinRoot>
+    </TooltipProvider>
   )
 }

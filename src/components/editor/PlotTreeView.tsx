@@ -1,5 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, ExternalLink, GitBranch, Loader2, RefreshCw, Trash2 } from 'lucide-react'
+import {
+  ChevronLeft,
+  ChevronRight,
+  GitBranch,
+  Loader2,
+  RefreshCw,
+  Trash2,
+  BookOpen,
+  FileText,
+  ExternalLink,
+  Plus,
+} from 'lucide-react'
 
 import type { ModelProfile } from '../../shared/ipc-channels'
 import type {
@@ -9,26 +20,32 @@ import type {
 } from '../../shared/plot-tree'
 import { useLocaleStore } from '../../stores/locale-store'
 import { Button } from '../ui/Button'
-import { Label } from '../ui/Label'
-import { NativeSelect } from '../ui/NativeSelect'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '../ui/Dialog'
 
-const CHAPTER_WIDTH = 128
+const CHAPTER_WIDTH = 136
 const CHAPTER_WINDOW_SIZE = 40
 
 interface PlotTreeViewProps {
   snapshot: PlotTreeSnapshot | null
   sourceRevision: string
   currentChapter: number
-  models: ModelProfile[]
-  selectedModelId: string | null
-  busy: boolean
-  error: string
-  sourceReady: boolean
-  storedSnapshotInvalid: boolean
-  onModelChange: (modelId: string) => void
+  models?: ModelProfile[]
+  selectedModelId?: string | null
+  busy?: boolean
+  error?: string
+  sourceReady?: boolean
+  storedSnapshotInvalid?: boolean
+  onModelChange?: (modelId: string) => void
   onGenerate: () => void
   onClear: () => void
   onOpenSource: (source: PlotTreeSourceReference) => void
+  onNewStoryline?: () => void
 }
 
 function sourceLabel(source: PlotTreeSourceReference, text: (zh: string, en: string) => string): string {
@@ -38,28 +55,27 @@ function sourceLabel(source: PlotTreeSourceReference, text: (zh: string, en: str
   if (source.type === 'finalized-chapter') {
     return text(`第 ${source.chapterNumber} 章定稿`, `Chapter ${source.chapterNumber} finalized draft`)
   }
-  return text(`叙事计划 #${source.planId}`, `Narrative plan #${source.planId}`)
+  return text(`叙事线索 #${source.planId}`, `Narrative thread #${source.planId}`)
 }
 
 export default function PlotTreeView({
   snapshot,
   sourceRevision,
   currentChapter,
-  models,
-  selectedModelId,
-  busy,
-  error,
-  sourceReady,
-  storedSnapshotInvalid,
-  onModelChange,
+  busy = false,
+  error = '',
+  sourceReady = true,
+  storedSnapshotInvalid = false,
   onGenerate,
   onClear,
   onOpenSource,
+  onNewStoryline,
 }: PlotTreeViewProps) {
   const text = useLocaleStore(state => state.text)
   const viewportRef = useRef<HTMLDivElement>(null)
   const [selectedEvent, setSelectedEvent] = useState<PlotTreeEvent | null>(null)
   const [requestedWindowStart, setRequestedWindowStart] = useState<number | null>(null)
+
   const allChapters = useMemo(() => {
     const values = new Set<number>()
     const add = (chapter: number) => {
@@ -73,6 +89,7 @@ export default function PlotTreeView({
     }
     return [...values].sort((left, right) => left - right)
   }, [currentChapter, snapshot])
+
   const currentIndex = allChapters.findIndex(chapter => chapter >= currentChapter)
   const centeredWindowStart = Math.max(0, currentIndex - Math.floor(CHAPTER_WINDOW_SIZE / 2))
   const maximumWindowStart = Math.max(0, allChapters.length - CHAPTER_WINDOW_SIZE)
@@ -82,175 +99,312 @@ export default function PlotTreeView({
 
   useEffect(() => {
     if (!viewportRef.current) return
-    const currentIndex = chapters.indexOf(currentChapter)
-    viewportRef.current.scrollLeft = Math.max(0, (currentIndex - 1) * CHAPTER_WIDTH)
+    const curIdx = chapters.indexOf(currentChapter)
+    viewportRef.current.scrollLeft = Math.max(0, (curIdx - 1) * CHAPTER_WIDTH)
   }, [chapters, currentChapter])
 
   return (
     <section className="space-y-4">
-      <div className="rounded-lg border p-4 space-y-3" style={{ borderColor: 'var(--color-border)', background: 'var(--color-panel)' }}>
-        <div className="flex flex-wrap items-end gap-3">
-          <label className="min-w-56 flex-1">
-            <Label htmlFor="plot-tree-model">{text('本次分析模型', 'Model for this analysis')}</Label>
-            <NativeSelect
-              id="plot-tree-model"
-              value={selectedModelId ?? ''}
-              disabled={busy || models.length === 0}
-              onChange={event => onModelChange(event.target.value)}
+      {/* Top Toolbar */}
+      <div
+        className="rounded-lg border p-4 space-y-3"
+        style={{ borderColor: 'var(--color-border)', background: 'var(--color-panel)' }}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <GitBranch size={16} style={{ color: 'var(--color-accent)' }} />
+              <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
+                {text('剧情树与时间线可视化', 'Plot Tree & Timeline')}
+              </h3>
+            </div>
+            <p className="text-xs text-[var(--color-text-muted)] mt-1">
+              {text(
+                '确定性算法构建：直接由全部章节蓝图、正文定稿与叙事线索实时投影，第 1—58 章自动聚合成第一卷主线，完全不依赖任何大模型。',
+                'Deterministic projection: directly derived from blueprints, finalized chapters, and narrative threads without calling AI models.',
+              )}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {onNewStoryline && (
+              <Button variant="outline" size="sm" onClick={onNewStoryline}>
+                <Plus size={13} />
+                {text('新建故事线/支线', 'New Storyline')}
+              </Button>
+            )}
+
+            <Button
+              variant="default"
+              size="sm"
+              onClick={onGenerate}
+              disabled={busy || !sourceReady}
+              title={text('重新从蓝图与正文计算剧情树', 'Rebuild plot tree from blueprints and drafts')}
             >
-              <option value="" disabled>{text('请选择可用生成模型', 'Select a generation model')}</option>
-              {models.map(model => <option key={model.id} value={model.id}>{model.name || model.modelName}</option>)}
-            </NativeSelect>
-          </label>
-          <Button variant="ai" onClick={onGenerate} disabled={busy || !selectedModelId || !sourceReady}>
-            {busy ? <Loader2 size={14} className="animate-spin" /> : snapshot ? <RefreshCw size={14} /> : <GitBranch size={14} />}
-            {busy
-              ? text('生成中...', 'Generating...')
-              : snapshot
-                ? text('刷新剧情树', 'Refresh plot tree')
-                 : text('生成剧情树', 'Generate plot tree')}
-          </Button>
-          {snapshot && <Button variant="outline" onClick={onClear} disabled={busy}>
-            <Trash2 size={14} />{text('清除剧情树', 'Clear plot tree')}
-          </Button>}
+              {busy ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+              <span>{snapshot ? text('重建剧情树', 'Rebuild Plot Tree') : text('生成剧情树', 'Build Plot Tree')}</span>
+            </Button>
+
+            {snapshot && (
+              <Button variant="outline" size="sm" onClick={onClear} disabled={busy}>
+                <Trash2 size={13} />
+                {text('清除剧情树', 'Clear Plot Tree')}
+              </Button>
+            )}
+          </div>
         </div>
-        <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{text(
-          'AI 只读归纳现有大纲、蓝图、定稿与叙事计划；剧情树不会反写项目事实。',
-          'AI summarizes existing outlines, blueprints, finalized chapters, and narrative plans read-only. The plot tree never rewrites project facts.',
-        )}</p>
-        {stale && <p role="status" className="text-xs" style={{ color: 'var(--color-warning-text)' }}>{text('剧情资料已有更新，可刷新剧情树。', 'Plot sources have changed. Refresh the plot tree when ready.')}</p>}
-        {!sourceReady && <p role="status" className="text-xs" style={{ color: 'var(--color-warning-text)' }}>{text(
-          '请先添加章节蓝图、定稿或叙事线索，再生成剧情树。',
-          'Add a chapter blueprint, finalized chapter, or narrative thread before generating a plot tree.',
-        )}</p>}
-        {storedSnapshotInvalid && <p role="alert" className="text-xs" style={{ color: 'var(--color-warning-text)' }}>{text(
-          '旧剧情树快照无法安全显示，已隔离；作者资料未被修改，请重新生成。',
-          'The stored plot-tree snapshot could not be displayed safely and was isolated. Author sources were not changed; generate it again.',
-        )}</p>}
-        {error && <p role="alert" className="text-xs" style={{ color: 'var(--color-error-text)' }}>{error}</p>}
+
+        {stale && (
+          <p role="status" className="text-xs text-[var(--color-warning-text)] bg-[var(--color-hover)] px-2.5 py-1.5 rounded flex items-center justify-between">
+            <span>{text('章节蓝图或正文资料已更新，可点击「重建剧情树」刷新时间线。', 'Sources have changed. Click “Rebuild Plot Tree” to refresh.')}</span>
+            <button
+              type="button"
+              className="text-[11px] underline font-medium hover:opacity-80"
+              onClick={onGenerate}
+            >
+              {text('立即重建', 'Rebuild now')}
+            </button>
+          </p>
+        )}
+
+        {!sourceReady && (
+          <p role="status" className="text-xs text-[var(--color-warning-text)]">
+            {text('请先添加章节蓝图、定稿或叙事线索，再构建剧情树。', 'Add a chapter blueprint, finalized chapter, or narrative thread before generating a plot tree.')}
+          </p>
+        )}
+
+        {storedSnapshotInvalid && (
+          <p role="alert" className="text-xs text-[var(--color-warning-text)]">
+            {text('旧剧情树快照无法安全显示，已隔离；作者资料未被修改，请点击「重建剧情树」。', 'The stored plot-tree snapshot could not be displayed safely. Click “Rebuild Plot Tree” to recreate it.')}
+          </p>
+        )}
+
+        {error && <p role="alert" className="text-xs text-[var(--color-error-text)]">{error}</p>}
       </div>
 
       {!snapshot && (
-        <div className="rounded-lg border px-4 py-10 text-center text-sm" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}>
-          {text('尚未生成剧情树', 'No plot tree has been generated yet')}
+        <div
+          className="rounded-lg border px-4 py-12 text-center text-sm"
+          style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}
+        >
+          <GitBranch size={32} className="mx-auto mb-2 opacity-40" />
+          <p>{text('尚未生成剧情树', 'No plot tree built yet')}</p>
+          <Button variant="default" size="sm" className="mt-3" onClick={onGenerate} disabled={busy || !sourceReady}>
+            <RefreshCw size={13} />
+            {text('从蓝图与正文立即生成剧情树', 'Build Plot Tree Now')}
+          </Button>
         </div>
       )}
 
       {snapshot && (
         <div className="space-y-2">
-          {allChapters.length > CHAPTER_WINDOW_SIZE && <div className="flex items-center justify-end gap-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={chapterWindowStart === 0}
-              onClick={() => setRequestedWindowStart(Math.max(0, chapterWindowStart - CHAPTER_WINDOW_SIZE))}
-            >
-              <ChevronLeft size={13} />{text('上一组章节', 'Previous chapters')}
-            </Button>
-            <span>{text(
-              `显示 ${chapters[0]}–${chapters.at(-1)} 章（共 ${allChapters.length} 个有内容的章节）`,
-              `Showing Chapters ${chapters[0]}–${chapters.at(-1)} (${allChapters.length} chapters with content)`,
-            )}</span>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={chapterWindowStart + CHAPTER_WINDOW_SIZE >= allChapters.length}
-              onClick={() => setRequestedWindowStart(Math.min(
-                maximumWindowStart,
-                chapterWindowStart + CHAPTER_WINDOW_SIZE,
-              ))}
-            >
-              {text('下一组章节', 'Next chapters')}<ChevronRight size={13} />
-            </Button>
-          </div>}
-          <div ref={viewportRef} className="overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--color-border)' }}>
-          <table className="border-collapse text-xs" style={{ minWidth: 208 + chapters.length * CHAPTER_WIDTH, tableLayout: 'fixed' }}>
-            <thead>
-              <tr style={{ background: 'var(--color-panel)' }}>
-                <th className="sticky left-0 z-10 w-52 border-b border-r px-3 py-2 text-left" style={{ borderColor: 'var(--color-border)', background: 'var(--color-panel)' }}>
-                  {text('主线 / 支线', 'Main / subplot')}
-                </th>
-                {chapters.map(chapter => (
-                  <th
-                    key={chapter}
-                    className="border-b border-r px-2 py-2 text-center font-medium"
-                    style={{
-                      width: CHAPTER_WIDTH,
-                      borderColor: 'var(--color-border)',
-                      color: chapter === currentChapter ? 'var(--color-accent)' : 'var(--color-text-muted)',
-                    }}
-                  >
-                    {text(`第 ${chapter} 章`, `Ch. ${chapter}`)}
-                  </th>
+          {allChapters.length > CHAPTER_WINDOW_SIZE && (
+            <div className="flex items-center justify-end gap-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={chapterWindowStart === 0}
+                onClick={() => setRequestedWindowStart(Math.max(0, chapterWindowStart - CHAPTER_WINDOW_SIZE))}
+              >
+                <ChevronLeft size={13} />{text('上一组章节', 'Previous chapters')}
+              </Button>
+              <span>{text(
+                `显示 ${chapters[0]}–${chapters.at(-1)} 章（共 ${allChapters.length} 个章节）`,
+                `Showing Chapters ${chapters[0]}–${chapters.at(-1)} (${allChapters.length} chapters)`,
+              )}</span>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={chapterWindowStart + CHAPTER_WINDOW_SIZE >= allChapters.length}
+                onClick={() => setRequestedWindowStart(Math.min(
+                  maximumWindowStart,
+                  chapterWindowStart + CHAPTER_WINDOW_SIZE,
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {snapshot.tracks.map(track => {
-                const parent = snapshot.tracks.find(candidate => candidate.id === track.parentTrackId)
-                const occurredCount = track.events.filter(event => event.status === 'occurred').length
-                return (
-                  <tr key={track.id}>
-                    <th className="sticky left-0 z-10 border-b border-r p-3 text-left align-top" style={{ borderColor: 'var(--color-border)', background: 'var(--color-panel)' }}>
-                      <span className="mb-1 block text-[11px] font-normal" style={{ color: track.role === 'main' ? 'var(--color-accent)' : 'var(--color-text-muted)' }}>
-                        {track.role === 'main' ? text('主线', 'Main plot') : text('支线', 'Subplot')}
-                        {parent ? ` · ${parent.title}` : ''}
-                      </span>
-                      <span className="block text-sm">{track.title}</span>
-                      <span className="mt-1 block font-normal" style={{ color: 'var(--color-text-muted)' }}>
-                        {text(
-                          `第 ${track.startChapter}–${track.endChapter} 章 · ${occurredCount}/${track.events.length} 已发生`,
-                          `Ch. ${track.startChapter}–${track.endChapter} · ${occurredCount}/${track.events.length} occurred`,
-                        )}
-                      </span>
-                      <span className="mt-1 block font-normal leading-5" style={{ color: 'var(--color-text-muted)' }}>{track.summary}</span>
+              >
+                {text('下一组章节', 'Next chapters')}<ChevronRight size={13} />
+              </Button>
+            </div>
+          )}
+
+          <div
+            ref={viewportRef}
+            className="overflow-x-auto rounded-lg border"
+            style={{ borderColor: 'var(--color-border)' }}
+          >
+            <table
+              className="border-collapse text-xs"
+              style={{ minWidth: 208 + chapters.length * CHAPTER_WIDTH, tableLayout: 'fixed' }}
+            >
+              <thead>
+                <tr style={{ background: 'var(--color-panel)' }}>
+                  <th
+                    className="sticky left-0 z-10 w-52 border-b border-r px-3 py-2 text-left"
+                    style={{ borderColor: 'var(--color-border)', background: 'var(--color-panel)' }}
+                  >
+                    {text('主线 / 故事线', 'Main / Subplot')}
+                  </th>
+                  {chapters.map(chapter => (
+                    <th
+                      key={chapter}
+                      className="border-b border-r px-2 py-2 text-center font-medium"
+                      style={{
+                        width: CHAPTER_WIDTH,
+                        borderColor: 'var(--color-border)',
+                        color: chapter === currentChapter ? 'var(--color-accent)' : 'var(--color-text-muted)',
+                      }}
+                    >
+                      <div className="text-[11px] font-semibold">第 {chapter} 章</div>
                     </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {snapshot.tracks.map(track => (
+                  <tr key={track.id} className="border-b" style={{ borderColor: 'var(--color-border)' }}>
+                    <th
+                      className="sticky left-0 z-10 border-r px-3 py-2.5 text-left font-normal"
+                      style={{ borderColor: 'var(--color-border)', background: 'var(--color-panel)' }}
+                    >
+                      <div className="flex items-center gap-1.5 font-medium" style={{ color: 'var(--color-text)' }}>
+                        <GitBranch size={13} className={track.role === 'main' ? 'text-[var(--color-accent)]' : 'text-[var(--color-text-muted)]'} />
+                        <span className="truncate">{track.title}</span>
+                      </div>
+                      <div className="text-[10px] text-[var(--color-text-muted)] truncate mt-0.5">
+                        {track.role === 'main' ? text('主线轨道', 'Main Track') : text('支线/暗线', 'Subplot')} · {track.startChapter}–{track.endChapter} 章
+                      </div>
+                    </th>
+
                     {chapters.map(chapter => {
                       const events = track.events.filter(event => event.chapterNumber === chapter)
                       return (
-                        <td key={chapter} className="border-b border-r p-2 align-top" style={{ borderColor: 'var(--color-border)', width: CHAPTER_WIDTH }}>
-                          <div className="space-y-1">
-                            {events.map((event, index) => (
+                        <td
+                          key={chapter}
+                          className="border-r p-1.5 align-top"
+                          style={{
+                            borderColor: 'var(--color-border)',
+                            background: chapter < track.startChapter || chapter > track.endChapter
+                              ? 'var(--color-bg)'
+                              : 'transparent',
+                          }}
+                        >
+                          {events.map((event, index) => {
+                            const isOccurred = event.status === 'occurred'
+                            return (
                               <button
-                                key={`${event.chapterNumber}:${event.summary}:${index}`}
+                                key={index}
                                 type="button"
-                                className="w-full rounded border px-2 py-1.5 text-left leading-5 hover:border-[var(--color-accent)]"
-                                style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg)' }}
+                                className="w-full text-left p-1.5 rounded text-[11px] border transition-all hover:scale-[1.02]"
+                                style={{
+                                  borderColor: isOccurred ? 'rgba(34, 197, 94, 0.4)' : 'rgba(99, 102, 241, 0.4)',
+                                  backgroundColor: isOccurred ? 'rgba(34, 197, 94, 0.08)' : 'rgba(99, 102, 241, 0.08)',
+                                  color: 'var(--color-text)',
+                                }}
                                 onClick={() => setSelectedEvent(event)}
+                                title={text('点击查看事件详情与回跳入口', 'Click to view event details and jump links')}
                               >
-                                <span className="mb-0.5 block text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
-                                  {event.status === 'occurred' ? text('已发生', 'Occurred') : text('已计划', 'Planned')}
-                                </span>
-                                {event.summary}
+                                <div className="flex items-center justify-between gap-1 mb-0.5">
+                                  <span
+                                    className="text-[9px] px-1 py-0.2 rounded font-semibold"
+                                    style={{
+                                      backgroundColor: isOccurred ? 'rgba(34, 197, 94, 0.2)' : 'rgba(99, 102, 241, 0.2)',
+                                      color: isOccurred ? 'rgb(34, 197, 94)' : 'rgb(99, 102, 241)',
+                                    }}
+                                  >
+                                    {isOccurred ? text('已定稿', 'Finalized') : text('蓝图规划', 'Planned')}
+                                  </span>
+                                </div>
+                                <p className="line-clamp-2 leading-tight">
+                                  {event.summary}
+                                </p>
                               </button>
-                            ))}
-                          </div>
+                            )
+                          })}
                         </td>
                       )
                     })}
                   </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
 
+      {/* Event Details & Jump Dialog */}
       {selectedEvent && (
-        <aside className="rounded-lg border p-4 space-y-2" style={{ borderColor: 'var(--color-border)', background: 'var(--color-panel)' }}>
-          <h3 className="font-medium">{selectedEvent.summary}</h3>
-          <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            {text(`第 ${selectedEvent.chapterNumber} 章 · ${selectedEvent.status === 'occurred' ? '已发生' : '已计划'}`, `Chapter ${selectedEvent.chapterNumber} · ${selectedEvent.status === 'occurred' ? 'Occurred' : 'Planned'}`)}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {selectedEvent.sources.map((source, index) => (
-              <Button key={`${source.type}:${index}`} size="sm" variant="outline" onClick={() => onOpenSource(source)}>
-                <ExternalLink size={12} />{sourceLabel(source, text)}
+        <Dialog open={Boolean(selectedEvent)} onOpenChange={v => !v && setSelectedEvent(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-sm">
+                <BookOpen size={16} style={{ color: 'var(--color-accent)' }} />
+                <span>
+                  {text(`第 ${selectedEvent.chapterNumber} 章 剧情事件`, `Chapter ${selectedEvent.chapterNumber} Plot Event`)}
+                </span>
+              </DialogTitle>
+            </DialogHeader>
+
+            <div className="space-y-3 py-2 text-xs">
+              <div>
+                <span className="text-[10px] text-[var(--color-text-muted)] block mb-1">
+                  {text('事件状态', 'Event Status')}
+                </span>
+                <span
+                  className="px-2 py-0.5 rounded text-[10px] font-medium"
+                  style={{
+                    backgroundColor: selectedEvent.status === 'occurred' ? 'rgba(34, 197, 94, 0.2)' : 'rgba(99, 102, 241, 0.2)',
+                    color: selectedEvent.status === 'occurred' ? 'rgb(34, 197, 94)' : 'rgb(99, 102, 241)',
+                  }}
+                >
+                  {selectedEvent.status === 'occurred' ? text('已定稿发生', 'Occurred (Finalized)') : text('蓝图规划中', 'Planned in Blueprint')}
+                </span>
+              </div>
+
+              <div>
+                <span className="text-[10px] text-[var(--color-text-muted)] block mb-1">
+                  {text('事件概要 / 核心内容', 'Summary')}
+                </span>
+                <p className="p-2.5 rounded bg-[var(--color-bg)] border border-[var(--color-border)] leading-5 text-[var(--color-text-secondary)]">
+                  {selectedEvent.summary}
+                </p>
+              </div>
+
+              <div>
+                <span className="text-[10px] text-[var(--color-text-muted)] block mb-1">
+                  {text('来源引用与回跳入口', 'Source Citations & Quick Jumps')}
+                </span>
+                <div className="space-y-1.5">
+                  {selectedEvent.sources.map((source, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      className="w-full flex items-center justify-between p-2 rounded bg-[var(--color-bg)] border border-[var(--color-border)] hover:border-[var(--color-accent)] transition-colors text-left"
+                      onClick={() => {
+                        onOpenSource(source)
+                        setSelectedEvent(null)
+                      }}
+                    >
+                      <div className="flex items-center gap-2">
+                        {source.type === 'blueprint' && <BookOpen size={13} className="text-[var(--color-accent)]" />}
+                        {source.type === 'finalized-chapter' && <FileText size={13} className="text-emerald-500" />}
+                        {source.type === 'narrative-thread' && <GitBranch size={13} className="text-indigo-400" />}
+                        <span className="font-medium text-[var(--color-text)]">
+                          {sourceLabel(source, text)}
+                        </span>
+                      </div>
+                      <ExternalLink size={12} className="text-[var(--color-text-muted)]" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="ghost" size="sm" onClick={() => setSelectedEvent(null)}>
+                {text('关闭', 'Close')}
               </Button>
-            ))}
-          </div>
-        </aside>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
     </section>
   )

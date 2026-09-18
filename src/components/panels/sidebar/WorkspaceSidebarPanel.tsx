@@ -38,7 +38,7 @@ export default function WorkspaceSidebarPanel() {
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-1.5 font-medium" style={{ color: 'var(--color-text)' }}>
             <Compass size={14} style={{ color: 'var(--color-accent)' }} />
-            <span>{text('创作母稿中枢', 'Workspace Hub')}</span>
+            <span>{text('创作资料中枢', 'Writing Sources Hub')}</span>
           </div>
           {status?.externalWorkspacePath && (
             <button

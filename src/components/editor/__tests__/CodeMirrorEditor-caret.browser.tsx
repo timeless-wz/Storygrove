@@ -51,6 +51,7 @@ describe('CodeMirror writing caret', () => {
 
     container.className = 'app-skin-root light'
     container.dataset.theme = 'light'
-    expect(getComputedStyle(caret!).borderLeftColor).toBe('rgb(122, 31, 18)')
+    // 浅色主题的书写光标跟随唯一强调色（克制蓝）：在白色正文面上对比度 6.7:1。
+    expect(getComputedStyle(caret!).borderLeftColor).toBe('rgb(29, 78, 216)')
   })
 })

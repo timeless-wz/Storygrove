@@ -11,14 +11,17 @@ import {
   Plus,
   Quote,
   RotateCcw,
-  Sparkles,
   X,
+  BookOpen,
+  FileText,
+  ExternalLink,
+  BookmarkCheck,
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { Button } from '../ui/Button'
-import {
-  Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription,
-} from '../ui/Dialog'
+import { toast } from '../ui/Toast'
+import { useEditorStore } from '../../stores/editor-store'
+import { openBuiltinEditor } from '../panels/sidebar/sidebar-file-openers'
 import { Input } from '../ui/Input'
 import { Label } from '../ui/Label'
 import { NativeSelect } from '../ui/NativeSelect'
@@ -26,17 +29,13 @@ import { Textarea } from '../ui/Textarea'
 import { captureProjectSession, isProjectSessionCurrent, isProjectSessionPath } from '../project-session-gate'
 import { useProjectStore } from '../../stores/project-store'
 import { useLocaleStore } from '../../stores/locale-store'
-import { useLLMStore } from '../../stores/llm-store'
 import { ipc } from '../../services/ipc-client'
 import { requireIpcSuccess } from '../../services/ipc-result'
-import type { ExpectedDraftSource, ModelProfile } from '../../shared/ipc-channels'
-import { resolveWritingLanguage, type WritingLanguage } from '../../shared/writing-language'
+import type { ExpectedDraftSource } from '../../shared/ipc-channels'
 import { parseChapterGoalReview, type ChapterGoalReview } from '../../shared/chapter-goal-review'
 import {
   createHumanConfirmedReviewSnapshot,
-  hasIncludedReviewItems,
   parseHumanConfirmedReviewSnapshot,
-  renderHumanConfirmedReviewBrief,
   serializeHumanConfirmedReviewSnapshot,
   type HumanConfirmedReviewItem,
   type HumanConfirmedReviewSnapshot,
@@ -275,25 +274,6 @@ function SeverityIcon({ severity }: { severity: ReviewIssue['severity'] }) {
   return <CheckCircle size={14} className="flex-shrink-0" style={{ color: 'var(--color-success)' }} />
 }
 
-function isGenerationModel(model: ModelProfile): boolean {
-  return model.purposes.includes('generation')
-}
-
-function availableGenerationModelId(
-  models: ModelProfile[],
-  modelId: string | null | undefined,
-): string | null {
-  return modelId && models.some(model => model.id === modelId && isGenerationModel(model))
-    ? modelId
-    : null
-}
-
-function preferredGenerationModelId(models: ModelProfile[], defaultModelId: string | null): string | null {
-  return availableGenerationModelId(models, defaultModelId)
-    ?? models.find(isGenerationModel)?.id
-    ?? null
-}
-
 function isReviewId(value: number | undefined): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
 }
@@ -369,11 +349,6 @@ function ReviewReportSession({
   initialSnapshot,
 }: ReviewReportSessionProps) {
   const text = useLocaleStore(s => s.text)
-  const writingLanguage = useProjectStore(s => resolveWritingLanguage(
-    s.currentProject?.path === projectKey
-      ? s.currentProject.novelConfig.writingLanguage
-      : undefined,
-  ))
   const parsedReport = parseReport(reportText, text('综合检查', 'General review'))
   const [items, setItems] = useState<EditableReviewItem[]>(() => (
     editableItemsFromReview(parsedReport.issues, initialSnapshot)
@@ -391,8 +366,6 @@ function ReviewReportSession({
   const [editingChecklist, setEditingChecklist] = useState(() => !initialSnapshot || !isReviewId(reviewId))
   const [checklistError, setChecklistError] = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
-  const [showRevisionDialog, setShowRevisionDialog] = useState(false)
-  const [processing, setProcessing] = useState(false)
   const [showLegend, setShowLegend] = useState(false)
   const sourceReviewId = confirmationSourceReviewId(initialSnapshot, reviewId)
   const summary = initialSnapshot?.summary ?? parsedReport.summary
@@ -637,126 +610,38 @@ function ReviewReportSession({
     }
   }
 
-  const startConfirmedRevision = async (generationModelId: string): Promise<string | null> => {
-    if (!confirmed || editingChecklist) {
-      return text(
-        '请先确认审稿清单后再启动修稿。',
-        'Confirm the review checklist before starting a revision.',
-      )
+  const jumpToDraft = async () => {
+    if (!draftPath) {
+      toast.error(text('该审稿报告未关联正文草稿', 'No draft linked to this review report'))
+      return
     }
-    if (!hasIncludedReviewItems(confirmed.snapshot)) {
-      const error = text(
-        '未纳入任何审稿项，无法启动修稿。请恢复至少一项错误或建议后重新确认。',
-        'No review item is included. Restore at least one issue or suggestion, then confirm again before revising.',
-      )
-      setChecklistError(error)
-      return error
-    }
-    if (!draftPath || !chapterDir) {
-      return text(
-        '此审稿报告未关联到可修稿的草稿。',
-        'This review is not linked to a revisable draft.',
-      )
-    }
-
     const projectSession = captureProjectSession(useProjectStore.getState().currentProject)
-    if (!projectSession || !isProjectSessionPath(projectSession, projectKey)) {
-      return text(
-        '当前项目会话已失效，请重新打开该项目后再试。',
-        'The current project session is no longer active. Reopen the project and try again.',
-      )
-    }
+    if (!projectSession || !isProjectSessionPath(projectSession, projectKey)) return
+    const { readDraftBody } = await import('../../stores/draft-store')
+    const draftContent = await readDraftBody(draftPath, projectKey, projectSession)
+    if (!isProjectSessionCurrent(projectSession)) return
+    useEditorStore.getState().openFile({
+      id: draftPath,
+      name: text(`第${chapterNumber ?? ''}章草稿`, `Chapter ${chapterNumber ?? ''} Draft`),
+      type: 'chapter',
+      filePath: draftPath,
+      content: draftContent,
+      savedContent: draftContent,
+      chapterNumber,
+      projectKey,
+    })
+    toast.success(text('已定位至正文草稿', 'Navigated to draft'))
+  }
 
-    setProcessing(true)
-    try {
-      const { readDraftBody } = await import('../../stores/draft-store')
-      const draftContent = await readDraftBody(
-        draftPath,
-        projectSession.projectPath,
-        projectSession,
-      )
-      if (!isProjectSessionCurrent(projectSession)) return null
-      if (!draftContent) {
-        return text(
-          '关联草稿为空或无法读取，未启动修稿。',
-          'The associated draft is empty or unreadable; revision was not started.',
-        )
-      }
-
-      // Re-check after every asynchronous preflight: a deleted or repurposed
-      // profile must never be frozen into a revision workflow.
-      const currentModelId = availableGenerationModelId(
-        useLLMStore.getState().models,
-        generationModelId,
-      )
-      if (!currentModelId) {
-        return text(
-          '所选修稿模型已不可用。请选择一项可用于文本生成的模型后再试。',
-          'The selected revision model is no longer available. Select a compatible generation model and try again.',
-        )
-      }
-
-      const { createRefineFromReviewWorkflow, parseDraftMeta } = await import('../../services/workflows/chapter-workflow')
-      const draftMeta = await parseDraftMeta(
-        draftPath,
-        projectSession.projectPath,
-        projectSession,
-      )
-      if (!isProjectSessionCurrent(projectSession)) return null
-      if (!draftMeta) {
-        return text(
-          '找不到关联草稿，未启动修稿。',
-          'The associated draft could not be found; revision was not started.',
-        )
-      }
-      if (
-        !confirmed.snapshot.sourceDraft
-        || !matchesReviewSource(confirmed.snapshot.sourceDraft, draftMeta, draftContent)
-      ) {
-        return text(
-          '源草稿已变化，未启动修稿；请重新运行 AI 审稿并确认清单。',
-          'The source draft changed, so revision was not started. Run AI review and confirm the checklist again.',
-        )
-      }
-
-      const frozenGenerationModelId = availableGenerationModelId(
-        useLLMStore.getState().models,
-        currentModelId,
-      )
-      if (!frozenGenerationModelId) {
-        return text(
-          '所选修稿模型已不可用。请选择一项可用于文本生成的模型后再试。',
-          'The selected revision model is no longer available. Select a compatible generation model and try again.',
-        )
-      }
-
-      const chapterNum = draftMeta.chapterNumber || chapterNumber || 0
-      const chapterTitle = draftMeta.chapterTitle || text(
-        '第' + chapterNum + '章',
-        'Chapter ' + chapterNum,
-      )
-      const { useWorkflowStore } = await import('../../stores/workflow-store')
-      if (!isProjectSessionCurrent(projectSession)) return null
-      useWorkflowStore.getState().startWorkflow(createRefineFromReviewWorkflow({
-        projectPath: projectSession.projectPath,
-        chapterNumber: chapterNum,
-        chapterTitle,
-        draftPath,
-        draftContent,
-        confirmedReviewContent: confirmed.content,
-        reviewSourceId: confirmed.reviewSourceId,
-        generationModelId: frozenGenerationModelId,
-      }, projectSession), false)
-      setChecklistError(null)
-      return null
-    } catch (error) {
-      if (!isProjectSessionCurrent(projectSession)) return null
-      return error instanceof Error
-        ? error.message
-        : text('启动审稿修稿时发生错误。', 'An error occurred while starting the review-driven revision.')
-    } finally {
-      if (isProjectSessionCurrent(projectSession)) setProcessing(false)
-    }
+  const jumpToBlueprint = () => {
+    openBuiltinEditor(
+      'chapter-card-editor',
+      text('章节蓝图', 'Chapter blueprints'),
+      'chapter-card',
+      undefined,
+      chapterNumber,
+    )
+    toast.success(text('已定位至章节蓝图', 'Navigated to blueprint'))
   }
 
   return (
@@ -793,6 +678,24 @@ function ReviewReportSession({
             >
               <HelpCircle size={14} style={{ color: 'var(--color-text-muted)' }} />
             </button>
+          </div>
+        </div>
+
+        {/* 双向跳转导航栏 */}
+        <div className="flex items-center justify-between gap-2 mb-4 p-2.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-panel)] text-xs">
+          <div className="flex items-center gap-1.5 font-medium text-[var(--color-text)]">
+            <ExternalLink size={14} className="text-[var(--color-accent)]" />
+            <span>{text(`第 ${chapterNumber ?? ''} 章一致性审核报告（只读）`, `Chapter ${chapterNumber ?? ''} Consistency Audit (Read-only)`)}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={jumpToDraft} disabled={!draftPath}>
+              <FileText size={12} />
+              {text('定位至正文', 'Jump to prose')}
+            </Button>
+            <Button variant="outline" size="sm" onClick={jumpToBlueprint}>
+              <BookOpen size={12} />
+              {text('定位至蓝图', 'Jump to blueprint')}
+            </Button>
           </div>
         </div>
 
@@ -968,13 +871,32 @@ function ReviewReportSession({
                               </p>
                             )}
                             {!isPass && editingChecklist && (
-                              <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center justify-between gap-2 pt-1 flex-wrap">
                                 <span className={cn('text-[0.7rem]', meta.colorClass)}>
                                   {item.decision === 'apply'
-                                    ? text('已纳入本次修稿', 'Included in this revision')
-                                    : text('已忽略，不会传给模型', 'Ignored; not sent to the model')}
+                                    ? text('已标记为待处理问题', 'Flagged to address')
+                                    : text('已标记为忽略/有意安排', 'Ignored / Intentional')}
                                 </span>
-                                <div className="flex items-center gap-1">
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={jumpToDraft}
+                                    disabled={!draftPath}
+                                    title={text('跳转至正文草稿', 'Jump to draft')}
+                                  >
+                                    <FileText size={11} />
+                                    {text('定位正文', 'Prose')}
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={jumpToBlueprint}
+                                    title={text('跳转至章节蓝图', 'Jump to blueprint')}
+                                  >
+                                    <BookOpen size={11} />
+                                    {text('定位蓝图', 'Blueprint')}
+                                  </Button>
                                   <Button
                                     variant="outline"
                                     size="sm"
@@ -987,7 +909,24 @@ function ReviewReportSession({
                                       : <RotateCcw size={12} />}
                                     {item.decision === 'apply'
                                       ? text('忽略', 'Ignore')
-                                      : item.goalId || item.severity === 'unknown' ? text('明确纳入修稿', 'Explicitly include in revision') : text('恢复', 'Restore')}
+                                      : text('恢复', 'Restore')}
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      updateItem(item.id, {
+                                        decision: 'ignore',
+                                        description: item.description.includes('【有意安排】')
+                                          ? item.description
+                                          : `${item.description} 【有意安排】`,
+                                      })
+                                      toast.success(text('已标记为有意安排', 'Marked as intentional'))
+                                    }}
+                                    title={text('作者有意突破设定，不视为错误', 'Mark as intentional departure')}
+                                  >
+                                    <BookmarkCheck size={12} />
+                                    {text('有意安排', 'Intentional')}
                                   </Button>
                                   {item.origin === 'author' && (
                                     <Button
@@ -1001,6 +940,31 @@ function ReviewReportSession({
                                     </Button>
                                   )}
                                 </div>
+                              </div>
+                            )}
+                            {!editingChecklist && (
+                              <div className="flex items-center gap-1.5 mt-1.5">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 text-[0.7rem] px-2"
+                                  onClick={jumpToDraft}
+                                  disabled={!draftPath}
+                                  title={text('跳转至正文草稿', 'Jump to draft')}
+                                >
+                                  <FileText size={11} />
+                                  {text('定位正文', 'Prose')}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 text-[0.7rem] px-2"
+                                  onClick={jumpToBlueprint}
+                                  title={text('跳转至章节蓝图', 'Jump to blueprint')}
+                                >
+                                  <BookOpen size={11} />
+                                  {text('定位蓝图', 'Blueprint')}
+                                </Button>
                               </div>
                             )}
                           </div>
@@ -1032,7 +996,7 @@ function ReviewReportSession({
             <div>
               <h4 className="text-sm font-semibold text-[var(--color-text)] flex items-center gap-1.5">
                 <ListChecks size={15} className="text-[var(--color-accent)]" />
-                {text('人工确认修稿清单', 'Human-confirmed revision checklist')}
+                {text('作者决策与确认清单', 'Author decision checklist')}
               </h4>
               <p className="mt-1 text-xs text-[var(--color-text-muted)]">
                 {editingChecklist
@@ -1052,7 +1016,7 @@ function ReviewReportSession({
             <>
               <div>
                 <Label htmlFor="review-author-guidance">
-                  {text('总体修稿指导（可选）', 'Overall revision guidance (optional)')}
+                  {text('作者修改指导（可选）', 'Author editing guidance (optional)')}
                 </Label>
                 <Textarea
                   id="review-author-guidance"
@@ -1096,26 +1060,15 @@ function ReviewReportSession({
                 }}
               >
                 <Pencil size={13} />
-                {text('编辑清单', 'Edit checklist')}
+                {text('修改决策清单', 'Edit decision checklist')}
               </Button>
-              <Button
-                variant="ai"
-                size="sm"
-                onClick={() => {
-                  if (!hasIncludedReviewItems(confirmed.snapshot)) {
-                    setChecklistError(text(
-                      '未纳入任何审稿项，无法启动修稿。请恢复至少一项错误或建议后重新确认。',
-                      'No review item is included. Restore at least one issue or suggestion, then confirm again before revising.',
-                    ))
-                    return
-                  }
-                  setChecklistError(null)
-                  setShowRevisionDialog(true)
-                }}
-                disabled={processing}
-              >
-                <Sparkles size={13} />
-                {text('按确认意见修稿', 'Revise from confirmed checklist')}
+              <Button variant="default" size="sm" onClick={jumpToDraft} disabled={!draftPath}>
+                <FileText size={13} />
+                {text('返回正文修改', 'Return to prose')}
+              </Button>
+              <Button variant="outline" size="sm" onClick={jumpToBlueprint}>
+                <BookOpen size={13} />
+                {text('查看对应蓝图', 'View blueprint')}
               </Button>
             </div>
           )}
@@ -1140,163 +1093,6 @@ function ReviewReportSession({
           </pre>
         </details>
       </div>
-
-      {showRevisionDialog && confirmed && (
-        <ConfirmedRevisionDialog
-          snapshot={confirmed.snapshot}
-          writingLanguage={writingLanguage}
-          onClose={() => setShowRevisionDialog(false)}
-          onStart={startConfirmedRevision}
-        />
-      )}
     </div>
-  )
-}
-
-interface ConfirmedRevisionDialogProps {
-  snapshot: HumanConfirmedReviewSnapshot
-  writingLanguage: WritingLanguage
-  onClose: () => void
-  onStart: (generationModelId: string) => Promise<string | null>
-}
-
-/**
- * Mounted only while open so every revision gets a fresh local snapshot of the
- * global default model. The chooser never writes to the global default.
- */
-function ConfirmedRevisionDialog({ snapshot, writingLanguage, onClose, onStart }: ConfirmedRevisionDialogProps) {
-  const text = useLocaleStore(s => s.text)
-  const models = useLLMStore(s => s.models)
-  const defaultModelId = useLLMStore(s => s.defaultModelId)
-  const [generationModelId, setGenerationModelId] = useState<string | null>(() => (
-    preferredGenerationModelId(models, defaultModelId)
-  ))
-  const [starting, setStarting] = useState(false)
-  const [startError, setStartError] = useState<string | null>(null)
-  const generationModels = models.filter(isGenerationModel)
-  const fallbackGenerationModelId = preferredGenerationModelId(models, defaultModelId)
-  const selectedGenerationModelId = generationModelId ?? fallbackGenerationModelId
-  const selectedGenerationModel = generationModels.find(model => model.id === selectedGenerationModelId)
-  const modelSelectionError = generationModels.length === 0
-    ? text(
-      '没有已配置且可用于文本生成的模型。请在设置中添加或启用一项生成模型。',
-      'No configured model can generate text. Add or enable a generation model in Settings.',
-    )
-    : !selectedGenerationModel
-      ? text(
-        '所选修稿模型已不可用。请选择一项可用于文本生成的模型后再试。',
-        'The selected revision model is no longer available. Select a compatible generation model and try again.',
-      )
-      : null
-  const confirmedBrief = renderHumanConfirmedReviewBrief(snapshot, writingLanguage)
-
-  const start = async () => {
-    if (modelSelectionError || !selectedGenerationModelId) {
-      setStartError(modelSelectionError ?? text(
-        '请选择一项可用于文本生成的模型。',
-        'Select a compatible generation model before starting.',
-      ))
-      return
-    }
-
-    const frozenGenerationModelId = availableGenerationModelId(
-      useLLMStore.getState().models,
-      selectedGenerationModelId,
-    )
-    if (!frozenGenerationModelId) {
-      setStartError(text(
-        '所选修稿模型已不可用。请选择一项可用于文本生成的模型后再试。',
-        'The selected revision model is no longer available. Select a compatible generation model and try again.',
-      ))
-      return
-    }
-
-    setStarting(true)
-    try {
-      const error = await onStart(frozenGenerationModelId)
-      if (error) {
-        setStartError(error)
-        return
-      }
-      onClose()
-    } catch (error) {
-      setStartError(error instanceof Error
-        ? error.message
-        : text('启动审稿修稿时发生错误。', 'An error occurred while starting the review-driven revision.'))
-    } finally {
-      setStarting(false)
-    }
-  }
-
-  return (
-    <Dialog open onOpenChange={(open) => {
-      if (!open && !starting) onClose()
-    }}>
-      <DialogContent className="max-w-[520px]">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Sparkles size={15} className="text-[var(--color-accent)]" />
-            {text('按确认意见修稿', 'Revise from confirmed checklist')}
-          </DialogTitle>
-          <DialogDescription>
-            {text(
-              '仅将已确认纳入的审稿项和作者指导传给修稿流程；已忽略项与原始 AI 报告不会成为模型指令。',
-              'Only confirmed review items and author guidance are sent to revision. Ignored items and the raw AI report are not model instructions.',
-            )}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="px-5 py-2 space-y-3">
-          <div>
-            <Label htmlFor="review-revision-model">
-              {text('本次修稿模型', 'Model for this revision')}
-            </Label>
-            <NativeSelect
-              id="review-revision-model"
-              value={selectedGenerationModelId ?? ''}
-              onChange={(event) => {
-                setGenerationModelId(event.target.value || null)
-                setStartError(null)
-              }}
-              disabled={generationModels.length === 0 || starting}
-            >
-              <option value="" disabled>{text('请选择可用生成模型', 'Select a generation model')}</option>
-              {generationModels.map(model => (
-                <option key={model.id} value={model.id}>{model.name || model.modelName}</option>
-              ))}
-            </NativeSelect>
-            <p className="mt-1 text-[0.7rem] text-[var(--color-text-muted)]">
-              {text('仅用于本次修稿，不会更改默认模型。', 'Used for this revision only; it does not change the default model.')}
-            </p>
-            {modelSelectionError && (
-              <p role="alert" className="mt-1 text-xs text-[var(--color-error-text)]">
-                {modelSelectionError}
-              </p>
-            )}
-          </div>
-          <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg-elevated)] p-3">
-            <div className="mb-1 text-xs font-medium text-[var(--color-text)]">
-              {text('将传给修稿流程的已确认意见', 'Confirmed guidance sent to revision')}
-            </div>
-            <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap font-sans text-xs leading-5 text-[var(--color-text-secondary)]">
-              {confirmedBrief}
-            </pre>
-          </div>
-          {startError && (
-            <p role="alert" className="text-xs text-[var(--color-error-text)]">
-              {startError}
-            </p>
-          )}
-        </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={starting}>
-            {text('取消', 'Cancel')}
-          </Button>
-          <Button variant="ai" onClick={start} disabled={starting || Boolean(modelSelectionError)}>
-            <Sparkles size={13} />
-            {text('开始修稿', 'Start revision')}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   )
 }

@@ -162,26 +162,15 @@ describe('CharacterEditor relationship field', () => {
     expect(relationshipField?.value).not.toContain(unknownJson)
   })
 
-  it('zooms the relationship graph with controls and the mouse wheel, then fits the view', async () => {
+  it('opens the directed relationship graph and fits its current view', async () => {
     await act(async () => {
       root?.render(<CharacterEditor projectKey={PROJECT_PATH} />)
     })
 
     await act(async () => page.getByRole('button', { name: '关系图谱' }).click())
-    await expect.element(page.getByText('100%')).toBeVisible()
-
-    await act(async () => page.getByRole('button', { name: '放大关系图谱' }).click())
-    await expect.element(page.getByText('110%')).toBeVisible()
-
-    const canvas = container?.querySelector('canvas')
-    expect(canvas).toBeTruthy()
-    await act(async () => {
-      canvas?.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }))
-    })
-    await expect.element(page.getByText('120%')).toBeVisible()
-
-    await act(async () => page.getByRole('button', { name: '适合视图' }).click())
-    await expect.element(page.getByText('100%')).toBeVisible()
+    await expect.element(page.getByText('1 条有向关系')).toBeVisible()
+    expect(container?.querySelector('.react-flow')).toBeTruthy()
+    await expect.element(page.getByRole('button', { name: '适合视图' })).toBeVisible()
   })
 
   it('requires confirmation before clearing every character through the roster action', async () => {

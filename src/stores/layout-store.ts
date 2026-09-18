@@ -9,11 +9,11 @@ export type BottomTab = 'tasks' | 'log' | 'models'
 /** 右侧面板视图类型 */
 export type RightView = 'agent' | 'ai-output'
 
-/** 左侧主导航当前视觉激活项 */
-export type LeftRailItem = SidebarView | 'blueprint' | 'world' | 'plot-tree' | BottomTab
+/** 左侧主导航当前视觉激活项。二级内容始终归属其所在的一级视图。 */
+export type LeftRailItem = SidebarView | BottomTab
 
 /** 设置弹窗分类 */
-export type SettingsSection = 'llm' | 'embedding' | 'proxy' | 'editor' | 'prompts' | 'skills' | 'about'
+export type SettingsSection = 'llm' | 'embedding' | 'proxy' | 'editor' | 'prompts' | 'skills' | 'logs' | 'about'
 
 /** 章节创建对话框的预填参数 */
 export type ChapterCreationPrefill = Record<string, unknown> | null
@@ -30,6 +30,10 @@ interface LayoutState {
   aiPanelWidth: number
   /** 右侧面板当前视图：Agent 对话 / AI 输出 */
   rightView: RightView
+  /** 三栏工作台的项目参考栏。它与 AI 对话面板独立，窄窗口可单独收起。 */
+  referencePanelOpen: boolean
+  /** 专注模式仅收起工作台辅助栏，不卸载任何编辑器或数据流。 */
+  focusMode: boolean
 
   // ===== 底部面板 =====
   bottomPanelOpen: boolean
@@ -54,6 +58,7 @@ interface LayoutState {
 
   // ===== Actions =====
   toggleSidebar: () => void
+  setSidebarOpen: (open: boolean) => void
   setSidebarView: (view: SidebarView, activeRailItem?: LeftRailItem) => void
   setSidebarWidth: (width: number) => void
   toggleAIPanel: () => void
@@ -62,6 +67,9 @@ interface LayoutState {
   setRightView: (view: RightView) => void
   /** 打开右侧面板并切换到指定视图 */
   openRightPanel: (view: RightView) => void
+  toggleReferencePanel: () => void
+  setReferencePanelOpen: (open: boolean) => void
+  toggleFocusMode: () => void
   toggleBottomPanel: () => void
   setBottomTab: (tab: BottomTab) => void
   setBottomPanelHeight: (height: number) => void
@@ -87,11 +95,15 @@ export const useLayoutStore = create<LayoutState>()((set) => ({
   sidebarWidth: 260,
   activeRailItem: 'project',
 
-  aiPanelOpen: true,
+  // 参考栏是默认右侧信息架；AI 对话在用户需要时由右侧栏或快捷按钮打开。
+  aiPanelOpen: false,
   aiPanelWidth: 320,
   rightView: 'agent',
+  referencePanelOpen: true,
+  focusMode: false,
 
-  bottomPanelOpen: true,
+  // 任务面板是状态栏触发的悬浮窗；默认关闭，绝不为它预留工作区。
+  bottomPanelOpen: false,
   bottomTab: 'tasks',
   bottomPanelHeight: 200,
 
@@ -106,6 +118,7 @@ export const useLayoutStore = create<LayoutState>()((set) => ({
 
   // Actions
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
+  setSidebarOpen: (open) => set({ sidebarOpen: open }),
   setSidebarView: (view, activeRailItem) =>
     set((s) => {
       const nextRailItem = activeRailItem ?? view
@@ -123,6 +136,9 @@ export const useLayoutStore = create<LayoutState>()((set) => ({
   setAIPanelWidth: (width) => set({ aiPanelWidth: Math.max(260, Math.min(600, width)) }),
   setRightView: (view) => set({ rightView: view }),
   openRightPanel: (view) => set({ aiPanelOpen: true, rightView: view }),
+  toggleReferencePanel: () => set((s) => ({ referencePanelOpen: !s.referencePanelOpen })),
+  setReferencePanelOpen: (open) => set({ referencePanelOpen: open }),
+  toggleFocusMode: () => set((s) => ({ focusMode: !s.focusMode })),
 
   toggleBottomPanel: () => set((s) => ({ bottomPanelOpen: !s.bottomPanelOpen })),
   setBottomTab: (tab) =>
@@ -147,6 +163,8 @@ export const useLayoutStore = create<LayoutState>()((set) => ({
   closeExport: () => set({ exportOpen: false }),
   openImportNovel: () => set({ importNovelOpen: true }),
   closeImportNovel: () => set({ importNovelOpen: false }),
-  openChapterCreation: (prefill = null) => set({ chapterCreationOpen: true, chapterCreationPrefill: prefill }),
+  openChapterCreation: () => {
+    // Disabled in Codex Creative Workbench: generation popups are deactivated
+  },
   closeChapterCreation: () => set({ chapterCreationOpen: false, chapterCreationPrefill: null }),
 }))

@@ -36,13 +36,14 @@ export class PlotTreeRepository {
     if (!core) throw new Error('项目配置不存在')
 
     const blueprintRows = db.prepare(`
-      SELECT chapter_number, title, purpose, key_events
+      SELECT chapter_number, title, purpose, key_events, user_guidance
       FROM blueprints ORDER BY chapter_number ASC
     `).all() as Array<{
       chapter_number: number
       title: string
       purpose: string
       key_events: string
+      user_guidance?: string
     }>
     const finalizedRows = db.prepare(`
       SELECT drafts.id AS draft_id,
@@ -93,6 +94,7 @@ export class PlotTreeRepository {
       title: row.title,
       purpose: row.purpose,
       keyEvents: row.key_events,
+      userGuidance: row.user_guidance || '',
     }))
     const finalizedChapters = finalizedRows.map(row => ({
       draftId: row.draft_id,

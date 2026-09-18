@@ -2,7 +2,7 @@ import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import {
   X, Plus, Trash2, Check, Save, Globe, Cpu, Database,
   Type, Settings2, Zap, Eye, EyeOff, ChevronDown, MessageSquare,
-  Info, Palette, ExternalLink, RefreshCw, RotateCcw, BookOpen,
+  Info, Palette, ExternalLink, RefreshCw, RotateCcw, BookOpen, ClipboardList,
 } from 'lucide-react'
 import PromptSettings from './PromptSettings'
 import SkillSettings from './SkillSettings'
@@ -30,6 +30,7 @@ import { Switch } from '../ui/Switch'
 import { APP_BRAND } from '../../shared/brand'
 import { useLayoutStore, type SettingsSection } from '../../stores/layout-store'
 import { useLocaleStore } from '../../stores/locale-store'
+import { useWorkflowStore } from '../../stores/workflow-store'
 import type { Locale } from '../../i18n/types'
 import { alertError } from '../ui/AlertDialog'
 import {
@@ -59,6 +60,7 @@ export const SETTINGS_SECTIONS: SectionItem[] = [
   { id: 'editor', label: '编辑器', labelEn: 'Editor', icon: <Type size={16} />, description: '字体大小、自动保存等编辑器偏好设置', descriptionEn: 'Fonts and other editor preferences' },
   { id: 'prompts', label: '提示词模板', labelEn: 'Prompt templates', icon: <MessageSquare size={16} />, description: '自定义 AI 创作各环节使用的提示词模板', descriptionEn: 'Customize guidance for each AI writing stage' },
   { id: 'skills', label: '写作 Skills', labelEn: 'Writing skills', icon: <BookOpen size={16} />, description: '检查、安装并绑定提示词型写作 Skill', descriptionEn: 'Inspect, install, and bind prompt-only writing skills' },
+  { id: 'logs', label: '运行日志', labelEn: 'Runtime logs', icon: <ClipboardList size={16} />, description: '查看并清理本地运行诊断，不干扰创作工作区', descriptionEn: 'View and clear local diagnostics without occupying the writing workspace' },
   { id: 'about', label: '关于', labelEn: 'About', icon: <Info size={16} />, description: '版本、定位与本地部署说明', descriptionEn: 'Version, positioning, and local deployment' },
 ]
 
@@ -163,9 +165,40 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
             {section === 'editor' && <EditorSection />}
             {section === 'prompts' && <PromptSettings />}
             {section === 'skills' && <SkillSettings />}
+            {section === 'logs' && <RuntimeLogSection />}
             {section === 'about' && <AboutSection />}
           </div>
         </main>
+      </div>
+    </div>
+  )
+}
+
+function RuntimeLogSection() {
+  const text = useLocaleStore(s => s.text)
+  const globalLogs = useWorkflowStore(s => s.globalLogs)
+  const clearLogs = useWorkflowStore(s => s.clearLogs)
+  const levelColor = (level: string) => level === 'error'
+    ? 'var(--color-error-text)'
+    : level === 'warn' ? 'var(--color-warning-text)' : 'var(--color-text-secondary)'
+
+  return (
+    <div className="flex h-full min-h-[360px] flex-col">
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+          {text('仅保留本地诊断信息；不会写入小说正文或项目资料。', 'Local diagnostics only; never writes to manuscript or project material.')}
+        </p>
+        <Button variant="outline" size="sm" onClick={clearLogs}>{text('清空日志', 'Clear logs')}</Button>
+      </div>
+      <div className="flex-1 overflow-y-auto rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2 font-mono text-xs leading-5">
+        {globalLogs.length === 0 ? (
+          <div className="py-12 text-center" style={{ color: 'var(--color-text-muted)' }}>{text('暂无运行日志', 'No runtime logs')}</div>
+        ) : globalLogs.map((log, index) => (
+          <div key={`${log.time}-${index}`} className="flex gap-2">
+            <span className="flex-shrink-0" style={{ color: 'var(--color-text-muted)' }}>{log.time}</span>
+            <span style={{ color: levelColor(log.level) }}>{log.message}</span>
+          </div>
+        ))}
       </div>
     </div>
   )

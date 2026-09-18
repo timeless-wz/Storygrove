@@ -16,6 +16,7 @@ import type {
 import { hasUsablePlotTreeEventSource } from '../../shared/plot-tree'
 import { resolveWritingLanguage } from '../../shared/writing-language'
 import { ipc } from '../../services/ipc-client'
+import { rebuildPlotTreeDeterministic } from '../../services/plot-tree-deterministic'
 import {
   narrativeThreadCandidateGenerator,
   type NarrativeThreadCandidateGenerator,
@@ -31,13 +32,10 @@ import {
   PlotTreeSourceError,
   PlotTreeSourceLimitError,
   type GeneratePlotTreeInput,
-  type PlotTreeGenerationErrorCode,
-  type PlotTreeResponseErrorCode,
 } from '../../services/plot-tree-generator'
 import { useLLMStore } from '../../stores/llm-store'
 import { useLocaleStore } from '../../stores/locale-store'
 import { useProjectStore } from '../../stores/project-store'
-import { useWorkflowStore } from '../../stores/workflow-store'
 import { captureProjectSession, isProjectSessionCurrent, isProjectSessionPath } from '../project-session-gate'
 import { Button } from '../ui/Button'
 import {
@@ -188,7 +186,8 @@ export default function NarrativeThreadEditor({
   candidateGenerator = narrativeThreadCandidateGenerator,
   initialView = 'plans',
   viewRequest,
-  plotTreeGenerator = generatePlotTree,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  plotTreeGenerator: _plotTreeGenerator = generatePlotTree,
 }: NarrativeThreadEditorProps) {
   const currentProject = useProjectStore(s => s.currentProject)
   const text = useLocaleStore(s => s.text)
@@ -218,7 +217,6 @@ export default function NarrativeThreadEditor({
   const [aiError, setAiError] = useState('')
   const [view, setView] = useState<'plot-tree' | 'plans'>(initialView)
   const [plotSources, setPlotSources] = useState<PlotTreeSourceBundle | null>(null)
-  const [plotModelId, setPlotModelId] = useState<string | null>(null)
   const [plotBusy, setPlotBusy] = useState(false)
   const [plotError, setPlotError] = useState('')
   const [sourcePlanId, setSourcePlanId] = useState<number | null>(null)
@@ -234,8 +232,6 @@ export default function NarrativeThreadEditor({
     : generationModels[0]?.id ?? null
   const selectedModelId = aiModelId ?? fallbackModelId
   const selectedModel = generationModels.find(model => model.id === selectedModelId)
-  const selectedPlotModelId = plotModelId ?? fallbackModelId
-  const selectedPlotModel = generationModels.find(model => model.id === selectedPlotModelId)
   const modelSelectionError = generationModels.length === 0
     ? text(
         '没有已配置且可用于文本生成的模型。请先在设置中添加生成模型。',
@@ -245,14 +241,6 @@ export default function NarrativeThreadEditor({
       ? text(
           '所选识别模型已不可用，请重新选择。',
           'The selected analysis model is unavailable. Select another model.',
-        )
-      : ''
-  const plotModelSelectionError = generationModels.length === 0
-    ? modelSelectionError
-    : !selectedPlotModel
-      ? text(
-          '所选剧情树模型已不可用，请重新选择。',
-          'The selected plot-tree model is unavailable. Select another model.',
         )
       : ''
 
@@ -341,24 +329,12 @@ export default function NarrativeThreadEditor({
     const session = captureProjectSession(useProjectStore.getState().currentProject)
     const uiLocale = useLocaleStore.getState().locale
     const uiText: LocaleText = (zhCNText, enUSText) => uiLocale === 'en-US' ? enUSText : zhCNText
-    const frozenModelId = selectedPlotModel?.id
-    if (!session || !isProjectSessionPath(session, projectKey) || !plotSources
-      || !frozenModelId || plotBusy) return
-    const controller = new AbortController()
-    plotAbortRef.current?.abort()
-    plotAbortRef.current = controller
+    if (!session || !isProjectSessionPath(session, projectKey) || !plotSources || plotBusy) return
     setPlotBusy(true)
     setPlotError('')
-    let failureCode: PlotTreeGenerationErrorCode | PlotTreeResponseErrorCode
-      | 'sources_changed' | 'length' | 'save_failed' | null = null
     try {
-      const snapshot = await plotTreeGenerator({
-        modelId: frozenModelId,
-        projectSession: session,
-        sources: plotSources,
-        signal: controller.signal,
-      })
-      if (!isProjectSessionCurrent(session) || controller.signal.aborted) return
+      const snapshot = rebuildPlotTreeDeterministic(plotSources)
+      if (!isProjectSessionCurrent(session)) return
       let saved
       try {
         saved = await ipc.invokeWithProjectSession(
@@ -369,17 +345,13 @@ export default function NarrativeThreadEditor({
           projectKey,
         )
       } catch {
-        failureCode = 'save_failed'
         throw new Error('剧情树快照保存失败')
       }
-      if (!isProjectSessionCurrent(session) || controller.signal.aborted) return
+      if (!isProjectSessionCurrent(session)) return
       const savedSnapshot = saved.snapshot
       if (!saved.success || !savedSnapshot) {
         if (saved.errorCode === 'sources-changed') {
-          failureCode = 'sources_changed'
           await loadPlotTree()
-        } else {
-          failureCode = 'save_failed'
         }
         throw new Error(saved.errorCode === 'sources-changed'
           ? uiText(
@@ -389,33 +361,17 @@ export default function NarrativeThreadEditor({
           : '剧情树快照保存失败')
       }
       setPlotSources(previous => previous ? { ...previous, snapshot: savedSnapshot } : previous)
+      toast.success(uiText('剧情树已成功重建', 'Plot tree successfully rebuilt'))
     } catch (error) {
-      if (isProjectSessionCurrent(session) && !controller.signal.aborted) {
-        failureCode ??= error instanceof PlotTreeGenerationError
-          ? error.code
-          : error instanceof PlotTreeResponseError
-            ? error.code
-            : error instanceof PlotTreeIncompleteError && error.finishReason === 'length'
-              ? 'length'
-              : null
-        if (failureCode) {
-          useWorkflowStore.getState().addLog(
-            'error',
-            uiText(
-              `剧情树生成失败（错误码：${failureCode}）。`,
-              `Plot-tree generation failed (error code: ${failureCode}).`,
-            ),
-          )
-        }
+      if (isProjectSessionCurrent(session)) {
         setPlotError(plotTreeErrorMessage(
           error,
           uiText,
-          ['剧情树生成失败。', 'Could not generate the plot tree.'],
+          ['剧情树重建失败。', 'Could not rebuild the plot tree.'],
         ))
       }
     } finally {
-      if (plotAbortRef.current === controller) plotAbortRef.current = null
-      if (isProjectSessionCurrent(session) && !controller.signal.aborted) setPlotBusy(false)
+      if (isProjectSessionCurrent(session)) setPlotBusy(false)
     }
   }
 
@@ -703,16 +659,14 @@ export default function NarrativeThreadEditor({
             snapshot={plotSources?.snapshot ?? null}
             sourceRevision={plotSources?.sourceRevision ?? ''}
             currentChapter={Math.max(1, ...(plotSources?.finalizedChapters.map(chapter => chapter.chapterNumber) ?? []))}
-            models={generationModels}
-            selectedModelId={selectedPlotModel?.id ?? null}
             busy={plotBusy}
-            error={plotError || plotModelSelectionError}
+            error={plotError}
             sourceReady={Boolean(plotSources && hasUsablePlotTreeEventSource(plotSources))}
             storedSnapshotInvalid={plotSources?.storedSnapshotInvalid === true}
-            onModelChange={setPlotModelId}
             onGenerate={() => void refreshPlotTree()}
             onClear={() => void clearPlotTree()}
             onOpenSource={openPlotSource}
+            onNewStoryline={() => setView('plans')}
           />
         ) : <>
         <div className="flex items-start justify-between gap-3">

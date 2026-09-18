@@ -1,52 +1,20 @@
-import { renderToString } from 'react-dom/server'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import LeftToolWindowBar from '../LeftToolWindowBar'
 import { useLayoutStore } from '../../../stores/layout-store'
 
-function countActiveRailButtons(html: string) {
-  return [...html.matchAll(/<button\b[^>]*\bclass="([^"]*)"[^>]*>/g)]
-    .filter(([, className]) => {
-      const classTokens = className.split(/\s+/)
-      return classTokens.includes('left-nav-button') && classTokens.includes('is-active')
-    })
-    .length
-}
+const appSource = readFileSync(resolve(process.cwd(), 'src/App.tsx'), 'utf8')
 
-describe('LeftToolWindowBar', () => {
-  it('renders visible Chinese labels for every left navigation item', () => {
-    const html = renderToString(<LeftToolWindowBar />)
-
-    for (const label of ['首页', '项目', '小说', '蓝图', '角色', '世界', '剧情', '任务', '设置', '中枢']) {
-      expect(html).toContain(label)
-    }
+describe('Codex-style workbench shell', () => {
+  it('does not mount a fixed activity rail or a height-reserving bottom panel', () => {
+    expect(appSource).not.toContain("from './components/layout/LeftToolWindowBar'")
+    expect(appSource).not.toContain("from './components/layout/RightToolWindowBar'")
+    expect(appSource).not.toContain("from './components/panels/BottomPanel'")
+    expect(appSource).toContain('<StatusBar />')
   })
 
-  it('does not render legacy sidebar labels as primary nav labels', () => {
-    const html = renderToString(<LeftToolWindowBar />)
-
-    expect(html).not.toContain('项目结构</span>')
-    expect(html).not.toContain('知识库</span>')
-    expect(html).not.toContain('角色管理</span>')
-  })
-
-  it('keeps exactly one primary rail item visually active', () => {
-    useLayoutStore.setState({
-      sidebarOpen: true,
-      sidebarView: 'project',
-      aiPanelOpen: true,
-      rightView: 'agent',
-      bottomPanelOpen: true,
-      bottomTab: 'models',
-    })
-    const html = renderToString(<LeftToolWindowBar />)
-
-    expect(countActiveRailButtons(html)).toBe(1)
-  })
-
-  it('replaces the duplicate AI settings entry with the plot tree', () => {
-    const source = renderToString(<LeftToolWindowBar />)
-
-    expect(source).toContain('剧情树')
-    expect(source).not.toContain('配置模型 API')
+  it('keeps the task popover closed by default so the editor owns the available height', () => {
+    expect(useLayoutStore.getState().bottomPanelOpen).toBe(false)
+    expect(useLayoutStore.getState().bottomTab).toBe('tasks')
   })
 })

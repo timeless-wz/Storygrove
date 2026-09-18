@@ -41,6 +41,7 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
   const loadingProjectKey = useCharacterStore(s => s.loadingProjectKey)
   const lastError = useCharacterStore(s => s.lastError)
   const selectedName = useCharacterStore(s => s.selectedName)
+  const setSelectedName = useCharacterStore(s => s.setSelectedName)
   const saving = useCharacterStore(s => s.saving)
   const identityBusy = useCharacterStore(s => s.identityBusy)
   const renameCharacter = useCharacterStore(s => s.renameCharacter)
@@ -244,7 +245,11 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
       {/* 主体区 */}
       <div className="flex-1 overflow-y-auto relative">
         {viewMode === 'graph' ? (
-          <RelationshipGraph characters={characters} />
+          <RelationshipGraph
+            characters={characters}
+            projectKey={projectKey}
+            onCharacterSelect={setSelectedName}
+          />
         ) : !selectedCard ? (
           <BaseEmptyState 
             icon={<Users size={36} />} 

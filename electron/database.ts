@@ -585,6 +585,80 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
     -- 索引
     CREATE INDEX IF NOT EXISTS idx_llm_calls_time ON llm_calls(created_at);
 
+    -- ============================================================
+    -- 10. world_map_nodes & world_map_edges — 世界地图节点与连线
+    -- ============================================================
+    CREATE TABLE IF NOT EXISTS world_map_nodes (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      parent_id TEXT DEFAULT NULL,
+      map_layer TEXT NOT NULL DEFAULT 'surface',
+      x REAL NOT NULL DEFAULT 0,
+      y REAL NOT NULL DEFAULT 0,
+      source_refs TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_world_map_nodes_parent ON world_map_nodes(parent_id);
+    CREATE INDEX IF NOT EXISTS idx_world_map_nodes_layer ON world_map_nodes(map_layer);
+
+    CREATE TABLE IF NOT EXISTS world_map_edges (
+      id TEXT PRIMARY KEY,
+      from_node_id TEXT NOT NULL,
+      to_node_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (from_node_id) REFERENCES world_map_nodes(id) ON DELETE CASCADE,
+      FOREIGN KEY (to_node_id) REFERENCES world_map_nodes(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_world_map_edges_from ON world_map_edges(from_node_id);
+    CREATE INDEX IF NOT EXISTS idx_world_map_edges_to ON world_map_edges(to_node_id);
+
+    CREATE TABLE IF NOT EXISTS world_map_layers (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      sort_order REAL NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_world_map_layers_order ON world_map_layers(sort_order, created_at);
+
+    -- ============================================================
+    -- 11. story_timeline — 作者手动维护的故事内时间线
+    -- ============================================================
+    CREATE TABLE IF NOT EXISTS story_timeline_settings (
+      id TEXT PRIMARY KEY CHECK(id = 'main'),
+      title TEXT NOT NULL DEFAULT '故事时间线',
+      ruler_label TEXT NOT NULL DEFAULT '故事时间',
+      ruler_unit TEXT NOT NULL DEFAULT '刻度',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS story_timeline_events (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      time_label TEXT NOT NULL,
+      sort_order REAL NOT NULL,
+      precision TEXT NOT NULL DEFAULT 'exact'
+        CHECK(precision IN ('exact', 'range', 'relative', 'unknown')),
+      range_end_label TEXT NOT NULL DEFAULT '',
+      description TEXT NOT NULL DEFAULT '',
+      chapter_numbers TEXT NOT NULL DEFAULT '[]',
+      character_names TEXT NOT NULL DEFAULT '[]',
+      location_node_ids TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'planned'
+        CHECK(status IN ('planned', 'drafted', 'finalized')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_story_timeline_events_order
+      ON story_timeline_events(sort_order, created_at);
+
     -- Reference imports are recoverable project facts, not generic workflow history.
     CREATE TABLE IF NOT EXISTS import_runs (
       id TEXT PRIMARY KEY,

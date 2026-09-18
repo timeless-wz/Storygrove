@@ -57,6 +57,10 @@ import { ConsistencyExemptionRepository } from '../repositories/consistency-exem
 import { NarrativeThreadRepository } from '../repositories/narrative-thread-repository'
 import { PlotTreeRepository } from '../repositories/plot-tree-repository'
 import { isPlotTreeSourceRevision } from '../../src/shared/plot-tree'
+import { WorldMapRepository } from '../repositories/world-map-repository'
+import type { WorldMapNode, WorldMapEdge, WorldMapLayer } from '../../src/shared/world-map'
+import { StoryTimelineRepository } from '../repositories/story-timeline-repository'
+import type { StoryTimelineEvent, StoryTimelineSettings } from '../../src/shared/story-timeline'
 import { RecoveryCandidateRepository } from '../repositories/recovery-candidate-repository'
 import type { RecoveryCandidateRecordInput } from '../../src/shared/recovery-candidate'
 
@@ -116,6 +120,17 @@ const MUTATING_DATABASE_CHANNELS = new Set([
   'db:narrative-thread-event-confirm',
   'db:plot-tree-save',
   'db:plot-tree-clear',
+  'db:map-node-upsert',
+  'db:map-node-delete',
+  'db:map-edge-upsert',
+  'db:map-edge-delete',
+  'db:map-layer-upsert',
+  'db:map-layer-delete',
+  'db:map-layers-reorder',
+  'db:timeline-settings-save',
+  'db:timeline-event-upsert',
+  'db:timeline-event-delete',
+  'db:timeline-events-reorder',
 ])
 
 function registerProjectDatabaseHandler(channel: string, handler: ProjectDatabaseHandler): void {
@@ -1004,13 +1019,9 @@ export function registerDatabaseController() {
     return RevisionRepository.getNextIndex(baseDraftId)
   })
 
-  ipcMain.handle('db:revision-merge', async (_event, request: Parameters<typeof RevisionRepository.mergeIntoDraft>[0], expectedProjectPath: string) => {
-    try {
-      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
-      return { success: true, receipt: RevisionRepository.mergeIntoDraft(request) }
-    } catch (err) {
-      return { success: false, error: String(err) }
-    }
+  ipcMain.handle('db:revision-merge', async (_event, _request: unknown, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return { success: false, error: 'Codex 创作工作台已禁用自动修稿回写，请由作者手工编辑正文' }
   })
 
   ipcMain.handle('db:revision-mark-merged', async (_event, id: number, mergedToDraftId: number, expectedProjectPath: string) => {
@@ -1165,5 +1176,133 @@ export function registerDatabaseController() {
   ipcMain.handle('db:get-latest-summary', async (_event, expectedProjectPath: string) => {
     assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
     return SummaryRepository.getLatestSnapshot()
+  })
+
+  // ============================================================
+  // 10. world_map — 世界地图
+  // ============================================================
+  ipcMain.handle('db:map-get-all', async (_event, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return WorldMapRepository.getAll()
+  })
+
+  ipcMain.handle('db:map-node-upsert', async (_event, node: WorldMapNode, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      const saved = WorldMapRepository.upsertNode(node)
+      return { success: true, node: saved }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:map-node-delete', async (_event, id: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      WorldMapRepository.deleteNode(id)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:map-edge-upsert', async (_event, edge: WorldMapEdge, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      const saved = WorldMapRepository.upsertEdge(edge)
+      return { success: true, edge: saved }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:map-edge-delete', async (_event, id: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      WorldMapRepository.deleteEdge(id)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:map-candidates-get', async (_event, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return WorldMapRepository.extractCandidates()
+  })
+
+  ipcMain.handle('db:map-layer-upsert', async (_event, layer: WorldMapLayer, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, layer: WorldMapRepository.upsertLayer(layer) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:map-layer-delete', async (_event, id: string, fallbackLayerId: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      WorldMapRepository.deleteLayer(id, fallbackLayerId)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:map-layers-reorder', async (_event, orderedIds: string[], expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      WorldMapRepository.reorderLayers(orderedIds)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  // ============================================================
+  // 11. story_timeline — 作者手动维护的故事时间线
+  // ============================================================
+  ipcMain.handle('db:timeline-get-all', async (_event, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return StoryTimelineRepository.getAll()
+  })
+
+  ipcMain.handle('db:timeline-settings-save', async (_event, settings: StoryTimelineSettings, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, settings: StoryTimelineRepository.saveSettings(settings) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:timeline-event-upsert', async (_event, event: StoryTimelineEvent, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, event: StoryTimelineRepository.upsertEvent(event) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:timeline-event-delete', async (_event, id: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      StoryTimelineRepository.deleteEvent(id)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:timeline-events-reorder', async (_event, orderedIds: string[], expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      StoryTimelineRepository.reorderEvents(orderedIds)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
   })
 }

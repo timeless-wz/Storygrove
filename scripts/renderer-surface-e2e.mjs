@@ -26,7 +26,7 @@ export const RENDERER_SURFACE_E2E_CONTRACT = Object.freeze({
     page: Object.freeze({ selector: '.skin-workspace-page', alpha: 0.60 }),
     solid: Object.freeze({ selector: '.skin-solid-surface', alpha: 0.88 }),
   }),
-  routes: Object.freeze(['project', 'knowledge', 'characters', 'blueprint']),
+  routes: Object.freeze(['project', 'workspace', 'knowledge', 'characters']),
   classicMustBeOpaque: true,
   visualEvidence: Object.freeze({
     outputEnvironment: 'AI_NOVEL_RENDERER_VISUAL_EVIDENCE_DIR',
@@ -538,8 +538,19 @@ function assertTextColor(cssColor, theme, label) {
   assert.equal(computedColorAlpha(cssColor), 1, `${label} text must remain fully opaque`)
 }
 
+/**
+ * Icon-only chrome buttons expose their label as an accessible name
+ * (`aria-label`) and, when a native hint is still useful, as `title`.
+ * Match either so renamed or tooltip-only controls keep resolving.
+ */
+function labelSelector(labels) {
+  return labels
+    .flatMap(label => [`button[title="${label}"]`, `button[aria-label="${label}"]`])
+    .join(', ')
+}
+
 async function openAppearanceSettings(page) {
-  await page.locator('button[title="设置"], button[title="Settings"]').first().click()
+  await page.locator(labelSelector(['设置', 'Settings'])).first().click()
   const modal = page.locator('.skin-solid-surface').first()
   await modal.waitFor({ state: 'visible', timeout: RUNNER_TIMEOUT_MS })
   await modal.locator('aside button').filter({ hasText: /外观|Appearance/ }).first().click()
@@ -571,13 +582,12 @@ async function selectTheme(page, theme) {
 }
 
 async function clickNavigation(page, titles) {
-  const selector = titles.map(title => `button[title="${title}"]`).join(', ')
-  await page.locator(selector).first().click()
+  await page.locator(labelSelector(titles)).first().click()
   await page.locator('.skin-workspace-page').first().waitFor({ state: 'visible', timeout: RUNNER_TIMEOUT_MS })
 }
 
 async function selectVisualQaState(page) {
-  await clickNavigation(page, ['项目', 'Project'])
+  await clickNavigation(page, ['创作', 'Writing'])
   await page.locator('.writer-project-tree .tree-item')
     .filter({ hasText: /小说配置|Novel configuration/ })
     .first()
@@ -608,11 +618,13 @@ async function assertImageSkinThemes(page) {
 }
 
 async function assertReachableRoutes(page) {
+  // The primary rail holds workspace-level destinations only now: chapter
+  // blueprints, world and plot entries live inside their owning view.
   const routes = [
-    { id: 'project', titles: ['项目', 'Project'] },
-    { id: 'knowledge', titles: ['小说', 'Novel'] },
-    { id: 'characters', titles: ['角色', 'Cast'] },
-    { id: 'blueprint', titles: ['章节蓝图', 'Chapter blueprint'] },
+    { id: 'project', titles: ['创作', 'Writing'] },
+    { id: 'workspace', titles: ['资料', 'Sources'] },
+    { id: 'knowledge', titles: ['知识库', 'Knowledge'] },
+    { id: 'characters', titles: ['角色', 'Characters'] },
   ]
   const evidence = []
   for (const route of routes) {

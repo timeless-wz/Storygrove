@@ -9,17 +9,13 @@ import {
   type WorkflowStatus,
 } from '../../stores/workflow-store'
 import { useLocaleStore } from '../../stores/locale-store'
-import { ipc } from '../ipc-client'
 import {
   guardArchitectureGeneration,
-  guardChapterWriting,
   guardDirectoryGeneration,
   type GuardResult,
 } from '../workflow-guards'
 import { createArchitectureWorkflow, type ArchitectureWorkflowParams } from './architecture-workflow'
-import { createChapterWorkflow } from './chapter-workflow'
 import { createDirectoryWorkflow, type DirectoryWorkflowParams } from './directory-workflow'
-import { normalizeChapterWordsTarget } from './chapter-creation-parameters'
 import type { Locale } from '../../i18n/types'
 
 export type CreativeWorkflowName =
@@ -95,11 +91,10 @@ async function guardIntent(
     )
     return
   }
-  if (intent.workflow === 'generate_draft') {
-    requireGuardAccepted(
-      await guardChapterWriting(intent.chapterNumber, projectSession.projectPath, projectSession, uiLocale),
-      uiLocale,
-    )
+  if (intent.workflow === 'generate_draft' || intent.workflow === 'refine') {
+    throw new Error(uiLocale === 'en-US'
+      ? 'Codex creative workbench has disabled automated draft generation and refinement. Please author novel prose directly in the editor.'
+      : 'Codex 创作工作台已禁用自动生成正文与自动修稿，请在编辑器中直接撰写正文。')
   }
 }
 
@@ -114,7 +109,7 @@ function currentProjectFor(projectSession: ProjectSessionContext) {
 async function definitionFor(
   intent: CreativeIntent,
   projectSession: ProjectSessionContext,
-  generationModelId?: string,
+  _generationModelId?: string,
   uiLocale?: Locale,
 ): Promise<WorkflowDefinition> {
   const project = currentProjectFor(projectSession)
@@ -134,44 +129,31 @@ async function definitionFor(
     return createDirectoryWorkflow(intent.params ?? { mode: 'full' }, project.path, projectSession, uiLocale)
   }
   if (intent.workflow === 'generate_draft') {
-    if (!Number.isInteger(intent.chapterNumber) || intent.chapterNumber < 1) {
-      throw new Error('写稿需要有效的 chapter_number（从 1 开始）')
-    }
-    const blueprint = await ipc.invokeWithProjectSession(
-      projectSession,
-      'db:blueprint-get',
-      intent.chapterNumber,
-      project.path,
-    )
-    currentProjectFor(projectSession)
-    if (!blueprint) {
-      throw new Error(`第 ${intent.chapterNumber} 章蓝图不存在；请先运行 generate_blueprint 工作流`)
-    }
-    return createChapterWorkflow({
-      projectPath: project.path,
-      chapterNumber: blueprint.chapterNumber,
-      title: blueprint.title,
-      role: blueprint.role,
-      purpose: blueprint.purpose,
-      characters: blueprint.characters,
-      keyEvents: blueprint.keyEvents,
-      suspenseHook: blueprint.suspenseHook,
-      userGuidance: blueprint.userGuidance,
-      wordsTarget: normalizeChapterWordsTarget(project.novelConfig.wordsPerChapter),
-    }, projectSession, { generationModelId, uiLocale })
+    throw new Error(uiLocale === 'en-US'
+      ? 'Codex creative workbench has disabled automated draft generation and refinement. Please author novel prose directly in the editor.'
+      : 'Codex 创作工作台已禁用自动生成正文与自动修稿，请在编辑器中直接撰写正文。')
   }
 
   throw new Error(`${intent.workflow} 需要明确的草稿 ID 和不可变正文快照；请先打开目标草稿后从编辑器启动`)
 }
 
-/** The sole seam for turning a creative intent into an observable workflow run. */
 export async function launchCreativeWorkflow(
   intent: CreativeIntent,
-  projectSession: ProjectSessionContext,
+  projectSession?: ProjectSessionContext,
   options: CreativeWorkflowLaunchOptions = {},
 ): Promise<CreativeWorkflowLaunchReceipt> {
-  const generationModelId = options.generationModelId?.trim() || undefined
   const uiLocale = useLocaleStore.getState().locale
+  if (intent.workflow === 'generate_draft' || intent.workflow === 'refine') {
+    throw new Error(uiLocale === 'en-US'
+      ? 'Codex creative workbench has disabled automated draft generation and refinement. Please author novel prose directly in the editor.'
+      : 'Codex 创作工作台已禁用自动生成正文与自动修稿，请在编辑器中直接撰写正文。')
+  }
+
+  if (!projectSession) {
+    throw new Error('启动工作流时缺少项目会话')
+  }
+
+  const generationModelId = options.generationModelId?.trim() || undefined
   currentProjectFor(projectSession)
   await guardIntent(intent, projectSession, uiLocale)
   currentProjectFor(projectSession)
