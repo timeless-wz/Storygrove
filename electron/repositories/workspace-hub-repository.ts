@@ -799,6 +799,22 @@ export class WorkspaceHubRepository {
   }
 
   /**
+   * A compensation failure can leave a scan payload committed even though no
+   * workspace path can safely remain bound. Preserve rows and immutable
+   * snapshots for recovery, but make every source non-effective so content from
+   * an unbound directory is never treated as current context.
+   */
+  static markAllSourcesMissingForUnboundRecovery(projectId: string): void {
+    const db = requiredDb()
+    const sessionProjectId = requiredSessionProjectId(projectId, 'markAllSourcesMissingForUnboundRecovery')
+    db.prepare(`
+      UPDATE workspace_sources
+      SET is_missing = 1, import_status = 'missing', updated_at = datetime('now')
+      WHERE project_id = ?
+    `).run(sessionProjectId)
+  }
+
+  /**
    * 恢复本项目最后一次完整扫描成功的绑定路径。仅恢复仍存在且未缺失的批准快照，
    * 不从旧 fragments 表回退，也不写入 setting_rules。
    */

@@ -11,6 +11,7 @@ import type {
   WorkspaceImportCandidateStatus,
   ChapterContextBundle,
   ChapterContextSnapshot,
+  WorkspaceScanResult,
 } from '../shared/workspace-hub'
 
 export const workspaceHubService = {
@@ -28,13 +29,8 @@ export const workspaceHubService = {
   async bindDirectory(
     session: ProjectSessionContext,
     grantId: string,
-  ): Promise<{
-    success: boolean
-    scannedCount?: number
-    recognizedCount?: number
-    error?: string
-  }> {
-    return ipc.invokeWithProjectSession(session, 'workspace:bind-directory', grantId, session.projectPath)
+  ): Promise<WorkspaceScanResult> {
+    return ipc.invokeWithProjectSession(session, 'workspace:bind-directory', grantId, session.projectPath) as Promise<WorkspaceScanResult>
   },
 
   /** 解除外部目录关联（不删除外部文件） */
@@ -43,13 +39,8 @@ export const workspaceHubService = {
   },
 
   /** 重新扫描已关联目录（使用数据库中已授权绑定路径，不可被覆盖） */
-  async rescan(session: ProjectSessionContext, taskId?: string): Promise<{
-    success: boolean
-    scannedCount?: number
-    recognizedCount?: number
-    error?: string
-  }> {
-    return ipc.invokeWithProjectSession(session, 'workspace:scan', taskId, session.projectPath)
+  async rescan(session: ProjectSessionContext, taskId?: string): Promise<WorkspaceScanResult> {
+    return ipc.invokeWithProjectSession(session, 'workspace:scan', taskId, session.projectPath) as Promise<WorkspaceScanResult>
   },
 
   /** 取消正在执行的扫描任务 */
