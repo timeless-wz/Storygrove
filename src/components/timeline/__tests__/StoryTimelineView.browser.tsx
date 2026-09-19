@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ProjectData } from '../../../shared/ipc-channels'
 import { setActiveProjectSessionContext } from '../../../shared/project-session-context'
 import type { StoryTimelineEvent, StoryTimelineSettings } from '../../../shared/story-timeline'
+import { EMPTY_CARD, useCharacterStore } from '../../../stores/character-store'
+import { useLayoutStore } from '../../../stores/layout-store'
 import { useLocaleStore } from '../../../stores/locale-store'
 import { useProjectStore } from '../../../stores/project-store'
 import { useStoryTimelineStore } from '../../../stores/story-timeline-store'
@@ -79,6 +81,8 @@ const originalLocaleState = useLocaleStore.getState()
 const originalProjectState = useProjectStore.getState()
 const originalTimelineState = useStoryTimelineStore.getState()
 const originalWorldMapState = useWorldMapStore.getState()
+const originalCharacterState = useCharacterStore.getState()
+const originalLayoutState = useLayoutStore.getState()
 
 let container: HTMLDivElement
 let root: Root
@@ -149,6 +153,17 @@ async function renderTimeline(): Promise<void> {
 beforeEach(() => {
   useLocaleStore.setState({ locale: 'zh-CN', initialized: true })
   useProjectStore.setState({ currentProject: project, projectSessionEpoch: 1 })
+  useCharacterStore.setState({
+    ...originalCharacterState,
+    characters: [{ ...EMPTY_CARD, name: '许渡' }],
+    selectedName: null,
+    dataProjectKey: PROJECT_PATH,
+    dataProjectSession: PROJECT_SESSION,
+    loadingProjectKey: null,
+    loadingProjectSession: null,
+    lastError: null,
+  })
+  useLayoutStore.setState({ ...originalLayoutState, sidebarView: 'project', characterViewRequest: null })
   useStoryTimelineStore.setState({ ...originalTimelineState, events: [], settings, dataProjectKey: null, loading: false })
   useWorldMapStore.setState({ ...originalWorldMapState, maps: [], nodes: [], edges: [], migration: null, loading: false })
   setActiveProjectSessionContext(PROJECT_SESSION)
@@ -180,6 +195,8 @@ afterEach(async () => {
   setActiveProjectSessionContext(null)
   useLocaleStore.setState(originalLocaleState)
   useProjectStore.setState(originalProjectState)
+  useCharacterStore.setState(originalCharacterState)
+  useLayoutStore.setState(originalLayoutState)
   useStoryTimelineStore.setState(originalTimelineState)
   useWorldMapStore.setState(originalWorldMapState)
   vi.restoreAllMocks()
@@ -344,6 +361,17 @@ describe('story timeline horizontal axis', () => {
     expect(mentionBar).not.toBeNull()
     const tags = Array.from(container.querySelectorAll('[data-testid="timeline-mention-tag"]'))
     expect(tags.map(t => t.textContent?.trim())).toEqual(expect.arrayContaining(['@许渡', '[[雾港]]']))
+
+    const xuDu = tags.find(tag => tag.textContent?.includes('@许渡')) as HTMLButtonElement | undefined
+    expect(xuDu).toBeDefined()
+    expect(useProjectStore.getState().currentProject?.path).toBe(PROJECT_PATH)
+    expect(useCharacterStore.getState().characters.map(character => character.name)).toContain('许渡')
+    await act(async () => {
+      xuDu?.click()
+    })
+    expect(useCharacterStore.getState().selectedName).toBe('许渡')
+    expect(useLayoutStore.getState().sidebarView).toBe('characters')
+    expect(useLayoutStore.getState().characterViewRequest?.view).toBe('overview')
 
     // 关闭弹窗
     const closeBtn = container.querySelector('.writer-timeline-modal-close')

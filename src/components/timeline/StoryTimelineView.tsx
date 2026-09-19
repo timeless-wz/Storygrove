@@ -33,9 +33,13 @@ import type {
 import { STORY_TIMELINE_MAIN_BRANCH_ID } from '../../shared/story-timeline'
 import { useStoryTimelineStore } from '../../stores/story-timeline-store'
 import { useWorldMapStore } from '../../stores/world-map-store'
+import { useCharacterStore } from '../../stores/character-store'
+import { useLayoutStore } from '../../stores/layout-store'
+import { useProjectStore } from '../../stores/project-store'
 import { useLocaleStore } from '../../stores/locale-store'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
+import { toast } from '../ui/Toast'
 import {
   buildStoryTimelineLayout,
   sortTimelineEvents,
@@ -255,6 +259,7 @@ export default function StoryTimelineView({
   onNavigateMention?: (mention: StoryTimelineMention) => void
 }) {
   const text = useLocaleStore(s => s.text)
+  const currentProject = useProjectStore(s => s.currentProject)
   const settings = useStoryTimelineStore(s => s.settings)
   const branches = useStoryTimelineStore(s => s.branches)
   const events = useStoryTimelineStore(s => s.events)
@@ -278,6 +283,31 @@ export default function StoryTimelineView({
   // 浮层上下文菜单与编辑弹窗状态
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [modalState, setModalState] = useState<ModalState>({ open: false, mode: 'create-main' })
+
+  /**
+   * 提及只是一条导航入口，不能凭空创建人物或写入人物事实。若调用者没有
+   * 自定义导航器，则在当前项目的已加载角色名单中定位同名角色并打开概览。
+   */
+  const handleNavigateMention = useCallback((mention: StoryTimelineMention) => {
+    if (onNavigateMention) {
+      onNavigateMention(mention)
+      return
+    }
+    if (currentProject?.path !== projectKey) return
+
+    const target = useCharacterStore.getState().characters
+      .find(character => character.name === mention.name)
+    if (!target) {
+      toast.warning(text(
+        `未找到「${mention.name}」的人物卡片，无法跳转。`,
+        `No character card found for “${mention.name}”.`,
+      ))
+      return
+    }
+
+    useCharacterStore.getState().setSelectedName(target.name)
+    useLayoutStore.getState().openCharacterProfile('overview')
+  }, [currentProject?.path, onNavigateMention, projectKey, text])
 
   useEffect(() => {
     void loadAll(projectKey)
@@ -694,7 +724,7 @@ export default function StoryTimelineView({
         onDelete={async (id) => {
           await deleteEvent(id)
         }}
-        onNavigateMention={onNavigateMention}
+        onNavigateMention={handleNavigateMention}
       />
     </div>
   )
