@@ -543,6 +543,71 @@ describe('story timeline horizontal axis', () => {
     expect(container.querySelector('.writer-timeline-modal')).toBeNull()
   })
 
+  it('keeps the canvas and its anchors visible after saving the first event from an empty timeline', async () => {
+    const savedEvents: StoryTimelineEvent[] = []
+    invoke.mockImplementation(async (channel: string, payload?: StoryTimelineEvent) => {
+      if (channel === 'db:timeline-get-all') return { settings, branches: [], events: savedEvents }
+      if (channel === 'db:map-get-all') return { nodes: [], edges: [], layers: [] }
+      if (channel === 'db:timeline-event-upsert' && payload) {
+        savedEvents.push(payload)
+        return { success: true, event: payload }
+      }
+      return { success: false, error: `unexpected channel ${channel}` }
+    })
+    useStoryTimelineStore.setState({
+      events: [],
+      branches: [],
+      settings,
+      dataProjectKey: PROJECT_PATH,
+      loading: false,
+    })
+
+    await act(async () => {
+      root.render(<StoryTimelineView projectKey={PROJECT_PATH} />)
+    })
+    await act(async () => {
+      await vi.waitFor(() => expect(container.querySelector('[data-testid="timeline-anchor-start"]')).not.toBeNull())
+    })
+
+    const pane = container.querySelector('.react-flow__pane') ?? container.querySelector('.writer-timeline-flow')
+    await act(async () => {
+      pane?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 300, clientY: 200 }))
+    })
+    const createItem = Array.from(container.querySelectorAll('.writer-timeline-context-item'))
+      .find(element => element.textContent?.includes('在此创建事件'))
+    await act(async () => {
+      createItem?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    await act(async () => {
+      setInputValue(formField('事件标题'), '第一次相遇')
+      setInputValue(formField('自定义时间'), '第 1 年')
+    })
+    const saveButton = Array.from(container.querySelectorAll('.writer-timeline-modal button'))
+      .find(button => button.textContent?.includes('保存事件'))
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    await act(async () => {
+      await vi.waitFor(() => expect(labels().length).toBe(1))
+    })
+    const flow = container.querySelector<HTMLElement>('[data-testid="timeline-flow"]')
+    const startAnchor = container.querySelector<HTMLElement>('[data-testid="timeline-anchor-start"]')
+    const endAnchor = container.querySelector<HTMLElement>('[data-testid="timeline-anchor-end"]')
+    const eventLabel = labels()[0]
+
+    expect(flow).not.toBeNull()
+    expect(startAnchor).not.toBeNull()
+    expect(endAnchor).not.toBeNull()
+    // 回归保护：不只检查 DOM 仍存在；节点必须完成实际浏览器布局，不能
+    // 因为保存后视口或节点测量失步而落入一整片空白画布。
+    expect(startAnchor!.getBoundingClientRect().width).toBeGreaterThan(0)
+    expect(endAnchor!.getBoundingClientRect().width).toBeGreaterThan(0)
+    expect(eventLabel.getBoundingClientRect().width).toBeGreaterThan(0)
+    expect(eventLabel.getBoundingClientRect().height).toBeGreaterThan(0)
+  })
+
   it('rejects saving event when sortOrder is outside [startOrder, endOrder] with prompt', async () => {
     await renderTimeline()
 

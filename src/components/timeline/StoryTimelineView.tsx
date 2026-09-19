@@ -509,6 +509,11 @@ export default function StoryTimelineView({
     event: StoryTimelineEvent
     newBranchName?: string
   }) => {
+    // React Flow 初次初始化时只有两个范围锚点。首个普通事件加入后，节点
+    // 尺寸与连线会在下一帧才完成测量；此时只校正一次视口，避免窗口落在
+    // 旧的空白坐标上。后续创建/编辑绝不自动重置作者已调整过的视角。
+    const isFirstTimelineEvent = events.length === 0
+
     if (newBranchName && modalState.mode === 'create-branch' && modalState.sourceEvent) {
       // 先持久化新分支
       const branchCreated = await upsertBranch({
@@ -523,6 +528,13 @@ export default function StoryTimelineView({
     const saved = await upsertEvent(event)
     if (saved) {
       setSelectedId(event.id)
+      if (isFirstTimelineEvent) {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            flowInstanceRef.current?.fitView({ padding: 0.2, duration: 0 })
+          })
+        })
+      }
     }
   }
 
