@@ -1594,6 +1594,46 @@
 .writer-timeline-label-title { display: block; font-size: 12.5px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .writer-timeline-label-handle { opacity: 0; width: 1px; height: 1px; min-width: 0; min-height: 0; border: 0; background: transparent; }
 
+/* 故事范围两端固定锚点 */
+.writer-timeline-anchor {
+  padding: 4px 12px;
+  border: 1px solid var(--color-border-strong, var(--color-border));
+  border-radius: 999px;
+  background: var(--color-panel);
+  color: var(--color-text);
+  cursor: pointer;
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--color-text) 6%, transparent);
+  transition: border-color .16s ease, box-shadow .16s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  z-index: 10;
+}
+.writer-timeline-anchor:hover {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+.writer-timeline-anchor.is-start {
+  border-left: 3px solid #3b82f6;
+}
+.writer-timeline-anchor.is-end {
+  border-right: 3px solid #10b981;
+}
+.writer-timeline-anchor-title {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.writer-timeline-anchor-meta {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* 分支折叠/展开徽标按钮 */
 .writer-timeline-branch-badge { display: inline-flex; align-items: center; gap: 3px; margin-top: 4px; padding: 2px 6px; border-radius: 999px; font-size: 10px; font-weight: 600; background: color-mix(in srgb, #10b981 12%, transparent); color: #059669; border: 1px solid color-mix(in srgb, #10b981 30%, transparent); cursor: pointer; transition: background .14s ease; }
 .writer-timeline-branch-badge:hover { background: color-mix(in srgb, #10b981 22%, transparent); }

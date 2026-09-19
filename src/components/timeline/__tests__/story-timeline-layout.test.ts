@@ -118,12 +118,13 @@ describe('story timeline layout', () => {
     expect(above[2].y).toBeLessThan(above[1].y)
     // 每层错开一个固定步长，而不是把横轴拉宽。
     expect(above[0].y - above[1].y).toBe(TIMELINE_STAGGER_STEP)
-    expect(above[0].x).toBeLessThan(above[1].x)
+    // 同一刻度共享同一水平基准列
+    expect(above[0].x).toBe(above[1].x)
   })
 
-  it('keeps dense but short labels on a single layer', () => {
+  it('keeps dense but short labels on separate columns without extra vertical stagger', () => {
     const layout = buildStoryTimelineLayout(
-      [0, 1, 2].map(index => makeEvent(`e${index}`, 7, { title: 'A', timeLabel: 'B' })),
+      [1, 2, 3].map(order => makeEvent(`e${order}`, order, { title: 'A', timeLabel: 'B' })),
     )
 
     expect(layout.events.map(event => event.staggerLevel)).toEqual([0, 0, 0])
@@ -187,11 +188,17 @@ describe('story timeline layout', () => {
       .toBe(TIMELINE_LABEL_MAX_WIDTH)
   })
 
-  it('returns an empty axis for an empty timeline without inventing events', () => {
+  it('maintains a trunk width of at least 1000px for empty timeline with start and end anchors', () => {
     const layout = buildStoryTimelineLayout([])
 
     expect(layout.events).toEqual([])
-    expect(layout.axis.width).toBe(0)
+    expect(layout.axis.width).toBeGreaterThanOrEqual(1000)
+    expect(layout.startAnchor).toBeDefined()
+    expect(layout.endAnchor).toBeDefined()
+    expect(layout.startAnchor.id).toBe('timeline-anchor-start')
+    expect(layout.endAnchor.id).toBe('timeline-anchor-end')
+    expect(layout.startAnchor.x).toBeLessThan(layout.endAnchor.x)
+    expect(layout.endAnchor.x - layout.startAnchor.x).toBeGreaterThanOrEqual(1000)
   })
 
   it('derives identical geometry for identical input and never stores positions on events', () => {
@@ -287,16 +294,107 @@ describe('story timeline layout', () => {
     expect(seqEdge).toBeDefined()
   })
 
-  it('supports multiple events at the same sortOrder timepoint', () => {
+  it('symmetrically staggers multiple events on the same tick above and below without overlapping', () => {
     const eventA = makeEvent('a', 10, { title: '事件 A' })
     const eventB = makeEvent('b', 10, { title: '事件 B' })
+    const eventC = makeEvent('c', 10, { title: '事件 C' })
+    const eventD = makeEvent('d', 10, { title: '事件 D' })
 
-    const layout = buildStoryTimelineLayout([eventA, eventB])
-    expect(layout.events).toHaveLength(2)
-    // 两个事件均被布局且互不重叠
+    const layout = buildStoryTimelineLayout([eventA, eventB, eventC, eventD])
+    expect(layout.events).toHaveLength(4)
+
     const a = layout.events.find(e => e.id === 'a')!
     const b = layout.events.find(e => e.id === 'b')!
+    const c = layout.events.find(e => e.id === 'c')!
+    const d = layout.events.find(e => e.id === 'd')!
+
+    // 同一刻度多事件共享同一水平基准列
+    expect(a.x).toBe(b.x)
+    expect(b.x).toBe(c.x)
+    expect(c.x).toBe(d.x)
+
+    // 上下对称分布
+    expect(a.side).toBe('above')
+    expect(b.side).toBe('below')
+    expect(c.side).toBe('above')
+    expect(d.side).toBe('below')
+
+    // 垂直方向不重叠：同侧逐层错开
+    expect(c.y).toBeLessThan(a.y)
+    expect(d.y).toBeGreaterThan(b.y)
     expect(a.y).not.toBe(b.y)
+    expect(c.y).not.toBe(d.y)
+  })
+
+  it('calculates start and end anchor coordinates and properties accurately', () => {
+    const customSettings = {
+      title: '主线故事',
+      rulerLabel: '年代',
+      rulerUnit: '年',
+      startLabel: '起源纪元',
+      startTimeLabel: '前 100 年',
+      startOrder: 5,
+      endLabel: '终局之战',
+      endTimeLabel: '后 200 年',
+      endOrder: 25,
+      hasCustomRange: true,
+    }
+
+    const layout = buildStoryTimelineLayout([], [], ['main'], customSettings)
+    expect(layout.startAnchor).toEqual({
+      id: 'timeline-anchor-start',
+      anchorType: 'start',
+      label: '起源纪元',
+      timeLabel: '前 100 年',
+      order: 5,
+      x: expect.any(Number),
+      y: expect.any(Number),
+      width: 120,
+      height: 42,
+    })
+    expect(layout.endAnchor).toEqual({
+      id: 'timeline-anchor-end',
+      anchorType: 'end',
+      label: '终局之战',
+      timeLabel: '后 200 年',
+      order: 25,
+      x: expect.any(Number),
+      y: expect.any(Number),
+      width: 120,
+      height: 42,
+    })
+    expect(layout.startAnchor.x).toBeLessThan(layout.endAnchor.x)
+    expect(layout.axis.width).toBeGreaterThanOrEqual(1000)
+  })
+
+  it('clamps events with sortOrder outside [startOrder, endOrder] within timeline boundaries', () => {
+    const customSettings = {
+      title: '范围测试',
+      rulerLabel: '刻度',
+      rulerUnit: '点',
+      startLabel: '开端',
+      startTimeLabel: '0',
+      startOrder: 10,
+      endLabel: '结束',
+      endTimeLabel: '30',
+      endOrder: 30,
+      hasCustomRange: true,
+    }
+
+    const under = makeEvent('under', 2, { title: '太早的事件' })
+    const normal = makeEvent('normal', 20, { title: '正常事件' })
+    const over = makeEvent('over', 99, { title: '太晚的事件' })
+
+    const layout = buildStoryTimelineLayout([under, normal, over], [], ['main'], customSettings)
+    const underPlaced = layout.events.find(e => e.id === 'under')!
+    const normalPlaced = layout.events.find(e => e.id === 'normal')!
+    const overPlaced = layout.events.find(e => e.id === 'over')!
+
+    // 边界保护：超出范围的刻度被约束在锚点区间内，不会溢出到主干之外
+    expect(underPlaced.x).toBeGreaterThanOrEqual(layout.startAnchor.x)
+    expect(overPlaced.x).toBeLessThanOrEqual(layout.endAnchor.x)
+    expect(normalPlaced.x).toBeGreaterThan(underPlaced.x)
+    expect(overPlaced.x).toBeGreaterThan(normalPlaced.x)
   })
 })
 

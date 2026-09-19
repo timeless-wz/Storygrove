@@ -1,9 +1,12 @@
 import { useEffect, useRef } from 'react'
 import {
+  Compass,
   Edit3,
+  Flag,
   FolderMinus,
   FolderPlus,
   GitBranch,
+  Milestone,
   Plus,
   Trash2,
 } from 'lucide-react'
@@ -13,21 +16,28 @@ export interface TimelineContextMenuProps {
   x: number
   y: number
   targetEventId?: string | null
+  targetAnchor?: 'start' | 'end' | null
+  suggestedOrder?: number | null
+  canCreateEventAtPosition?: boolean
   hasChildBranches?: boolean
   isBranchExpanded?: boolean
   onClose: () => void
-  onCreateMainEvent: () => void
+  onCreateMainEvent: (suggestedOrder?: number) => void
   onCreateNextEvent?: () => void
   onCreateBranch?: () => void
   onToggleExpand?: () => void
   onEditEvent?: () => void
   onDeleteEvent?: () => void
+  onOpenRangeSettings?: (focusField?: 'start' | 'end' | 'general') => void
 }
 
 export function TimelineContextMenu({
   x,
   y,
   targetEventId,
+  targetAnchor,
+  suggestedOrder,
+  canCreateEventAtPosition = true,
   hasChildBranches,
   isBranchExpanded,
   onClose,
@@ -37,6 +47,7 @@ export function TimelineContextMenu({
   onToggleExpand,
   onEditEvent,
   onDeleteEvent,
+  onOpenRangeSettings,
 }: TimelineContextMenuProps) {
   const text = useLocaleStore(s => s.text)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -59,8 +70,8 @@ export function TimelineContextMenu({
   }, [onClose])
 
   // 边界保护：确保菜单不超出视口边界
-  const menuWidth = 190
-  const menuHeight = targetEventId ? 220 : 60
+  const menuWidth = 200
+  const menuHeight = targetEventId ? 220 : 100
   const safeX = Math.max(12, Math.min(x, window.innerWidth - menuWidth - 16))
   const safeY = Math.max(12, Math.min(y, window.innerHeight - menuHeight - 16))
 
@@ -72,20 +83,99 @@ export function TimelineContextMenu({
       data-testid="timeline-context-menu"
       style={{ left: safeX, top: safeY }}
     >
-      {!targetEventId ? (
-        // 右键空白画布
-        <button
-          type="button"
-          role="menuitem"
-          className="writer-timeline-context-item"
-          onClick={() => {
-            onCreateMainEvent()
-            onClose()
-          }}
-        >
-          <Plus size={14} />
-          <span>{text('新建主线事件', 'New main event')}</span>
-        </button>
+      {targetAnchor === 'start' ? (
+        // 右键开端锚点
+        <>
+          <button
+            type="button"
+            role="menuitem"
+            className="writer-timeline-context-item"
+            onClick={() => {
+              onOpenRangeSettings?.('start')
+              onClose()
+            }}
+          >
+            <Milestone size={14} className="text-blue-600" />
+            <span>{text('编辑故事开端', 'Edit Story Start')}</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="writer-timeline-context-item"
+            onClick={() => {
+              onOpenRangeSettings?.('general')
+              onClose()
+            }}
+          >
+            <Compass size={14} />
+            <span>{text('设置故事范围', 'Set story range')}</span>
+          </button>
+        </>
+      ) : targetAnchor === 'end' ? (
+        // 右键结束锚点
+        <>
+          <button
+            type="button"
+            role="menuitem"
+            className="writer-timeline-context-item"
+            onClick={() => {
+              onOpenRangeSettings?.('end')
+              onClose()
+            }}
+          >
+            <Flag size={14} className="text-emerald-600" />
+            <span>{text('编辑故事结束', 'Edit Story End')}</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="writer-timeline-context-item"
+            onClick={() => {
+              onOpenRangeSettings?.('general')
+              onClose()
+            }}
+          >
+            <Compass size={14} />
+            <span>{text('设置故事范围', 'Set story range')}</span>
+          </button>
+        </>
+      ) : !targetEventId ? (
+        // 右键空白画布或主干
+        <>
+          {canCreateEventAtPosition && (
+            <button
+              type="button"
+              role="menuitem"
+              className="writer-timeline-context-item"
+              onClick={() => {
+                onCreateMainEvent(suggestedOrder ?? undefined)
+                onClose()
+              }}
+            >
+              <Plus size={14} />
+              <span>
+                {suggestedOrder !== null && suggestedOrder !== undefined
+                  ? text(`在此创建事件（刻度: ${suggestedOrder}）`, `Create event here (tick: ${suggestedOrder})`)
+                  : text('新建主线事件', 'New main event')}
+              </span>
+            </button>
+          )}
+
+          {onOpenRangeSettings && (
+            <button
+              type="button"
+              role="menuitem"
+              className="writer-timeline-context-item"
+              onClick={() => {
+                onOpenRangeSettings('general')
+                onClose()
+              }}
+            >
+              <Compass size={14} />
+              <span>{text('设置故事范围', 'Set story range')}</span>
+            </button>
+          )}
+        </>
       ) : (
         // 右键特定事件
         <>
@@ -174,3 +264,4 @@ export function TimelineContextMenu({
     </div>
   )
 }
+

@@ -12,7 +12,97 @@ export interface StoryTimelineSettings {
   title: string
   rulerLabel: string
   rulerUnit: string
+  /** 故事开端锚点名称，默认“故事开端” */
+  startLabel?: string
+  /** 故事开端时间文本（如“创世纪”、“第1年”） */
+  startTimeLabel?: string
+  /** 故事开端刻度数值（如 0） */
+  startOrder?: number
+  /** 故事结束锚点名称，默认“故事结束” */
+  endLabel?: string
+  /** 故事结束时间文本（如“终局之战”、“第10年”） */
+  endTimeLabel?: string
+  /** 故事结束刻度数值（如 100） */
+  endOrder?: number
+  /** 是否已被作者显式保存/确认过故事范围 */
+  hasCustomRange?: boolean
   updatedAt?: string
+}
+
+export const DEFAULT_TIMELINE_SETTINGS: StoryTimelineSettings = {
+  title: '故事时间线',
+  rulerLabel: '故事时间',
+  rulerUnit: '刻度',
+  startLabel: '故事开端',
+  startTimeLabel: '',
+  startOrder: 0,
+  endLabel: '故事结束',
+  endTimeLabel: '',
+  endOrder: 10,
+  hasCustomRange: false,
+}
+
+export interface StoryTimelineResolvedRange {
+  startLabel: string
+  startTimeLabel: string
+  startOrder: number
+  endLabel: string
+  endTimeLabel: string
+  endOrder: number
+  isConfigured: boolean
+}
+
+/**
+ * 解析并计算出有效的故事范围：
+ * 1. 若作者已显式设置，严格使用作者设定的范围；
+ * 2. 旧项目兼容：若尚未显式配置范围且已有历史事件，默认自动包含所有历史事件，不可截断；
+ * 3. 空项目无设置时，默认 0 ~ 10 刻度。
+ */
+export function resolveStoryTimelineRange(
+  settings?: StoryTimelineSettings | null,
+  events: readonly StoryTimelineEvent[] = [],
+): StoryTimelineResolvedRange {
+  const isConfigured = Boolean(
+    settings?.hasCustomRange ||
+    (typeof settings?.startOrder === 'number' && typeof settings?.endOrder === 'number' && settings.startOrder < settings.endOrder),
+  )
+
+  const defaultStart = 0
+  const defaultEnd = 10
+
+  if (isConfigured && settings) {
+    const startOrder = typeof settings.startOrder === 'number' ? settings.startOrder : defaultStart
+    const rawEnd = typeof settings.endOrder === 'number' ? settings.endOrder : defaultEnd
+    const endOrder = rawEnd > startOrder ? rawEnd : startOrder + 10
+    return {
+      startLabel: settings.startLabel?.trim() || '故事开端',
+      startTimeLabel: settings.startTimeLabel ?? '',
+      startOrder,
+      endLabel: settings.endLabel?.trim() || '故事结束',
+      endTimeLabel: settings.endTimeLabel ?? '',
+      endOrder,
+      isConfigured: true,
+    }
+  }
+
+  // 旧项目兼容：取主干事件的最大最小刻度作为参考
+  const mainEvents = events.filter(e => (e.branchId || STORY_TIMELINE_MAIN_BRANCH_ID) === STORY_TIMELINE_MAIN_BRANCH_ID)
+  const eventOrders = mainEvents.map(e => e.sortOrder)
+  const minEventOrder = eventOrders.length > 0 ? Math.min(...eventOrders) : defaultStart
+  const maxEventOrder = eventOrders.length > 0 ? Math.max(...eventOrders) : defaultEnd
+
+  const startOrder = Math.min(defaultStart, minEventOrder)
+  const endOrder = Math.max(defaultEnd, maxEventOrder, startOrder + 10)
+
+  return {
+    startLabel: settings?.startLabel?.trim() || '故事开端',
+    startTimeLabel: settings?.startTimeLabel ?? '',
+    startOrder,
+    endLabel: settings?.endLabel?.trim() || '故事结束',
+    endTimeLabel: settings?.endTimeLabel ?? '',
+    endOrder,
+    isConfigured: false,
+  }
 }
 
 export interface StoryTimelineBranch {

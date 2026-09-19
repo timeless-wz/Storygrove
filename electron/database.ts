@@ -673,6 +673,13 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
       title TEXT NOT NULL DEFAULT '故事时间线',
       ruler_label TEXT NOT NULL DEFAULT '故事时间',
       ruler_unit TEXT NOT NULL DEFAULT '刻度',
+      start_label TEXT NOT NULL DEFAULT '故事开端',
+      start_time_label TEXT NOT NULL DEFAULT '',
+      start_order REAL DEFAULT NULL,
+      end_label TEXT NOT NULL DEFAULT '故事结束',
+      end_time_label TEXT NOT NULL DEFAULT '',
+      end_order REAL DEFAULT NULL,
+      has_custom_range INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -2006,6 +2013,31 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
     db.exec('ALTER TABLE story_timeline_events ADD COLUMN parent_event_id TEXT DEFAULT NULL')
   }
   db.exec('CREATE INDEX IF NOT EXISTS idx_story_timeline_events_branch ON story_timeline_events(branch_id, sort_order)')
+
+  const settingsColumns = new Set(
+    (db.prepare('PRAGMA table_info(story_timeline_settings)').all() as Array<{ name: string }>).map(column => column.name),
+  )
+  if (!settingsColumns.has('start_label')) {
+    db.exec("ALTER TABLE story_timeline_settings ADD COLUMN start_label TEXT NOT NULL DEFAULT '故事开端'")
+  }
+  if (!settingsColumns.has('start_time_label')) {
+    db.exec("ALTER TABLE story_timeline_settings ADD COLUMN start_time_label TEXT NOT NULL DEFAULT ''")
+  }
+  if (!settingsColumns.has('start_order')) {
+    db.exec('ALTER TABLE story_timeline_settings ADD COLUMN start_order REAL DEFAULT NULL')
+  }
+  if (!settingsColumns.has('end_label')) {
+    db.exec("ALTER TABLE story_timeline_settings ADD COLUMN end_label TEXT NOT NULL DEFAULT '故事结束'")
+  }
+  if (!settingsColumns.has('end_time_label')) {
+    db.exec("ALTER TABLE story_timeline_settings ADD COLUMN end_time_label TEXT NOT NULL DEFAULT ''")
+  }
+  if (!settingsColumns.has('end_order')) {
+    db.exec('ALTER TABLE story_timeline_settings ADD COLUMN end_order REAL DEFAULT NULL')
+  }
+  if (!settingsColumns.has('has_custom_range')) {
+    db.exec('ALTER TABLE story_timeline_settings ADD COLUMN has_custom_range INTEGER NOT NULL DEFAULT 0')
+  }
 
   migrateDraftUnitCounts(db)
 }

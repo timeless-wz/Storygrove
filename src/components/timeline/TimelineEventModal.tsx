@@ -33,6 +33,8 @@ export interface TimelineEventModalProps {
   sourceEvent?: StoryTimelineEvent | null
   currentBranchName?: string
   nextSortOrder?: number
+  initialSortOrder?: number
+  storyRange?: { startOrder: number; endOrder: number }
   onClose: () => void
   onSave: (data: {
     event: StoryTimelineEvent
@@ -63,6 +65,8 @@ export function TimelineEventModal({
   sourceEvent,
   currentBranchName,
   nextSortOrder = 1,
+  initialSortOrder,
+  storyRange,
   onClose,
   onSave,
   onDelete,
@@ -85,10 +89,12 @@ export function TimelineEventModal({
   const [locationNodeIds, setLocationNodeIds] = useState<string[]>([])
   const [status, setStatus] = useState<StoryTimelineEventStatus>('planned')
   const [saving, setSaving] = useState(false)
+  const [orderError, setOrderError] = useState<string | null>(null)
 
   // 当弹窗打开时初始化表单状态
   useEffect(() => {
     if (!open) return
+    setOrderError(null)
 
     if (mode === 'edit' && initialEvent) {
       setId(initialEvent.id)
@@ -139,7 +145,10 @@ export function TimelineEventModal({
       setNewBranchName('')
       setTitle('')
       setTimeLabel('')
-      setSortOrder(String(nextSortOrder))
+      const defaultOrder = initialSortOrder !== undefined
+        ? initialSortOrder
+        : nextSortOrder
+      setSortOrder(String(defaultOrder))
       setPrecision('exact')
       setRangeEndLabel('')
       setDescription('')
@@ -148,7 +157,19 @@ export function TimelineEventModal({
       setLocationNodeIds([])
       setStatus('planned')
     }
-  }, [open, mode, initialEvent, sourceEvent, nextSortOrder])
+  }, [open, mode, initialEvent, sourceEvent, nextSortOrder, initialSortOrder])
+
+  // 监听 Esc 键关闭
+  useEffect(() => {
+    if (!open) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [open, onClose])
 
   if (!open) return null
 
@@ -163,9 +184,19 @@ export function TimelineEventModal({
   }
 
   const handleSubmit = async () => {
-    if (!title.trim() || !timeLabel.trim() || !Number.isFinite(Number(sortOrder))) {
+    const orderNum = Number(sortOrder)
+    if (!title.trim() || !timeLabel.trim() || !Number.isFinite(orderNum)) {
       toast.error(text('请填写完整的事件标题、时间与排序刻度', 'Please fill in title, custom time and ruler position'))
       return
+    }
+
+    if (storyRange) {
+      if (orderNum < storyRange.startOrder || orderNum > storyRange.endOrder) {
+        const msg = text('请先编辑故事开端或故事结束', 'Please edit Story Start or Story End first')
+        setOrderError(msg)
+        toast.error(msg)
+        return
+      }
     }
 
     setSaving(true)
@@ -176,7 +207,7 @@ export function TimelineEventModal({
         parentEventId: mode === 'create-branch' ? (sourceEvent?.id ?? null) : (initialEvent?.parentEventId ?? null),
         title: title.trim(),
         timeLabel: timeLabel.trim(),
-        sortOrder: Number(sortOrder),
+        sortOrder: orderNum,
         precision,
         rangeEndLabel: precision === 'range' ? rangeEndLabel.trim() : undefined,
         description: description.trim(),
@@ -211,13 +242,18 @@ export function TimelineEventModal({
   }
 
   return (
-    <div className="writer-timeline-modal-backdrop" data-testid="timeline-event-modal-backdrop">
+    <div
+      className="writer-timeline-modal-backdrop"
+      data-testid="timeline-event-modal-backdrop"
+      onClick={onClose}
+    >
       <div
         className="writer-timeline-modal"
         role="dialog"
         aria-modal="true"
         aria-label={getModalTitle()}
         data-testid="timeline-event-modal"
+        onClick={e => e.stopPropagation()}
       >
         {/* Header */}
         <div className="writer-timeline-modal-header">
@@ -288,8 +324,16 @@ export function TimelineEventModal({
                 type="number"
                 step="0.1"
                 value={sortOrder}
-                onChange={e => setSortOrder(e.target.value)}
+                onChange={e => {
+                  setSortOrder(e.target.value)
+                  setOrderError(null)
+                }}
               />
+              {orderError && (
+                <div className="writer-timeline-field-error text-xs text-rose-500 mt-1" role="alert">
+                  {orderError}
+                </div>
+              )}
             </label>
           </div>
 

@@ -107,6 +107,16 @@ function labelsInSortOrder(): Array<{ eventId: string; element: HTMLElement; sor
     .sort((left, right) => left.sortOrder - right.sortOrder)
 }
 
+function setInputValue(input: HTMLInputElement | HTMLTextAreaElement, value: string) {
+  const nativeSet = Object.getOwnPropertyDescriptor(
+    input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
+    'value',
+  )?.set
+  nativeSet?.call(input, value)
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  input.dispatchEvent(new Event('change', { bubbles: true }))
+}
+
 function formField(labelText: string): HTMLInputElement | HTMLTextAreaElement {
   const label = Array.from(container.querySelectorAll('.writer-timeline-field, .writer-timeline-settings label'))
     .find(node => (node.querySelector('span')?.textContent ?? '').includes(labelText))
@@ -433,7 +443,7 @@ describe('story timeline horizontal axis', () => {
     })
   })
 
-  it('keeps the existing loading and empty-timeline states', async () => {
+  it('keeps the existing loading and renders canvas-centric empty-timeline states with anchors', async () => {
     useStoryTimelineStore.setState({ events: [], dataProjectKey: null, loading: true })
     invoke.mockImplementation(async (channel: string) => {
       if (channel === 'db:timeline-get-all') return new Promise(() => {})
@@ -448,11 +458,172 @@ describe('story timeline horizontal axis', () => {
 
     useStoryTimelineStore.setState({ events: [], dataProjectKey: PROJECT_PATH, loading: false })
     await act(async () => {
-      await vi.waitFor(() => expect(container.textContent).toContain('从第一个故事事件开始'))
+      await vi.waitFor(() => expect(container.querySelector('[data-testid="timeline-flow"]')).not.toBeNull())
     })
     expect(labels().length).toBe(0)
-    // 刻度设置入口始终可用。
+    // 呈现点状画布与故事开端、结束锚点，没有大号占位按钮
+    expect(container.querySelector('[data-testid="timeline-anchor-start"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="timeline-anchor-end"]')).not.toBeNull()
+    expect(container.textContent).toContain('故事开端')
+    expect(container.textContent).toContain('故事结束')
+    expect(container.textContent).not.toContain('从第一个故事事件开始')
+    // 刻度设置与适应视图入口始终可用
     expect(container.textContent).toContain('刻度设置')
+    expect(container.textContent).toContain('适应视图')
+  })
+
+  it('closes event modal cleanly on backdrop click, cancel click, and Escape key without freezing UI', async () => {
+    await renderTimeline()
+
+    // 1. 打开弹窗，通过遮罩点击关闭
+    await openEditModal('e2')
+    expect(container.querySelector('.writer-timeline-modal')).not.toBeNull()
+    const backdrop = container.querySelector('.writer-timeline-modal-backdrop') as HTMLElement
+    expect(backdrop).not.toBeNull()
+    await act(async () => {
+      backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(container.querySelector('.writer-timeline-modal')).toBeNull()
+
+    // 2. 再次打开，通过取消按钮关闭
+    await openEditModal('e2')
+    expect(container.querySelector('.writer-timeline-modal')).not.toBeNull()
+    const cancelBtn = Array.from(container.querySelectorAll('.writer-timeline-modal button'))
+      .find(b => b.textContent?.includes('取消'))
+    await act(async () => {
+      cancelBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(container.querySelector('.writer-timeline-modal')).toBeNull()
+
+    // 3. 再次打开，通过 Escape 键关闭
+    await openEditModal('e2')
+    expect(container.querySelector('.writer-timeline-modal')).not.toBeNull()
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    })
+    expect(container.querySelector('.writer-timeline-modal')).toBeNull()
+
+    // 4. 验证界面完全响应：可继续选择节点
+    await clickLabel('e1')
+    expect(labelFor('e1').className).toContain('is-selected')
+  })
+
+  it('supports right clicking blank canvas to create event with prefilled sortOrder', async () => {
+    await renderTimeline()
+
+    const pane = container.querySelector('.react-flow__pane') ?? container.querySelector('.writer-timeline-flow')
+    expect(pane).not.toBeNull()
+
+    await act(async () => {
+      pane!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 300, clientY: 200 }))
+    })
+
+    const menu = container.querySelector('.writer-timeline-context-menu')
+    expect(menu).not.toBeNull()
+    expect(menu?.textContent).toContain('在此创建事件')
+
+    const createItem = Array.from(menu!.querySelectorAll('.writer-timeline-context-item'))
+      .find(el => el.textContent?.includes('在此创建事件'))
+    await act(async () => {
+      createItem?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    const modal = container.querySelector('.writer-timeline-modal')
+    expect(modal).not.toBeNull()
+    expect(modal?.textContent).toContain('新建主线事件')
+    const sortOrderInput = formField('排序刻度') as HTMLInputElement
+    expect(sortOrderInput.value).toBeTruthy()
+
+    // 取消关闭
+    const cancelBtn = Array.from(container.querySelectorAll('.writer-timeline-modal button'))
+      .find(b => b.textContent?.includes('取消'))
+    await act(async () => {
+      cancelBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(container.querySelector('.writer-timeline-modal')).toBeNull()
+  })
+
+  it('rejects saving event when sortOrder is outside [startOrder, endOrder] with prompt', async () => {
+    await renderTimeline()
+
+    await openEditModal('e2')
+    const sortOrderInput = formField('排序刻度') as HTMLInputElement
+    await act(async () => {
+      setInputValue(sortOrderInput, '999')
+    })
+
+    const saveBtn = Array.from(container.querySelectorAll('.writer-timeline-modal button'))
+      .find(b => b.textContent?.includes('保存事件'))
+    expect(saveBtn).not.toBeNull()
+
+    await act(async () => {
+      saveBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    // 弹窗未被关闭，且展示校验提示“请先编辑故事开端或故事结束”
+    expect(container.querySelector('.writer-timeline-modal')).not.toBeNull()
+    expect(container.querySelector('.writer-timeline-field-error')?.textContent).toContain('请先编辑故事开端或故事结束')
+
+    // 关闭弹窗
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    })
+    expect(container.querySelector('.writer-timeline-modal')).toBeNull()
+  })
+
+  it('renders story start and end anchors and allows opening range modal on right click', async () => {
+    await renderTimeline()
+
+    const startAnchor = container.querySelector('[data-testid="timeline-anchor-start"]') as HTMLElement
+    const endAnchor = container.querySelector('[data-testid="timeline-anchor-end"]') as HTMLElement
+    expect(startAnchor).not.toBeNull()
+    expect(endAnchor).not.toBeNull()
+    expect(startAnchor.textContent).toContain('故事开端')
+    expect(endAnchor.textContent).toContain('故事结束')
+
+    // 右键开端锚点
+    await act(async () => {
+      startAnchor.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 100, clientY: 100 }))
+    })
+    const menu = container.querySelector('.writer-timeline-context-menu')
+    expect(menu).not.toBeNull()
+    expect(menu?.textContent).toContain('编辑故事开端')
+    expect(menu?.textContent).toContain('设置故事范围')
+
+    // 点击设置故事范围
+    const rangeOption = Array.from(menu!.querySelectorAll('.writer-timeline-context-item'))
+      .find(el => el.textContent?.includes('设置故事范围'))
+    await act(async () => {
+      rangeOption?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(container.querySelector('.writer-timeline-modal h2')?.textContent).toContain('设置故事范围与刻度')
+    const startInput = container.querySelector('input[placeholder="故事开端"]') as HTMLInputElement
+    const endInput = container.querySelector('input[placeholder="故事结束"]') as HTMLInputElement
+    expect(startInput.value).toBe('故事开端')
+    expect(endInput.value).toBe('故事结束')
+
+    // 关闭范围弹窗
+    const closeBtn = container.querySelector('.writer-timeline-modal-close')
+    await act(async () => {
+      closeBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(container.querySelector('.writer-timeline-modal')).toBeNull()
+  })
+
+  it('provides fit view button and maintains canvas responsiveness without unexpected viewport resets', async () => {
+    await renderTimeline()
+
+    const fitBtn = Array.from(container.querySelectorAll('button'))
+      .find(b => b.textContent?.includes('适应视图'))
+    expect(fitBtn).toBeDefined()
+    await act(async () => {
+      fitBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    // 画布与节点依然响应
+    await clickLabel('e3')
+    expect(labelFor('e3').className).toContain('is-selected')
   })
 
   it('renders the ruler settings section in both locales', async () => {

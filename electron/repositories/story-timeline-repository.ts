@@ -5,7 +5,7 @@ import type {
   StoryTimelineSettings,
   StoryTimelineSnapshot,
 } from '../../src/shared/story-timeline'
-import { STORY_TIMELINE_MAIN_BRANCH_ID } from '../../src/shared/story-timeline'
+import { DEFAULT_TIMELINE_SETTINGS, STORY_TIMELINE_MAIN_BRANCH_ID } from '../../src/shared/story-timeline'
 
 function requireDb(): NonNullable<ReturnType<typeof getProjectDb>> {
   const db = getProjectDb()
@@ -97,10 +97,25 @@ export class StoryTimelineRepository {
   static getAll(): StoryTimelineSnapshot {
     const db = requireDb()
     const settingsRow = db.prepare(`
-      SELECT title, ruler_label, ruler_unit, updated_at
+      SELECT title, ruler_label, ruler_unit,
+             start_label, start_time_label, start_order,
+             end_label, end_time_label, end_order,
+             has_custom_range, updated_at
       FROM story_timeline_settings
       WHERE id = 'main'
-    `).get() as { title: string; ruler_label: string; ruler_unit: string; updated_at: string } | undefined
+    `).get() as {
+      title: string
+      ruler_label: string
+      ruler_unit: string
+      start_label: string | null
+      start_time_label: string | null
+      start_order: number | null
+      end_label: string | null
+      end_time_label: string | null
+      end_order: number | null
+      has_custom_range: number | null
+      updated_at: string
+    } | undefined
 
     const branchRows = db.prepare(`
       SELECT id, name, source_event_id, color, sort_order, created_at, updated_at
@@ -126,9 +141,16 @@ export class StoryTimelineRepository {
             title: settingsRow.title,
             rulerLabel: settingsRow.ruler_label,
             rulerUnit: settingsRow.ruler_unit,
+            startLabel: settingsRow.start_label || '故事开端',
+            startTimeLabel: settingsRow.start_time_label || '',
+            startOrder: typeof settingsRow.start_order === 'number' ? settingsRow.start_order : undefined,
+            endLabel: settingsRow.end_label || '故事结束',
+            endTimeLabel: settingsRow.end_time_label || '',
+            endOrder: typeof settingsRow.end_order === 'number' ? settingsRow.end_order : undefined,
+            hasCustomRange: Boolean(settingsRow.has_custom_range),
             updatedAt: settingsRow.updated_at,
           }
-        : { title: '故事时间线', rulerLabel: '故事时间', rulerUnit: '刻度' },
+        : DEFAULT_TIMELINE_SETTINGS,
       branches,
       events: rows.map(mapEvent),
     }
@@ -140,16 +162,57 @@ export class StoryTimelineRepository {
     const title = settings.title.trim() || '故事时间线'
     const rulerLabel = settings.rulerLabel.trim() || '故事时间'
     const rulerUnit = settings.rulerUnit.trim() || '刻度'
+    const startLabel = settings.startLabel?.trim() || '故事开端'
+    const startTimeLabel = settings.startTimeLabel?.trim() || ''
+    const startOrder = typeof settings.startOrder === 'number' && Number.isFinite(settings.startOrder)
+      ? settings.startOrder
+      : null
+    const endLabel = settings.endLabel?.trim() || '故事结束'
+    const endTimeLabel = settings.endTimeLabel?.trim() || ''
+    const endOrder = typeof settings.endOrder === 'number' && Number.isFinite(settings.endOrder)
+      ? settings.endOrder
+      : null
+    const hasCustomRange = settings.hasCustomRange || (startOrder !== null && endOrder !== null) ? 1 : 0
+
     db.prepare(`
-      INSERT INTO story_timeline_settings (id, title, ruler_label, ruler_unit, updated_at)
-      VALUES ('main', ?, ?, ?, ?)
+      INSERT INTO story_timeline_settings (
+        id, title, ruler_label, ruler_unit,
+        start_label, start_time_label, start_order,
+        end_label, end_time_label, end_order,
+        has_custom_range, updated_at
+      )
+      VALUES ('main', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
         ruler_label = excluded.ruler_label,
         ruler_unit = excluded.ruler_unit,
+        start_label = excluded.start_label,
+        start_time_label = excluded.start_time_label,
+        start_order = excluded.start_order,
+        end_label = excluded.end_label,
+        end_time_label = excluded.end_time_label,
+        end_order = excluded.end_order,
+        has_custom_range = excluded.has_custom_range,
         updated_at = excluded.updated_at
-    `).run(title, rulerLabel, rulerUnit, now)
-    return { title, rulerLabel, rulerUnit, updatedAt: now }
+    `).run(
+      title, rulerLabel, rulerUnit,
+      startLabel, startTimeLabel, startOrder,
+      endLabel, endTimeLabel, endOrder,
+      hasCustomRange, now,
+    )
+    return {
+      title,
+      rulerLabel,
+      rulerUnit,
+      startLabel,
+      startTimeLabel,
+      startOrder: startOrder ?? undefined,
+      endLabel,
+      endTimeLabel,
+      endOrder: endOrder ?? undefined,
+      hasCustomRange: Boolean(hasCustomRange),
+      updatedAt: now,
+    }
   }
 
   static upsertBranch(branch: StoryTimelineBranch): StoryTimelineBranch {

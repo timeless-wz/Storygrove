@@ -4,7 +4,7 @@ import type {
   StoryTimelineEvent,
   StoryTimelineSettings,
 } from '../shared/story-timeline'
-import { STORY_TIMELINE_MAIN_BRANCH_ID } from '../shared/story-timeline'
+import { DEFAULT_TIMELINE_SETTINGS, STORY_TIMELINE_MAIN_BRANCH_ID } from '../shared/story-timeline'
 import { ipc } from '../services/ipc-client'
 import { toast } from '../components/ui/Toast'
 import { captureProjectSession, isProjectSessionCurrent } from '../components/project-session-gate'
@@ -28,12 +28,6 @@ interface StoryTimelineState {
   setBranchExpanded: (branchId: string, expanded: boolean) => void
 }
 
-const DEFAULT_SETTINGS: StoryTimelineSettings = {
-  title: '故事时间线',
-  rulerLabel: '故事时间',
-  rulerUnit: '刻度',
-}
-
 const DEFAULT_MAIN_BRANCH: StoryTimelineBranch = {
   id: STORY_TIMELINE_MAIN_BRANCH_ID,
   name: '主时间轴',
@@ -42,7 +36,7 @@ const DEFAULT_MAIN_BRANCH: StoryTimelineBranch = {
 }
 
 export const useStoryTimelineStore = create<StoryTimelineState>((set, get) => ({
-  settings: DEFAULT_SETTINGS,
+  settings: DEFAULT_TIMELINE_SETTINGS,
   branches: [DEFAULT_MAIN_BRANCH],
   events: [],
   // 支线默认折叠：初始仅主时间轴展开
