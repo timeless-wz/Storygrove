@@ -1638,6 +1638,9 @@
 .writer-timeline-branch-badge { display: inline-flex; align-items: center; gap: 3px; margin-top: 4px; padding: 2px 6px; border-radius: 999px; font-size: 10px; font-weight: 600; background: color-mix(in srgb, #10b981 12%, transparent); color: #059669; border: 1px solid color-mix(in srgb, #10b981 30%, transparent); cursor: pointer; transition: background .14s ease; }
 .writer-timeline-branch-badge:hover { background: color-mix(in srgb, #10b981 22%, transparent); }
 .dark .writer-timeline-branch-badge { color: #34d399; }
+.writer-timeline-create-branch { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; padding: 3px 7px; border-radius: 5px; font-size: 10px; font-weight: 650; color: #047857; background: color-mix(in srgb, #10b981 11%, transparent); border: 1px solid color-mix(in srgb, #10b981 32%, transparent); cursor: pointer; transition: background .14s ease, border-color .14s ease; }
+.writer-timeline-create-branch:hover { background: color-mix(in srgb, #10b981 20%, transparent); border-color: color-mix(in srgb, #10b981 52%, transparent); }
+.dark .writer-timeline-create-branch { color: #6ee7b7; }
 
 /* 连接线 */
 .writer-timeline-connector { stroke: var(--color-border-strong, var(--color-border)); }

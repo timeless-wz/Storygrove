@@ -67,6 +67,7 @@ type TimelineNodeData = Record<string, unknown> & {
   anchorType?: 'start' | 'end'
   onEdit?: (anchorType: 'start' | 'end') => void
   onToggleExpand?: (eventId: string) => void
+  onCreateBranch?: (eventId: string) => void
   onSelect?: (eventId: string) => void
   onDoubleClick?: (eventId: string) => void
 }
@@ -156,6 +157,23 @@ function TimelineEventNodeView({ data, selected }: NodeProps<TimelineNode>) {
       </div>
 
       <strong className="writer-timeline-label-title">{data.title}</strong>
+
+      {/* 选中事件后直接给出分叉入口，避免把核心创作动作藏在右键菜单中。 */}
+      {selected && (
+        <button
+          type="button"
+          className="writer-timeline-create-branch"
+          data-testid="timeline-create-branch"
+          onClick={(event) => {
+            event.stopPropagation()
+            if (data.eventId) data.onCreateBranch?.(data.eventId)
+          }}
+          title="从此事件创建一条向后发展的支线"
+        >
+          <GitBranch size={10} />
+          <span>创建支线</span>
+        </button>
+      )}
 
       {(data.childBranchCount ?? 0) > 0 && (
         <button
@@ -366,6 +384,13 @@ export default function StoryTimelineView({
     })
   }, [branches, expandedBranchIds, setBranchExpanded])
 
+  const handleCreateBranchFromEvent = useCallback((eventId: string) => {
+    const sourceEvent = events.find(event => event.id === eventId)
+    if (!sourceEvent) return
+    setSelectedId(eventId)
+    setModalState({ open: true, mode: 'create-branch', sourceEvent })
+  }, [events])
+
   // 纯函数推导时间树布局
   const layout = useMemo(() => {
     return buildStoryTimelineLayout(events, branches, expandedBranchIds, settings)
@@ -457,6 +482,7 @@ export default function StoryTimelineView({
         childBranchCount: event.childBranchCount,
         isExpanded: event.isExpanded,
         onToggleExpand: handleToggleEventBranch,
+        onCreateBranch: handleCreateBranchFromEvent,
         onSelect: (id: string) => setSelectedId(id),
         onDoubleClick: (id: string) => {
           const target = events.find(e => e.id === id)
@@ -468,7 +494,7 @@ export default function StoryTimelineView({
     }))
 
     return [axis, startAnchorNode, endAnchorNode, ...eventNodes]
-  }, [layout, selectedId, events, handleToggleEventBranch])
+  }, [layout, selectedId, events, handleToggleEventBranch, handleCreateBranchFromEvent])
 
   const flowEdges = useMemo<TimelineEdge[]>(() => {
     // 1. 主轴到主轴事件的垂直接线
@@ -763,11 +789,7 @@ export default function StoryTimelineView({
           }}
           onCreateBranch={() => {
             if (contextTargetEvent) {
-              setModalState({
-                open: true,
-                mode: 'create-branch',
-                sourceEvent: contextTargetEvent,
-              })
+              handleCreateBranchFromEvent(contextTargetEvent.id)
             }
           }}
           onToggleExpand={() => {

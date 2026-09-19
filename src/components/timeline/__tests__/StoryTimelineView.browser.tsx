@@ -343,6 +343,49 @@ describe('story timeline horizontal axis', () => {
     expect(container.querySelector('.writer-timeline-modal')).toBeNull()
   })
 
+  it('creates and immediately displays a branch from the selected event card', async () => {
+    const savedEvents = [...timelineEvents]
+    const savedBranches: Array<{ id: string; name: string; sourceEventId: string | null; sortOrder: number }> = []
+    invoke.mockImplementation(async (channel: string, payload?: StoryTimelineEvent & { sourceEventId?: string }) => {
+      if (channel === 'db:timeline-get-all') return { settings, branches: savedBranches, events: savedEvents }
+      if (channel === 'db:map-get-all') return { nodes: [], edges: [], layers: [] }
+      if (channel === 'db:timeline-branch-upsert' && payload) {
+        savedBranches.push(payload as unknown as { id: string; name: string; sourceEventId: string | null; sortOrder: number })
+        return { success: true, branch: payload }
+      }
+      if (channel === 'db:timeline-event-upsert' && payload) {
+        savedEvents.push(payload)
+        return { success: true, event: payload }
+      }
+      return { success: false, error: `unexpected channel ${channel}` }
+    })
+
+    await renderTimeline()
+    await clickLabel('e1')
+    const createBranch = labelFor('e1').querySelector<HTMLButtonElement>('[data-testid="timeline-create-branch"]')
+    expect(createBranch?.textContent).toContain('创建支线')
+    await act(async () => {
+      createBranch?.click()
+    })
+
+    expect(container.querySelector('.writer-timeline-modal h2')?.textContent).toContain('创建新支线事件')
+    await act(async () => {
+      setInputValue(formField('事件标题'), '反派潜入雾港')
+    })
+    const saveButton = Array.from(container.querySelectorAll('.writer-timeline-modal button'))
+      .find(button => button.textContent?.includes('保存事件'))
+    await act(async () => {
+      saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    await act(async () => {
+      await vi.waitFor(() => expect(savedBranches).toHaveLength(1))
+      await vi.waitFor(() => expect(useStoryTimelineStore.getState().events.some(event => event.title === '反派潜入雾港')).toBe(true))
+    })
+    expect(savedBranches[0].sourceEventId).toBe('e1')
+    expect(labels().some(label => label.textContent?.includes('反派潜入雾港'))).toBe(true)
+  })
+
   it('renders mention chips inside modal when description contains mentions', async () => {
     const eventWithMentions = makeEvent({
       id: 'e-mention',
