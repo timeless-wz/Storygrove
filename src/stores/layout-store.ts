@@ -18,8 +18,8 @@ export type SettingsSection = 'llm' | 'embedding' | 'proxy' | 'editor' | 'prompt
 /** 章节创建对话框的预填参数 */
 export type ChapterCreationPrefill = Record<string, unknown> | null
 
-/** 角色档案页的内部视图。 */
-export type CharacterProfileView = 'edit' | 'state' | 'graph'
+/** 角色档案页的内部视图；默认为概览，完整字段只出现在显式编辑模式里。 */
+export type CharacterProfileView = 'overview' | 'edit' | 'graph'
 
 /** 外部跳转对角色档案页的视图请求；requestId 递增以让重复请求也生效。 */
 export interface CharacterViewRequest {
@@ -102,7 +102,7 @@ interface LayoutState {
   closeImportNovel: () => void
   openChapterCreation: (prefill?: ChapterCreationPrefill) => void
   closeChapterCreation: () => void
-  /** 打开角色档案并请求内部视图（档案 / 当前状态 / 关系图谱）。 */
+  /** 打开角色档案并请求内部视图（概览 / 编辑 / 关系图谱）。 */
   openCharacterProfile: (view?: CharacterProfileView) => void
 }
 
@@ -186,7 +186,7 @@ export const useLayoutStore = create<LayoutState>()((set) => ({
     // Disabled in Codex Creative Workbench: generation popups are deactivated
   },
   closeChapterCreation: () => set({ chapterCreationOpen: false, chapterCreationPrefill: null }),
-  openCharacterProfile: (view = 'edit') =>
+  openCharacterProfile: (view = 'overview') =>
     set((s) => ({
       sidebarView: 'characters',
       activeRailItem: 'characters',
