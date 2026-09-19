@@ -38,6 +38,8 @@ vi.mock('../controllers/workspace-hub-controller', () => ({ registerWorkspaceHub
 vi.mock('../controllers/story-data-controller', () => ({ registerStoryDataController: vi.fn() }))
 vi.mock('../controllers/phase3-8-controller', () => ({ registerPhase3To8Controller: vi.fn() }))
 vi.mock('../controllers/backup-controller', () => ({ registerBackupController: vi.fn() }))
+vi.mock('../controllers/project-documents-controller', () => ({ registerProjectDocumentsController: vi.fn() }))
+vi.mock('../controllers/world-map-image-controller', () => ({ registerWorldMapImageController: vi.fn() }))
 
 import { registerIPCHandlers } from '../ipc-handlers'
 

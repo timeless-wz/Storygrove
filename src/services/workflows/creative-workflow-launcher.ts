@@ -11,11 +11,14 @@ import {
 import { useLocaleStore } from '../../stores/locale-store'
 import {
   guardArchitectureGeneration,
+  guardChapterWriting,
   guardDirectoryGeneration,
   type GuardResult,
 } from '../workflow-guards'
 import { createArchitectureWorkflow, type ArchitectureWorkflowParams } from './architecture-workflow'
+import { createChapterWorkflow } from './chapter-workflow'
 import { createDirectoryWorkflow, type DirectoryWorkflowParams } from './directory-workflow'
+import { ipc } from '../ipc-client'
 import type { Locale } from '../../i18n/types'
 
 export type CreativeWorkflowName =
@@ -91,10 +94,11 @@ async function guardIntent(
     )
     return
   }
-  if (intent.workflow === 'generate_draft' || intent.workflow === 'refine') {
-    throw new Error(uiLocale === 'en-US'
-      ? 'Codex creative workbench has disabled automated draft generation and refinement. Please author novel prose directly in the editor.'
-      : 'Codex 创作工作台已禁用自动生成正文与自动修稿，请在编辑器中直接撰写正文。')
+  if (intent.workflow === 'generate_draft') {
+    requireGuardAccepted(
+      await guardChapterWriting(intent.chapterNumber, projectSession.projectPath, projectSession, uiLocale),
+      uiLocale,
+    )
   }
 }
 
@@ -109,7 +113,7 @@ function currentProjectFor(projectSession: ProjectSessionContext) {
 async function definitionFor(
   intent: CreativeIntent,
   projectSession: ProjectSessionContext,
-  _generationModelId?: string,
+  generationModelId?: string,
   uiLocale?: Locale,
 ): Promise<WorkflowDefinition> {
   const project = currentProjectFor(projectSession)
@@ -129,9 +133,29 @@ async function definitionFor(
     return createDirectoryWorkflow(intent.params ?? { mode: 'full' }, project.path, projectSession, uiLocale)
   }
   if (intent.workflow === 'generate_draft') {
-    throw new Error(uiLocale === 'en-US'
-      ? 'Codex creative workbench has disabled automated draft generation and refinement. Please author novel prose directly in the editor.'
-      : 'Codex 创作工作台已禁用自动生成正文与自动修稿，请在编辑器中直接撰写正文。')
+    const blueprint = await ipc.invokeWithProjectSession(
+      projectSession,
+      'db:blueprint-get',
+      intent.chapterNumber,
+      project.path,
+    )
+    if (!blueprint) {
+      throw new Error(uiLocale === 'en-US'
+        ? `Chapter ${intent.chapterNumber} has no blueprint. Create or import its blueprint before starting AI drafting.`
+        : `第 ${intent.chapterNumber} 章尚无章节蓝图；请先创建或导入该章蓝图，再启动 AI 辅助写稿。`)
+    }
+    return createChapterWorkflow({
+      projectPath: project.path,
+      chapterNumber: intent.chapterNumber,
+      title: blueprint.title,
+      role: blueprint.role,
+      purpose: blueprint.purpose,
+      characters: blueprint.characters,
+      keyEvents: blueprint.keyEvents,
+      suspenseHook: blueprint.suspenseHook,
+      userGuidance: blueprint.userGuidance,
+      wordsTarget: project.novelConfig.wordsPerChapter,
+    }, projectSession, { generationModelId, uiLocale })
   }
 
   throw new Error(`${intent.workflow} 需要明确的草稿 ID 和不可变正文快照；请先打开目标草稿后从编辑器启动`)
@@ -143,11 +167,6 @@ export async function launchCreativeWorkflow(
   options: CreativeWorkflowLaunchOptions = {},
 ): Promise<CreativeWorkflowLaunchReceipt> {
   const uiLocale = useLocaleStore.getState().locale
-  if (intent.workflow === 'generate_draft' || intent.workflow === 'refine') {
-    throw new Error(uiLocale === 'en-US'
-      ? 'Codex creative workbench has disabled automated draft generation and refinement. Please author novel prose directly in the editor.'
-      : 'Codex 创作工作台已禁用自动生成正文与自动修稿，请在编辑器中直接撰写正文。')
-  }
 
   if (!projectSession) {
     throw new Error('启动工作流时缺少项目会话')

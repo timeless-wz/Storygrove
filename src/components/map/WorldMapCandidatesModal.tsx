@@ -4,16 +4,15 @@ import { Check, X, Sparkles, MapPin } from 'lucide-react'
 import { useLocaleStore } from '../../stores/locale-store'
 import {
   type WorldMapCandidate,
-  type WorldMapLayer,
   WORLD_MAP_NODE_TYPE_LABELS,
-  getWorldMapLayerName,
 } from '../../shared/world-map'
 
 interface Props {
   open: boolean
   candidates: WorldMapCandidate[]
-  layers: WorldMapLayer[]
   loading: boolean
+  /** 候选只会被采纳进当前选中的地图，绝不复制到多张地图。 */
+  targetMapName: string
   onClose: () => void
   onConfirm: (candidate: WorldMapCandidate) => Promise<boolean>
   onDismiss: (candidateId: string) => void
@@ -22,8 +21,8 @@ interface Props {
 export default function WorldMapCandidatesModal({
   open,
   candidates,
-  layers,
   loading,
+  targetMapName,
   onClose,
   onConfirm,
   onDismiss,
@@ -42,8 +41,8 @@ export default function WorldMapCandidatesModal({
 
         <p className="text-xs text-[var(--color-text-muted)]">
           {text(
-            '以下是从已有世界观、设定清单或探索资料标题中提取的地名候选。系统绝不会将候选自动写入地图；必须由作者逐条确认采纳，方可成为正式地图节点。',
-            'These candidate locations were extracted from existing setting documents and exploration files. They will never become formal map nodes without your explicit confirmation.',
+            `以下是从已有世界观、设定清单或探索资料标题中提取的地名候选。系统绝不会将候选自动写入地图；必须由作者逐条确认采纳，方可成为「${targetMapName}」的正式地点，且只会出现在这张地图。`,
+            `These candidate locations were extracted from existing setting documents. They never become map locations without your explicit confirmation, and they are added only to “${targetMapName}”.`,
           )}
         </p>
 
@@ -74,14 +73,9 @@ export default function WorldMapCandidatesModal({
                     >
                       {text(WORLD_MAP_NODE_TYPE_LABELS[cand.type]?.zh || cand.type, cand.type)}
                     </span>
-                    {cand.suggestedLayer && (
-                      <span className="text-[10px] text-[var(--color-text-muted)]">
-                        {text(
-                          getWorldMapLayerName(layers, cand.suggestedLayer),
-                          getWorldMapLayerName(layers, cand.suggestedLayer),
-                        )}
-                      </span>
-                    )}
+                    <span className="text-[10px] text-[var(--color-text-muted)]">
+                      {targetMapName}
+                    </span>
                   </div>
                   {cand.description && (
                     <p className="text-xs text-[var(--color-text-secondary)] line-clamp-2">

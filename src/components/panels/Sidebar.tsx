@@ -15,6 +15,7 @@ import KnowledgePanel from './KnowledgePanel'
 import HomeSidebarPanel from './sidebar/HomeSidebarPanel'
 import ProjectTree from './sidebar/ProjectTree'
 import CharactersView from './sidebar/CharactersView'
+import ProjectDocumentsView from './sidebar/ProjectDocumentsView'
 import WorkspaceSidebarPanel from './sidebar/WorkspaceSidebarPanel'
 import {
   registerMenuSetter, unregisterMenuSetter,
@@ -41,9 +42,10 @@ export default function Sidebar() {
   const viewTitles: Record<string, string> = {
     home:       text('主页', 'Home'),
     project:    text('创作', 'Writing'),
-    workspace:  text('创作资料', 'Writing sources'),
-    knowledge:  text('知识库', 'Knowledge'),
-    characters: text('角色', 'Characters'),
+    workspace:  text('资料来源与审核', 'Sources & review'),
+    knowledge:  text('知识检索', 'Knowledge retrieval'),
+    characters: text('角色档案', 'Character profile'),
+    documents:  text('项目文档', 'Project documents'),
   }
 
   // 全局主页只在未打开项目时出现；所有资料、知识库和角色都从当前项目资源树进入。
@@ -126,6 +128,7 @@ export default function Sidebar() {
         {effectiveView === 'workspace'  && <WorkspaceSidebarPanel />}
         {effectiveView === 'knowledge'  && <KnowledgePanel />}
         {effectiveView === 'characters' && <CharactersView />}
+        {effectiveView === 'documents'  && <ProjectDocumentsView />}
       </div>
 
       {/* 动态右键菜单 */}

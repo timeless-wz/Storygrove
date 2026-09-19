@@ -141,7 +141,7 @@ export default function KnowledgePanel() {
       <div className="flex items-center justify-between px-3 h-9 flex-shrink-0 border-b border-[var(--color-border)]">
         <span className="text-xs font-medium text-[var(--color-text)] flex items-center gap-1.5">
           <Database size={13} />
-          {text('知识库', 'Knowledge base')}
+          {text('知识检索', 'Knowledge retrieval')}
           <span className="text-[0.7rem] text-[var(--color-text-muted)]">
             {text(`（${stats.documentCount} 文档 / ${stats.totalChunks} 块）`, `(${stats.documentCount} documents / ${stats.totalChunks} chunks)`)}
           </span>

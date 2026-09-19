@@ -51,7 +51,7 @@ describe('UI project session gates', () => {
     const draftEditor = source('src/components/editor/DraftEditor.tsx')
 
     expect(draftEditor).toContain('parseDraftMeta(filePath, projectKey, projectSession)')
-    expect(draftEditor).toContain('readDraftBody(filePath, projectKey, projectSession)')
+    expect(draftEditor).toContain('readDraftBody(`vela://review/${latest.id}`, projectKey, projectSession)')
     expect(draftEditor).toContain('retryFinalizationPublication(finalizationId, projectSession)')
   })
 

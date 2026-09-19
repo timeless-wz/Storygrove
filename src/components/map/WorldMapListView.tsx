@@ -2,10 +2,8 @@ import { useState } from 'react'
 import {
   type WorldMapNode,
   type WorldMapEdge,
-  type WorldMapLayer,
   WORLD_MAP_NODE_TYPE_LABELS,
   WORLD_MAP_EDGE_TYPE_LABELS,
-  getWorldMapLayerName,
 } from '../../shared/world-map'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
@@ -13,9 +11,9 @@ import { Search, Edit2, Trash2, ArrowRight } from 'lucide-react'
 import { useLocaleStore } from '../../stores/locale-store'
 
 interface Props {
+  /** 当前地图自己的地点与内部连接。 */
   nodes: WorldMapNode[]
   edges: WorldMapEdge[]
-  layers: WorldMapLayer[]
   selectedNodeId: string | null
   selectedEdgeId: string | null
   onSelectNode: (id: string | null) => void
@@ -29,7 +27,6 @@ interface Props {
 export default function WorldMapListView({
   nodes,
   edges,
-  layers,
   selectedNodeId,
   selectedEdgeId,
   onSelectNode,
@@ -104,7 +101,7 @@ export default function WorldMapListView({
                 <tr className="border-b border-[var(--color-border)] bg-[var(--color-hover)] text-[var(--color-text-muted)]">
                   <th className="py-2 px-3 font-semibold">{text('名称', 'Name')}</th>
                   <th className="py-2 px-3 font-semibold">{text('类型', 'Type')}</th>
-                  <th className="py-2 px-3 font-semibold">{text('层级/位面', 'Layer')}</th>
+                  <th className="py-2 px-3 font-semibold">{text('上级地点', 'Parent location')}</th>
                   <th className="py-2 px-3 font-semibold">{text('描述', 'Description')}</th>
                   <th className="py-2 px-3 font-semibold text-right">{text('操作', 'Actions')}</th>
                 </tr>
@@ -125,7 +122,7 @@ export default function WorldMapListView({
                         </span>
                       </td>
                       <td className="py-2 px-3 text-[var(--color-text-muted)]">
-                        {getWorldMapLayerName(layers, n.mapLayer)}
+                        {n.parentId ? nodeMap.get(n.parentId)?.name ?? n.parentId : '—'}
                       </td>
                       <td className="py-2 px-3 text-[var(--color-text-secondary)] truncate max-w-xs">
                         {n.description || '—'}

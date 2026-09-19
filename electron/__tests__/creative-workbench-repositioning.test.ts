@@ -106,6 +106,16 @@ describe('Creative Workbench Repositioning Verification', () => {
   })
 
   it('stores world map nodes and queries candidates from worldbuilding text without model hallucination', () => {
+    // 地点必须绑定一张已经存在的地图；这里先建立承载它的星界地图。
+    const astralMap = WorldMapRepository.upsertMap({
+      id: 'map-a0000005-5555-4555-8555-555555555555',
+      name: '星界地图',
+      parentMapId: null,
+      sortOrder: 1,
+      image: null,
+    })
+    expect(astralMap.name).toBe('星界地图')
+
     // Insert a node with spatial coordinates and rules
     const node = WorldMapRepository.upsertNode({
       id: 'node-astral-01',
@@ -113,7 +123,7 @@ describe('Creative Workbench Repositioning Verification', () => {
       type: 'route_node',
       description: '连接表世界与星界的空间不稳定褶皱点。',
       parentId: null,
-      mapLayer: 'astral',
+      mapId: astralMap.id,
       x: 350.5,
       y: 420.0,
       sourceRefs: ['worldbuilding.md#astral'],
@@ -123,7 +133,7 @@ describe('Creative Workbench Repositioning Verification', () => {
     const all = WorldMapRepository.getAll()
     expect(all.nodes).toHaveLength(1)
     expect(all.nodes[0].name).toBe('星界裂隙')
-    expect(all.nodes[0].mapLayer).toBe('astral')
+    expect(all.nodes[0].mapId).toBe(astralMap.id)
 
     // Candidate extraction parses keywords deterministically from worldbuilding
     ProjectCoreRepository.init('测试小说')

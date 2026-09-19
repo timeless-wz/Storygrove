@@ -162,18 +162,25 @@ afterEach(async () => {
 })
 
 describe('DraftEditor revision source binding', () => {
-  it('shows an old revision against its frozen source but refuses to merge it into a newer saved draft', async () => {
+  it('does not expose pending revision merge UI and never auto-merges revisions into draft prose', async () => {
+    // 即使底层存在历史未合并修订记录，DraftEditor 严格不渲染“待合并”入口或自动改写正文
+    expect(container.textContent).not.toContain('待合并')
+    expect(container.textContent).not.toContain('完成合并')
+    expect(container.textContent).not.toContain('自动修稿')
+    expect(page.getByRole('button', { name: '待合并(1)' }).elements()).toHaveLength(0)
+
+    // 正文以 Vditor 打开，保持作者最新内容
     await act(async () => {
-      await vi.waitFor(() => expect(container.textContent).toContain('待合并(1)'))
-      await page.getByRole('button', { name: '待合并(1)' }).click()
+      await vi.waitFor(() => expect(container.querySelector('[data-vditor-ready="true"]')).not.toBeNull())
     })
+    const prose = container.querySelector('.vditor-ir pre.vditor-reset')
+    expect(prose?.textContent).toContain(CURRENT)
 
-    await expect.element(page.getByText('当前草稿已不是该修订稿的生成时源稿，修订仍可查看但不能合并。')).toBeVisible()
-    const merge = document.querySelector('.three-way-merge')
-    expect(merge?.textContent).toContain(SOURCE)
-    expect(merge?.textContent).toContain(REVISION)
+    // 只有 AI 审稿、定稿等只读/定稿入口存在
+    await expect.element(page.getByRole('button', { name: 'AI 审稿' })).toBeVisible()
+    await expect.element(page.getByRole('button', { name: '定稿' })).toBeVisible()
 
-    await act(async () => page.getByRole('button', { name: '完成合并' }).click())
+    // 数据库合并接口绝不被自动触发
     expect(invoke.mock.calls.some(([channel]) => channel === 'db:revision-merge')).toBe(false)
   })
 
@@ -222,12 +229,16 @@ describe('DraftEditor revision source binding', () => {
     await act(async () => root.render(
       <DraftEditor key="draft-7" tabId="draft-7" filePath="vela://draft/7" content={firstContent} projectKey={PROJECT_PATH} />,
     ))
-    useEditorStore.getState().setActiveTab('draft-8')
-    await act(async () => root.render(
-      <DraftEditor key="draft-8" tabId="draft-8" filePath="vela://draft/8" content={secondContent} projectKey={PROJECT_PATH} />,
-    ))
+    await act(async () => {
+      useEditorStore.getState().setActiveTab('draft-8')
+      root.render(
+        <DraftEditor key="draft-8" tabId="draft-8" filePath="vela://draft/8" content={secondContent} projectKey={PROJECT_PATH} />,
+      )
+    })
 
-    await act(async () => saveDirtyEditorChangesForExit(PROJECT_PATH))
+    await act(async () => {
+      await saveDirtyEditorChangesForExit(PROJECT_PATH)
+    })
 
     const writes = invoke.mock.calls.filter(([channel]) => channel === 'db:draft-update-content')
     expect(writes.map(([, id, content]) => [id, content])).toEqual([

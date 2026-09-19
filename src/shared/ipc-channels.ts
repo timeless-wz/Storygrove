@@ -14,6 +14,11 @@ import type { ModelProviderResourceId } from './model-provider-resources'
 import type { WritingLanguage } from './writing-language'
 import type { DraftStatus } from './draft-status'
 import type {
+  ProjectDocumentEntry,
+  ProjectDocumentImportFailure,
+  ProjectDocumentImportOutcome,
+} from './project-documents'
+import type {
   RecoveryCandidate,
   RecoveryCandidateRecordInput,
 } from './recovery-candidate'
@@ -34,7 +39,7 @@ import type {
   NarrativeThreadView,
 } from './narrative-thread'
 import type { PlotTreeSnapshot, PlotTreeSourceBundle } from './plot-tree'
-import type { WorldMapNode, WorldMapEdge, WorldMapCandidate, WorldMapLayer } from './world-map'
+import type { WorldMapNode, WorldMapEdge, WorldMapCandidate, WorldMapImage, WorldMap, WorldMapAtlas } from './world-map'
 import type {
   StoryTimelineEvent,
   StoryTimelineSettings,
@@ -430,6 +435,81 @@ export interface FileChannels {
   }
 }
 
+// ===== 项目自由 Markdown 文档 =====
+export interface ProjectDocumentListResult {
+  success: boolean
+  documents: ProjectDocumentEntry[]
+  error?: string
+}
+
+export interface ProjectDocumentImportResult {
+  success: boolean
+  imported: ProjectDocumentImportOutcome[]
+  failed: ProjectDocumentImportFailure[]
+  error?: string
+}
+
+/**
+ * 所有 `docs:*` 通道都以当前项目租约 + 受控目录 `boundary` 为唯一权限边界。
+ * 渲染进程只能提交受控目录内的相对路径，永远不能提交绝对路径。
+ */
+export interface ProjectDocumentChannels {
+  'docs:list': {
+    args: [expectedProjectPath: string]
+    return: ProjectDocumentListResult
+  }
+  'docs:read': {
+    args: [documentPath: string, expectedProjectPath: string]
+    return: { success: boolean; content: string; error?: string }
+  }
+  'docs:write': {
+    args: [documentPath: string, content: string, expectedProjectPath: string]
+    return: { success: boolean; commitState: FileWriteCommitState; error?: string }
+  }
+  'docs:create': {
+    args: [title: string, expectedProjectPath: string]
+    return: { success: boolean; documentPath?: string; error?: string }
+  }
+  'docs:rename': {
+    args: [documentPath: string, nextTitle: string, expectedProjectPath: string]
+    return: {
+      success: boolean
+      documentPath?: string
+      /**
+       * 会话/租约在删除旧文件前失效时，新名称副本已经写入完成。
+       * 渲染层据此告知作者“旧文件保留 + 新副本已存在”，而不是笼统的失败。
+       */
+      createdDocumentPath?: string
+      error?: string
+    }
+  }
+  'docs:delete': {
+    args: [documentPath: string, expectedProjectPath: string]
+    return: { success: boolean; error?: string }
+  }
+  /** 只读取已授权的外部 Markdown 并复制到当前项目；绝不修改来源文件。 */
+  'docs:import': {
+    args: [grantIds: string[], expectedProjectPath: string]
+    return: ProjectDocumentImportResult
+  }
+  'docs:import-asset': {
+    args: [documentPath: string, grantId: string, expectedProjectPath: string]
+    return: { success: boolean; assetReference?: string; error?: string }
+  }
+  'docs:read-asset': {
+    args: [documentPath: string, assetReference: string, expectedProjectPath: string]
+    return: { success: boolean; dataUrl?: string; error?: string }
+  }
+  'dialog:select-markdown-files': {
+    args: []
+    return: ExternalFileGrant[] | null
+  }
+  'dialog:select-markdown-images': {
+    args: []
+    return: ExternalFileGrant[] | null
+  }
+}
+
 // ===== LLM 调用 =====
 export interface DiscoveredModel {
   /** Provider-owned model identifier exactly as returned by the list API. */
@@ -756,6 +836,7 @@ import type {
 import type {
   BlueprintCharacterSyncOperation,
   BlueprintData,
+  BlueprintVolumeData,
   BlueprintRangeCommitReceipt,
   BlueprintRangeCommitRequest,
 } from '../../electron/repositories/blueprint-repository'
@@ -861,6 +942,8 @@ export interface DatabaseChannels {
 
   // 2. blueprints
   'db:blueprint-get-all': { args: [expectedProjectPath: string]; return: BlueprintData[] }
+  'db:blueprint-volume-list': { args: [expectedProjectPath: string]; return: BlueprintVolumeData[] }
+  'db:blueprint-volume-upsert': { args: [volume: BlueprintVolumeData, expectedProjectPath: string]; return: { success: boolean; error?: string } }
   'db:blueprint-get': { args: [chapterNumber: number, expectedProjectPath: string]; return: BlueprintData | null }
   'db:blueprint-upsert': { args: [data: BlueprintData, expectedProjectPath: string]; return: { success: boolean; error?: string } }
   'db:blueprint-upsert-many': { args: [items: BlueprintData[], expectedProjectPath: string]; return: { success: boolean; error?: string } }
@@ -1076,20 +1159,36 @@ export interface DatabaseChannels {
   'db:get-llm-history': { args: [limit: number | undefined, expectedProjectPath: string]; return: unknown[] }
   'db:save-summary-snapshot': { args: [chapterNumber: number, characterStates: string, expectedProjectPath: string]; return: { success: boolean } }
   'db:get-latest-summary': { args: [expectedProjectPath: string]; return: { characterStates: string; chapterNumber: number } | null }
-  'db:map-get-all': { args: [expectedProjectPath: string]; return: { nodes: WorldMapNode[]; edges: WorldMapEdge[]; layers: WorldMapLayer[] } }
+  'db:map-get-all': { args: [expectedProjectPath: string]; return: WorldMapAtlas }
+  'db:map-upsert': { args: [map: WorldMap, expectedProjectPath: string]; return: { success: boolean; map?: WorldMap; error?: string } }
+  'db:map-delete': { args: [mapId: string, strategy: 'promote-children' | 'cascade', expectedProjectPath: string]; return: { success: boolean; removedMapIds?: string[]; error?: string } }
+  'db:map-reorder': { args: [orderedIds: string[], expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:map-migration-ack': { args: [expectedProjectPath: string]; return: { success: boolean; error?: string } }
   'db:map-node-upsert': { args: [node: WorldMapNode, expectedProjectPath: string]; return: { success: boolean; node?: WorldMapNode; error?: string } }
   'db:map-node-delete': { args: [id: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
   'db:map-edge-upsert': { args: [edge: WorldMapEdge, expectedProjectPath: string]; return: { success: boolean; edge?: WorldMapEdge; error?: string } }
   'db:map-edge-delete': { args: [id: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
   'db:map-candidates-get': { args: [expectedProjectPath: string]; return: WorldMapCandidate[] }
-  'db:map-layer-upsert': { args: [layer: WorldMapLayer, expectedProjectPath: string]; return: { success: boolean; layer?: WorldMapLayer; error?: string } }
-  'db:map-layer-delete': { args: [id: string, fallbackLayerId: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
-  'db:map-layers-reorder': { args: [orderedIds: string[], expectedProjectPath: string]; return: { success: boolean; error?: string } }
   'db:timeline-get-all': { args: [expectedProjectPath: string]; return: StoryTimelineSnapshot }
   'db:timeline-settings-save': { args: [settings: StoryTimelineSettings, expectedProjectPath: string]; return: { success: boolean; settings?: StoryTimelineSettings; error?: string } }
   'db:timeline-event-upsert': { args: [event: StoryTimelineEvent, expectedProjectPath: string]; return: { success: boolean; event?: StoryTimelineEvent; error?: string } }
   'db:timeline-event-delete': { args: [id: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
   'db:timeline-events-reorder': { args: [orderedIds: string[], expectedProjectPath: string]; return: { success: boolean; error?: string } }
+}
+
+export interface WorldMapImageChannels {
+  'world-map-image:get': {
+    args: [mapId: string, expectedProjectPath: string]
+    return: { success: boolean; image: WorldMapImage | null; dataUrl?: string; error?: string }
+  }
+  'world-map-image:select-and-import': {
+    args: [mapId: string, expectedProjectPath: string]
+    return: { success: boolean; cancelled?: boolean; image?: WorldMapImage; dataUrl?: string; error?: string }
+  }
+  'world-map-image:remove': {
+    args: [mapId: string, expectedProjectPath: string]
+    return: { success: boolean; error?: string }
+  }
 }
 
 // ===== 知识库频道 =====
@@ -1364,7 +1463,7 @@ export interface StoryDataChannels {
 }
 
 // ===== 合并所有频道 =====
-export type AllInvokeChannels = WindowChannels & OfficialHomepageChannels & ModelProviderResourceChannels & ConfigChannels & UpdateChannels & SkinChannels & ProjectChannels & FileChannels & AppDataChannels & LLMChannels & DatabaseChannels & KnowledgeBaseChannels & ChapterLifecycleChannels & ImportChannels & MCPChannels & WorkspaceHubChannels & StoryDataChannels & Phase38Channels
+export type AllInvokeChannels = WindowChannels & OfficialHomepageChannels & ModelProviderResourceChannels & ConfigChannels & UpdateChannels & SkinChannels & ProjectChannels & FileChannels & AppDataChannels & LLMChannels & DatabaseChannels & WorldMapImageChannels & KnowledgeBaseChannels & ProjectDocumentChannels & ChapterLifecycleChannels & ImportChannels & MCPChannels & WorkspaceHubChannels & StoryDataChannels & Phase38Channels
 export type AllEventChannels = LLMStreamEvents & UpdateStateEvents & WindowEvents
 
 /** 提取 invoke 频道名 */

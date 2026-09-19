@@ -1,0 +1,98 @@
+/**
+ * Vditor 正文写作页样式
+ *
+ * Vditor 自带样式用一组 CSS 变量描述面板、工具栏、边框与文字色。
+ * 这里把那些变量映射到应用的设计令牌，再补上中文小说的排版细节，
+ * 因此不需要重写 Vditor 的布局规则。
+ */
+
+.vditor-prose-host {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.vditor-prose-host .vditor {
+  /* 设计令牌映射：工具栏、正文面板、边框与图标色跟随皮肤。 */
+  --border-color: var(--color-border);
+  --panel-background-color: var(--color-editor-bg);
+  --textarea-background-color: var(--color-editor-bg);
+  --textarea-text-color: var(--color-text);
+  --toolbar-background-color: var(--color-editor-bg);
+  --toolbar-icon-color: var(--color-text-secondary);
+  --toolbar-icon-hover-color: var(--color-accent);
+  --second-color: var(--color-text-muted);
+
+  height: 100%;
+  border: none;
+  border-radius: 0;
+  background-color: var(--color-editor-bg);
+}
+
+/* 工具栏融入写作页顶部，不再有第二层边框。 */
+.vditor-prose-host .vditor-toolbar {
+  border-bottom: 1px solid var(--color-border);
+  background-color: var(--color-editor-bg);
+}
+
+.vditor-prose-host .vditor-toolbar__item .vditor-tooltipped:hover {
+  color: var(--color-accent);
+}
+
+/* 正文排版：写作字体、舒适行高、无横向溢出。 */
+.vditor-prose-host .vditor-reset {
+  font-family: var(--font-writing);
+  font-size: 16px;
+  line-height: 1.9;
+  color: var(--color-text);
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.vditor-prose-host .vditor-ir,
+.vditor-prose-host .vditor-wysiwyg,
+.vditor-prose-host .vditor-sv {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.vditor-prose-host .vditor-ir pre.vditor-reset,
+.vditor-prose-host .vditor-wysiwyg pre.vditor-reset {
+  overflow-x: hidden;
+  caret-color: var(--color-editor-caret, var(--color-text));
+}
+
+/* 代码块与表格在窄窗口内自身横向滚动，正文列不被撑开。 */
+.vditor-prose-host .vditor-reset pre,
+.vditor-prose-host .vditor-reset table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.vditor-prose-host .vditor-ir__preview pre,
+.vditor-prose-host .vditor-ir__marker--pre {
+  overflow-x: auto;
+}
+
+.vditor-prose-host ::selection {
+  background-color: var(--color-editor-selection, rgba(99, 102, 241, 0.2));
+}
+
+.vditor-prose-host .vditor-reset:focus {
+  outline: none;
+}
+
+/* 只读章节仍然要能顺畅阅读：Vditor 默认把只读正文降到 30% 不透明度。 */
+.vditor-prose-host .vditor-ir pre.vditor-reset[contenteditable="false"],
+.vditor-prose-host .vditor-wysiwyg pre.vditor-reset[contenteditable="false"],
+.vditor-prose-host textarea.vditor-sv:disabled,
+.vditor-prose-host textarea.vditor-sv[readonly] {
+  opacity: 1;
+  cursor: default;
+}
+
+/* 分割线、引用块等粗线元素在窄窗口里不产生横向滚动。 */
+.vditor-prose-host .vditor-reset hr,
+.vditor-prose-host .vditor-reset blockquote {
+  max-width: 100%;
+}

@@ -577,7 +577,7 @@ export class WorkspaceScannerService {
   }
 
   static abortAllForProject(projectId: string): void {
-    for (const [_, task] of activeScanTasks.entries()) {
+    for (const task of activeScanTasks.values()) {
       if (task.projectId === projectId) {
         task.controller.abort()
       }
@@ -586,7 +586,7 @@ export class WorkspaceScannerService {
 
   static async cancelAllForProject(projectId: string): Promise<void> {
     const pendingPromises: Promise<unknown>[] = []
-    for (const [_, task] of activeScanTasks.entries()) {
+    for (const task of activeScanTasks.values()) {
       if (task.projectId === projectId) {
         task.controller.abort()
         if (task.promise) {

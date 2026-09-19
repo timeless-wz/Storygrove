@@ -1,3 +1,11 @@
+/**
+ * 多地图地图册（World Map Atlas）共享契约。
+ *
+ * 核心规则：一张地图就是一层空间。地点、地点父子关系、地点连接与坐标都只在
+ * 所属地图内部成立，绝不允许同一地点出现在多张地图，也不允许跨地图连接。
+ * 地图之间只通过地图册树与面包屑切换。
+ */
+
 export type WorldMapNodeType =
   | 'world'       // 世界
   | 'region'      // 区域
@@ -16,13 +24,15 @@ export type WorldMapEdgeType =
 
 export type WorldMapEdgeStatus = 'active' | 'blocked' | 'hidden'
 
+/** 属于某一张地图的地点。mapId 是不可变归属，一个地点只属于一张地图。 */
 export interface WorldMapNode {
   id: string
   name: string
   type: WorldMapNodeType
   description: string
   parentId: string | null
-  mapLayer: string
+  /** 唯一归属地图。由仓库层在写入时校验，必须指向一张存在的地图。 */
+  mapId: string
   x: number
   y: number
   sourceRefs: string[]
@@ -30,6 +40,10 @@ export interface WorldMapNode {
   updatedAt?: string
 }
 
+/**
+ * 地点连接。mapId 由两个端点推导并由仓库层写入；为 null 表示迁移期间被隔离的
+ * 旧连接（两端已分属不同地图），运行时永不显示，但原始行仍然保留。
+ */
 export interface WorldMapEdge {
   id: string
   fromNodeId: string
@@ -37,15 +51,28 @@ export interface WorldMapEdge {
   type: WorldMapEdgeType
   description: string
   status: WorldMapEdgeStatus
+  mapId?: string | null
   createdAt?: string
   updatedAt?: string
 }
 
-/** 项目级可维护图层。id 被节点引用，name 可随时由作者改名。 */
-export interface WorldMapLayer {
+/** 项目托管在地图受控目录中的图片元数据；渲染层只会拿到 data URL。 */
+export interface WorldMapImage {
+  fileName: string
+  mimeType: string
+  bytes: number
+  updatedAt: string
+}
+
+/**
+ * 一张独立地图。每张地图可分别导入一张图片，并可通过 parentMapId 组成层级地图树。
+ */
+export interface WorldMap {
   id: string
   name: string
+  parentMapId: string | null
   sortOrder: number
+  image: WorldMapImage | null
   createdAt?: string
   updatedAt?: string
 }
@@ -56,7 +83,39 @@ export interface WorldMapCandidate {
   type: WorldMapNodeType
   description: string
   sourceRef: string
-  suggestedLayer?: string
+}
+
+/**
+ * 旧单图/图层结构的迁移结果说明。迁移绝不删除既有地点、图层或连接：
+ * 仅把旧图层转换成同名地图，把两端分属不同新地图的旧连接隔离（保留行但不再显示）。
+ */
+export interface WorldMapMigrationReport {
+  migratedAt: string
+  /** 由旧图层转换而来的地图数量。 */
+  mapCount: number
+  /** 迁移进地图的地点数量。 */
+  nodeCount: number
+  /** 因两端分属不同地图而被隔离、不再显示的旧连接数量。 */
+  isolatedEdgeCount: number
+  /** 旧单张项目底图是否已迁入某张地图。 */
+  imageMigrated: boolean
+  /** 旧图层名称，仅用于向作者说明迁移来源。 */
+  legacyLayerNames: string[]
+  /**
+   * 新图片元数据已经提交、但旧托管副本未能清理时置位：此时两份文件都被保留，
+   * 图片本身完好可用，旧副本仍留在项目内可供人工找回。
+   */
+  legacyImageCopyRetained?: boolean
+  /** 与 legacyImageCopyRetained 配套的诊断信息。 */
+  legacyImageCleanupError?: string
+  acknowledged: boolean
+}
+
+export interface WorldMapAtlas {
+  maps: WorldMap[]
+  nodes: WorldMapNode[]
+  edges: WorldMapEdge[]
+  migration: WorldMapMigrationReport | null
 }
 
 export const WORLD_MAP_NODE_TYPE_LABELS: Record<WorldMapNodeType, { zh: string; en: string }> = {
@@ -77,6 +136,96 @@ export const WORLD_MAP_EDGE_TYPE_LABELS: Record<WorldMapEdgeType, { zh: string; 
   conflict: { zh: '冲突关系', en: 'Conflict' },
 }
 
-export function getWorldMapLayerName(layers: WorldMapLayer[], id: string): string {
-  return layers.find(layer => layer.id === id)?.name || id
+/** 每张地图的图片都复制到项目受控目录 `.vela/world-maps/<map-id>/`。 */
+export const WORLD_MAPS_DIRECTORY = '.vela/world-maps'
+/** 旧版单张项目底图的托管目录；只在读取迁移前的文件时作为回退。 */
+export const LEGACY_WORLD_MAP_DIRECTORY = '.vela/world-map'
+export const MAX_WORLD_MAP_IMAGE_BYTES = 32 * 1024 * 1024
+export const WORLD_MAP_IMAGE_MIME_TYPES: Readonly<Record<string, string>> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+}
+
+/** 地图图片的文件名固定为 `map-<uuid>.<ext>`，也是地图目录名的安全校验依据。 */
+const MANAGED_IMAGE_FILE_NAME = /^map-[0-9a-f-]{36}\.(?:png|jpe?g|webp)$/iu
+const MAP_ID = /^map-[0-9a-f-]{36}$/iu
+
+export function isSafeWorldMapImageFileName(fileName: string): boolean {
+  return MANAGED_IMAGE_FILE_NAME.test(fileName)
+}
+
+/** 地图 id 直接参与受控目录路径，因此写入前必须通过严格格式校验。 */
+export function isSafeWorldMapId(mapId: string): boolean {
+  return MAP_ID.test(mapId)
+}
+
+export function createWorldMapId(): string {
+  return `map-${randomUuidV4()}`
+}
+
+/**
+ * 地图 id 会进入受控目录路径，因此渲染层必须始终产出合法 UUID。Chromium 在
+ * file:// 下仍可能缺少 crypto.randomUUID，这里保证任何环境下都是合规 v4 值。
+ */
+function randomUuidV4(): string {
+  const cryptoApi = globalThis.crypto
+  if (typeof cryptoApi?.randomUUID === 'function') return cryptoApi.randomUUID()
+  const bytes = new Uint8Array(16)
+  if (typeof cryptoApi?.getRandomValues === 'function') cryptoApi.getRandomValues(bytes)
+  else for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256)
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
+export function getWorldMapName(maps: WorldMap[], id: string | null | undefined): string {
+  if (!id) return ''
+  return maps.find(map => map.id === id)?.name || id
+}
+
+/** 从根地图到指定地图的面包屑，用于在地图册树中定位当前位置。 */
+export function getWorldMapBreadcrumb(maps: WorldMap[], id: string | null | undefined): WorldMap[] {
+  if (!id) return []
+  const byId = new Map(maps.map(map => [map.id, map]))
+  const trail: WorldMap[] = []
+  const visited = new Set<string>()
+  let cursor = byId.get(id)
+  while (cursor && !visited.has(cursor.id)) {
+    visited.add(cursor.id)
+    trail.unshift(cursor)
+    cursor = cursor.parentMapId ? byId.get(cursor.parentMapId) : undefined
+  }
+  return trail
+}
+
+export interface WorldMapTreeNode {
+  map: WorldMap
+  depth: number
+  children: WorldMapTreeNode[]
+}
+
+/** 按 sortOrder 构建地图册树；孤儿地图（父地图缺失）按顶层地图处理。 */
+export function buildWorldMapTree(maps: WorldMap[]): WorldMapTreeNode[] {
+  const ordered = [...maps].sort((a, b) => a.sortOrder - b.sortOrder || (a.createdAt ?? '').localeCompare(b.createdAt ?? ''))
+  const ids = new Set(ordered.map(map => map.id))
+  const childrenByParent = new Map<string, WorldMap[]>()
+  for (const map of ordered) {
+    const parentKey = map.parentMapId && ids.has(map.parentMapId) ? map.parentMapId : ''
+    const bucket = childrenByParent.get(parentKey)
+    if (bucket) bucket.push(map)
+    else childrenByParent.set(parentKey, [map])
+  }
+
+  const build = (parentKey: string, depth: number, seen: Set<string>): WorldMapTreeNode[] =>
+    (childrenByParent.get(parentKey) ?? [])
+      .filter(map => !seen.has(map.id))
+      .map(map => {
+        const nextSeen = new Set(seen).add(map.id)
+        return { map, depth, children: build(map.id, depth + 1, nextSeen) }
+      })
+
+  return build('', 0, new Set())
 }

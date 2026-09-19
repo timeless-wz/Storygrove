@@ -188,22 +188,22 @@ describe('plot-tree left rail navigation', () => {
   })
 
   it('returns an existing narrative editor to plot tree without losing the plan form', async () => {
-    await act(async () => button('剧情树').click())
-    await vi.waitFor(() => expect(selectedTab('伏笔与叙事线索')).toBe(true))
+    await act(async () => button('章节脉络').click())
+    await vi.waitFor(() => expect(selectedTab('章节脉络')).toBe(true))
 
     await act(async () => button('计划清单').click())
-    expect(selectedTab('伏笔与叙事线索')).toBe(true)
+    expect(selectedTab('章节脉络')).toBe(true)
     const title = container!.querySelector<HTMLInputElement>('input')!
     await act(async () => setInputValue(title, '不应丢失的计划'))
     expect(title.value).toBe('不应丢失的计划')
 
     await act(async () => openBuiltinEditor(
       'narrative-thread-editor',
-      '伏笔与叙事线索',
+      '章节脉络',
       'narrative-thread',
       'plot-tree',
     ))
-    await vi.waitFor(() => expect(selectedTab('伏笔与叙事线索')).toBe(true))
+    await vi.waitFor(() => expect(selectedTab('章节脉络')).toBe(true))
 
     await act(async () => button('计划清单').click())
     expect(container!.querySelector<HTMLInputElement>('input')?.value)
@@ -211,10 +211,10 @@ describe('plot-tree left rail navigation', () => {
 
     await act(async () => openBuiltinEditor(
       'narrative-thread-editor',
-      '伏笔与叙事线索',
+      '章节脉络',
       'narrative-thread',
     ))
-    await vi.waitFor(() => expect(selectedTab('伏笔与叙事线索')).toBe(true))
+    await vi.waitFor(() => expect(selectedTab('章节脉络')).toBe(true))
     expect(container!.querySelector<HTMLInputElement>('input')?.value)
       .toBe('不应丢失的计划')
   })

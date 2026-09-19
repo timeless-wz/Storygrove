@@ -28,7 +28,7 @@ import { openBuiltinEditor } from './sidebar/sidebar-file-openers'
 import { IconTooltip } from '../ui/Tooltip'
 import { captureProjectSession } from '../project-session-gate'
 import { ipc } from '../../services/ipc-client'
-import { getWorldMapLayerName } from '../../shared/world-map'
+import { getWorldMapName } from '../../shared/world-map'
 import type { ChapterBlueprint } from '../../services/workflows/directory-workflow'
 import type { ReviewFull } from '../../../electron/repositories/review-repository'
 
@@ -88,7 +88,7 @@ export default function ProjectReferencePanel() {
 
   const activeTab = useEditorStore(s => s.tabs.find(t => t.id === s.activeTabId))
   const worldMapNodes = useWorldMapStore(s => s.nodes)
-  const worldMapLayers = useWorldMapStore(s => s.layers)
+  const worldMaps = useWorldMapStore(s => s.maps)
   const selectedNodeId = useWorldMapStore(s => s.selectedNodeId)
 
   // 正在写草稿时上下文感知的当前蓝图与审核状态
@@ -177,7 +177,7 @@ export default function ProjectReferencePanel() {
     return worldMapNodes.filter(node => node.name && searchTarget.includes(node.name))
   }, [currentBlueprint, activeTab, worldMapNodes])
 
-  // 世界地图中当前选中的节点
+  // 地图册中当前选中的地点
   const activeMapNode = useMemo(() => {
     if (activeTab?.type !== 'world-map') return null
     return worldMapNodes.find(n => n.id === selectedNodeId) || null
@@ -216,9 +216,9 @@ export default function ProjectReferencePanel() {
     openBuiltinEditor('narrative-thread-editor', text('伏笔与叙事线索', 'Foreshadowing & narrative threads'), 'narrative-thread', 'plans')
   }
 
-  // 打开世界地图
+  // 打开地图册
   const openWorldMap = () => {
-    openBuiltinEditor('world-map-editor', text('世界地图', 'World map'), 'world-map')
+    openBuiltinEditor('world-map-editor', text('多地图地图册', 'Map atlas'), 'world-map')
   }
 
   return (
@@ -299,7 +299,7 @@ export default function ProjectReferencePanel() {
                   </div>
                 )}
 
-                {/* 关联的世界地图节点 */}
+                {/* 关联的地图册地点 */}
                 <div className="pt-1">
                   <div className="mb-1 flex items-center justify-between gap-2">
                     <span className="flex items-center gap-1 text-[11px] font-medium" style={{ color: 'var(--color-text)' }}>
@@ -332,7 +332,7 @@ export default function ProjectReferencePanel() {
                                 className="writer-titlebar-meta writer-titlebar-meta--accent"
                                 style={{ height: 16, padding: '0 5px', fontSize: 10 }}
                               >
-                                {getWorldMapLayerName(worldMapLayers, node.mapLayer)}
+                                {getWorldMapName(worldMaps, node.mapId)}
                               </span>
                             </div>
                             {node.description && (
@@ -405,7 +405,7 @@ export default function ProjectReferencePanel() {
           </div>
         )}
 
-        {/* 2. 世界地图上下文检查器 */}
+        {/* 2. 地图册上下文检查器 */}
         {activeTab?.type === 'world-map' && (
           <div className="writer-context-block space-y-2">
             <div className="flex items-center justify-between gap-2">
@@ -428,7 +428,7 @@ export default function ProjectReferencePanel() {
                     </span>
                   </div>
                   <div className="mt-1 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
-                    {text('所属图层：', 'Layer: ')}{getWorldMapLayerName(worldMapLayers, activeMapNode.mapLayer)}
+                    {text('所属地图：', 'Map: ')}{getWorldMapName(worldMaps, activeMapNode.mapId)}
                   </div>
                 </div>
 

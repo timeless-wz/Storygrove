@@ -120,6 +120,45 @@ describe('BlueprintRepository without an opened project DB', () => {
   })
 })
 
+describe('BlueprintRepository volume organization', () => {
+  it('creates the legacy first volume and persists a chapter assignment to a separately added volume', () => {
+    const db = createBlueprintDb()
+    vi.mocked(getProjectDb).mockReturnValue(db)
+
+    try {
+      expect(BlueprintRepository.getVolumes()).toEqual([
+        { id: 'volume-1', name: '第1卷', sortOrder: 1 },
+      ])
+
+      BlueprintRepository.upsertVolume({ id: 'volume-2', name: '第2卷', sortOrder: 2 })
+      BlueprintRepository.upsert({ ...blueprint, volumeId: 'volume-2' })
+
+      expect(BlueprintRepository.getVolumes()).toEqual([
+        { id: 'volume-1', name: '第1卷', sortOrder: 1 },
+        { id: 'volume-2', name: '第2卷', sortOrder: 2 },
+      ])
+      expect(BlueprintRepository.getByChapter(1)).toMatchObject({
+        chapterNumber: 1,
+        volumeId: 'volume-2',
+      })
+    } finally {
+      db.close()
+    }
+  })
+
+  it('rejects assigning a chapter to a volume that does not exist', () => {
+    const db = createBlueprintDb()
+    vi.mocked(getProjectDb).mockReturnValue(db)
+
+    try {
+      expect(() => BlueprintRepository.upsert({ ...blueprint, volumeId: 'missing-volume' }))
+        .toThrow(/指定的卷不存在/u)
+    } finally {
+      db.close()
+    }
+  })
+})
+
 describe('BlueprintRepository range commit', () => {
   it('commits one exact logical range and returns its transaction readback receipt', () => {
     const db = createBlueprintDb()

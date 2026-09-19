@@ -385,8 +385,8 @@ export default function PlotTreeView({
                     >
                       <div className="flex items-center gap-2">
                         {source.type === 'blueprint' && <BookOpen size={13} className="text-[var(--color-accent)]" />}
-                        {source.type === 'finalized-chapter' && <FileText size={13} className="text-emerald-500" />}
-                        {source.type === 'narrative-thread' && <GitBranch size={13} className="text-indigo-400" />}
+                        {source.type === 'finalized-chapter' && <FileText size={13} className="text-[var(--color-success-text)]" />}
+                        {source.type === 'narrative-thread' && <GitBranch size={13} className="text-[var(--color-info)]" />}
                         <span className="font-medium text-[var(--color-text)]">
                           {sourceLabel(source, text)}
                         </span>

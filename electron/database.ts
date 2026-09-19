@@ -11,6 +11,7 @@ import fs from 'node:fs'
 import { loadApplicationImportSourceSecret } from './services/import-source-identity-secret'
 import { countDraftUnits } from '../src/shared/draft-units'
 import { migrateDraftUnitCounts } from './services/draft-unit-migration'
+import { migrateWorldMapAtlas } from './services/world-map-atlas-migration'
 
 const require = createRequire(import.meta.url)
 const Database = require('better-sqlite3') as typeof import('better-sqlite3')
@@ -204,6 +205,11 @@ export function initProjectDatabase(projectPath: string, importSourceSecret?: Bu
 
   // 创建表结构
   createTables(projectDb, importSourceSecret)
+
+  // 旧项目只有「一张项目底图 + 图层筛选」的结构。一次性把旧图层转换成同名地图，
+  // 并把旧底图迁入其中一张地图的受控目录；迁移不删除任何既有地点、图层或连接。
+  migrateWorldMapAtlas(projectDb, projectPath)
+
   console.log(`[Vela DB] 项目数据库已打开: ${dbPath}`)
 }
 
@@ -276,6 +282,7 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
     -- ============================================================
     CREATE TABLE IF NOT EXISTS blueprints (
       chapter_number INTEGER PRIMARY KEY,         -- 章节序号
+      volume_id TEXT NOT NULL DEFAULT 'volume-1', -- 所属卷（旧项目统一归入第 1 卷）
       title TEXT NOT NULL DEFAULT '',             -- 章节标题
       role TEXT DEFAULT '',                       -- 章节角色
       purpose TEXT DEFAULT '',                    -- 核心目的
@@ -288,6 +295,15 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     );
+    CREATE TABLE IF NOT EXISTS blueprint_volumes (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      sort_order REAL NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_blueprint_volumes_order
+      ON blueprint_volumes(sort_order, created_at);
 
     -- ============================================================
     -- 3. characters — 角色卡（currentState 拍平为 cs_* 列）
@@ -588,15 +604,42 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
     CREATE INDEX IF NOT EXISTS idx_llm_calls_time ON llm_calls(created_at);
 
     -- ============================================================
-    -- 10. world_map_nodes & world_map_edges — 世界地图节点与连线
+    -- 10. world_maps & world_map_nodes & world_map_edges — 多地图地图册
+    --
+    -- 一张地图 = 一层独立空间。地点通过 map_id 唯一归属一张地图，图片也由
+    -- 地图自己持有（不再有项目级单张底图）。旧版 world_map_layers 与
+    -- world_map_image 表不再创建：其数据由 world-map-atlas-migration 一次性
+    -- 迁入本结构，迁移代码保留原始行以供追溯。
     -- ============================================================
+    CREATE TABLE IF NOT EXISTS world_maps (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      parent_map_id TEXT DEFAULT NULL,
+      sort_order REAL NOT NULL DEFAULT 0,
+      image_file_name TEXT DEFAULT NULL,
+      image_mime_type TEXT DEFAULT NULL,
+      image_bytes INTEGER DEFAULT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_world_maps_parent ON world_maps(parent_map_id);
+    CREATE INDEX IF NOT EXISTS idx_world_maps_order ON world_maps(sort_order, created_at);
+
+    -- 旧图层/单图结构的迁移审计。一次性执行，迁移报告供界面向作者说明结果。
+    CREATE TABLE IF NOT EXISTS world_map_atlas_migration (
+      migration_id TEXT PRIMARY KEY,
+      report_json TEXT NOT NULL,
+      acknowledged_at TEXT DEFAULT NULL,
+      applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS world_map_nodes (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       type TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
       parent_id TEXT DEFAULT NULL,
-      map_layer TEXT NOT NULL DEFAULT 'surface',
+      map_id TEXT NOT NULL DEFAULT '',
       x REAL NOT NULL DEFAULT 0,
       y REAL NOT NULL DEFAULT 0,
       source_refs TEXT NOT NULL DEFAULT '[]',
@@ -604,7 +647,6 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_world_map_nodes_parent ON world_map_nodes(parent_id);
-    CREATE INDEX IF NOT EXISTS idx_world_map_nodes_layer ON world_map_nodes(map_layer);
 
     CREATE TABLE IF NOT EXISTS world_map_edges (
       id TEXT PRIMARY KEY,
@@ -613,6 +655,7 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
       type TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL DEFAULT 'active',
+      map_id TEXT DEFAULT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (from_node_id) REFERENCES world_map_nodes(id) ON DELETE CASCADE,
@@ -620,15 +663,7 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
     );
     CREATE INDEX IF NOT EXISTS idx_world_map_edges_from ON world_map_edges(from_node_id);
     CREATE INDEX IF NOT EXISTS idx_world_map_edges_to ON world_map_edges(to_node_id);
-
-    CREATE TABLE IF NOT EXISTS world_map_layers (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      sort_order REAL NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-    CREATE INDEX IF NOT EXISTS idx_world_map_layers_order ON world_map_layers(sort_order, created_at);
+    -- map_id 的索引在增量补列之后建立：旧库的节点/连线表此时还没有该列。
 
     -- ============================================================
     -- 11. story_timeline — 作者手动维护的故事内时间线
@@ -1054,6 +1089,32 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
     );
     CREATE INDEX IF NOT EXISTS idx_workspace_candidates_status
       ON workspace_import_candidates(project_id, candidate_type, status);
+  `)
+
+  // 章节蓝图的卷目录是项目事实。旧项目只有平铺章节，因此只在首次升级时将其
+  // 归入默认第 1 卷；不改写章节号、草稿或正文关联。
+  const blueprintColumns = new Set(
+    (db.prepare('PRAGMA table_info(blueprints)').all() as Array<{ name: string }>).map(column => column.name),
+  )
+  if (!blueprintColumns.has('volume_id')) {
+    db.exec("ALTER TABLE blueprints ADD COLUMN volume_id TEXT NOT NULL DEFAULT 'volume-1'")
+  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS blueprint_volumes (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      sort_order REAL NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_blueprint_volumes_order
+      ON blueprint_volumes(sort_order, created_at);
+    CREATE INDEX IF NOT EXISTS idx_blueprints_volume_chapter
+      ON blueprints(volume_id, chapter_number);
+    INSERT OR IGNORE INTO blueprint_volumes (id, name, sort_order)
+      VALUES ('volume-1', '第1卷', 1);
+    UPDATE blueprints SET volume_id = 'volume-1'
+      WHERE volume_id IS NULL OR TRIM(volume_id) = '';
   `)
 
   const draftColumns = db.prepare('PRAGMA table_info(drafts)').all() as Array<{ name: string }>
@@ -1862,6 +1923,24 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
   }
 
   migrateLegacyWorkspaceHubData(db)
+
+  // 多地图地图册：旧库的节点/连线表没有 map_id。列必须可空或带默认值才能
+  // 增量补齐；真正的归属由 world-map-atlas-migration 从旧图层回填。
+  const nodeColumns = new Set(
+    (db.prepare('PRAGMA table_info(world_map_nodes)').all() as Array<{ name: string }>).map(column => column.name),
+  )
+  if (!nodeColumns.has('map_id')) {
+    db.exec("ALTER TABLE world_map_nodes ADD COLUMN map_id TEXT NOT NULL DEFAULT ''")
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_world_map_nodes_map ON world_map_nodes(map_id)')
+
+  const edgeColumns = new Set(
+    (db.prepare('PRAGMA table_info(world_map_edges)').all() as Array<{ name: string }>).map(column => column.name),
+  )
+  if (!edgeColumns.has('map_id')) {
+    db.exec('ALTER TABLE world_map_edges ADD COLUMN map_id TEXT DEFAULT NULL')
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_world_map_edges_map ON world_map_edges(map_id)')
 
   // Existing databases only have the legacy project_core path. Backfill the
   // authoritative per-session state once, after legacy approved snapshots have

@@ -175,10 +175,13 @@ function NovelConfigEditorSession({ projectKey }: { projectKey: string }) {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h2 className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>
-              {text('小说配置', 'Novel configuration')}
+              {text('创作参数', 'Creative parameters')}
             </h2>
             <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
-              {text('定义你的小说基本信息和写作参数', 'Define the novel’s core information and writing parameters.')}
+              {text(
+                '作品的元数据与创作约束：题材、受众、章数、叙事视角与文风偏好。',
+                'Project metadata and creative constraints: genre, audience, chapters, point of view, and style.',
+              )}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -238,31 +241,7 @@ function NovelConfigEditorSession({ projectKey }: { projectKey: string }) {
                 </NativeSelect>
               </Field>
             </div>
-            <div className="grid grid-cols-4 gap-4 mt-4">
-              <Field label={text('故事结构', 'Story structure')} tipItems={[
-                '三幕结构：经典的“建置→对抗→高潮”，适合大多数网文类型',
-                '英雄之旅：神话学十二阶段，适合冒险/成长类，强调内在蜕变',
-                '节拍表：好莱坞十五拍结构，节奏最精细，适合情感张力强的故事',
-                '起承转合：中国传统四段式结构，适合古言/武侠/仙侠',
-                '多线叙事：多条故事线并进交织，适合群像或复杂情节',
-                '自由结构：不限定特定框架，AI 根据内容自适应，适合日常/轻小说',
-              ].map((item, index) => text(item, [
-                'Three-act structure: setup, confrontation, and climax; suitable for most genres',
-                'Hero’s journey: a transformation-focused adventure structure',
-                'Beat sheet: detailed pacing for emotionally intense stories',
-                'Kishōtenketsu: a four-part East Asian structure',
-                'Multi-thread: interwoven story lines for ensembles and complex plots',
-                'Freeform: AI adapts the structure to the content',
-              ][index]))}>
-                <NativeSelect value={config.plotStructure || 'three_act'} onChange={(e) => update('plotStructure', e.target.value as NovelConfig['plotStructure'])}>
-                  <option value="three_act">{text('三幕结构', 'Three-act')}</option>
-                  <option value="heros_journey">{text('英雄之旅', 'Hero’s journey')}</option>
-                  <option value="save_the_cat">{text('节拍表', 'Beat sheet')}</option>
-                  <option value="kishotenketsu">{text('起承转合', 'Kishōtenketsu')}</option>
-                  <option value="multi_thread">{text('多线叙事', 'Multi-thread')}</option>
-                  <option value="freeform">{text('自由结构', 'Freeform')}</option>
-                </NativeSelect>
-              </Field>
+            <div className="grid grid-cols-3 gap-4 mt-4">
               <Field label={text('叙事视角', 'Point of view')} tipItems={[
                 '第一人称："我"视角叙事，代入感最强，信息受限',
                 '第三人称有限视角：跟随主角视角，兼顾代入感和灵活性，最常用',
@@ -308,6 +287,49 @@ function NovelConfigEditorSession({ projectKey }: { projectKey: string }) {
                 />
               </Field>
             </div>
+            <p className="mt-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+              {text(
+                `目标字数：${(Number(config.totalChapters) * Number(config.wordsPerChapter) || 0).toLocaleString()} 字（总章数 × 每章字数）`,
+                `Target length: ${(Number(config.totalChapters) * Number(config.wordsPerChapter) || 0).toLocaleString()} words (chapters × words per chapter)`,
+              )}
+            </p>
+          </Section>
+
+          {/*
+           * 故事结构曾经和「情节大纲」并列为大纲入口。它现在只是创作约束：
+           * 影响 AI 生成情节大纲时的组织方式，不再是一个独立的大纲入口。
+           */}
+          <Section
+            title={text('高级结构偏好', 'Advanced structure preference')}
+            desc={text(
+              '只影响 AI 生成「情节大纲」时的组织方式。你写的全书计划仍然是唯一的「情节大纲」入口。',
+              'Only guides how AI organizes the plot outline. The outline you write remains the single source of truth.',
+            )}
+          >
+            <Field label={text('情节组织方式', 'Outline organization')} tipItems={[
+              '三幕结构：经典的“建置→对抗→高潮”，适合大多数网文类型',
+              '英雄之旅：神话学十二阶段，适合冒险/成长类，强调内在蜕变',
+              '节拍表：好莱坞十五拍结构，节奏最精细，适合情感张力强的故事',
+              '起承转合：中国传统四段式结构，适合古言/武侠/仙侠',
+              '多线叙事：多条故事线并进交织，适合群像或复杂情节',
+              '自由结构：不限定特定框架，AI 根据内容自适应，适合日常/轻小说',
+            ].map((item, index) => text(item, [
+              'Three-act structure: setup, confrontation, and climax; suitable for most genres',
+              'Hero’s journey: a transformation-focused adventure structure',
+              'Beat sheet: detailed pacing for emotionally intense stories',
+              'Kishōtenketsu: a four-part East Asian structure',
+              'Multi-thread: interwoven story lines for ensembles and complex plots',
+              'Freeform: AI adapts the structure to the content',
+            ][index]))}>
+              <NativeSelect value={config.plotStructure || 'three_act'} onChange={(e) => update('plotStructure', e.target.value as NovelConfig['plotStructure'])}>
+                <option value="three_act">{text('三幕结构', 'Three-act')}</option>
+                <option value="heros_journey">{text('英雄之旅', 'Hero’s journey')}</option>
+                <option value="save_the_cat">{text('节拍表', 'Beat sheet')}</option>
+                <option value="kishotenketsu">{text('起承转合', 'Kishōtenketsu')}</option>
+                <option value="multi_thread">{text('多线叙事', 'Multi-thread')}</option>
+                <option value="freeform">{text('自由结构', 'Freeform')}</option>
+              </NativeSelect>
+            </Field>
           </Section>
 
           <Section

@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 
 /** 左侧活动栏的视图类型 */
-export type SidebarView = 'home' | 'project' | 'workspace' | 'knowledge' | 'characters' | 'settings'
+export type SidebarView = 'home' | 'project' | 'workspace' | 'knowledge' | 'characters' | 'documents' | 'settings'
 
 /** 下方工具窗口 Tab */
 export type BottomTab = 'tasks' | 'log' | 'models'
@@ -17,6 +17,15 @@ export type SettingsSection = 'llm' | 'embedding' | 'proxy' | 'editor' | 'prompt
 
 /** 章节创建对话框的预填参数 */
 export type ChapterCreationPrefill = Record<string, unknown> | null
+
+/** 角色档案页的内部视图。 */
+export type CharacterProfileView = 'edit' | 'state' | 'graph'
+
+/** 外部跳转对角色档案页的视图请求；requestId 递增以让重复请求也生效。 */
+export interface CharacterViewRequest {
+  view: CharacterProfileView
+  requestId: number
+}
 
 interface LayoutState {
   // ===== 侧边栏 =====
@@ -55,6 +64,13 @@ interface LayoutState {
   chapterCreationOpen: boolean
   /** 章节创建对话框的预填参数 */
   chapterCreationPrefill: ChapterCreationPrefill
+  /**
+   * 角色档案页的视图请求。
+   *
+   * 角色图谱已不再是独立入口；旧标签页、旧路由或旧项目打开角色图谱时，
+   * 统一改成“打开角色档案并切到关系图谱视图”，由这里传递请求。
+   */
+  characterViewRequest: CharacterViewRequest | null
 
   // ===== Actions =====
   toggleSidebar: () => void
@@ -86,6 +102,8 @@ interface LayoutState {
   closeImportNovel: () => void
   openChapterCreation: (prefill?: ChapterCreationPrefill) => void
   closeChapterCreation: () => void
+  /** 打开角色档案并请求内部视图（档案 / 当前状态 / 关系图谱）。 */
+  openCharacterProfile: (view?: CharacterProfileView) => void
 }
 
 export const useLayoutStore = create<LayoutState>()((set) => ({
@@ -115,6 +133,7 @@ export const useLayoutStore = create<LayoutState>()((set) => ({
   importNovelOpen: false,
   chapterCreationOpen: false,
   chapterCreationPrefill: null,
+  characterViewRequest: null,
 
   // Actions
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
@@ -167,4 +186,14 @@ export const useLayoutStore = create<LayoutState>()((set) => ({
     // Disabled in Codex Creative Workbench: generation popups are deactivated
   },
   closeChapterCreation: () => set({ chapterCreationOpen: false, chapterCreationPrefill: null }),
+  openCharacterProfile: (view = 'edit') =>
+    set((s) => ({
+      sidebarView: 'characters',
+      activeRailItem: 'characters',
+      sidebarOpen: true,
+      characterViewRequest: {
+        view,
+        requestId: (s.characterViewRequest?.requestId ?? 0) + 1,
+      },
+    })),
 }))

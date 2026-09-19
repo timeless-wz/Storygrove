@@ -80,6 +80,7 @@
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.5.0",
     "tailwindcss-animate": "^1.0.7",
+    "vditor": "^4.0.0",
     "yauzl": "^2.10.0",
     "zustand": "^5.0.0"
   },

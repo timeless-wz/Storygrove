@@ -9,11 +9,13 @@ import {
 import { useLocaleStore } from '../../stores/locale-store'
 
 interface Props {
+  /** 当前地图自己的地点；画布绝不显示其他地图的地点。 */
   nodes: WorldMapNode[]
   edges: WorldMapEdge[]
   selectedNodeId: string | null
   selectedEdgeId: string | null
-  activeLayer: string
+  /** 当前地图自己的托管图片；随同画布的平移和缩放显示。 */
+  backgroundImage?: string | null
   onSelectNode: (id: string | null) => void
   onSelectEdge: (id: string | null) => void
   onUpdateNodePosition: (id: string, x: number, y: number) => void
@@ -43,7 +45,7 @@ export default function WorldMapCanvas({
   edges,
   selectedNodeId,
   selectedEdgeId,
-  activeLayer,
+  backgroundImage,
   onSelectNode,
   onSelectEdge,
   onUpdateNodePosition,
@@ -63,11 +65,10 @@ export default function WorldMapCanvas({
   const dragStartRef = useRef({ mouseX: 0, mouseY: 0, nodeX: 0, nodeY: 0 })
   const currentDragPosRef = useRef<{ id: string; x: number; y: number } | null>(null)
 
-  // Filter nodes by layer
-  const visibleNodes = nodes.filter(n => activeLayer === 'all' || n.mapLayer === activeLayer)
+  const visibleNodes = nodes
   const visibleNodeMap = new Map(visibleNodes.map(n => [n.id, n]))
 
-  // Filter edges where both endpoints are visible
+  // Only connections whose both endpoints belong to this map are ever drawn.
   const visibleEdges = edges.filter(e => visibleNodeMap.has(e.fromNodeId) && visibleNodeMap.has(e.toNodeId))
 
   // Mouse wheel zoom
@@ -192,6 +193,19 @@ export default function WorldMapCanvas({
 
         {/* Grid surface */}
         <rect width="8000" height="8000" x="-4000" y="-4000" fill="url(#grid)" />
+
+        {backgroundImage && (
+          <image
+            href={backgroundImage}
+            x="0"
+            y="0"
+            width="1200"
+            height="900"
+            preserveAspectRatio="xMidYMid meet"
+            opacity="0.78"
+            pointerEvents="none"
+          />
+        )}
 
         {/* Edges */}
         {visibleEdges.map(edge => {

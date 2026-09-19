@@ -56,18 +56,26 @@ export function findWindowsSafeFileSystemHelper(unpackedDir) {
 export function verifyWindowsPackage(unpackedDir) {
   const asar = path.join(unpackedDir, 'resources', 'app.asar')
   const executable = path.join(unpackedDir, 'AI小说作家.exe')
-  for (const required of [asar, executable]) {
-    if (!existsSync(required)) throw new Error(`Missing required package file: ${required}`)
+  // Package verification must inspect the physical archive, not let an
+  // Electron-hosted test runner try to mount a fixture app.asar as an archive.
+  const previousNoAsar = process.noAsar
+  process.noAsar = true
+  try {
+    for (const required of [asar, executable]) {
+      if (!existsSync(required)) throw new Error(`Missing required package file: ${required}`)
+    }
+
+    const nativeBinding = findLanceBinding(unpackedDir)
+    if (!nativeBinding) throw new Error('Missing LanceDB Windows native binding')
+    const betterSqliteBinding = findBetterSqliteBinding(unpackedDir)
+    if (!betterSqliteBinding) throw new Error('Missing better-sqlite3 Windows native binding')
+    const secureFileSystemHelper = findWindowsSafeFileSystemHelper(unpackedDir)
+    if (!secureFileSystemHelper) throw new Error('Missing Windows secure file-system helper')
+
+    return { asar, executable, nativeBinding, betterSqliteBinding, secureFileSystemHelper }
+  } finally {
+    process.noAsar = previousNoAsar
   }
-
-  const nativeBinding = findLanceBinding(unpackedDir)
-  if (!nativeBinding) throw new Error('Missing LanceDB Windows native binding')
-  const betterSqliteBinding = findBetterSqliteBinding(unpackedDir)
-  if (!betterSqliteBinding) throw new Error('Missing better-sqlite3 Windows native binding')
-  const secureFileSystemHelper = findWindowsSafeFileSystemHelper(unpackedDir)
-  if (!secureFileSystemHelper) throw new Error('Missing Windows secure file-system helper')
-
-  return { asar, executable, nativeBinding, betterSqliteBinding, secureFileSystemHelper }
 }
 
 export function verifyPackagedLanceLoad(unpackedDir, runner = spawnSync) {

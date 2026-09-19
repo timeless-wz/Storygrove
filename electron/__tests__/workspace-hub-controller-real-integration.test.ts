@@ -102,7 +102,8 @@ describe('Workspace Hub Controller Real UUID Integration Tests', () => {
     // Hook readdir so that during the scan of dirA, cancelScan is triggered mid-flight
     let cancelTriggered = false
     const origReaddir = fs.promises.readdir
-    vi.spyOn(fs.promises, 'readdir').mockImplementation(async (dir, opts) => {
+    vi.spyOn(fs.promises, 'readdir').mockImplementation(async (...args) => {
+      const [dir] = args
       const p = String(dir)
       if (p.includes(path.basename(dirA)) && !cancelTriggered) {
         cancelTriggered = true
@@ -110,7 +111,7 @@ describe('Workspace Hub Controller Real UUID Integration Tests', () => {
         const cancelRes = (await invokeHandler('workspace:cancel-scan', mockSenderEvent, projectSession)) as { success: boolean }
         expect(cancelRes.success).toBe(true)
       }
-      return (origReaddir as any)(dir, opts)
+      return origReaddir(...args)
     })
 
     const bindResult = (await invokeHandler(
@@ -172,14 +173,15 @@ describe('Workspace Hub Controller Real UUID Integration Tests', () => {
     // Now trigger rescan and cancel it mid-flight
     let cancelTriggered = false
     const origReaddir = fs.promises.readdir
-    vi.spyOn(fs.promises, 'readdir').mockImplementation(async (dir, opts) => {
+    vi.spyOn(fs.promises, 'readdir').mockImplementation(async (...args) => {
+      const [dir] = args
       const p = String(dir)
       if (p.includes(path.basename(dirA)) && !cancelTriggered) {
         cancelTriggered = true
         const cancelRes = (await invokeHandler('workspace:cancel-scan', mockSenderEvent, projectSession)) as { success: boolean }
         expect(cancelRes.success).toBe(true)
       }
-      return (origReaddir as any)(dir, opts)
+      return origReaddir(...args)
     })
 
     const rescanResult = (await invokeHandler(
@@ -242,12 +244,13 @@ describe('Workspace Hub Controller Real UUID Integration Tests', () => {
     })
 
     const origReaddir = fs.promises.readdir
-    vi.spyOn(fs.promises, 'readdir').mockImplementation(async (dir, opts) => {
+    vi.spyOn(fs.promises, 'readdir').mockImplementation(async (...args) => {
+      const [dir] = args
       const p = String(dir)
       if (p.includes(path.basename(dirB))) {
         throw new Error('EACCES: permission denied, scandir')
       }
-      return (origReaddir as any)(dir, opts)
+      return origReaddir(...args)
     })
 
     const bindBResult = (await invokeHandler(
@@ -311,14 +314,15 @@ describe('Workspace Hub Controller Real UUID Integration Tests', () => {
 
     let cancelTriggered = false
     const origReaddir = fs.promises.readdir
-    vi.spyOn(fs.promises, 'readdir').mockImplementation(async (dir, opts) => {
+    vi.spyOn(fs.promises, 'readdir').mockImplementation(async (...args) => {
+      const [dir] = args
       const p = String(dir)
       if (p.includes(path.basename(dirB)) && !cancelTriggered) {
         cancelTriggered = true
         const cancelRes = (await invokeHandler('workspace:cancel-scan', mockSenderEvent, projectSession)) as { success: boolean }
         expect(cancelRes.success).toBe(true)
       }
-      return (origReaddir as any)(dir, opts)
+      return origReaddir(...args)
     })
 
     const bindBResult = (await invokeHandler(
@@ -404,13 +408,14 @@ describe('Workspace Hub Controller Real UUID Integration Tests', () => {
     const pausePromise = new Promise<void>(resolve => { releaseReaddir = resolve })
 
     const origReaddir = fs.promises.readdir
-    vi.spyOn(fs.promises, 'readdir').mockImplementation(async (dir, opts) => {
+    vi.spyOn(fs.promises, 'readdir').mockImplementation(async (...args) => {
+      const [dir] = args
       const p = String(dir)
       if (p.includes(path.basename(dirA))) {
         // Pause scan execution to deterministically simulate in-flight scan
         await pausePromise
       }
-      return (origReaddir as any)(dir, opts)
+      return origReaddir(...args)
     })
 
     // Start bind-directory (will pause inside readdir)
@@ -488,11 +493,9 @@ describe('Workspace Hub Controller Real UUID Integration Tests', () => {
     })
 
     const origBind = WorkspaceHubRepository.bindWorkspaceDirectory
-    let bindCallCount = 0
     let directoryBBindAttempts = 0
     const committedBindPaths: string[] = []
     vi.spyOn(WorkspaceHubRepository, 'bindWorkspaceDirectory').mockImplementation((extPath, projId) => {
-      bindCallCount += 1
       committedBindPaths.push(extPath)
       if (extPath === getCanonical(dirB)) {
         directoryBBindAttempts += 1
@@ -591,7 +594,8 @@ describe('Workspace Hub Controller Real UUID Integration Tests', () => {
     let compensationReaddirCalls = 0
 
     const origReaddir = fs.promises.readdir
-    vi.spyOn(fs.promises, 'readdir').mockImplementation(async (dir, opts) => {
+    vi.spyOn(fs.promises, 'readdir').mockImplementation(async (...args) => {
+      const [dir] = args
       const p = String(dir)
       // The original successful scan of A already ran before the switch, so any readdir of A
       // from here on belongs to the compensation scan.
@@ -600,7 +604,7 @@ describe('Workspace Hub Controller Real UUID Integration Tests', () => {
         compensationScanStarted = true
         await compensationPaused
       }
-      return (origReaddir as any)(dir, opts)
+      return origReaddir(...args)
     })
 
     // Commit-phase marker: an aborted scan must never reach the transactional commit.

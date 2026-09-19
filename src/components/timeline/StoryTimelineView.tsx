@@ -1,16 +1,27 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  Background,
+  BackgroundVariant,
+  BaseEdge,
+  Controls,
+  Handle,
+  Position,
+  ReactFlow,
+  type Edge,
+  type EdgeProps,
+  type Node,
+  type NodeProps,
+} from '@xyflow/react'
+import '@xyflow/react/dist/style.css'
 import {
   CalendarClock,
   Check,
-  ChevronDown,
-  ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   Clock3,
-  MapPin,
-  PencilLine,
   Plus,
   Settings2,
   Trash2,
-  Users,
 } from 'lucide-react'
 import type {
   StoryTimelineEvent,
@@ -27,6 +38,11 @@ import { useLocaleStore } from '../../stores/locale-store'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
 import { Textarea } from '../ui/Textarea'
+import {
+  buildStoryTimelineLayout,
+  sortTimelineEvents,
+  type StoryTimelineLabelSide,
+} from './story-timeline-layout'
 
 interface TimelineFormState {
   id: string
@@ -41,6 +57,21 @@ interface TimelineFormState {
   locationNodeIds: string[]
   status: StoryTimelineEventStatus
 }
+
+const TIMELINE_AXIS_NODE_ID = 'timeline-axis'
+
+type TimelineNodeData = Record<string, unknown> & {
+  handles: Array<{ id: string; offsetX: number }>
+  eventId: string
+  title: string
+  timeText: string
+  side: StoryTimelineLabelSide
+  staggerLevel: number
+  width: number
+}
+
+type TimelineNode = Node<TimelineNodeData, 'timeline-axis' | 'timeline-event'>
+type TimelineEdge = Edge<Record<string, unknown>, 'timeline-connector'>
 
 function createEventId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `timeline-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -88,6 +119,68 @@ function eventToForm(event: StoryTimelineEvent): TimelineFormState {
   }
 }
 
+/**
+ * 主轴：一条连续横线，并为每个事件暴露一个引出点。事件标注只展示自定义时间与
+ * 标题，状态/描述/章节/角色/地点一律留在右侧详情面板。
+ */
+function TimelineAxisNodeView({ data }: NodeProps<TimelineNode>) {
+  return (
+    <div className="writer-timeline-axis" data-testid="timeline-axis">
+      <div className="writer-timeline-axis-line" aria-hidden="true" />
+      {data.handles.map(handle => (
+        <Handle
+          key={handle.id}
+          id={handle.id}
+          type="source"
+          position={Position.Top}
+          isConnectable={false}
+          className="writer-timeline-axis-handle"
+          style={{ left: handle.offsetX, top: 0, transform: 'translate(-50%, -50%)' }}
+        />
+      ))}
+    </div>
+  )
+}
+
+function TimelineEventNodeView({ data, selected }: NodeProps<TimelineNode>) {
+  return (
+    <div
+      className={`writer-timeline-label is-${data.side}${selected ? ' is-selected' : ''}`}
+      data-testid="timeline-event-label"
+      data-event-id={data.eventId}
+      data-side={data.side}
+      data-stagger-level={data.staggerLevel}
+      style={{ width: data.width }}
+      title={data.title}
+    >
+      <Handle
+        id="event-in"
+        type="target"
+        position={data.side === 'above' ? Position.Bottom : Position.Top}
+        isConnectable={false}
+        className="writer-timeline-label-handle"
+      />
+      <span className="writer-timeline-label-time">{data.timeText}</span>
+      <strong className="writer-timeline-label-title">{data.title}</strong>
+    </div>
+  )
+}
+
+/** 主轴到事件标注的连接线：两端 x 相同，因此是一条竖直引出线。 */
+function TimelineConnectorEdgeView({ sourceX, sourceY, targetX, targetY, selected }: EdgeProps<TimelineEdge>) {
+  const path = `M ${sourceX},${sourceY} L ${targetX},${targetY}`
+  return (
+    <BaseEdge
+      path={path}
+      className={`writer-timeline-connector${selected ? ' is-selected' : ''}`}
+      style={{ stroke: 'var(--color-border-strong, var(--color-border))', strokeWidth: 1.2 }}
+    />
+  )
+}
+
+const nodeTypes = { 'timeline-axis': TimelineAxisNodeView, 'timeline-event': TimelineEventNodeView }
+const edgeTypes = { 'timeline-connector': TimelineConnectorEdgeView }
+
 export default function StoryTimelineView({ projectKey }: { projectKey: string }) {
   const text = useLocaleStore(s => s.text)
   const settings = useStoryTimelineStore(s => s.settings)
@@ -115,23 +208,78 @@ export default function StoryTimelineView({ projectKey }: { projectKey: string }
   }, [projectKey, loadAll, loadWorldMap])
 
   useEffect(() => {
-    setTitle(settings.title)
-    setRulerLabel(settings.rulerLabel)
-    setRulerUnit(settings.rulerUnit)
+    // 设置由异步加载更新时，在下一帧同步本地表单草稿，避免 effect 内级联渲染。
+    const frame = requestAnimationFrame(() => {
+      setTitle(settings.title)
+      setRulerLabel(settings.rulerLabel)
+      setRulerUnit(settings.rulerUnit)
+    })
+    return () => cancelAnimationFrame(frame)
   }, [settings])
 
-  const orderedEvents = useMemo(
-    () => [...events].sort((a, b) => a.sortOrder - b.sortOrder),
-    [events],
-  )
+  const orderedEvents = useMemo(() => sortTimelineEvents(events), [events])
   const nextOrder = orderedEvents.length > 0
     ? Math.max(...orderedEvents.map(event => event.sortOrder)) + 1
     : 1
   const selectedEvent = selectedId ? orderedEvents.find(event => event.id === selectedId) : undefined
-  const locationNames = useMemo(
-    () => new Map(nodes.map(node => [node.id, node.name])),
-    [nodes],
-  )
+
+  // 坐标每一次都由 sortOrder 现算：没有任何拖拽结果被写回事件或持久化。
+  const layout = useMemo(() => buildStoryTimelineLayout(orderedEvents), [orderedEvents])
+  const flowNodes = useMemo<TimelineNode[]>(() => {
+    if (layout.events.length === 0) return []
+    const axis: TimelineNode = {
+      id: TIMELINE_AXIS_NODE_ID,
+      type: 'timeline-axis',
+      position: { x: layout.axis.x, y: layout.axis.y },
+      style: { width: layout.axis.width, height: layout.axis.height },
+      selectable: false,
+      draggable: false,
+      focusable: false,
+      data: {
+        handles: layout.events.map((event, index) => ({
+          id: `axis-out-${index}`,
+          offsetX: event.x - layout.axis.x,
+        })),
+        eventId: '',
+        title: '',
+        timeText: '',
+        side: 'above',
+        staggerLevel: 0,
+        width: layout.axis.width,
+      },
+    }
+    return [
+      axis,
+      ...layout.events.map<TimelineNode>((event, index) => ({
+        id: event.id,
+        type: 'timeline-event',
+        position: { x: event.x, y: event.y },
+        draggable: false,
+        selected: event.id === selectedId,
+        data: {
+          handles: [{ id: `axis-out-${index}`, offsetX: 0 }],
+          eventId: event.id,
+          title: event.title,
+          timeText: event.timeText,
+          side: event.side,
+          staggerLevel: event.staggerLevel,
+          width: event.width,
+        },
+      })),
+    ]
+  }, [layout, selectedId])
+
+  const flowEdges = useMemo<TimelineEdge[]>(() => layout.events.map((event, index) => ({
+    id: `connector-${event.id}`,
+    type: 'timeline-connector',
+    source: TIMELINE_AXIS_NODE_ID,
+    sourceHandle: `axis-out-${index}`,
+    target: event.id,
+    targetHandle: 'event-in',
+    selectable: false,
+    focusable: false,
+    data: {},
+  })), [layout])
 
   const selectEvent = (event: StoryTimelineEvent) => {
     setSelectedId(event.id)
@@ -176,14 +324,18 @@ export default function StoryTimelineView({ projectKey }: { projectKey: string }
     if (deleted) startNewEvent()
   }
 
-  const moveEvent = async (id: string, offset: -1 | 1) => {
+  const moveEvent = useCallback(async (id: string, offset: -1 | 1) => {
     const index = orderedEvents.findIndex(event => event.id === id)
     const targetIndex = index + offset
     if (index < 0 || targetIndex < 0 || targetIndex >= orderedEvents.length) return
     const ids = orderedEvents.map(event => event.id)
     ;[ids[index], ids[targetIndex]] = [ids[targetIndex], ids[index]]
     await reorderEvents(ids)
-  }
+  }, [orderedEvents, reorderEvents])
+
+  const selectedIndex = selectedEvent
+    ? orderedEvents.findIndex(event => event.id === selectedEvent.id)
+    : -1
 
   const updateForm = <K extends keyof TimelineFormState>(key: K, value: TimelineFormState[K]) => {
     setForm(current => ({ ...current, [key]: value }))
@@ -226,6 +378,11 @@ export default function StoryTimelineView({ projectKey }: { projectKey: string }
             <div className="writer-timeline-ruler-heading">
               <span>{settings.rulerLabel}</span>
               <small>{settings.rulerUnit}</small>
+              {orderedEvents.length > 0 && (
+                <small className="writer-timeline-ruler-hint">
+                  {text('拖动平移，滚轮缩放；顺序由排序刻度决定。', 'Drag to pan, scroll to zoom; order follows the ruler position.')}
+                </small>
+              )}
             </div>
             {loading && !isDataReady ? (
               <div className="writer-timeline-empty">{text('正在读取项目时间线…', 'Loading project timeline…')}</div>
@@ -236,37 +393,45 @@ export default function StoryTimelineView({ projectKey }: { projectKey: string }
                 <span>{text('设置自定义时间与刻度；以后可随时调整顺序。', 'Set a custom time and ruler position; you can reorder later.')}</span>
               </button>
             ) : (
-              <ol className="writer-timeline-events">
-                {orderedEvents.map((event, index) => (
-                  <li key={event.id} className={event.id === selectedId ? 'is-selected' : ''}>
-                    <div className="writer-timeline-tick" aria-hidden="true"><span>{index + 1}</span></div>
-                    <button type="button" className="writer-timeline-event" onClick={() => selectEvent(event)}>
-                      <div className="writer-timeline-event-topline">
-                        <span className="writer-timeline-time">{event.timeLabel}{event.rangeEndLabel ? ` — ${event.rangeEndLabel}` : ''}</span>
-                        <span className={`writer-timeline-status is-${event.status}`}>{text(STORY_TIMELINE_STATUS_LABELS[event.status].zh, STORY_TIMELINE_STATUS_LABELS[event.status].en)}</span>
-                      </div>
-                      <strong>{event.title}</strong>
-                      {event.description && <p>{event.description}</p>}
-                      <div className="writer-timeline-event-links">
-                        {event.chapterNumbers.length > 0 && <span><PencilLine size={12} />{event.chapterNumbers.map(chapter => `第${chapter}章`).join('、')}</span>}
-                        {event.characterNames.length > 0 && <span><Users size={12} />{event.characterNames.join('、')}</span>}
-                        {event.locationNodeIds.length > 0 && <span><MapPin size={12} />{event.locationNodeIds.map(id => locationNames.get(id) ?? text('未知地点', 'Unknown location')).join('、')}</span>}
-                      </div>
-                    </button>
-                    <div className="writer-timeline-reorder" aria-label={text('调整事件顺序', 'Reorder event')}>
-                      <button type="button" disabled={index === 0} onClick={() => void moveEvent(event.id, -1)} aria-label={text('向前移动', 'Move earlier')}><ChevronUp size={14} /></button>
-                      <button type="button" disabled={index === orderedEvents.length - 1} onClick={() => void moveEvent(event.id, 1)} aria-label={text('向后移动', 'Move later')}><ChevronDown size={14} /></button>
-                    </div>
-                  </li>
-                ))}
-              </ol>
+              <div className="writer-timeline-flow" data-testid="timeline-flow">
+                <ReactFlow<TimelineNode, TimelineEdge>
+                  nodes={flowNodes}
+                  edges={flowEdges}
+                  nodeTypes={nodeTypes}
+                  edgeTypes={edgeTypes}
+                  onNodeClick={(_event, node) => {
+                    if (node.type !== 'timeline-event') return
+                    const target = orderedEvents.find(event => event.id === node.data.eventId)
+                    if (target) selectEvent(target)
+                  }}
+                  fitView
+                  minZoom={0.3}
+                  maxZoom={1.8}
+                  nodesDraggable={false}
+                  nodesConnectable={false}
+                  elementsSelectable
+                  proOptions={{ hideAttribution: true }}
+                  className="bg-[var(--color-editor-bg)]"
+                >
+                  <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--color-border)" />
+                  <Controls showInteractive={false} position="bottom-right" />
+                </ReactFlow>
+              </div>
             )}
           </section>
 
           <aside className="writer-timeline-editor" aria-label={selectedEvent ? text('编辑时间线事件', 'Edit timeline event') : text('新增时间线事件', 'New timeline event')}>
             <div className="writer-timeline-editor-title">
               <div><span>{selectedEvent ? text('事件详情', 'Event details') : text('新事件', 'New event')}</span><strong>{selectedEvent ? selectedEvent.title : text('手动添加故事事件', 'Add a story event manually')}</strong></div>
-              {selectedEvent && <Button variant="ghost" size="icon" title={text('删除事件', 'Delete event')} onClick={() => void handleDelete()}><Trash2 size={14} /></Button>}
+              <div className="writer-timeline-editor-title-actions">
+                {selectedEvent && (
+                  <div className="writer-timeline-reorder" aria-label={text('调整事件顺序', 'Reorder event')}>
+                    <button type="button" disabled={selectedIndex <= 0} onClick={() => void moveEvent(selectedEvent.id, -1)} aria-label={text('向前移动', 'Move earlier')} title={text('向前移动', 'Move earlier')}><ChevronLeft size={14} /></button>
+                    <button type="button" disabled={selectedIndex >= orderedEvents.length - 1} onClick={() => void moveEvent(selectedEvent.id, 1)} aria-label={text('向后移动', 'Move later')} title={text('向后移动', 'Move later')}><ChevronRight size={14} /></button>
+                  </div>
+                )}
+                {selectedEvent && <Button variant="ghost" size="icon" title={text('删除事件', 'Delete event')} onClick={() => void handleDelete()}><Trash2 size={14} /></Button>}
+              </div>
             </div>
             <div className="writer-timeline-form">
               <label><span>{text('事件标题', 'Event title')} *</span><Input value={form.title} placeholder={text('例如：许渡抵达雾港', 'Example: Arrival at the port')} onChange={event => updateForm('title', event.target.value)} /></label>
@@ -282,7 +447,7 @@ export default function StoryTimelineView({ projectKey }: { projectKey: string }
               <label><span>{text('事件描述', 'Description')}</span><Textarea value={form.description} placeholder={text('写下这件事造成的变化、前因或后果。', 'Describe the change, cause, or consequence.')} onChange={event => updateForm('description', event.target.value)} /></label>
               <label><span>{text('关联章节', 'Linked chapters')}</span><Input value={form.chapterNumbers} placeholder={text('例如：3, 4（可留空）', 'Example: 3, 4 (optional)')} onChange={event => updateForm('chapterNumbers', event.target.value)} /></label>
               <label><span>{text('涉及角色', 'Characters')}</span><Input value={form.characterNames} placeholder={text('用逗号分隔角色名（可留空）', 'Comma-separated names (optional)')} onChange={event => updateForm('characterNames', event.target.value)} /></label>
-              <label><span>{text('关联地点', 'Linked locations')}</span><select multiple value={form.locationNodeIds} onChange={event => updateForm('locationNodeIds', Array.from(event.currentTarget.selectedOptions, option => option.value))} className="writer-timeline-location-select">{nodes.length === 0 ? <option disabled>{text('先在世界地图创建地点', 'Create map locations first')}</option> : nodes.map(node => <option key={node.id} value={node.id}>{node.name}</option>)}</select><small>{text('按 Ctrl/⌘ 可多选；地图为空时也可先保存事件。', 'Use Ctrl/⌘ for multiple; you may save before creating map locations.')}</small></label>
+              <label><span>{text('关联地点', 'Linked locations')}</span><select multiple value={form.locationNodeIds} onChange={event => updateForm('locationNodeIds', Array.from(event.currentTarget.selectedOptions, option => option.value))} className="writer-timeline-location-select">{nodes.length === 0 ? <option disabled>{text('先在地图册中创建地点', 'Create map locations first')}</option> : nodes.map(node => <option key={node.id} value={node.id}>{node.name}</option>)}</select><small>{text('按 Ctrl/⌘ 可多选；地图为空时也可先保存事件。', 'Use Ctrl/⌘ for multiple; you may save before creating map locations.')}</small></label>
               <div className="writer-timeline-form-actions"><Button variant="outline" size="sm" onClick={startNewEvent}>{text('新建空白事件', 'New blank event')}</Button><Button size="sm" disabled={!form.title.trim() || !form.timeLabel.trim() || !Number.isFinite(Number(form.sortOrder))} onClick={() => void handleSaveEvent()}><Check size={13} />{text('保存事件', 'Save event')}</Button></div>
             </div>
           </aside>

@@ -126,7 +126,12 @@ function AITaskCapsule() {
   useEffect(() => {
     if (activeRuns.length > 0) return
     const latest = useWorkflowStore.getState().history[0]
-    if (latest?.status === 'completed') setCompletedTitle(previous => previous === latest.title ? previous : latest.title)
+    if (latest?.status !== 'completed') return
+    // 延后到 effect 完成后再同步提示，避免在 React effect 中触发级联渲染。
+    const timer = setTimeout(() => {
+      setCompletedTitle(previous => previous === latest.title ? previous : latest.title)
+    }, 0)
+    return () => clearTimeout(timer)
   }, [activeRuns.length])
 
   const stepInfo = getActiveStepInfo()

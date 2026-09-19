@@ -1,574 +1,447 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
-  Map as MapIcon,
+  ArrowRight,
+  ChevronRight,
+  Compass,
+  ImagePlus,
+  Layers,
   List,
+  Map as MapIcon,
+  Network,
+  Pencil,
   Plus,
   Sparkles,
-  Layers,
-  MapPin,
-  Compass,
-  ArrowRight,
-  Edit2,
   Trash2,
-  BookOpen,
 } from 'lucide-react'
-import { useWorldMapStore } from '../../stores/world-map-store'
+import {
+  getWorldMapBreadcrumb,
+  type WorldMap,
+  type WorldMapEdge,
+} from '../../shared/world-map'
+import { createMapDraft, useWorldMapStore, type WorldMapDeleteStrategy } from '../../stores/world-map-store'
 import { useLocaleStore } from '../../stores/locale-store'
-import { useEditorStore } from '../../stores/editor-store'
+import { ipc } from '../../services/ipc-client'
 import { Button } from '../ui/Button'
-import { NativeSelect } from '../ui/NativeSelect'
 import { EmptyState } from '../ui/EmptyState'
 import { confirm } from '../ui/Confirm'
+import { toast } from '../ui/Toast'
+import WorldMapAtlasTree from './WorldMapAtlasTree'
 import WorldMapCanvas from './WorldMapCanvas'
 import WorldMapListView from './WorldMapListView'
 import WorldMapNodeDialog from './WorldMapNodeDialog'
 import WorldMapEdgeDialog from './WorldMapEdgeDialog'
 import WorldMapCandidatesModal from './WorldMapCandidatesModal'
-import WorldMapLayersDialog from './WorldMapLayersDialog'
-import {
-  type WorldMapNode,
-  type WorldMapEdge,
-  getWorldMapLayerName,
-  WORLD_MAP_NODE_TYPE_LABELS,
-  WORLD_MAP_EDGE_TYPE_LABELS,
-} from '../../shared/world-map'
+import WorldMapMapDialog from './WorldMapMapDialog'
+import WorldMapDeleteDialog from './WorldMapDeleteDialog'
 
+type MapDialogTarget =
+  | { kind: 'create-top-level' }
+  | { kind: 'create-child'; parentMapId: string }
+  | null
+
+/**
+ * 多地图地图册。选中的地图是一个独立空间：主区域只显示它自己的图片、地点、
+ * 地点层级与内部连接；地图之间只通过左侧地图册树和面包屑切换。
+ */
 export default function WorldMapView({ projectKey }: { projectKey: string }) {
   const text = useLocaleStore(s => s.text)
-
+  const maps = useWorldMapStore(s => s.maps)
   const nodes = useWorldMapStore(s => s.nodes)
   const edges = useWorldMapStore(s => s.edges)
-  const layers = useWorldMapStore(s => s.layers)
   const candidates = useWorldMapStore(s => s.candidates)
+  const migration = useWorldMapStore(s => s.migration)
+  const selectedMapId = useWorldMapStore(s => s.selectedMapId)
   const selectedNodeId = useWorldMapStore(s => s.selectedNodeId)
   const selectedEdgeId = useWorldMapStore(s => s.selectedEdgeId)
-  const activeLayer = useWorldMapStore(s => s.activeLayer)
   const viewMode = useWorldMapStore(s => s.viewMode)
   const candidatesLoading = useWorldMapStore(s => s.candidatesLoading)
-
   const loadAll = useWorldMapStore(s => s.loadAll)
   const loadCandidates = useWorldMapStore(s => s.loadCandidates)
+  const upsertMap = useWorldMapStore(s => s.upsertMap)
+  const deleteMap = useWorldMapStore(s => s.deleteMap)
+  const reorderMaps = useWorldMapStore(s => s.reorderMaps)
+  const acknowledgeMigration = useWorldMapStore(s => s.acknowledgeMigration)
   const upsertNode = useWorldMapStore(s => s.upsertNode)
   const deleteNode = useWorldMapStore(s => s.deleteNode)
   const upsertEdge = useWorldMapStore(s => s.upsertEdge)
   const deleteEdge = useWorldMapStore(s => s.deleteEdge)
-  const upsertLayer = useWorldMapStore(s => s.upsertLayer)
-  const deleteLayer = useWorldMapStore(s => s.deleteLayer)
-  const reorderLayers = useWorldMapStore(s => s.reorderLayers)
   const confirmCandidate = useWorldMapStore(s => s.confirmCandidate)
   const dismissCandidate = useWorldMapStore(s => s.dismissCandidate)
+  const setSelectedMapId = useWorldMapStore(s => s.setSelectedMapId)
   const setSelectedNodeId = useWorldMapStore(s => s.setSelectedNodeId)
   const setSelectedEdgeId = useWorldMapStore(s => s.setSelectedEdgeId)
-  const setActiveLayer = useWorldMapStore(s => s.setActiveLayer)
   const setViewMode = useWorldMapStore(s => s.setViewMode)
 
-  // Dialog state
-  const [nodeDialogTarget, setNodeDialogTarget] = useState<WorldMapNode | null | 'new'>(null)
+  const [showAtlas, setShowAtlas] = useState(true)
+  const [mapDialogTarget, setMapDialogTarget] = useState<MapDialogTarget>(null)
+  const [nodeDialogTarget, setNodeDialogTarget] = useState<string | null | 'new'>(null)
   const [edgeDialogTarget, setEdgeDialogTarget] = useState<WorldMapEdge | null | 'new'>(null)
-  const [candidatesModalOpen, setCandidatesModalOpen] = useState(false)
-  const [layersDialogOpen, setLayersDialogOpen] = useState(false)
-
-  // Blueprint cache for chapter references
-  const [blueprints, setBlueprints] = useState<Array<{ chapterNumber: number; title: string; keyEvents: string; purpose: string }>>([])
+  const [candidatesOpen, setCandidatesOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<WorldMap | null>(null)
+  /**
+   * 图片始终与它所属的地图 id 一起保存，切换地图时无需清空状态：
+   * 只要 id 不匹配就一律视为没有图片，绝不会把上一张地图的底图显示出来。
+   */
+  const [mapImageState, setMapImageState] = useState<{ mapId: string; dataUrl: string | null } | null>(null)
+  const [importingImage, setImportingImage] = useState(false)
 
   useEffect(() => {
-    if (projectKey) {
-      void loadAll(projectKey)
-      void loadCandidates(projectKey)
-    }
+    void loadAll(projectKey)
+    void loadCandidates(projectKey)
   }, [projectKey, loadAll, loadCandidates])
 
-  useEffect(() => {
-    // Load blueprints to show associated chapters
-    const loadBps = async () => {
-      try {
-        const { ipc } = await import('../../services/ipc-client')
-        const list = await ipc.invoke('db:blueprint-get-all', projectKey)
-        if (Array.isArray(list)) {
-          setBlueprints(list.map(b => ({
-            chapterNumber: b.chapterNumber,
-            title: b.title || '',
-            keyEvents: b.keyEvents || '',
-            purpose: b.purpose || '',
-          })))
-        }
-      } catch (e) {
-        console.warn('[WorldMapView] load blueprints error:', e)
-      }
+  const selectedMap = maps.find(map => map.id === selectedMapId) ?? null
+
+  /** 只暴露当前地图自己的地点与连接。 */
+  const mapNodes = useMemo(
+    () => nodes.filter(node => node.mapId === selectedMapId),
+    [nodes, selectedMapId],
+  )
+  const mapEdges = useMemo(
+    () => edges.filter(edge => edge.mapId === selectedMapId),
+    [edges, selectedMapId],
+  )
+  const nodeCountByMap = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const node of nodes) counts.set(node.mapId, (counts.get(node.mapId) ?? 0) + 1)
+    return counts
+  }, [nodes])
+  const childMapsByParent = useMemo(() => {
+    const children = new Map<string, WorldMap[]>()
+    for (const map of maps) {
+      if (!map.parentMapId) continue
+      const bucket = children.get(map.parentMapId)
+      if (bucket) bucket.push(map)
+      else children.set(map.parentMapId, [map])
     }
-    if (projectKey) void loadBps()
-  }, [projectKey])
+    return children
+  }, [maps])
 
-  const selectedNode = nodes.find(n => n.id === selectedNodeId)
-  const selectedEdge = edges.find(e => e.id === selectedEdgeId)
-  const nodeCountByLayer = new Map<string, number>()
-  for (const node of nodes) nodeCountByLayer.set(node.mapLayer, (nodeCountByLayer.get(node.mapLayer) ?? 0) + 1)
+  // 只同步外部系统（主进程托管的图片），并丢弃已经过期的那张地图的响应。
+  useEffect(() => {
+    if (!selectedMapId) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const result = await ipc.invoke('world-map-image:get', selectedMapId, projectKey)
+        if (cancelled) return
+        setMapImageState({ mapId: selectedMapId, dataUrl: result.success ? result.dataUrl ?? null : null })
+      } catch {
+        if (!cancelled) setMapImageState({ mapId: selectedMapId, dataUrl: null })
+      }
+    })()
+    return () => { cancelled = true }
+  }, [selectedMapId, projectKey])
 
-  // Associated chapters for selected node
-  const associatedChapters = selectedNode
-    ? blueprints.filter(b => (
-      b.title.includes(selectedNode.name) ||
-      b.keyEvents.includes(selectedNode.name) ||
-      b.purpose.includes(selectedNode.name)
-    ))
-    : []
+  const mapImage = mapImageState && mapImageState.mapId === selectedMapId ? mapImageState.dataUrl : null
 
-  const handleUpdateNodePosition = async (id: string, x: number, y: number) => {
-    const node = nodes.find(n => n.id === id)
-    if (!node) return
-    await upsertNode({ ...node, x, y }, projectKey)
+  const importMapImage = async () => {
+    if (!selectedMapId) return
+    setImportingImage(true)
+    try {
+      const result = await ipc.invoke('world-map-image:select-and-import', selectedMapId, projectKey)
+      if (result.cancelled) return
+      if (!result.success || !result.dataUrl) throw new Error(result.error || 'import failed')
+      setMapImageState({ mapId: selectedMapId, dataUrl: result.dataUrl })
+      await loadAll(projectKey)
+      toast.success(text('地图图片已导入这张地图', 'Map image imported for this map'))
+    } catch {
+      toast.error(text('导入地图图片失败', 'Could not import the map image'))
+    } finally {
+      setImportingImage(false)
+    }
   }
 
-  const handleDeleteNodeConfirm = async (id: string) => {
-    const target = nodes.find(n => n.id === id)
-    const ok = await confirm(text(
-      `确认删除节点「${target?.name || id}」？\n此操作会同时删除该节点的所有连接航路，子级节点将变为根节点。`,
-      `Delete node “${target?.name || id}”? Connected edges will also be removed.`,
-    ), {
-      title: text('删除地图节点', 'Delete Map Node'),
-      confirmText: text('删除', 'Delete'),
-      danger: true,
+  const removeMapImage = async () => {
+    if (!selectedMapId || !mapImage) return
+    const accepted = await confirm(text(
+      `移除「${selectedMap?.name ?? ''}」的图片？这张地图的地点、层级和连接不受影响，其他地图的图片也不会被改动；你最初选择的原始图片不会被删除。`,
+      `Remove the image from “${selectedMap?.name ?? ''}”? Its locations, hierarchy, and connections are unchanged, other maps keep their images, and your original file is not deleted.`,
+    ), { title: text('移除地图图片', 'Remove map image'), confirmText: text('移除', 'Remove'), danger: true })
+    if (!accepted) return
+    const result = await ipc.invoke('world-map-image:remove', selectedMapId, projectKey)
+    if (!result.success) {
+      toast.error(result.error || text('移除地图图片失败', 'Could not remove the map image'))
+      return
+    }
+    setMapImageState({ mapId: selectedMapId, dataUrl: null })
+    await loadAll(projectKey)
+  }
+
+  const selectedNode = mapNodes.find(node => node.id === selectedNodeId)
+  const selectedEdge = mapEdges.find(edge => edge.id === selectedEdgeId)
+  const childNodes = useMemo(
+    () => selectedNode ? mapNodes.filter(node => node.parentId === selectedNode.id) : [],
+    [mapNodes, selectedNode],
+  )
+
+  const updateNodePosition = async (id: string, x: number, y: number) => {
+    const node = nodes.find(item => item.id === id)
+    if (node) await upsertNode({ ...node, x, y }, projectKey)
+  }
+
+  const removeNode = async (id: string) => {
+    const node = nodes.find(item => item.id === id)
+    const accepted = await confirm(text(
+      `删除地点「${node?.name ?? id}」？与它的连接会一起删除，子地点会成为该地图的顶层地点。`,
+      `Delete location “${node?.name ?? id}”? Its connections are removed and child locations become top-level locations on this map.`,
+    ), { title: text('删除地点', 'Delete location'), confirmText: text('删除', 'Delete'), danger: true })
+    if (accepted) await deleteNode(id, projectKey)
+  }
+
+  const removeEdge = async (id: string) => {
+    const accepted = await confirm(text('删除这条地点连接？', 'Delete this location connection?'), {
+      title: text('删除连接', 'Delete connection'), confirmText: text('删除', 'Delete'), danger: true,
     })
-    if (ok) await deleteNode(id, projectKey)
+    if (accepted) await deleteEdge(id, projectKey)
   }
 
-  const handleDeleteEdgeConfirm = async (id: string) => {
-    const ok = await confirm(text(
-      '确认删除该条连线航路？',
-      'Delete this connection edge?',
-    ), {
-      title: text('删除连线', 'Delete Edge'),
-      confirmText: text('删除', 'Delete'),
-      danger: true,
-    })
-    if (ok) await deleteEdge(id, projectKey)
+  const saveMapName = async (target: MapDialogTarget, name: string) => {
+    if (!target) return false
+    if (target.kind === 'create-top-level') {
+      return upsertMap(createMapDraft(maps, name, null), projectKey)
+    }
+    return upsertMap(createMapDraft(maps, name, target.parentMapId), projectKey)
   }
+
+  const deleteImpact = useMemo(() => {
+    if (!deleteTarget) return { childMapCount: 0, descendantMapCount: 0, nodeCount: 0, edgeCount: 0, hasImage: false }
+    const descendants = new Set<string>()
+    const queue = [...(childMapsByParent.get(deleteTarget.id) ?? []).map(map => map.id)]
+    while (queue.length > 0) {
+      const current = queue.shift() as string
+      if (descendants.has(current)) continue
+      descendants.add(current)
+      queue.push(...(childMapsByParent.get(current) ?? []).map(map => map.id))
+    }
+    return {
+      childMapCount: (childMapsByParent.get(deleteTarget.id) ?? []).length,
+      descendantMapCount: descendants.size,
+      nodeCount: nodes.filter(node => node.mapId === deleteTarget.id).length,
+      edgeCount: edges.filter(edge => edge.mapId === deleteTarget.id).length,
+      hasImage: Boolean(deleteTarget.image),
+    }
+  }, [deleteTarget, childMapsByParent, nodes, edges])
+
+  const breadcrumb = selectedMap ? getWorldMapBreadcrumb(maps, selectedMap.id) : []
+  const mapDialogTitle = mapDialogTarget?.kind === 'create-child'
+    ? text('新建子地图', 'New child map')
+    : text('新建顶层地图', 'New top-level map')
+  const mapDialogHint = mapDialogTarget?.kind === 'create-child'
+    ? text(
+        `新地图会成为「${maps.find(map => map.id === mapDialogTarget.parentMapId)?.name ?? ''}」的子地图，并拥有自己的图片、地点与连接。`,
+        `The new map becomes a child of “${maps.find(map => map.id === mapDialogTarget.parentMapId)?.name ?? ''}” with its own image, locations, and connections.`,
+      )
+    : text('顶层地图不从属于任何地图，可作为世界总图等根节点。', 'A top-level map belongs to no other map and can act as the atlas root.')
 
   return (
-    <div className="h-full flex flex-col overflow-hidden bg-[var(--color-bg)]">
-      {/* Top toolbar */}
-      <div
-        className="flex items-center justify-between gap-3 px-4 h-11 flex-shrink-0 border-b border-[var(--color-border)] bg-[var(--color-panel)]"
-      >
-        <div className="flex items-center gap-2">
+    <div className="flex h-full flex-col overflow-hidden bg-[var(--color-bg)]">
+      <header className="flex h-11 flex-shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-panel)] px-4">
+        <div className="flex min-w-0 items-center gap-2">
           <Compass size={17} style={{ color: 'var(--color-accent)' }} />
-          <span className="font-semibold text-sm text-[var(--color-text)]">
-            {text('世界地图', 'World Map')}
-          </span>
-          <span className="text-xs text-[var(--color-text-muted)] ml-1">
-            {text(`${nodes.length} 个地点 · ${edges.length} 条航路`, `${nodes.length} nodes · ${edges.length} routes`)}
+          <span className="text-sm font-semibold text-[var(--color-text)]">{text('多地图地图册', 'Map atlas')}</span>
+          <span className="truncate text-xs text-[var(--color-text-muted)]">
+            {selectedMap
+              ? text(`「${selectedMap.name}」：${mapNodes.length} 个地点 · ${mapEdges.length} 条连接 · 共 ${maps.length} 张地图`, `“${selectedMap.name}”: ${mapNodes.length} locations · ${mapEdges.length} connections · ${maps.length} maps total`)
+              : text(`共 ${maps.length} 张地图`, `${maps.length} maps`)}
           </span>
         </div>
-
-        <div className="flex items-center gap-2">
-          {/* Layer Filter */}
-          <div className="flex items-center gap-1 text-xs">
-            <Layers size={13} className="text-[var(--color-text-muted)]" />
-            <NativeSelect
-              className="h-7 text-xs"
-              value={activeLayer}
-              onChange={e => setActiveLayer(e.target.value)}
-            >
-              <option value="all">{text('全部层级', 'All Layers')}</option>
-              {layers.map(l => (
-                <option key={l.id} value={l.id}>
-                  {l.name}
-                </option>
-              ))}
-            </NativeSelect>
-          </div>
-
-          <Button size="sm" variant="outline" onClick={() => setLayersDialogOpen(true)} title={text('管理当前项目的地图图层', 'Manage project map layers')}>
-            <Layers size={13} />
-            <span>{text('管理图层', 'Layers')}</span>
+        <div className="flex flex-shrink-0 items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => setShowAtlas(value => !value)} title={text('显示或隐藏地图册树', 'Show or hide the atlas tree')}>
+            <Layers size={13} />{text('管理地图', 'Manage maps')}
           </Button>
-
-          {/* View Mode Toggle */}
-          <div className="flex items-center bg-[var(--color-bg)] border border-[var(--color-border)] rounded-md p-0.5 text-xs">
-            <button
-              type="button"
-              className={`p-1 rounded ${viewMode === 'canvas' ? 'bg-[var(--color-accent)] text-white' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
-              onClick={() => setViewMode('canvas')}
-              title={text('画布视图', 'Canvas View')}
-            >
-              <MapIcon size={13} />
-            </button>
-            <button
-              type="button"
-              className={`p-1 rounded ${viewMode === 'list' ? 'bg-[var(--color-accent)] text-white' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
-              onClick={() => setViewMode('list')}
-              title={text('列表视图', 'List View')}
-            >
-              <List size={13} />
-            </button>
+          <div className="flex rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] p-0.5">
+            <button type="button" className={`rounded p-1 ${viewMode === 'canvas' ? 'bg-[var(--color-accent)] text-white' : ''}`} onClick={() => setViewMode('canvas')} title={text('画布视图', 'Canvas view')}><MapIcon size={13} /></button>
+            <button type="button" className={`rounded p-1 ${viewMode === 'list' ? 'bg-[var(--color-accent)] text-white' : ''}`} onClick={() => setViewMode('list')} title={text('地点列表', 'Location list')}><List size={13} /></button>
           </div>
+          <Button size="sm" variant="outline" disabled={!selectedMap} onClick={() => void importMapImage()} title={text('为当前地图导入或替换图片', 'Import or replace this map’s image')}>
+            <ImagePlus size={13} />{mapImage ? text('替换图片', 'Replace image') : text('导入图片', 'Import image')}
+          </Button>
+          {mapImage && <Button size="sm" variant="outline" disabled={!selectedMap} onClick={() => void removeMapImage()} title={text('移除当前地图的图片', 'Remove this map’s image')}><Trash2 size={13} /></Button>}
+          <Button size="sm" variant="outline" disabled={!selectedMap} onClick={() => setCandidatesOpen(true)}><Sparkles size={13} />{text('地点候选', 'Candidates')}</Button>
+          <Button size="sm" variant="outline" disabled={mapNodes.length < 2} onClick={() => setEdgeDialogTarget('new')}><ArrowRight size={13} />{text('新建连接', 'New connection')}</Button>
+          <Button size="sm" disabled={!selectedMap} onClick={() => setNodeDialogTarget('new')}><Plus size={13} />{text('新建地点', 'New location')}</Button>
+        </div>
+      </header>
 
-          {/* Candidates button */}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setCandidatesModalOpen(true)}
-            title={text('查看从设定中扫描到的候选地点', 'View candidate locations scanned from settings')}
-          >
-            <Sparkles size={13} />
-            <span>{text('待确认候选', 'Candidates')}</span>
-            {candidates.length > 0 && (
-              <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-[var(--color-accent)] text-white">
-                {candidates.length}
-              </span>
+      {migration && !migration.acknowledged && (
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-hover)] px-4 py-2 text-xs">
+          <Network size={13} className="flex-shrink-0" style={{ color: 'var(--color-accent)' }} />
+          <span className="text-[var(--color-text)]">
+            {text(
+              `旧图层结构已迁移为 ${migration.mapCount} 张地图${migration.legacyLayerNames.length > 0 ? `（${migration.legacyLayerNames.join('、')}）` : ''}，${migration.nodeCount} 个地点保留在原坐标上。`,
+              `Legacy layers were migrated into ${migration.mapCount} maps; ${migration.nodeCount} locations kept their original coordinates.`,
             )}
-          </Button>
-
-          {/* Add Edge */}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setEdgeDialogTarget('new')}
-            disabled={nodes.length < 2}
-            title={nodes.length < 2 ? text('至少需要两个节点才能连线', 'Requires at least 2 nodes') : undefined}
-          >
-            <ArrowRight size={13} />
-            <span>{text('添加连线', 'Add Route')}</span>
-          </Button>
-
-          {/* Add Node */}
-          <Button
-            size="sm"
-            variant="default"
-            onClick={() => setNodeDialogTarget('new')}
-          >
-            <Plus size={13} />
-            <span>{text('新建节点', 'New Node')}</span>
-          </Button>
-        </div>
-      </div>
-
-      {/* Main Body */}
-      <div className="flex-1 flex overflow-hidden relative">
-        {nodes.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center p-8">
-            <EmptyState
-              icon={<Compass size={40} className="text-[var(--color-text-muted)]" />}
-              message={text('尚未录入地图数据', 'No world map data recorded yet')}
-            >
-              <p className="text-xs text-[var(--color-text-muted)] max-w-md text-center mt-1">
-                {text(
-                  '系统遵守创作真实原则，不会臆造或自动填充地理信息。你可以手动录入地点与航路，或从已有资料中提取待确认候选。',
-                  'The workbench respects narrative authenticity and never fabricates geography. Add nodes manually or extract candidates from your setting materials.',
-                )}
-              </p>
-              <div className="flex items-center gap-2 mt-4">
-                <Button variant="default" onClick={() => setNodeDialogTarget('new')}>
-                  <Plus size={13} />
-                  {text('手动添加节点', 'Add Node Manually')}
-                </Button>
-                {candidates.length > 0 && (
-                  <Button variant="outline" onClick={() => setCandidatesModalOpen(true)}>
-                    <Sparkles size={13} />
-                    {text(`查看 ${candidates.length} 个候选地点`, `View ${candidates.length} Candidates`)}
-                  </Button>
-                )}
-              </div>
-            </EmptyState>
-          </div>
-        ) : (
-          <div className="flex-1 flex overflow-hidden">
-            {/* Canvas or List view */}
-            <div className="flex-1 h-full overflow-hidden">
-              {viewMode === 'canvas' ? (
-                <WorldMapCanvas
-                  nodes={nodes}
-                  edges={edges}
-                  selectedNodeId={selectedNodeId}
-                  selectedEdgeId={selectedEdgeId}
-                  activeLayer={activeLayer}
-                  onSelectNode={setSelectedNodeId}
-                  onSelectEdge={setSelectedEdgeId}
-                  onUpdateNodePosition={handleUpdateNodePosition}
-                  onDoubleNodeClick={node => setNodeDialogTarget(node)}
-                />
-              ) : (
-                <WorldMapListView
-                  nodes={nodes}
-                  edges={edges}
-                  layers={layers}
-                  selectedNodeId={selectedNodeId}
-                  selectedEdgeId={selectedEdgeId}
-                  onSelectNode={setSelectedNodeId}
-                  onSelectEdge={setSelectedEdgeId}
-                  onEditNode={node => setNodeDialogTarget(node)}
-                  onDeleteNode={handleDeleteNodeConfirm}
-                  onEditEdge={edge => setEdgeDialogTarget(edge)}
-                  onDeleteEdge={handleDeleteEdgeConfirm}
-                />
+          </span>
+          {migration.isolatedEdgeCount > 0 && (
+            <span className="text-[var(--color-warning-text)]">
+              {text(
+                `其中 ${migration.isolatedEdgeCount} 条旧连接的两端分属不同地图，已安全隔离并且不会在任何地图上显示；原始记录仍然保留。`,
+                `${migration.isolatedEdgeCount} legacy connections linked different maps; they are quarantined and never displayed, and their records are preserved.`,
               )}
-            </div>
+            </span>
+          )}
+          {migration.imageMigrated && (
+            <span className="text-[var(--color-text-muted)]">{text('旧项目底图已迁入对应的地图。', 'The legacy project image was moved into its map.')}</span>
+          )}
+          <Button size="sm" variant="ghost" className="ml-auto" onClick={() => void acknowledgeMigration(projectKey)}>{text('知道了', 'Got it')}</Button>
+        </div>
+      )}
 
-            {/* Right-side Inspector Drawer when a Node or Edge is selected */}
-            {(selectedNode || selectedEdge) && (
-              <div
-                className="w-72 flex-shrink-0 border-l border-[var(--color-border)] bg-[var(--color-panel)] flex flex-col h-full overflow-hidden"
-              >
-                {selectedNode && (
-                  <>
-                    <div className="p-3 border-b border-[var(--color-border)] flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <MapPin size={15} style={{ color: 'var(--color-accent)' }} />
-                        <span className="font-semibold text-xs truncate text-[var(--color-text)]">
-                          {selectedNode.name}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-6 w-6 p-0"
-                          onClick={() => setNodeDialogTarget(selectedNode)}
-                          title={text('编辑节点', 'Edit Node')}
-                        >
-                          <Edit2 size={12} />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-6 w-6 p-0 text-[var(--color-error)]"
-                          onClick={() => handleDeleteNodeConfirm(selectedNode.id)}
-                          title={text('删除节点', 'Delete Node')}
-                        >
-                          <Trash2 size={12} />
-                        </Button>
-                      </div>
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto p-3 space-y-3 text-xs">
-                      <div>
-                        <span className="text-[10px] text-[var(--color-text-muted)] block mb-1">
-                          {text('基本信息', 'Basic Info')}
-                        </span>
-                        <div className="flex items-center gap-1.5">
-                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--color-hover)] text-[var(--color-text)]">
-                            {text(WORLD_MAP_NODE_TYPE_LABELS[selectedNode.type]?.zh || selectedNode.type, selectedNode.type)}
-                          </span>
-                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--color-hover)] text-[var(--color-text-muted)]">
-                            {getWorldMapLayerName(layers, selectedNode.mapLayer)}
-                          </span>
-                        </div>
-                      </div>
-
-                      {selectedNode.description && (
-                        <div>
-                          <span className="text-[10px] text-[var(--color-text-muted)] block mb-1">
-                            {text('地理与设定描述', 'Description')}
-                          </span>
-                          <p className="text-xs text-[var(--color-text-secondary)] leading-5 whitespace-pre-wrap bg-[var(--color-bg)] p-2 rounded border border-[var(--color-border)]">
-                            {selectedNode.description}
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Source References */}
-                      {selectedNode.sourceRefs && selectedNode.sourceRefs.length > 0 && (
-                        <div>
-                          <span className="text-[10px] text-[var(--color-text-muted)] block mb-1">
-                            {text('关联设定出处', 'Source References')}
-                          </span>
-                          <div className="space-y-1">
-                            {selectedNode.sourceRefs.map((ref, idx) => (
-                              <div
-                                key={idx}
-                                className="text-[11px] text-[var(--color-text-secondary)] bg-[var(--color-bg)] px-2 py-1 rounded border border-[var(--color-border)] truncate"
-                              >
-                                {ref}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Connected Edges */}
-                      <div>
-                        <span className="text-[10px] text-[var(--color-text-muted)] block mb-1">
-                          {text('连接航路与关系', 'Connected Routes')}
-                        </span>
-                        {edges.filter(e => e.fromNodeId === selectedNode.id || e.toNodeId === selectedNode.id).length === 0 ? (
-                          <span className="text-[11px] text-[var(--color-text-muted)]">
-                            {text('暂无连接航路', 'No connected routes')}
-                          </span>
-                        ) : (
-                          <div className="space-y-1">
-                            {edges
-                              .filter(e => e.fromNodeId === selectedNode.id || e.toNodeId === selectedNode.id)
-                              .map(edge => {
-                                const otherId = edge.fromNodeId === selectedNode.id ? edge.toNodeId : edge.fromNodeId
-                                const otherNode = nodes.find(n => n.id === otherId)
-                                return (
-                                  <div
-                                    key={edge.id}
-                                    className="p-1.5 rounded bg-[var(--color-bg)] border border-[var(--color-border)] text-[11px]"
-                                  >
-                                    <div className="flex items-center justify-between">
-                                      <span className="font-medium text-[var(--color-text)]">
-                                        {otherNode?.name || otherId}
-                                      </span>
-                                      <span className="text-[10px] text-[var(--color-text-muted)]">
-                                        {text(WORLD_MAP_EDGE_TYPE_LABELS[edge.type]?.zh || edge.type, edge.type)}
-                                      </span>
-                                    </div>
-                                    {edge.description && (
-                                      <p className="text-[10px] text-[var(--color-text-secondary)] mt-0.5">
-                                        {edge.description}
-                                      </p>
-                                    )}
-                                  </div>
-                                )
-                              })}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Associated Chapters / Blueprints */}
-                      <div>
-                        <span className="text-[10px] text-[var(--color-text-muted)] block mb-1">
-                          {text('关联章节蓝图', 'Associated Chapters')}
-                        </span>
-                        {associatedChapters.length === 0 ? (
-                          <span className="text-[11px] text-[var(--color-text-muted)]">
-                            {text('蓝图中未显式提及该地点', 'Not explicitly mentioned in blueprints')}
-                          </span>
-                        ) : (
-                          <div className="space-y-1">
-                            {associatedChapters.map(ch => (
-                              <button
-                                key={ch.chapterNumber}
-                                type="button"
-                                className="w-full text-left p-1.5 rounded bg-[var(--color-bg)] border border-[var(--color-border)] hover:border-[var(--color-accent)] transition-colors"
-                                onClick={() => {
-                                  useEditorStore.getState().openFile({
-                                    id: 'chapter-card-editor',
-                                    name: text('章节蓝图', 'Chapter blueprints'),
-                                    type: 'chapter-card',
-                                    projectKey,
-                                  })
-                                }}
-                              >
-                                <div className="flex items-center gap-1 font-medium text-[11px] text-[var(--color-text)]">
-                                  <BookOpen size={11} className="text-[var(--color-accent)]" />
-                                  <span>第 {ch.chapterNumber} 章：{ch.title}</span>
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                {selectedEdge && !selectedNode && (
-                  <>
-                    <div className="p-3 border-b border-[var(--color-border)] flex items-center justify-between">
-                      <span className="font-semibold text-xs text-[var(--color-text)]">
-                        {text('连线详情', 'Edge Details')}
-                      </span>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-6 w-6 p-0"
-                          onClick={() => setEdgeDialogTarget(selectedEdge)}
-                          title={text('编辑连线', 'Edit Edge')}
-                        >
-                          <Edit2 size={12} />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-6 w-6 p-0 text-[var(--color-error)]"
-                          onClick={() => handleDeleteEdgeConfirm(selectedEdge.id)}
-                          title={text('删除连线', 'Delete Edge')}
-                        >
-                          <Trash2 size={12} />
-                        </Button>
-                      </div>
-                    </div>
-
-                    <div className="p-3 space-y-3 text-xs">
-                      <div className="flex items-center justify-between p-2 rounded bg-[var(--color-bg)] border border-[var(--color-border)]">
-                        <span className="font-semibold">{nodes.find(n => n.id === selectedEdge.fromNodeId)?.name}</span>
-                        <ArrowRight size={12} className="text-[var(--color-text-muted)]" />
-                        <span className="font-semibold">{nodes.find(n => n.id === selectedEdge.toNodeId)?.name}</span>
-                      </div>
-                      <div>
-                        <span className="text-[10px] text-[var(--color-text-muted)] block mb-1">
-                          {text('关系类型', 'Type')}
-                        </span>
-                        <span>{text(WORLD_MAP_EDGE_TYPE_LABELS[selectedEdge.type]?.zh || selectedEdge.type, selectedEdge.type)}</span>
-                      </div>
-                      <div>
-                        <span className="text-[10px] text-[var(--color-text-muted)] block mb-1">
-                          {text('状态', 'Status')}
-                        </span>
-                        <span>{selectedEdge.status}</span>
-                      </div>
-                      {selectedEdge.description && (
-                        <div>
-                          <span className="text-[10px] text-[var(--color-text-muted)] block mb-1">
-                            {text('说明', 'Description')}
-                          </span>
-                          <p className="text-xs text-[var(--color-text-secondary)]">{selectedEdge.description}</p>
-                        </div>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
+      <div className="flex flex-1 overflow-hidden">
+        {showAtlas && (
+          <div className="w-60 flex-shrink-0">
+            <WorldMapAtlasTree
+              maps={maps}
+              selectedMapId={selectedMapId}
+              nodeCountByMap={nodeCountByMap}
+              onSelect={setSelectedMapId}
+              onCreateTopLevel={() => setMapDialogTarget({ kind: 'create-top-level' })}
+              onCreateChild={parentMapId => setMapDialogTarget({ kind: 'create-child', parentMapId })}
+              onRename={(map, name) => void upsertMap({ ...map, name }, projectKey)}
+              onMove={(map, siblings, offset) => {
+                const index = siblings.findIndex(candidate => candidate.id === map.id)
+                const target = index + offset
+                if (index < 0 || target < 0 || target >= siblings.length) return
+                const ids = siblings.map(candidate => candidate.id)
+                ;[ids[index], ids[target]] = [ids[target], ids[index]]
+                void reorderMaps(ids, projectKey)
+              }}
+              onDelete={setDeleteTarget}
+            />
           </div>
         )}
+
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <div className="flex h-8 flex-shrink-0 items-center gap-1 border-b border-[var(--color-border)] bg-[var(--color-panel)] px-3 text-xs" data-testid="world-map-breadcrumb">
+            {breadcrumb.length === 0 ? (
+              <span className="text-[var(--color-text-muted)]">{text('未选择地图', 'No map selected')}</span>
+            ) : breadcrumb.map((map, index) => (
+              <span key={map.id} className="flex min-w-0 items-center gap-1">
+                {index > 0 && <ChevronRight size={12} className="flex-shrink-0 text-[var(--color-text-muted)]" />}
+                {index === breadcrumb.length - 1 ? (
+                  <span className="truncate font-semibold text-[var(--color-text)]">{map.name}</span>
+                ) : (
+                  <button type="button" className="truncate text-[var(--color-text-secondary)] hover:text-[var(--color-accent)]" onClick={() => setSelectedMapId(map.id)}>{map.name}</button>
+                )}
+              </span>
+            ))}
+          </div>
+
+          {maps.length === 0 ? (
+            <div className="flex flex-1 items-center justify-center p-8">
+              <EmptyState icon={<MapIcon size={40} className="text-[var(--color-text-muted)]" />} message={text('先新建一张地图', 'Create your first map')} opacity={1}>
+                <p className="max-w-md text-center text-xs text-[var(--color-text-muted)]">
+                  {text('每张地图都是独立空间，可以分别导入一张图片，并在自己的内部建立地点、地点层级与连接。地图之间可组成父子层级。', 'Each map is an independent space with its own image and its own locations, hierarchy, and connections. Maps can form a parent/child tree.')}
+                </p>
+                <div className="mt-3"><Button onClick={() => setMapDialogTarget({ kind: 'create-top-level' })}><Plus size={13} />{text('新建顶层地图', 'New top-level map')}</Button></div>
+              </EmptyState>
+            </div>
+          ) : mapNodes.length === 0 && mapEdges.length === 0 ? (
+            <div className="flex flex-1 items-center justify-center p-8">
+              <EmptyState icon={<Compass size={40} className="text-[var(--color-text-muted)]" />} message={text('这张地图还是空的', 'This map is still empty')} opacity={1}>
+                <p className="max-w-md text-center text-xs text-[var(--color-text-muted)]">
+                  {text('可以先导入这张地图自己的图片，也可以直接建立地点。图片只是底图，地点仍按世界、区域、城市等层级组织。', 'Import this map’s own image first, or create locations right away. The image is only a base map; locations are still organized as worlds, regions, and cities.')}
+                </p>
+                <div className="mt-3 flex gap-2">
+                  <Button onClick={() => void importMapImage()} disabled={importingImage}><ImagePlus size={13} />{text('导入图片', 'Import image')}</Button>
+                  <Button variant="outline" onClick={() => setNodeDialogTarget('new')}><Plus size={13} />{text('新建地点', 'New location')}</Button>
+                </div>
+              </EmptyState>
+            </div>
+          ) : (
+            <div className="flex min-h-0 flex-1 overflow-hidden">
+              <div className="min-w-0 flex-1 overflow-hidden">
+                {viewMode === 'canvas'
+                  ? <WorldMapCanvas nodes={mapNodes} edges={mapEdges} selectedNodeId={selectedNodeId} selectedEdgeId={selectedEdgeId} backgroundImage={mapImage} onSelectNode={setSelectedNodeId} onSelectEdge={setSelectedEdgeId} onUpdateNodePosition={updateNodePosition} onDoubleNodeClick={node => setNodeDialogTarget(node.id)} />
+                  : <WorldMapListView nodes={mapNodes} edges={mapEdges} selectedNodeId={selectedNodeId} selectedEdgeId={selectedEdgeId} onSelectNode={setSelectedNodeId} onSelectEdge={setSelectedEdgeId} onEditNode={node => setNodeDialogTarget(node.id)} onDeleteNode={removeNode} onEditEdge={edge => setEdgeDialogTarget(edge)} onDeleteEdge={removeEdge} />}
+              </div>
+              {(selectedNode || selectedEdge) && (
+                <aside className="w-64 flex-shrink-0 overflow-y-auto border-l border-[var(--color-border)] bg-[var(--color-panel)] p-3 text-xs">
+                  {selectedNode && (
+                    <>
+                      <div className="flex items-center justify-between gap-2">
+                        <strong className="truncate">{selectedNode.name}</strong>
+                        <span className="flex gap-1">
+                          <Button size="sm" variant="ghost" onClick={() => setNodeDialogTarget(selectedNode.id)}><Pencil size={13} /></Button>
+                          <Button size="sm" variant="ghost" onClick={() => void removeNode(selectedNode.id)}><Trash2 size={13} /></Button>
+                        </span>
+                      </div>
+                      <p className="mt-2 text-[var(--color-text-muted)]">{text(`所属地图：${selectedMap?.name ?? ''}`, `Map: ${selectedMap?.name ?? ''}`)}</p>
+                      {selectedNode.parentId && <p className="mt-1">{text(`上级地点：${mapNodes.find(node => node.id === selectedNode.parentId)?.name ?? selectedNode.parentId}`, `Parent: ${mapNodes.find(node => node.id === selectedNode.parentId)?.name ?? selectedNode.parentId}`)}</p>}
+                      <p className="mt-1">{text(`下级地点：${childNodes.length}`, `Child locations: ${childNodes.length}`)}</p>
+                      {selectedNode.description && <p className="mt-3 whitespace-pre-wrap rounded border border-[var(--color-border)] p-2">{selectedNode.description}</p>}
+                    </>
+                  )}
+                  {selectedEdge && !selectedNode && (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <strong>{text('地点连接', 'Location connection')}</strong>
+                        <span className="flex gap-1">
+                          <Button size="sm" variant="ghost" onClick={() => setEdgeDialogTarget(selectedEdge)}><Pencil size={13} /></Button>
+                          <Button size="sm" variant="ghost" onClick={() => void removeEdge(selectedEdge.id)}><Trash2 size={13} /></Button>
+                        </span>
+                      </div>
+                      <p className="mt-3">{mapNodes.find(node => node.id === selectedEdge.fromNodeId)?.name} → {mapNodes.find(node => node.id === selectedEdge.toNodeId)?.name}</p>
+                      <p className="mt-1 text-[var(--color-text-muted)]">{text('连接只存在于这张地图内部。', 'Connections only exist inside this map.')}</p>
+                      {selectedEdge.description && <p className="mt-2 whitespace-pre-wrap">{selectedEdge.description}</p>}
+                    </>
+                  )}
+                </aside>
+              )}
+            </div>
+          )}
+        </main>
       </div>
 
-      {/* Node Dialog */}
-      {nodeDialogTarget && (
+      <WorldMapMapDialog
+        open={mapDialogTarget !== null}
+        title={mapDialogTitle}
+        hint={mapDialogHint}
+        onClose={() => setMapDialogTarget(null)}
+        onSave={name => saveMapName(mapDialogTarget, name)}
+      />
+
+      {nodeDialogTarget && selectedMap && (
         <WorldMapNodeDialog
-          open={Boolean(nodeDialogTarget)}
-          node={nodeDialogTarget === 'new' ? null : nodeDialogTarget}
-          existingNodes={nodes}
-          layers={layers}
+          open
+          node={nodeDialogTarget === 'new' ? null : mapNodes.find(node => node.id === nodeDialogTarget) ?? null}
+          existingNodes={mapNodes}
+          mapId={selectedMap.id}
+          mapName={selectedMap.name}
           onClose={() => setNodeDialogTarget(null)}
           onSave={node => upsertNode(node, projectKey)}
         />
       )}
 
-      {/* Edge Dialog */}
-      {edgeDialogTarget && (
+      {edgeDialogTarget && selectedMap && (
         <WorldMapEdgeDialog
-          open={Boolean(edgeDialogTarget)}
+          open
           edge={edgeDialogTarget === 'new' ? null : edgeDialogTarget}
-          nodes={nodes}
+          nodes={mapNodes}
+          mapName={selectedMap.name}
           defaultFromNodeId={selectedNodeId}
           onClose={() => setEdgeDialogTarget(null)}
           onSave={edge => upsertEdge(edge, projectKey)}
         />
       )}
 
-      {/* Candidates Modal */}
       <WorldMapCandidatesModal
-        open={candidatesModalOpen}
+        open={candidatesOpen}
         candidates={candidates}
         loading={candidatesLoading}
-        onClose={() => setCandidatesModalOpen(false)}
-        onConfirm={cand => confirmCandidate(cand, projectKey)}
+        targetMapName={selectedMap?.name ?? ''}
+        onClose={() => setCandidatesOpen(false)}
+        onConfirm={candidate => selectedMapId ? confirmCandidate(candidate, selectedMapId, projectKey) : Promise.resolve(false)}
         onDismiss={dismissCandidate}
-        layers={layers}
       />
-      <WorldMapLayersDialog
-        open={layersDialogOpen}
-        layers={layers}
-        nodeCountByLayer={nodeCountByLayer}
-        onClose={() => setLayersDialogOpen(false)}
-        onUpsert={layer => upsertLayer(layer, projectKey)}
-        onDelete={(id, fallbackLayerId) => deleteLayer(id, fallbackLayerId, projectKey)}
-        onReorder={orderedIds => reorderLayers(orderedIds, projectKey)}
+
+      <WorldMapDeleteDialog
+        open={deleteTarget !== null}
+        map={deleteTarget}
+        impact={deleteImpact}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={(strategy: WorldMapDeleteStrategy) => deleteTarget ? deleteMap(deleteTarget.id, strategy, projectKey) : Promise.resolve(false)}
       />
     </div>
   )

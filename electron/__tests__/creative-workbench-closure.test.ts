@@ -9,7 +9,6 @@ import { DraftRepository } from '../repositories/draft-repository'
 import { WorldMapRepository } from '../repositories/world-map-repository'
 import { ReviewRepository } from '../repositories/review-repository'
 import { rebuildPlotTreeDeterministic } from '../../src/services/plot-tree-deterministic'
-import { launchCreativeWorkflow, type CreativeIntent } from '../../src/services/workflows/creative-workflow-launcher'
 import { useLayoutStore } from '../../src/stores/layout-store'
 import { useDraftStore } from '../../src/stores/draft-store'
 
@@ -122,32 +121,23 @@ describe('Codex Fiction Creative Workbench Closure Integration Tests', () => {
     expect(reopenedBp42?.title).toBe('第 42 章 终焉前夜')
   })
 
-  // 2. 全局杜绝生成正文/批量写正文/修稿合并入口。
-  it('strictly prohibits auto-draft generation, batch writing, and revision merge writeback', async () => {
-    // 2.1 Workflow launcher blocks generate_draft
-    await expect(
-      launchCreativeWorkflow({
-        workflow: 'generate_draft',
-        chapterNumber: 1,
-      } as unknown as CreativeIntent),
-    ).rejects.toThrow(/Codex 创作工作台已禁用自动生成正文与自动修稿/u)
-
-    // 2.2 Workflow launcher blocks refine
-    await expect(
-      launchCreativeWorkflow({
-        workflow: 'refine',
-        chapterNumber: 1,
-      } as unknown as CreativeIntent),
-    ).rejects.toThrow(/Codex 创作工作台已禁用自动生成正文与自动修稿/u)
-
-    // 2.3 Layout store openChapterCreation is a no-op
+  // 2. 保持作者主导：不恢复批量入口或自动合并回写；AI 单章写稿必须先确认。
+  it('keeps batch creation and revision writeback disabled while requiring confirmation for AI-assisted drafting', () => {
+    // 2.1 Layout store openChapterCreation is a no-op
     const layoutStore = useLayoutStore.getState()
     layoutStore.openChapterCreation({ chapterNumber: 1 })
     expect(useLayoutStore.getState().chapterCreationOpen).toBe(false)
 
-    // 2.4 Draft store has no applyMergedRevision function
+    // 2.2 Draft store has no applyMergedRevision function
     const draftStoreState = useDraftStore.getState() as unknown as Record<string, unknown>
     expect(draftStoreState.applyMergedRevision).toBeUndefined()
+
+    // 2.3 Agent-originated drafting is an explicit author-confirmed action.
+    const startWorkflowSource = fs.readFileSync(
+      path.resolve(process.cwd(), 'src/services/agent/tools/start-workflow.tool.ts'),
+      'utf8',
+    )
+    expect(startWorkflowSource).toContain('requiresConfirmation: true')
   })
 
   // 3. 审核只读不变量（审核后正文内容、版本、哈希及蓝图均不改变）。
@@ -302,9 +292,9 @@ describe('Codex Fiction Creative Workbench Closure Integration Tests', () => {
     const fragCandidate = candidates.find(c => c.name === '幽影回廊')
 
     expect(ruleCandidate).toBeDefined()
-    expect(ruleCandidate?.suggestedLayer).toBe('underground')
+    expect(ruleCandidate?.sourceRef).toContain('里世界')
     expect(fragCandidate).toBeDefined()
-    expect(fragCandidate?.suggestedLayer).toBe('underground')
+    expect(fragCandidate?.sourceRef).toContain('里世界')
 
     // Disable the approved source (is_disabled = 1)
     db.prepare(`UPDATE workspace_sources SET is_disabled = 1 WHERE id = 'src-approved'`).run()

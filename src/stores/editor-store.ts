@@ -13,7 +13,7 @@ export interface EditorTabSaveSnapshot {
 export interface EditorTab {
   id: string
   name: string
-  type: 'chapter' | 'outline' | 'character' | 'config' | 'diff' | 'chapter-card' | 'world-building' | 'arch-file' | 'version-history' | 'review-report' | 'narrative-thread' | 'world-map' | 'story-timeline' | 'overview'
+  type: 'chapter' | 'outline' | 'character' | 'config' | 'diff' | 'chapter-card' | 'world-building' | 'arch-file' | 'version-history' | 'review-report' | 'narrative-thread' | 'world-map' | 'story-timeline' | 'overview' | 'project-document'
   filePath?: string
   content?: string
   /** 架构文档已持久化的基准内容，用于跨 Tab/项目切换后恢复脏状态。 */
@@ -134,6 +134,7 @@ const PROJECT_SCOPED_BUILTIN_TYPES = new Set<EditorTab['type']>([
   'world-map',
   'story-timeline',
   'overview',
+  'project-document',
 ])
 
 export interface EditorExitSaveHandler {
@@ -428,6 +429,28 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
     })
   },
 }))
+
+function exitSaveHandlerFor(tab: EditorTab): EditorExitSaveHandler | undefined {
+  return exitSaveHandlers.get(`tab:${tab.id}`)
+    ?? (tab.projectKey ? exitSaveHandlers.get(exitSaveTypeKey(tab.type, tab.projectKey)) : undefined)
+}
+
+/** 关闭确认里是否可以向用户提供“保存并关闭”。 */
+export function hasEditorExitSaveHandler(tab: EditorTab): boolean {
+  return !!exitSaveHandlerFor(tab)
+}
+
+/**
+ * 关闭前的显式保存。抛错时调用方必须保持标签页打开，
+ * 不能把“保存失败”当作“已放弃”。
+ */
+export async function saveEditorTabBeforeClose(tabId: string): Promise<void> {
+  const tab = useEditorStore.getState().tabs.find(candidate => candidate.id === tabId)
+  if (!tab) return
+  const handler = exitSaveHandlerFor(tab)
+  if (!handler) throw new Error(`“${tab.name}”当前无法保存`)
+  await handler.save()
+}
 
 export async function saveDirtyEditorChangesForExit(currentProjectKey: string | undefined): Promise<void> {
   const initial = useEditorStore.getState()

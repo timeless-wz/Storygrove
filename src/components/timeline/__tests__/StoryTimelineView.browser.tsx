@@ -1,0 +1,351 @@
+import { act } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import type { ProjectData } from '../../../shared/ipc-channels'
+import { setActiveProjectSessionContext } from '../../../shared/project-session-context'
+import type { StoryTimelineEvent, StoryTimelineSettings } from '../../../shared/story-timeline'
+import { useLocaleStore } from '../../../stores/locale-store'
+import { useProjectStore } from '../../../stores/project-store'
+import { useStoryTimelineStore } from '../../../stores/story-timeline-store'
+import { useWorldMapStore } from '../../../stores/world-map-store'
+import StoryTimelineView from '../StoryTimelineView'
+
+const PROJECT_PATH = 'C:\\novels\\story-timeline'
+const PROJECT_SESSION = {
+  projectId: 'story-timeline',
+  leaseId: 'story-timeline-lease',
+  projectPath: PROJECT_PATH,
+}
+const project: ProjectData = {
+  id: PROJECT_SESSION.projectId,
+  sessionLease: PROJECT_SESSION.leaseId,
+  name: 'Story timeline',
+  path: PROJECT_PATH,
+  novelConfig: {
+    genre: '', subGenre: '', targetAudience: '', totalChapters: 4, wordsPerChapter: 2500,
+    plotStructure: 'three_act', narrativePOV: 'third_limited', coreOutline: '',
+    worldSetting: '', goldenFinger: '', protagonistProfile: '', globalGuidance: '',
+  },
+  characterStates: '',
+  createdAt: '',
+  updatedAt: '',
+}
+
+const settings: StoryTimelineSettings = {
+  title: '故事时间线',
+  rulerLabel: '大荒纪年',
+  rulerUnit: '年',
+}
+
+function makeEvent(overrides: Partial<StoryTimelineEvent> & { id: string; sortOrder: number }): StoryTimelineEvent {
+  return {
+    title: overrides.id,
+    timeLabel: '时间',
+    precision: 'exact',
+    description: '',
+    chapterNumbers: [],
+    characterNames: [],
+    locationNodeIds: [],
+    status: 'planned',
+    ...overrides,
+  }
+}
+
+/** 故意打乱输入顺序：横轴顺序必须只由 sortOrder 决定。 */
+const timelineEvents: StoryTimelineEvent[] = [
+  makeEvent({
+    id: 'e4', sortOrder: 40, title: '许渡归来', timeLabel: '大荒历 318 年',
+    status: 'finalized',
+  }),
+  makeEvent({ id: 'e1', sortOrder: 10, title: '末班车驶出地图', timeLabel: '大荒历 310 年' }),
+  makeEvent({
+    id: 'e3', sortOrder: 30, title: '隧道封锁期', timeLabel: '大荒历 313 年',
+    precision: 'range', rangeEndLabel: '大荒历 315 年',
+  }),
+  makeEvent({
+    id: 'e2', sortOrder: 20, title: '雾港调查', timeLabel: '大荒历 312 年',
+    description: '仅在详情面板可见的描述',
+    chapterNumbers: [3, 4],
+    // 角色名刻意不与任何标题重叠，便于断言时间轴上不出现关联信息。
+    characterNames: ['沈砚'],
+    locationNodeIds: ['loc-1'],
+    status: 'drafted',
+  }),
+  makeEvent({ id: 'e5', sortOrder: 50, title: '终局对峙', timeLabel: '大荒历 320 年' }),
+]
+
+const originalLocaleState = useLocaleStore.getState()
+const originalProjectState = useProjectStore.getState()
+const originalTimelineState = useStoryTimelineStore.getState()
+const originalWorldMapState = useWorldMapStore.getState()
+
+let container: HTMLDivElement
+let root: Root
+let invoke: ReturnType<typeof vi.fn>
+
+;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+
+function labels(): HTMLElement[] {
+  return Array.from(container.querySelectorAll<HTMLElement>('[data-testid="timeline-event-label"]'))
+}
+
+function labelFor(eventId: string): HTMLElement {
+  const element = labels().find(label => label.dataset.eventId === eventId)
+  if (!element) throw new Error(`timeline label for ${eventId} is missing`)
+  return element
+}
+
+/** 依据 sortOrder 排序后的标注元素，用于验证横轴左右关系。 */
+function labelsInSortOrder(): Array<{ eventId: string; element: HTMLElement; sortOrder: number }> {
+  return timelineEvents
+    .map(event => ({ eventId: event.id, element: labelFor(event.id), sortOrder: event.sortOrder }))
+    .sort((left, right) => left.sortOrder - right.sortOrder)
+}
+
+function formField(labelText: string): HTMLInputElement | HTMLTextAreaElement {
+  const label = Array.from(container.querySelectorAll('.writer-timeline-form label'))
+    .find(node => (node.querySelector('span')?.textContent ?? '').includes(labelText))
+  const field = label?.querySelector('input, textarea')
+  if (!field) throw new Error(`form field ${labelText} is missing`)
+  return field as HTMLInputElement | HTMLTextAreaElement
+}
+
+async function clickLabel(eventId: string): Promise<void> {
+  const element = labelFor(eventId)
+  const node = (element.closest('.react-flow__node') as HTMLElement | null) ?? element
+  await act(async () => {
+    node.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  })
+}
+
+async function renderTimeline(): Promise<void> {
+  await act(async () => {
+    root.render(<StoryTimelineView projectKey={PROJECT_PATH} />)
+  })
+  await act(async () => {
+    await vi.waitFor(() => expect(labels().length).toBe(timelineEvents.length))
+  })
+}
+
+beforeEach(() => {
+  useLocaleStore.setState({ locale: 'zh-CN', initialized: true })
+  useProjectStore.setState({ currentProject: project, projectSessionEpoch: 1 })
+  useStoryTimelineStore.setState({ ...originalTimelineState, events: [], settings, dataProjectKey: null, loading: false })
+  useWorldMapStore.setState({ ...originalWorldMapState, maps: [], nodes: [], edges: [], migration: null, loading: false })
+  setActiveProjectSessionContext(PROJECT_SESSION)
+
+  invoke = vi.fn(async (channel: string) => {
+    if (channel === 'db:timeline-get-all') return { settings, events: timelineEvents }
+    if (channel === 'db:map-get-all') return { nodes: [], edges: [], layers: [] }
+    // setLocale 会持久化语言偏好；这里只需成功，避免切换被回滚。
+    if (channel === 'config:set') return { success: true }
+    return { success: false, error: `unexpected channel ${channel}` }
+  })
+  Object.defineProperty(window, 'velaAPI', {
+    configurable: true,
+    value: { invoke, on: vi.fn(() => () => {}), once: vi.fn(), send: vi.fn() },
+  })
+
+  container = document.createElement('div')
+  // React Flow 需要可测量的视口尺寸。
+  container.style.width = '1200px'
+  container.style.height = '900px'
+  document.body.append(container)
+  root = createRoot(container)
+})
+
+afterEach(async () => {
+  await act(async () => root.unmount())
+  container.remove()
+  Reflect.deleteProperty(window, 'velaAPI')
+  setActiveProjectSessionContext(null)
+  useLocaleStore.setState(originalLocaleState)
+  useProjectStore.setState(originalProjectState)
+  useStoryTimelineStore.setState(originalTimelineState)
+  useWorldMapStore.setState(originalWorldMapState)
+  vi.restoreAllMocks()
+})
+
+describe('story timeline horizontal axis', () => {
+  it('lays events out from left to right by sortOrder on a continuous axis', async () => {
+    await renderTimeline()
+
+    const ordered = labelsInSortOrder()
+    const lefts = ordered.map(entry => entry.element.getBoundingClientRect().left)
+    for (let index = 1; index < lefts.length; index++) {
+      expect(lefts[index], `${ordered[index].eventId} must sit right of ${ordered[index - 1].eventId}`)
+        .toBeGreaterThan(lefts[index - 1])
+    }
+
+    const axis = container.querySelector('[data-testid="timeline-axis"]')
+    expect(axis).not.toBeNull()
+    const axisRect = axis!.getBoundingClientRect()
+    expect(axisRect.width).toBeGreaterThan(0)
+    // 每个事件都从主轴引出一条连接线。
+    expect(container.querySelectorAll('.writer-timeline-connector').length).toBe(timelineEvents.length)
+  })
+
+  it('alternates event labels above and below the axis and staggers dense same-side labels', async () => {
+    await renderTimeline()
+
+    const ordered = labelsInSortOrder()
+    expect(ordered.map(entry => entry.element.dataset.side))
+      .toEqual(['above', 'below', 'above', 'below', 'above'])
+
+    const axisRect = container.querySelector('[data-testid="timeline-axis"]')!.getBoundingClientRect()
+    const above = ordered.filter(entry => entry.element.dataset.side === 'above')
+    const below = ordered.filter(entry => entry.element.dataset.side === 'below')
+    for (const entry of above) expect(entry.element.getBoundingClientRect().top).toBeLessThan(axisRect.top)
+    for (const entry of below) expect(entry.element.getBoundingClientRect().top).toBeGreaterThan(axisRect.top)
+
+    // 本组刻度间隔足够，不产生错开层。
+    expect(ordered.map(entry => entry.element.dataset.staggerLevel)).toEqual(['0', '0', '0', '0', '0'])
+  })
+
+  it('shows only the custom time and title on the axis, with start and end for range events', async () => {
+    await renderTimeline()
+
+    const range = labelFor('e3')
+    expect(range.querySelector('.writer-timeline-label-time')?.textContent)
+      .toBe('大荒历 313 年 — 大荒历 315 年')
+    expect(range.querySelector('.writer-timeline-label-title')?.textContent).toBe('隧道封锁期')
+
+    // 状态/描述/章节/角色/地点一律不出现在时间轴标注上。
+    const axisText = labels().map(label => label.textContent ?? '').join(' | ')
+    expect(axisText).not.toContain('仅在详情面板可见的描述')
+    expect(axisText).not.toContain('已起草')
+    expect(axisText).not.toContain('第3章')
+    expect(axisText).not.toContain('沈砚')
+    expect(axisText).not.toContain('loc-1')
+    // 自定义时间与标题本身必须显示。
+    expect(axisText).toContain('大荒历 312 年')
+    expect(axisText).toContain('雾港调查')
+    expect(axisText).toContain('许渡归来')
+  })
+
+  it('opens the matching event in the right-hand detail editor when a label is clicked', async () => {
+    await renderTimeline()
+
+    await clickLabel('e2')
+
+    expect(container.querySelector('.writer-timeline-editor-title strong')?.textContent).toBe('雾港调查')
+    expect((formField('自定义时间') as HTMLInputElement).value).toBe('大荒历 312 年')
+    expect((formField('排序刻度') as HTMLInputElement).value).toBe('20')
+    expect((formField('事件描述') as HTMLTextAreaElement).value).toBe('仅在详情面板可见的描述')
+    expect((formField('关联章节') as HTMLInputElement).value).toBe('3, 4')
+    expect((formField('涉及角色') as HTMLInputElement).value).toBe('沈砚')
+
+    // 切换到另一个事件时，面板内容随之切换。
+    await clickLabel('e5')
+    expect(container.querySelector('.writer-timeline-editor-title strong')?.textContent).toBe('终局对峙')
+    expect((formField('自定义时间') as HTMLInputElement).value).toBe('大荒历 320 年')
+
+    // 选中态回写到对应标注上。
+    expect(labelFor('e5').className).toContain('is-selected')
+    expect(labelFor('e2').className).not.toContain('is-selected')
+  })
+
+  it('keeps events non-draggable while the axis itself can pan and zoom', async () => {
+    await renderTimeline()
+
+    // 位置永远由 sortOrder 计算，事件不可自由拖动。
+    for (const node of container.querySelectorAll('.react-flow__node')) {
+      expect(node.className).not.toContain('draggable')
+    }
+    // 画布本身保留平移与缩放表面。
+    expect(container.querySelector('.react-flow__viewport')).not.toBeNull()
+    expect(container.querySelector('.react-flow__controls')).not.toBeNull()
+
+    // 标注位置没有被写回事件事实。
+    for (const event of useStoryTimelineStore.getState().events) {
+      expect(Object.keys(event)).not.toContain('position')
+      expect(Object.keys(event)).not.toContain('side')
+    }
+  })
+
+  it('reorders the axis purely from sortOrder when the author moves an event', async () => {
+    await renderTimeline()
+
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'db:timeline-get-all') return { settings, events: timelineEvents }
+      if (channel === 'db:map-get-all') return { nodes: [], edges: [], layers: [] }
+      if (channel === 'db:timeline-events-reorder') return { success: true }
+      return { success: false, error: `unexpected channel ${channel}` }
+    })
+
+    await clickLabel('e1')
+    const beforeOrder = useStoryTimelineStore.getState().events.map(event => event.id)
+
+    const moveLater = Array.from(container.querySelectorAll('.writer-timeline-reorder button'))
+      .find(button => (button.getAttribute('aria-label') ?? '').includes('向后移动'))
+    await act(async () => {
+      moveLater?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    const afterOrder = useStoryTimelineStore.getState().events.map(event => event.id)
+    expect(afterOrder).not.toEqual(beforeOrder)
+    // 排序只改 sortOrder，事件数量与身份不变。
+    expect([...afterOrder].sort()).toEqual([...beforeOrder].sort())
+    for (const event of useStoryTimelineStore.getState().events) {
+      expect(typeof event.sortOrder).toBe('number')
+    }
+    expect(invoke).toHaveBeenCalledWith(
+      'db:timeline-events-reorder',
+      expect.any(Array),
+      PROJECT_PATH,
+      expect.objectContaining({ projectId: PROJECT_SESSION.projectId }),
+    )
+  })
+
+  it('keeps the existing loading and empty-timeline states', async () => {
+    useStoryTimelineStore.setState({ events: [], dataProjectKey: null, loading: true })
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'db:timeline-get-all') return new Promise(() => {})
+      if (channel === 'db:map-get-all') return { nodes: [], edges: [], layers: [] }
+      return { success: false, error: `unexpected channel ${channel}` }
+    })
+
+    await act(async () => {
+      root.render(<StoryTimelineView projectKey={PROJECT_PATH} />)
+    })
+    expect(container.textContent).toContain('正在读取项目时间线')
+
+    useStoryTimelineStore.setState({ events: [], dataProjectKey: PROJECT_PATH, loading: false })
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain('从第一个故事事件开始'))
+    })
+    expect(labels().length).toBe(0)
+    // 刻度设置入口始终可用。
+    expect(container.textContent).toContain('刻度设置')
+  })
+
+  it('renders the ruler settings section in both locales', async () => {
+    await act(async () => {
+      root.render(<StoryTimelineView projectKey={PROJECT_PATH} />)
+    })
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain('刻度设置'))
+    })
+
+    const settingsButton = Array.from(container.querySelectorAll('button'))
+      .find(button => (button.textContent ?? '').includes('刻度设置'))
+    await act(async () => {
+      settingsButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(container.textContent).toContain('时间线名称')
+    expect(container.textContent).toContain('刻度单位')
+    expect(container.textContent).toContain('保存刻度')
+
+    await act(async () => {
+      // 真实的语言切换会刷新 locale readers，从而触发已挂载组件重渲染。
+      await useLocaleStore.getState().setLocale('en-US')
+    })
+    expect(container.textContent).toContain('Timeline name')
+    expect(container.textContent).toContain('Ruler unit')
+    expect(container.textContent).toContain('Save ruler')
+    expect(container.textContent).toContain('Event title')
+    expect(container.textContent).not.toContain('时间线名称')
+    expect(container.textContent).not.toContain('事件标题')
+  })
+})

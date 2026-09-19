@@ -11,6 +11,7 @@ import type {
   AppFailure,
   ProjectSessionContext,
 } from '../shared/ipc-channels'
+import { projectDocumentKnowledgeName } from '../shared/project-documents'
 
 export interface PlanningMaterial {
   fileName: string
@@ -157,4 +158,53 @@ export async function importPlanningMaterial(
     material.fileName,
     projectSession.projectPath,
   )
+}
+
+/**
+ * 作者显式把一份项目自由文档加入知识检索。
+ *
+ * 这是唯一入口：项目文档不会被自动索引，批准资料来源的规则也不因它放宽。
+ * 索引名称使用文档在受控目录内的相对路径，因此不同目录下的同名文档
+ * 是两份互不覆盖的索引条目。
+ */
+export async function addProjectDocumentToKnowledge(
+  projectSession: ProjectSessionContext,
+  documentPath: string,
+  text: string,
+): Promise<{ success: boolean; docId?: string; chunkCount?: number; error?: string }> {
+  const knowledgeName = projectDocumentKnowledgeName(documentPath)
+  if (!knowledgeName) return { success: false, error: 'invalid-document-path' }
+  return ipc.invokeWithProjectSession(
+    projectSession,
+    'kb:import-text',
+    text,
+    knowledgeName,
+    projectSession.projectPath,
+  )
+}
+
+/**
+ * 按文档路径建立的知识检索状态。
+ *
+ * 键为受控目录内的项目相对路径（`卷一/设定.md`），因此同名文档各自独立；
+ * 只有形状合法的文档路径才会进入索引状态，避免把其它语料误判成项目文档。
+ */
+export async function loadProjectKnowledgeIndex(
+  projectSession: ProjectSessionContext,
+): Promise<Record<string, { docId: string; fileName: string }>> {
+  const documents = await listDocuments(projectSession.projectPath)
+  const index: Record<string, { docId: string; fileName: string }> = {}
+  for (const document of documents) {
+    const documentPath = projectDocumentKnowledgeName(document.fileName)
+    if (!documentPath) continue
+    index[documentPath] = { docId: document.id, fileName: document.fileName }
+  }
+  return index
+}
+
+export async function removeProjectDocumentFromKnowledge(
+  projectSession: ProjectSessionContext,
+  docId: string,
+): Promise<{ success: boolean; error?: string }> {
+  return removeKnowledgeDocument(docId, projectSession.projectPath)
 }

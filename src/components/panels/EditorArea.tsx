@@ -12,6 +12,7 @@ import CharacterEditor from '../editor/CharacterEditor'
 import ChapterCardEditor from '../editor/ChapterCardEditor'
 import WorldBuildingEditor from '../editor/WorldBuildingEditor'
 import ArchFileViewer from '../editor/ArchFileViewer'
+import ProjectDocumentEditor from '../editor/ProjectDocumentEditor'
 import DraftEditor from '../editor/DraftEditor'
 import VersionHistory from '../editor/VersionHistory'
 import ReviewReport from '../editor/ReviewReport'
@@ -25,6 +26,10 @@ import StoryTimelineView from '../timeline/StoryTimelineView'
 import ProjectOverviewPage from '../pages/ProjectOverviewPage'
 import { useProjectStore } from '../../stores/project-store'
 import { registerEditorExitSaveHandler, useEditorStore, type EditorTab } from '../../stores/editor-store'
+import {
+  hasEditorExitSaveHandler,
+  saveEditorTabBeforeClose,
+} from '../../stores/editor-store'
 import { discardAndCloseEditorTab } from '../../stores/editor-discard'
 import { useLayoutStore } from '../../stores/layout-store'
 import { useLocaleStore } from '../../stores/locale-store'
@@ -507,6 +512,7 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
     if (type === 'overview') return <LayoutDashboard size={14} />
     if (type === 'version-history') return <History size={14} />
     if (type === 'review-report') return <ClipboardCheck size={14} />
+    if (type === 'project-document') return <FileText size={14} />
     return <FileText size={14} />
   }
 
@@ -739,6 +745,18 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
         {activeTab?.type === 'overview' && (
           <ProjectOverviewPage key={activeTab.id} />
         )}
+        {activeTab?.type === 'project-document'
+          && activeTab.projectKey === currentProject.path
+          && activeTab.filePath && (
+          <ProjectDocumentEditor
+            key={activeTab.id}
+            tabId={activeTab.id}
+            documentPath={activeTab.filePath}
+            projectKey={activeTab.projectKey}
+            content={activeTab.content ?? ''}
+            savedContent={activeTab.savedContent ?? activeTab.content ?? ''}
+          />
+        )}
         {/* AI 建议预览 — 只读对比，统一使用弹出式 Dialog（与 DraftEditor 一致） */}
         <Dialog
           open={
@@ -812,16 +830,16 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
         />
       )}
 
-      {/* 关闭未保存 Tab 确认弹窗 */}
+      {/* 关闭未保存 Tab 确认弹窗 — 保存 / 放弃 / 取消 */}
       <Dialog
         open={closeConfirm !== null}
         onOpenChange={v => !v && setCloseConfirm(null)}
       >
-        <DialogContent className="max-w-[380px]">
+        <DialogContent className="max-w-[420px]">
           <DialogHeader>
             <DialogTitle>{text('关闭未保存的文件', 'Close unsaved file')}</DialogTitle>
             <DialogDescription>
-              {text(`「${tabs.find(t => t.id === closeConfirm)?.name ?? '该文件'}」有未保存的修改。是否放弃修改并关闭？`, `“${tabs.find(t => t.id === closeConfirm)?.name ?? 'This file'}” has unsaved changes. Discard them and close?`)}
+              {text(`「${tabs.find(t => t.id === closeConfirm)?.name ?? '该文件'}」有未保存的修改。保存后关闭、放弃修改，还是取消？`, `“${tabs.find(t => t.id === closeConfirm)?.name ?? 'This file'}” has unsaved changes. Save and close, discard them, or cancel?`)}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2">
@@ -840,6 +858,32 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
             >
               {text('放弃修改', 'Discard changes')}
             </Button>
+            {(() => {
+              const tab = tabs.find(t => t.id === closeConfirm)
+              if (!tab || !hasEditorExitSaveHandler(tab)) return null
+              return (
+                <Button
+                  variant="default"
+                  onClick={() => {
+                    const tabId = closeConfirm
+                    if (!tabId) return
+                    setCloseConfirm(null)
+                    void (async () => {
+                      try {
+                        await saveEditorTabBeforeClose(tabId)
+                        useEditorStore.getState().closeTab(tabId)
+                      } catch (error) {
+                        toast.error(error instanceof Error
+                          ? error.message
+                          : text('保存失败，文件保持打开', 'Save failed; the file stays open'))
+                      }
+                    })()
+                  }}
+                >
+                  {text('保存并关闭', 'Save and close')}
+                </Button>
+              )
+            })()}
           </DialogFooter>
         </DialogContent>
       </Dialog>

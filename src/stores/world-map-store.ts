@@ -6,58 +6,75 @@ import {
   isProjectSessionCurrent,
 } from '../components/project-session-gate'
 import { useProjectStore } from './project-store'
-import type {
-  WorldMapNode,
-  WorldMapEdge,
-  WorldMapCandidate,
-  WorldMapLayer,
+import {
+  createWorldMapId,
+  type WorldMap,
+  type WorldMapCandidate,
+  type WorldMapEdge,
+  type WorldMapMigrationReport,
+  type WorldMapNode,
 } from '../shared/world-map'
 
+export type WorldMapDeleteStrategy = 'promote-children' | 'cascade'
+
 interface WorldMapState {
+  maps: WorldMap[]
   nodes: WorldMapNode[]
   edges: WorldMapEdge[]
-  layers: WorldMapLayer[]
   candidates: WorldMapCandidate[]
+  migration: WorldMapMigrationReport | null
+  /** 当前正在查看的地图；所有地点与连接都以它为准。 */
+  selectedMapId: string | null
   selectedNodeId: string | null
   selectedEdgeId: string | null
-  activeLayer: string
   viewMode: 'canvas' | 'list'
   loading: boolean
   candidatesLoading: boolean
 
+  setSelectedMapId: (id: string | null) => void
   setSelectedNodeId: (id: string | null) => void
   setSelectedEdgeId: (id: string | null) => void
-  setActiveLayer: (layer: string) => void
   setViewMode: (mode: 'canvas' | 'list') => void
 
   loadAll: (projectPath: string) => Promise<void>
   loadCandidates: (projectPath: string) => Promise<void>
+  upsertMap: (map: WorldMap, projectPath: string) => Promise<boolean>
+  deleteMap: (mapId: string, strategy: WorldMapDeleteStrategy, projectPath: string) => Promise<boolean>
+  reorderMaps: (orderedIds: string[], projectPath: string) => Promise<boolean>
+  acknowledgeMigration: (projectPath: string) => Promise<void>
   upsertNode: (node: WorldMapNode, projectPath: string) => Promise<boolean>
   deleteNode: (id: string, projectPath: string) => Promise<boolean>
   upsertEdge: (edge: WorldMapEdge, projectPath: string) => Promise<boolean>
   deleteEdge: (id: string, projectPath: string) => Promise<boolean>
-  upsertLayer: (layer: WorldMapLayer, projectPath: string) => Promise<boolean>
-  deleteLayer: (id: string, fallbackLayerId: string, projectPath: string) => Promise<boolean>
-  reorderLayers: (orderedIds: string[], projectPath: string) => Promise<boolean>
-  confirmCandidate: (candidate: WorldMapCandidate, projectPath: string) => Promise<boolean>
+  confirmCandidate: (candidate: WorldMapCandidate, mapId: string, projectPath: string) => Promise<boolean>
   dismissCandidate: (candidateId: string) => void
 }
 
+function nextSortOrder(maps: WorldMap[], parentMapId: string | null): number {
+  const siblings = maps.filter(map => map.parentMapId === parentMapId)
+  return siblings.reduce((max, map) => Math.max(max, map.sortOrder), 0) + 1
+}
+
 export const useWorldMapStore = create<WorldMapState>((set, get) => ({
+  maps: [],
   nodes: [],
   edges: [],
-  layers: [],
   candidates: [],
+  migration: null,
+  selectedMapId: null,
   selectedNodeId: null,
   selectedEdgeId: null,
-  activeLayer: 'all',
   viewMode: 'canvas',
   loading: false,
   candidatesLoading: false,
 
+  setSelectedMapId: (id) => {
+    if (get().selectedMapId === id) return
+    // 切换地图时必须清空选择：旧选择属于另一张地图，绝不能被沿用。
+    set({ selectedMapId: id, selectedNodeId: null, selectedEdgeId: null })
+  },
   setSelectedNodeId: (id) => set({ selectedNodeId: id, selectedEdgeId: null }),
   setSelectedEdgeId: (id) => set({ selectedEdgeId: id, selectedNodeId: null }),
-  setActiveLayer: (layer) => set({ activeLayer: layer }),
   setViewMode: (mode) => set({ viewMode: mode }),
 
   loadAll: async (projectPath: string) => {
@@ -67,19 +84,23 @@ export const useWorldMapStore = create<WorldMapState>((set, get) => ({
 
     set({ loading: true })
     try {
-      const data = await ipc.invokeWithProjectSession(
-        projectSession,
-        'db:map-get-all',
-        projectPath,
-      )
+      const data = await ipc.invokeWithProjectSession(projectSession, 'db:map-get-all', projectPath)
       if (!isProjectSessionCurrent(projectSession)) return
-      const layers = data?.layers ?? []
-      const activeLayer = get().activeLayer
+      const maps = data?.maps ?? []
+      const currentMapId = get().selectedMapId
+      const selectedMapId = currentMapId && maps.some(map => map.id === currentMapId)
+        ? currentMapId
+        : maps[0]?.id ?? null
+      const nodes = data?.nodes ?? []
+      const edges = data?.edges ?? []
       set({
-        nodes: data?.nodes ?? [],
-        edges: data?.edges ?? [],
-        layers,
-        activeLayer: activeLayer === 'all' || layers.some(layer => layer.id === activeLayer) ? activeLayer : 'all',
+        maps,
+        nodes,
+        edges,
+        migration: data?.migration ?? null,
+        selectedMapId,
+        selectedNodeId: nodes.some(node => node.id === get().selectedNodeId) ? get().selectedNodeId : null,
+        selectedEdgeId: edges.some(edge => edge.id === get().selectedEdgeId) ? get().selectedEdgeId : null,
         loading: false,
       })
     } catch (e) {
@@ -95,11 +116,7 @@ export const useWorldMapStore = create<WorldMapState>((set, get) => ({
 
     set({ candidatesLoading: true })
     try {
-      const cands = await ipc.invokeWithProjectSession(
-        projectSession,
-        'db:map-candidates-get',
-        projectPath,
-      )
+      const cands = await ipc.invokeWithProjectSession(projectSession, 'db:map-candidates-get', projectPath)
       if (!isProjectSessionCurrent(projectSession)) return
       set({ candidates: cands ?? [], candidatesLoading: false })
     } catch (e) {
@@ -108,24 +125,80 @@ export const useWorldMapStore = create<WorldMapState>((set, get) => ({
     }
   },
 
-  upsertNode: async (node: WorldMapNode, projectPath: string) => {
-    const currentProject = useProjectStore.getState().currentProject
-    const projectSession = captureProjectSession(currentProject)
+  upsertMap: async (map: WorldMap, projectPath: string) => {
+    const projectSession = captureProjectSession(useProjectStore.getState().currentProject)
     if (!projectSession || projectSession.projectPath !== projectPath) return false
-
     try {
-      const res = await ipc.invokeWithProjectSession(
-        projectSession,
-        'db:map-node-upsert',
-        node,
-        projectPath,
-      )
+      const res = await ipc.invokeWithProjectSession(projectSession, 'db:map-upsert', map, projectPath)
       if (!res?.success) {
-        toast.error(res?.error || '保存地图节点失败')
+        toast.error(res?.error || '保存地图失败')
         return false
       }
       await get().loadAll(projectPath)
-      set({ selectedNodeId: node.id })
+      set({ selectedMapId: map.id })
+      return true
+    } catch (e) {
+      toast.error(String(e))
+      return false
+    }
+  },
+
+  deleteMap: async (mapId: string, strategy: WorldMapDeleteStrategy, projectPath: string) => {
+    const projectSession = captureProjectSession(useProjectStore.getState().currentProject)
+    if (!projectSession || projectSession.projectPath !== projectPath) return false
+    try {
+      const res = await ipc.invokeWithProjectSession(projectSession, 'db:map-delete', mapId, strategy, projectPath)
+      if (!res?.success) {
+        toast.error(res?.error || '删除地图失败')
+        return false
+      }
+      if (get().selectedMapId === mapId) set({ selectedMapId: null, selectedNodeId: null, selectedEdgeId: null })
+      await get().loadAll(projectPath)
+      return true
+    } catch (e) {
+      toast.error(String(e))
+      return false
+    }
+  },
+
+  reorderMaps: async (orderedIds: string[], projectPath: string) => {
+    const projectSession = captureProjectSession(useProjectStore.getState().currentProject)
+    if (!projectSession || projectSession.projectPath !== projectPath) return false
+    try {
+      const res = await ipc.invokeWithProjectSession(projectSession, 'db:map-reorder', orderedIds, projectPath)
+      if (!res?.success) throw new Error(res?.error || '调整地图顺序失败')
+      await get().loadAll(projectPath)
+      return true
+    } catch (e) {
+      toast.error(String(e))
+      return false
+    }
+  },
+
+  acknowledgeMigration: async (projectPath: string) => {
+    const projectSession = captureProjectSession(useProjectStore.getState().currentProject)
+    if (!projectSession || projectSession.projectPath !== projectPath) return
+    try {
+      await ipc.invokeWithProjectSession(projectSession, 'db:map-migration-ack', projectPath)
+      if (!isProjectSessionCurrent(projectSession)) return
+      const migration = get().migration
+      if (migration) set({ migration: { ...migration, acknowledged: true } })
+    } catch (e) {
+      console.error('[WorldMapStore] acknowledgeMigration error:', e)
+    }
+  },
+
+  upsertNode: async (node: WorldMapNode, projectPath: string) => {
+    const projectSession = captureProjectSession(useProjectStore.getState().currentProject)
+    if (!projectSession || projectSession.projectPath !== projectPath) return false
+    try {
+      const res = await ipc.invokeWithProjectSession(projectSession, 'db:map-node-upsert', node, projectPath)
+      if (!res?.success) {
+        toast.error(res?.error || '保存地点失败')
+        return false
+      }
+      await get().loadAll(projectPath)
+      set({ selectedMapId: node.mapId, selectedNodeId: node.id })
       return true
     } catch (e) {
       toast.error(String(e))
@@ -134,19 +207,12 @@ export const useWorldMapStore = create<WorldMapState>((set, get) => ({
   },
 
   deleteNode: async (id: string, projectPath: string) => {
-    const currentProject = useProjectStore.getState().currentProject
-    const projectSession = captureProjectSession(currentProject)
+    const projectSession = captureProjectSession(useProjectStore.getState().currentProject)
     if (!projectSession || projectSession.projectPath !== projectPath) return false
-
     try {
-      const res = await ipc.invokeWithProjectSession(
-        projectSession,
-        'db:map-node-delete',
-        id,
-        projectPath,
-      )
+      const res = await ipc.invokeWithProjectSession(projectSession, 'db:map-node-delete', id, projectPath)
       if (!res?.success) {
-        toast.error(res?.error || '删除节点失败')
+        toast.error(res?.error || '删除地点失败')
         return false
       }
       if (get().selectedNodeId === id) set({ selectedNodeId: null })
@@ -159,19 +225,13 @@ export const useWorldMapStore = create<WorldMapState>((set, get) => ({
   },
 
   upsertEdge: async (edge: WorldMapEdge, projectPath: string) => {
-    const currentProject = useProjectStore.getState().currentProject
-    const projectSession = captureProjectSession(currentProject)
+    const projectSession = captureProjectSession(useProjectStore.getState().currentProject)
     if (!projectSession || projectSession.projectPath !== projectPath) return false
-
     try {
-      const res = await ipc.invokeWithProjectSession(
-        projectSession,
-        'db:map-edge-upsert',
-        edge,
-        projectPath,
-      )
+      const res = await ipc.invokeWithProjectSession(projectSession, 'db:map-edge-upsert', edge, projectPath)
       if (!res?.success) {
-        toast.error(res?.error || '保存连线失败')
+        // 跨地图连接由仓库层拒绝，错误信息必须原样透出，不做降级改写。
+        toast.error(res?.error || '保存连接失败')
         return false
       }
       await get().loadAll(projectPath)
@@ -184,19 +244,12 @@ export const useWorldMapStore = create<WorldMapState>((set, get) => ({
   },
 
   deleteEdge: async (id: string, projectPath: string) => {
-    const currentProject = useProjectStore.getState().currentProject
-    const projectSession = captureProjectSession(currentProject)
+    const projectSession = captureProjectSession(useProjectStore.getState().currentProject)
     if (!projectSession || projectSession.projectPath !== projectPath) return false
-
     try {
-      const res = await ipc.invokeWithProjectSession(
-        projectSession,
-        'db:map-edge-delete',
-        id,
-        projectPath,
-      )
+      const res = await ipc.invokeWithProjectSession(projectSession, 'db:map-edge-delete', id, projectPath)
       if (!res?.success) {
-        toast.error(res?.error || '删除连线失败')
+        toast.error(res?.error || '删除连接失败')
         return false
       }
       if (get().selectedEdgeId === id) set({ selectedEdgeId: null })
@@ -208,61 +261,16 @@ export const useWorldMapStore = create<WorldMapState>((set, get) => ({
     }
   },
 
-  upsertLayer: async (layer: WorldMapLayer, projectPath: string) => {
-    const projectSession = captureProjectSession(useProjectStore.getState().currentProject)
-    if (!projectSession || projectSession.projectPath !== projectPath) return false
-    try {
-      const res = await ipc.invokeWithProjectSession(projectSession, 'db:map-layer-upsert', layer, projectPath)
-      if (!res?.success) throw new Error(res?.error || '保存图层失败')
-      await get().loadAll(projectPath)
-      return true
-    } catch (e) {
-      toast.error(String(e))
-      return false
-    }
-  },
-
-  deleteLayer: async (id: string, fallbackLayerId: string, projectPath: string) => {
-    const projectSession = captureProjectSession(useProjectStore.getState().currentProject)
-    if (!projectSession || projectSession.projectPath !== projectPath) return false
-    try {
-      const res = await ipc.invokeWithProjectSession(projectSession, 'db:map-layer-delete', id, fallbackLayerId, projectPath)
-      if (!res?.success) throw new Error(res?.error || '删除图层失败')
-      await get().loadAll(projectPath)
-      return true
-    } catch (e) {
-      toast.error(String(e))
-      return false
-    }
-  },
-
-  reorderLayers: async (orderedIds: string[], projectPath: string) => {
-    const projectSession = captureProjectSession(useProjectStore.getState().currentProject)
-    if (!projectSession || projectSession.projectPath !== projectPath) return false
-    try {
-      const res = await ipc.invokeWithProjectSession(projectSession, 'db:map-layers-reorder', orderedIds, projectPath)
-      if (!res?.success) throw new Error(res?.error || '调整图层顺序失败')
-      await get().loadAll(projectPath)
-      return true
-    } catch (e) {
-      toast.error(String(e))
-      return false
-    }
-  },
-
-  confirmCandidate: async (candidate: WorldMapCandidate, projectPath: string) => {
-    // Determine random offset near center so new node doesn't overlap perfectly
-    const existing = get().nodes
-    const offset = existing.length * 30
+  confirmCandidate: async (candidate: WorldMapCandidate, mapId: string, projectPath: string) => {
+    const mapNodes = get().nodes.filter(node => node.mapId === mapId)
+    const offset = mapNodes.length * 30
     const newNode: WorldMapNode = {
       id: `node-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       name: candidate.name,
       type: candidate.type,
       description: candidate.description,
       parentId: null,
-      mapLayer: get().layers.find(layer => layer.id === candidate.suggestedLayer)?.id
-        || get().layers[0]?.id
-        || 'surface',
+      mapId,
       x: 200 + (offset % 300),
       y: 150 + (Math.floor(offset / 300) * 80),
       sourceRefs: [candidate.sourceRef],
@@ -271,7 +279,7 @@ export const useWorldMapStore = create<WorldMapState>((set, get) => ({
     const ok = await get().upsertNode(newNode, projectPath)
     if (ok) {
       get().dismissCandidate(candidate.id)
-      toast.success(`已添加地图节点「${candidate.name}」`)
+      toast.success(`已添加地点「${candidate.name}」`)
       return true
     }
     return false
@@ -283,3 +291,18 @@ export const useWorldMapStore = create<WorldMapState>((set, get) => ({
     }))
   },
 }))
+
+/** 新建地图时统一生成 id，保证它落在受控目录的安全格式内。 */
+export function createMapDraft(
+  maps: WorldMap[],
+  name: string,
+  parentMapId: string | null,
+): WorldMap {
+  return {
+    id: createWorldMapId(),
+    name,
+    parentMapId,
+    sortOrder: nextSortOrder(maps, parentMapId),
+    image: null,
+  }
+}

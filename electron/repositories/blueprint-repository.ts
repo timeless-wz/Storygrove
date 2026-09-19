@@ -13,6 +13,7 @@ import type { BlueprintNewCharacterCandidate } from '../../src/shared/blueprint-
 /** 蓝图行类型（DB 蛇形命名） */
 export interface BlueprintRow {
     chapter_number: number
+    volume_id?: string
     title: string
     role: string
     purpose: string
@@ -29,6 +30,8 @@ export interface BlueprintRow {
 /** 前端使用的驼峰接口 */
 export interface BlueprintData {
     chapterNumber: number
+    /** Omitted means the default first volume, preserving older callers. */
+    volumeId?: string
     title: string
     role: string
     purpose: string
@@ -46,6 +49,13 @@ export interface BlueprintData {
     userGuidance: string
     notes: string
     notesUpdatedAt: string
+}
+
+/** A project-local container used to organize chapter blueprints. */
+export interface BlueprintVolumeData {
+    id: string
+    name: string
+    sortOrder: number
 }
 
 export type BlueprintRangeCommitMode = 'full' | 'replace-range'
@@ -131,12 +141,46 @@ interface CharacterRosterOperationEvidenceRow {
 }
 
 const SHA256_HEX = /^[a-f0-9]{64}$/u
+export const DEFAULT_BLUEPRINT_VOLUME_ID = 'volume-1'
+
+function normalizedVolumeId(volumeId: string | undefined): string {
+    return volumeId?.trim() || DEFAULT_BLUEPRINT_VOLUME_ID
+}
+
+function ensureBlueprintVolumeSchema(db: NonNullable<ReturnType<typeof getProjectDb>>): void {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS blueprint_volumes (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        sort_order REAL NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_blueprint_volumes_order
+        ON blueprint_volumes(sort_order, created_at);
+    `)
+    const columns = new Set(
+        (db.prepare('PRAGMA table_info(blueprints)').all() as Array<{ name: string }>).map(column => column.name),
+    )
+    if (!columns.has('volume_id')) {
+        db.exec(`ALTER TABLE blueprints ADD COLUMN volume_id TEXT NOT NULL DEFAULT '${DEFAULT_BLUEPRINT_VOLUME_ID}'`)
+    }
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_blueprints_volume_chapter
+        ON blueprints(volume_id, chapter_number);
+      INSERT OR IGNORE INTO blueprint_volumes (id, name, sort_order)
+        VALUES ('${DEFAULT_BLUEPRINT_VOLUME_ID}', '第1卷', 1);
+      UPDATE blueprints SET volume_id = '${DEFAULT_BLUEPRINT_VOLUME_ID}'
+        WHERE volume_id IS NULL OR TRIM(volume_id) = '';
+    `)
+}
 
 function rowToData(row: BlueprintRow): BlueprintData {
     let chars: string[] = []
     try { chars = JSON.parse(row.characters) } catch { /* 容错 */ }
     return {
         chapterNumber: row.chapter_number,
+        ...(row.volume_id && row.volume_id !== DEFAULT_BLUEPRINT_VOLUME_ID ? { volumeId: row.volume_id } : {}),
         title: row.title,
         role: row.role,
         purpose: row.purpose,
@@ -455,6 +499,9 @@ function snapshotWithCharacterSyncFacts(
 
 function samePersistedBlueprint(left: BlueprintData, right: BlueprintData): boolean {
     return left.chapterNumber === right.chapterNumber
+        // AI generation predates volume organization and deliberately omits volumeId.
+        // In that case a range refresh must preserve the chapter's existing volume.
+        && (right.volumeId === undefined || normalizedVolumeId(left.volumeId) === normalizedVolumeId(right.volumeId))
         && left.title === right.title
         && left.role === right.role
         && left.purpose === right.purpose
@@ -467,9 +514,44 @@ function samePersistedBlueprint(left: BlueprintData, right: BlueprintData): bool
 }
 
 export class BlueprintRepository {
+    /** 取得当前项目的卷目录；首次打开旧项目时自动建立第 1 卷。 */
+    static getVolumes(): BlueprintVolumeData[] {
+        const db = requireProjectDb()
+        ensureBlueprintVolumeSchema(db)
+        return (db.prepare(`
+          SELECT id, name, sort_order
+          FROM blueprint_volumes
+          ORDER BY sort_order ASC, created_at ASC
+        `).all() as Array<{ id: string; name: string; sort_order: number }>).map(row => ({
+            id: row.id,
+            name: row.name,
+            sortOrder: row.sort_order,
+        }))
+    }
+
+    /** 新增或重命名项目卷。 */
+    static upsertVolume(volume: BlueprintVolumeData): void {
+        const db = requireProjectDb()
+        ensureBlueprintVolumeSchema(db)
+        const id = volume.id.trim()
+        const name = volume.name.trim()
+        if (!id) throw new Error('卷缺少标识')
+        if (!name) throw new Error('卷名称不能为空')
+        if (!Number.isFinite(volume.sortOrder)) throw new Error('卷排序无效')
+        db.prepare(`
+          INSERT INTO blueprint_volumes (id, name, sort_order, updated_at)
+          VALUES (?, ?, ?, datetime('now'))
+          ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name,
+            sort_order = excluded.sort_order,
+            updated_at = datetime('now')
+        `).run(id, name, volume.sortOrder)
+    }
+
     /** 获取所有蓝图（按章节号排序） */
     static getAll(): BlueprintData[] {
         const db = requireProjectDb()
+        ensureBlueprintVolumeSchema(db)
 
         const rows = db.prepare(
             'SELECT * FROM blueprints ORDER BY chapter_number ASC'
@@ -481,6 +563,7 @@ export class BlueprintRepository {
     /** 获取单个蓝图 */
     static getByChapter(chapterNumber: number): BlueprintData | null {
         const db = requireProjectDb()
+        ensureBlueprintVolumeSchema(db)
 
         const row = db.prepare(
             'SELECT * FROM blueprints WHERE chapter_number = ?'
@@ -492,6 +575,7 @@ export class BlueprintRepository {
     /** 获取蓝图总数 */
     static count(): number {
         const db = requireProjectDb()
+        ensureBlueprintVolumeSchema(db)
 
         const row = db.prepare(
             'SELECT COUNT(*) as cnt FROM blueprints'
@@ -503,13 +587,23 @@ export class BlueprintRepository {
     /** 插入或更新蓝图 */
     static upsert(data: BlueprintData): void {
         const db = requireProjectDb()
+        ensureBlueprintVolumeSchema(db)
+        const existing = db.prepare('SELECT volume_id FROM blueprints WHERE chapter_number = ?')
+            .get(data.chapterNumber) as { volume_id?: string } | undefined
+        const volumeId = data.volumeId === undefined
+            ? normalizedVolumeId(existing?.volume_id)
+            : normalizedVolumeId(data.volumeId)
+        if (!db.prepare('SELECT 1 FROM blueprint_volumes WHERE id = ?').get(volumeId)) {
+            throw new Error('指定的卷不存在')
+        }
 
         db.prepare(`
       INSERT INTO blueprints (
-        chapter_number, title, role, purpose, key_events, characters,
+        chapter_number, volume_id, title, role, purpose, key_events, characters,
         suspense_hook, user_guidance, notes, notes_updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(chapter_number) DO UPDATE SET
+        volume_id = excluded.volume_id,
         title = excluded.title,
         role = excluded.role,
         purpose = excluded.purpose,
@@ -522,6 +616,7 @@ export class BlueprintRepository {
         updated_at = datetime('now')
     `).run(
             data.chapterNumber,
+            volumeId,
             data.title,
             data.role,
             data.purpose,

@@ -15,7 +15,9 @@ import {
 interface Props {
   open: boolean
   edge: WorldMapEdge | null
+  /** 只包含当前地图内部的地点。两端都在同一张地图内，跨地图连接不可能建立。 */
   nodes: WorldMapNode[]
+  mapName: string
   defaultFromNodeId?: string | null
   onClose: () => void
   onSave: (edge: WorldMapEdge) => Promise<boolean>
@@ -25,6 +27,7 @@ export default function WorldMapEdgeDialog({
   open,
   edge,
   nodes,
+  mapName,
   defaultFromNodeId,
   onClose,
   onSave,
@@ -86,15 +89,21 @@ export default function WorldMapEdgeDialog({
         <DialogHeader>
           <DialogTitle>
             {isEditing
-              ? text('编辑地图连线/航路', 'Edit Map Edge / Route')
-              : text('新建地图连线/航路', 'New Map Edge / Route')}
+              ? text('编辑地点连接/航路', 'Edit location connection')
+              : text('新建地点连接/航路', 'New location connection')}
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-3 py-2 text-xs">
+          <p className="text-[var(--color-text-muted)]">
+            {text(
+              `两端地点都必须在「${mapName}」内部。连接只在这张地图上显示，不会跨地图。`,
+              `Both endpoints must belong to “${mapName}”. The connection is only shown on this map and never crosses maps.`,
+            )}
+          </p>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <Label>{text('起点节点 *', 'From Node *')}</Label>
+              <Label>{text('起点地点 *', 'From location *')}</Label>
               <NativeSelect
                 value={fromNodeId}
                 onChange={e => setFromNodeId(e.target.value)}
@@ -108,7 +117,7 @@ export default function WorldMapEdgeDialog({
             </div>
 
             <div>
-              <Label>{text('终点节点 *', 'To Node *')}</Label>
+              <Label>{text('终点地点 *', 'To location *')}</Label>
               <NativeSelect
                 value={toNodeId}
                 onChange={e => setToNodeId(e.target.value)}
@@ -124,7 +133,7 @@ export default function WorldMapEdgeDialog({
 
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <Label>{text('连线关系类型', 'Relationship Type')}</Label>
+              <Label>{text('连接关系类型', 'Relationship type')}</Label>
               <NativeSelect
                 value={type}
                 onChange={e => setType(e.target.value as WorldMapEdgeType)}
@@ -138,7 +147,7 @@ export default function WorldMapEdgeDialog({
             </div>
 
             <div>
-              <Label>{text('连线状态', 'Status')}</Label>
+              <Label>{text('连接状态', 'Status')}</Label>
               <NativeSelect
                 value={status}
                 onChange={e => setStatus(e.target.value as 'active' | 'blocked' | 'hidden')}
@@ -168,7 +177,7 @@ export default function WorldMapEdgeDialog({
             onClick={handleSave}
             disabled={saving || !fromNodeId || !toNodeId || fromNodeId === toNodeId}
           >
-            {saving ? text('保存中...', 'Saving...') : text('保存连线', 'Save Edge')}
+            {saving ? text('保存中...', 'Saving...') : text('保存连接', 'Save connection')}
           </Button>
         </DialogFooter>
       </DialogContent>

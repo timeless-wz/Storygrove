@@ -5,6 +5,8 @@ node_modules
 dist
 dist-electron
 release
+# Vditor 的本地运行时资源必须随包发布；上面的 dist 规则会按目录名误伤它。
+!public/vditor/dist/
 
 # 日志
 logs
@@ -42,6 +44,12 @@ tailwind.config.js.bak
 .workbuddy/
 .release-gate*.txt
 /.vitest-attachments/
+
+# 浏览器测试失败截图：可重复生成的本地产物，不作为功能代码提交
+**/__tests__/__screenshots__/
+
+# 远程附件缓存：工具运行期产物，可能包含用户本地文件
+/.codex-remote-attachments/
 
 # 本地工具索引与会话
 .codegraph/

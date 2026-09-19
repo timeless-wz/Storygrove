@@ -1,0 +1,328 @@
+import { act } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
+import { page } from 'vitest/browser'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { setActiveProjectSessionContext } from '../../../shared/project-session-context'
+import { countDraftUnits } from '../../../shared/draft-units'
+import { useEditorStore } from '../../../stores/editor-store'
+import { useProjectStore } from '../../../stores/project-store'
+import { useWorkflowStore, type WorkflowDefinition } from '../../../stores/workflow-store'
+import { useLocaleStore } from '../../../stores/locale-store'
+import DraftEditor from '../DraftEditor'
+
+const mockConfirm = vi.fn<(message?: string, options?: unknown) => Promise<boolean>>(async () => true)
+vi.mock('../../ui/Confirm', () => ({
+  confirm: (message?: string, options?: unknown) => mockConfirm(message, options),
+}))
+
+;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+
+const PROJECT_PATH = 'C:\\novels\\vditor-integration'
+const PROJECT_SESSION = Object.freeze({
+  projectId: 'vditor-integration-project',
+  leaseId: 'vditor-integration-lease',
+  projectPath: PROJECT_PATH,
+})
+const TAB_ID = 'tab-vditor-integration'
+const FILE_PATH = 'vela://draft/10'
+const INITIAL_CONTENT = '# 第二章 风暴降临\n\n海风呼啸着卷过港口。'
+const READY_TIMEOUT = 20000
+
+let root: Root
+let container: HTMLDivElement
+let invoke: ReturnType<typeof vi.fn>
+let startWorkflow: ReturnType<typeof vi.fn>
+const originalLocaleState = useLocaleStore.getState()
+const originalEditorState = useEditorStore.getState()
+const originalProjectState = useProjectStore.getState()
+const originalWorkflowState = useWorkflowStore.getState()
+
+async function waitForVditorReady(): Promise<HTMLElement> {
+  await act(async () => {
+    await vi.waitFor(
+      () => expect(container.querySelector('[data-vditor-ready="true"]')).not.toBeNull(),
+      { timeout: READY_TIMEOUT },
+    )
+  })
+  const prose = container.querySelector('.vditor-ir pre.vditor-reset')
+  expect(prose).not.toBeNull()
+  return prose as HTMLElement
+}
+
+async function typeIntoProse(textToInsert: string): Promise<void> {
+  const prose = await waitForVditorReady()
+  await act(async () => {
+    prose.focus()
+    const range = document.createRange()
+    range.selectNodeContents(prose.lastElementChild ?? prose)
+    range.collapse(false)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    document.execCommand('insertText', false, textToInsert)
+  })
+}
+
+beforeEach(async () => {
+  useLocaleStore.setState({ locale: 'zh-CN', initialized: true })
+  mockConfirm.mockClear()
+  mockConfirm.mockResolvedValue(true)
+  container = document.createElement('div')
+  document.body.append(container)
+  root = createRoot(container)
+
+  invoke = vi.fn(async (channel: string) => {
+    if (channel === 'db:draft-get-meta') {
+      return {
+        id: 10,
+        chapterNumber: 2,
+        version: 1,
+        status: 'draft',
+        source: 'write',
+        contentId: 100,
+        wordCount: INITIAL_CONTENT.length,
+        createdAt: '2026-09-06T00:00:00.000Z',
+        updatedAt: '2026-09-06T00:00:00.000Z',
+      }
+    }
+    if (channel === 'db:blueprint-get-all') return [{ chapterNumber: 2, title: '风暴降临' }]
+    if (channel === 'db:draft-list') return [{ id: 10, version: 1 }]
+    if (channel === 'db:revision-get-pending' || channel === 'db:review-list') return []
+    if (channel === 'db:draft-update-content') return { success: true }
+    throw new Error(`Unexpected IPC channel: ${channel}`)
+  })
+  Object.defineProperty(window, 'velaAPI', {
+    configurable: true,
+    value: {
+      invoke,
+      on: vi.fn(() => () => {}),
+      once: vi.fn(),
+      send: vi.fn(),
+      setZoomLevel: vi.fn(),
+      setZoomFactor: vi.fn(),
+      getZoomLevel: vi.fn(() => 0),
+    },
+  })
+
+  useProjectStore.setState({
+    currentProject: {
+      id: PROJECT_SESSION.projectId,
+      name: 'Vditor integration novel',
+      path: PROJECT_PATH,
+      sessionLease: PROJECT_SESSION.leaseId,
+      novelConfig: {
+        writingLanguage: 'zh-CN',
+        genre: 'fantasy',
+        subGenre: '',
+        targetAudience: 'all',
+        totalChapters: 10,
+        wordsPerChapter: 3000,
+        plotStructure: 'three_act',
+        narrativePOV: 'third_limited',
+        coreOutline: '',
+        worldSetting: '',
+        goldenFinger: '',
+        protagonistProfile: '',
+        globalGuidance: '',
+      },
+      characterStates: '',
+      createdAt: '',
+      updatedAt: '',
+    },
+  })
+  setActiveProjectSessionContext(PROJECT_SESSION)
+  useEditorStore.setState({
+    tabs: [{
+      id: TAB_ID,
+      name: 'Chapter 2',
+      type: 'chapter',
+      filePath: FILE_PATH,
+      content: INITIAL_CONTENT,
+      savedContent: INITIAL_CONTENT,
+      dirty: false,
+      draftId: 10,
+      draftStatus: 'draft',
+      chapterNumber: 2,
+      projectKey: PROJECT_PATH,
+      projectSessionLease: PROJECT_SESSION.leaseId,
+      contentRevision: 0,
+    }],
+    activeTabId: TAB_ID,
+  })
+  startWorkflow = vi.fn(async () => 'mock-workflow-run')
+  useWorkflowStore.setState({
+    activeRuns: [],
+    startWorkflow: startWorkflow as never,
+  })
+})
+
+afterEach(async () => {
+  await act(async () => root.unmount())
+  container.remove()
+  useLocaleStore.setState(originalLocaleState)
+  useEditorStore.setState(originalEditorState)
+  useProjectStore.setState(originalProjectState)
+  useWorkflowStore.setState(originalWorkflowState)
+  setActiveProjectSessionContext(null)
+  Reflect.deleteProperty(window, 'velaAPI')
+})
+
+describe('DraftEditor Vditor integration', () => {
+  it('loads draft in Vditor, tracks dirty state on edit, clears dirty on save, and retains AI review without refine/merge', async () => {
+    await act(async () => root.render(
+      <DraftEditor
+        tabId={TAB_ID}
+        filePath={FILE_PATH}
+        content={INITIAL_CONTENT}
+        projectKey={PROJECT_PATH}
+      />,
+    ))
+
+    // 1. 草稿正文以 Vditor 打开，处于即时渲染（IR）模式
+    const prose = await waitForVditorReady()
+    expect(container.querySelector('[data-vditor-prose-editor="true"]')).not.toBeNull()
+    expect(prose.textContent).toContain('海风呼啸着卷过港口。')
+    expect(prose.getAttribute('contenteditable')).toBe('true')
+
+    // 5 & 6. AI 审稿入口存在；严格不存在“AI 修稿”、“待合并”、“自动合并”入口
+    await expect.element(page.getByRole('button', { name: 'AI 审稿' })).toBeVisible()
+    expect(container.textContent).not.toContain('AI 修稿')
+    expect(container.textContent).not.toContain('待合并')
+    expect(container.textContent).not.toContain('自动合并')
+
+    // 点击 AI 审稿应能打开审核确认弹窗
+    await act(async () => page.getByRole('button', { name: 'AI 审稿' }).click())
+    await expect.element(page.getByRole('button', { name: '开始一致性审核' })).toBeVisible()
+    // 取消弹窗
+    await act(async () => page.getByRole('button', { name: '取消' }).click())
+
+    // 2. 输入正文后草稿标签被标记为 dirty
+    expect(useEditorStore.getState().tabs[0].dirty).toBe(false)
+    const appendText = '\n\n浪涛拍打着防波堤。'
+    await typeIntoProse(appendText)
+
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(useEditorStore.getState().tabs[0].dirty).toBe(true)
+      })
+    })
+    const tabAfterTyping = useEditorStore.getState().tabs[0]
+    expect(tabAfterTyping.content).toContain('浪涛拍打着防波堤。')
+
+    // 3. 保存后 dirty 被清除，并且通过 IPC 写入数据库
+    const saveButton = page.getByRole('button', { name: '保存' })
+    await expect.element(saveButton).toBeVisible()
+    await act(async () => saveButton.click())
+
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(useEditorStore.getState().tabs[0].dirty).toBe(false)
+      })
+    })
+    expect(invoke.mock.calls).toContainEqual([
+      'db:draft-update-content',
+      10,
+      tabAfterTyping.content,
+      countDraftUnits(tabAfterTyping.content ?? ''),
+      PROJECT_PATH,
+      PROJECT_SESSION,
+    ])
+  })
+
+  it('keeps finalized draft strictly read-only and displays finalized status', async () => {
+    // 设置已定稿状态
+    useEditorStore.setState({
+      tabs: [{
+        id: TAB_ID,
+        name: 'Chapter 2',
+        type: 'chapter',
+        filePath: FILE_PATH,
+        content: INITIAL_CONTENT,
+        savedContent: INITIAL_CONTENT,
+        dirty: false,
+        draftId: 10,
+        draftStatus: 'finalized',
+        chapterNumber: 2,
+        projectKey: PROJECT_PATH,
+        projectSessionLease: PROJECT_SESSION.leaseId,
+        contentRevision: 0,
+      }],
+      activeTabId: TAB_ID,
+    })
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'db:draft-get-meta') {
+        return {
+          id: 10,
+          chapterNumber: 2,
+          version: 1,
+          status: 'finalized',
+          source: 'write',
+          contentId: 100,
+          wordCount: INITIAL_CONTENT.length,
+          createdAt: '2026-09-06T00:00:00.000Z',
+          updatedAt: '2026-09-06T00:00:00.000Z',
+        }
+      }
+      if (channel === 'db:blueprint-get-all') return [{ chapterNumber: 2, title: '风暴降临' }]
+      if (channel === 'db:draft-list') return [{ id: 10, version: 1 }]
+      if (channel === 'db:revision-get-pending' || channel === 'db:review-list') return []
+      return { success: true }
+    })
+
+    await act(async () => root.render(
+      <DraftEditor
+        tabId={TAB_ID}
+        filePath={FILE_PATH}
+        content={INITIAL_CONTENT}
+        projectKey={PROJECT_PATH}
+      />,
+    ))
+
+    const prose = await waitForVditorReady()
+    // 4. 已定稿草稿为真正只读
+    expect(prose.getAttribute('contenteditable')).toBe('false')
+    expect(container.textContent).toContain('已定稿（只读）')
+    expect(container.querySelector('.vditor-toolbar button[data-type="bold"]')?.classList.contains('vditor-menu--disabled')).toBe(true)
+    // 允许切换模式
+    expect(container.querySelector('.vditor-toolbar button[data-type="edit-mode"]')?.classList.contains('vditor-menu--disabled')).toBe(false)
+
+    // 尝试粘贴与输入不会改写正文
+    const paste = new Event('paste', { bubbles: true, cancelable: true })
+    await act(async () => {
+      prose.focus()
+      prose.dispatchEvent(paste)
+      document.execCommand('insertText', false, '试图修改终稿')
+    })
+    expect(paste.defaultPrevented).toBe(true)
+    expect(prose.textContent).not.toContain('试图修改终稿')
+    expect(useEditorStore.getState().tabs[0].dirty).toBe(false)
+  })
+
+  it('runs finalization through the existing save and finalize workflow pipeline', async () => {
+    await act(async () => root.render(
+      <DraftEditor
+        tabId={TAB_ID}
+        filePath={FILE_PATH}
+        content={INITIAL_CONTENT}
+        projectKey={PROJECT_PATH}
+      />,
+    ))
+    await waitForVditorReady()
+
+    // 7. 定稿逻辑触发已有定稿工作流与快照链路
+    const finalizeButton = page.getByRole('button', { name: '定稿' })
+    await expect.element(finalizeButton).toBeVisible()
+    await act(async () => finalizeButton.click())
+
+    expect(mockConfirm).toHaveBeenCalled()
+    await act(async () => {
+      await vi.waitFor(() => expect(startWorkflow).toHaveBeenCalled())
+    })
+
+    const definition = startWorkflow.mock.calls[0]?.[0] as WorkflowDefinition
+    expect(definition.type).toBe('chapter_creation')
+    expect(definition.title).toContain('定稿')
+    expect(definition.title).toContain('第2章')
+  })
+})

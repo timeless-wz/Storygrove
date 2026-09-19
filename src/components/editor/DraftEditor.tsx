@@ -1,11 +1,13 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Search, BadgeCheck, Save, FileText, Wrench, Check } from 'lucide-react'
+import {
+  Search, BadgeCheck, Save, FileText, Wrench, Check,
+} from 'lucide-react'
 
 import { useProjectStore } from '../../stores/project-store'
 import { registerEditorExitSaveHandler, useEditorStore } from '../../stores/editor-store'
 import { useWorkflowStore } from '../../stores/workflow-store'
 import { useLocaleStore } from '../../stores/locale-store'
-import CodeMirrorEditor from './CodeMirrorEditor'
+import VditorProseEditor from './VditorProseEditor'
 import { Button } from '../ui/Button'
 import { toast } from '../ui/Toast'
 import { confirm } from '../ui/Confirm'
@@ -53,8 +55,8 @@ interface Props {
 
 /**
  * 草稿编辑器
- * — 顶部工具栏：草稿状态 + 待合并修稿 + AI 修稿(含自定义提示词) / AI 审稿 / 定稿
- * — 正文：CodeMirrorEditor（prose 模式）
+ * — 顶部工具栏：草稿状态、保存、只读一致性审核与定稿
+ * — 正文：Vditor 即时渲染（IR）编辑器，可在 IR / 所见即所得 / 分屏预览间切换
  */
 export default function DraftEditor(props: Props) {
   const currentProject = useProjectStore(s => s.currentProject)
@@ -646,23 +648,21 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
         </div>
       )}
 
-      {/* 正文区 */}
-      <div className="flex-1 overflow-hidden relative">
-        <CodeMirrorEditor
-          mode="prose"
-          content={content}
-          filePath={filePath}
-          editable={!isReadonly && !isChapterBusy}
-          hideStatusBar
-          onCharCountChange={setCharCount}
-          onChange={(text) => {
-            currentBodyRef.current = text
-            useEditorStore.getState().updateTabContent(tabId, text)
-          }}
-          onSave={(text) => doSave(text)}
-        />
-
-
+      {/* 正文区：Markdown 编辑与预览都由 Vditor 承担。 */}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <div className="min-w-0 flex-1 overflow-hidden">
+          <VditorProseEditor
+            content={editorTab?.content ?? content}
+            editable={!isReadonly && !isChapterBusy}
+            placeholder={text('开始写这一章…', 'Start writing this chapter…')}
+            onCharCountChange={setCharCount}
+            onChange={(nextContent) => {
+              currentBodyRef.current = nextContent
+              useEditorStore.getState().updateTabContent(tabId, nextContent)
+            }}
+            onSave={(nextContent) => doSave(nextContent)}
+          />
+        </div>
       </div>
 
       {/* AI 一致性审核确认弹窗（只读） */}

@@ -1570,32 +1570,29 @@
 .writer-timeline-settings-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
 .writer-timeline-workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(290px, 360px); gap: 24px; padding-top: 22px; align-items: start; }
 .writer-timeline-canvas { min-height: 500px; padding: 0 8px 10px; }
-.writer-timeline-ruler-heading { display: flex; align-items: baseline; gap: 8px; margin-bottom: 14px; padding-left: 52px; color: var(--color-text-secondary); }
+.writer-timeline-ruler-heading { display: flex; align-items: baseline; gap: 8px; margin-bottom: 14px; color: var(--color-text-secondary); }
 .writer-timeline-ruler-heading span { font-size: 12px; font-weight: 650; }
 .writer-timeline-ruler-heading small { font-size: 10px; color: var(--color-text-muted); }
-.writer-timeline-events { margin: 0; padding: 0; list-style: none; }
-.writer-timeline-events > li { display: grid; grid-template-columns: 52px minmax(0, 1fr) 30px; position: relative; min-height: 110px; }
-.writer-timeline-events > li::before { content: ''; position: absolute; left: 25px; top: 28px; bottom: -2px; width: 1px; background: var(--color-border); }
-.writer-timeline-events > li:last-child::before { display: none; }
-.writer-timeline-tick { position: relative; z-index: 1; display: flex; justify-content: center; padding-top: 15px; }
-.writer-timeline-tick span { display: grid; place-items: center; width: 23px; height: 23px; border-radius: 999px; border: 1px solid var(--color-border); background: var(--color-editor-bg); color: var(--color-text-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
-.writer-timeline-events > li.is-selected .writer-timeline-tick span { border-color: var(--color-accent); color: var(--color-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 12%, transparent); }
-.writer-timeline-event { min-width: 0; margin: 0 0 12px; padding: 12px 14px; text-align: left; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-panel); color: var(--color-text); cursor: pointer; transition: border-color .16s ease, transform .16s ease, box-shadow .16s ease; }
-.writer-timeline-event:hover { border-color: var(--color-accent); transform: translateY(-1px); box-shadow: 0 5px 16px color-mix(in srgb, var(--color-text) 7%, transparent); }
-.writer-timeline-events > li.is-selected .writer-timeline-event { border-color: var(--color-accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 20%, transparent); }
-.writer-timeline-event-topline { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 5px; }
-.writer-timeline-time { color: var(--color-accent); font-size: 11px; font-weight: 650; }
-.writer-timeline-status { border-radius: 999px; padding: 2px 7px; background: var(--color-hover); color: var(--color-text-secondary); font-size: 10px; white-space: nowrap; }
-.writer-timeline-status.is-finalized { color: var(--color-success-text); background: color-mix(in srgb, var(--color-success) 12%, transparent); }
-.writer-timeline-status.is-drafted { color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
-.writer-timeline-event strong { display: block; font-size: 13px; line-height: 1.35; }
-.writer-timeline-event p { margin: 5px 0 0; color: var(--color-text-secondary); font-size: 11px; line-height: 1.55; white-space: pre-wrap; }
-.writer-timeline-event-links { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-top: 9px; color: var(--color-text-muted); font-size: 10px; }
-.writer-timeline-event-links span { display: inline-flex; align-items: center; gap: 3px; }
-.writer-timeline-reorder { display: flex; flex-direction: column; align-items: center; padding-top: 12px; }
-.writer-timeline-reorder button { display: grid; place-items: center; width: 24px; height: 21px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-muted); cursor: pointer; }
+.writer-timeline-ruler-hint { margin-left: auto; }
+/* 横向时间轴画布：React Flow 需要显式高度才能测量视口。 */
+.writer-timeline-flow { height: 460px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden; background: var(--color-editor-bg); }
+.writer-timeline-axis { position: relative; width: 100%; height: 100%; }
+.writer-timeline-axis-line { position: absolute; inset: 0; border-radius: 999px; background: var(--color-border-strong, var(--color-border)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-text) 4%, transparent); }
+.writer-timeline-axis-handle { opacity: 0; width: 1px; height: 1px; min-width: 0; min-height: 0; border: 0; background: transparent; }
+/* 事件标注：只呈现自定义时间与标题。 */
+.writer-timeline-label { padding: 8px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-panel); color: var(--color-text); cursor: pointer; box-shadow: 0 1px 3px color-mix(in srgb, var(--color-text) 7%, transparent); transition: border-color .16s ease, box-shadow .16s ease; }
+.writer-timeline-label:hover { border-color: var(--color-accent); }
+.writer-timeline-label.is-selected { border-color: var(--color-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 22%, transparent); }
+.writer-timeline-label-time { display: block; margin-bottom: 3px; color: var(--color-accent); font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.writer-timeline-label-title { display: block; font-size: 12.5px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.writer-timeline-label-handle { opacity: 0; width: 1px; height: 1px; min-width: 0; min-height: 0; border: 0; background: transparent; }
+.writer-timeline-connector { stroke: var(--color-border); }
+.writer-timeline-connector.is-selected { stroke: var(--color-accent); }
+.writer-timeline-reorder { display: flex; flex-direction: row; align-items: center; }
+.writer-timeline-reorder button { display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-muted); cursor: pointer; }
 .writer-timeline-reorder button:hover:not(:disabled) { background: var(--color-hover); color: var(--color-text); }
 .writer-timeline-reorder button:disabled { opacity: .28; cursor: default; }
+.writer-timeline-editor-title-actions { display: flex; align-items: center; gap: 4px; }
 .writer-timeline-empty { min-height: 300px; display: grid; place-content: center; justify-items: center; gap: 8px; color: var(--color-text-muted); text-align: center; font-size: 12px; border: 1px dashed var(--color-border); border-radius: var(--radius-lg); }
 .writer-timeline-empty strong { color: var(--color-text); font-size: 13px; }
 .writer-timeline-empty-button { width: 100%; background: transparent; cursor: pointer; }

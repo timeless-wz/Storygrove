@@ -187,20 +187,20 @@ describe('current-project reference import', () => {
     }
 
     await act(async () => {
-      clickProjectItem('小说配置')
+      clickProjectItem('创作参数')
       clickProjectItem('章节蓝图')
     })
-    expect(useEditorStore.getState().tabs.find(tab => tab.type === 'config')?.name).toBe('小说配置')
+    expect(useEditorStore.getState().tabs.find(tab => tab.type === 'config')?.name).toBe('创作参数')
     expect(useEditorStore.getState().tabs.find(tab => tab.type === 'chapter-card')?.name).toBe('章节蓝图')
 
     await act(async () => useLocaleStore.getState().setLocale('en-US'))
     await act(async () => {
-      clickProjectItem('Novel configuration')
+      clickProjectItem('Creative parameters')
       clickProjectItem('Chapter blueprints')
     })
     expect(useEditorStore.getState().tabs.filter(tab => tab.type === 'config')).toHaveLength(1)
     expect(useEditorStore.getState().tabs.filter(tab => tab.type === 'chapter-card')).toHaveLength(1)
-    expect(useEditorStore.getState().tabs.find(tab => tab.type === 'config')?.name).toBe('Novel configuration')
+    expect(useEditorStore.getState().tabs.find(tab => tab.type === 'config')?.name).toBe('Creative parameters')
     expect(useEditorStore.getState().tabs.find(tab => tab.type === 'chapter-card')?.name).toBe('Chapter blueprints')
   })
 

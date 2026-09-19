@@ -19,10 +19,6 @@ import {
   shouldSyncProjectArchTab,
 } from './arch-file-refresh-policy'
 import { LatestRequestGate } from './latest-request-gate'
-import {
-  canExplicitlyRepairCharacterRoster,
-  getCharacterRosterRepairPresentation,
-} from './character-roster-repair-state'
 import { useCharacterRosterRepair } from './use-character-roster-repair'
 import {
   captureProjectSession,
@@ -50,10 +46,16 @@ const ARCH_FILES: Array<{
   descEn: string
 }> = [
     { key: 'premise', fileName: 'premise.md', labelZh: '故事前提', labelEn: 'Story premise', iconName: 'target', descZh: '故事钩子 · 核心冲突链 · 主角优势 · 悬念骨架', descEn: 'Story hook · core conflict · protagonist edge · suspense structure' },
-    { key: 'characters', fileName: 'characters.md', labelZh: '角色图谱', labelEn: 'Character map', iconName: 'users', descZh: '角色弧光 · 关系网络 · 矛盾交织', descEn: 'Character arcs · relationships · interlocking tensions' },
     { key: 'worldbuilding', fileName: 'worldbuilding.md', labelZh: '世界观', labelEn: 'Worldbuilding', iconName: 'globe', descZh: '核心规则 · 社会结构 · 深层危机', descEn: 'Core rules · social structure · underlying crisis' },
     { key: 'synopsis', fileName: 'synopsis.md', labelZh: '情节大纲', labelEn: 'Plot outline', iconName: 'map', descZh: '结构推进 · 转折节奏 · 伏笔闭环', descEn: 'Story progression · turning points · setup and payoff' },
   ]
+
+/**
+ * 架构总览只呈现三个可编辑的架构文档。
+ *
+ * 角色图谱不是架构文档：它是角色档案的只读投影，入口在「角色档案」。
+ */
+const ARCH_OVERVIEW_FILES = ARCH_FILES.filter(f => f.key !== 'characters')
 
 /** 续批按钮默认的每批章数上限（可在弹窗内调整，避免一次请求剩余全部章节）。 */
 const CONTINUATION_BATCH_SPAN = 20
@@ -82,12 +84,10 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
   const [showArchDialog, setShowArchDialog] = useState(false)
   const lastCompletedArchitectureRunRef = useRef<string | null>(null)
   const archStatusRequestGate = useRef(new LatestRequestGate())
+  // 角色名单状态只用于让生成弹窗知道角色步骤是否已就绪；角色本身不在架构总览里。
   const {
     snapshot: rosterSnapshot,
-    repairError: rosterRepairError,
-    isRepairing: extracting,
     refresh: loadCharacterRosterStatus,
-    migrate: handleRepairCharacterRoster,
   } = useCharacterRosterRepair({ projectKey, enabled: projectMatches })
 
   /** 加载各架构文件状态（通过 Service 层获取，不直接调 IPC） */
@@ -399,15 +399,10 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
     )
   }
 
-  const generatedCount = ARCH_FILES.filter(f => (
+  // 完成度只统计三个架构文档：故事前提、世界观、情节大纲。
+  const generatedCount = ARCH_OVERVIEW_FILES.filter(f => (
     archStatus[f.key] && !(f.key === 'synopsis' && synopsisRecoveryFailed)
   )).length
-  const rosterPresentation = getCharacterRosterRepairPresentation(
-    rosterSnapshot,
-    text,
-    rosterRepairError,
-  )
-  const canRepairRoster = canExplicitlyRepairCharacterRoster(rosterPresentation)
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -422,7 +417,7 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
             {text('故事架构', 'Story architecture')}
           </span>
           <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            {generatedCount}/{ARCH_FILES.length} {text('已生成', 'generated')}
+            {generatedCount}/{ARCH_OVERVIEW_FILES.length} {text('已生成', 'generated')}
           </span>
         </div>
         <div className="flex items-center gap-1.5">
@@ -449,38 +444,26 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
 
       {/* 文件卡片列表 */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {ARCH_FILES.map(f => {
+        {ARCH_OVERVIEW_FILES.map(f => {
           const generated = archStatus[f.key]
           const synopsisNeedsRecovery = f.key === 'synopsis' && synopsisRecoveryFailed
           const words = wordCounts[f.key] ?? 0
-          const isCharacters = f.key === 'characters'
           const isWorldBuildingCandidate = f.key === 'worldbuilding' && Boolean(worldBuildingCandidate)
-          const rosterNeedsAttention = isCharacters && rosterPresentation
-            && rosterPresentation.kind !== 'ready'
-            && rosterPresentation.kind !== 'empty'
-          // 动态边框颜色：明确失败/异常 → 红 | 显式修复/采用 → 警告 | 已生成 → 绿
-          const cardBorderColor = rosterPresentation?.kind === 'failed_with_data_preserved'
-            || rosterPresentation?.kind === 'inconsistent'
-            ? 'var(--color-error, #ef4444)'
-            : rosterNeedsAttention
+          // 动态边框颜色：需处理的异常 → 警告 | 已生成 → 绿
+          const cardBorderColor = synopsisNeedsRecovery
+            ? 'var(--color-warning)'
+            : isWorldBuildingCandidate
               ? 'var(--color-warning)'
-              : synopsisNeedsRecovery
-                ? 'var(--color-warning)'
-                : isWorldBuildingCandidate
-                  ? 'var(--color-warning)'
-               : generated
-                    ? 'var(--color-success)'
-                    : 'var(--color-border)'
+              : generated
+                ? 'var(--color-success)'
+                : 'var(--color-border)'
           return (
             <div key={f.key} className="space-y-2">
               <div
                 className="rounded-lg border p-4 flex items-center gap-4 cursor-pointer transition-all"
                 style={{
                   borderColor: cardBorderColor,
-                  backgroundColor: rosterPresentation?.kind === 'failed_with_data_preserved'
-                    || rosterPresentation?.kind === 'inconsistent'
-                    ? 'rgba(239, 68, 68, 0.03)'
-                    : 'var(--color-panel)',
+                  backgroundColor: 'var(--color-panel)',
                   opacity: loading ? 0.6 : 1,
                 }}
                 onClick={() => openArchFile(f)}
@@ -507,45 +490,11 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
                   <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
                     {text(f.descZh, f.descEn)}
                   </div>
-                  {isCharacters && rosterPresentation && (
-                    <div
-                      role="status"
-                      className="text-xs mt-1 leading-5"
-                      style={{
-                        color: rosterNeedsAttention
-                          ? 'var(--color-warning-text)'
-                          : 'var(--color-text-muted)',
-                      }}
-                    >
-                      {rosterPresentation.label} · {rosterPresentation.description}
-                    </div>
-                  )}
                 </div>
 
                 {/* 右侧状态标签 / 字数 / 提取按钮 */}
                 <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                  {isCharacters && rosterPresentation ? (
-                    <>
-                      <span
-                        className="text-[0.7rem] px-1.5 py-0.5 rounded font-medium"
-                        style={{
-                          backgroundColor: rosterNeedsAttention
-                            ? 'rgba(245, 158, 11, 0.12)'
-                            : 'rgba(34, 197, 94, 0.1)',
-                          color: rosterNeedsAttention
-                            ? 'var(--color-warning-text)'
-                            : 'var(--color-success-text)',
-                        }}
-                      >
-                        {rosterPresentation.label}
-                      </span>
-                      {generated && (
-                        <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                          {words.toLocaleString()} {text('字符', 'characters')}
-                        </span>
-                      )}
-                    </>
-                  ) : isWorldBuildingCandidate ? (
+                  {isWorldBuildingCandidate ? (
                     <>
                       <span className="text-[0.7rem] px-1.5 py-0.5 rounded font-medium bg-yellow-500/15 text-[var(--color-warning-text)]">
                         {text(
@@ -673,27 +622,8 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
                       {text('待生成', 'Not generated')}
                     </span>
                   )}
-                  {/* 显式安全修复，或采用受保护的既有角色卡。 */}
-                  {isCharacters && !loading && canRepairRoster && rosterPresentation?.actionLabel && (
-                    <Button
-                      size="sm"
-                      disabled={extracting}
-                      className="gap-1.5 mt-0.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-sm hover:from-amber-600 hover:to-orange-600 border-none hover:shadow hover:-translate-y-[0.5px] transition-all"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        void handleRepairCharacterRoster()
-                      }}
-                      title={rosterPresentation.actionTitle}
-                    >
-                      {extracting
-                        ? <RefreshCw size={12} className="animate-spin opacity-90" />
-                        : <AlertTriangle size={12} className="opacity-90" />
-                      }
-                      {extracting ? text('处理中...', 'Working...') : rosterPresentation.actionLabel}
-                    </Button>
-                  )}
                   {/* 查看箭头提示 */}
-                  {generated && !(isCharacters && !loading && canRepairRoster) && (
+                  {generated && (
                     <span className="text-[0.7rem] flex items-center gap-0.5" style={{ color: 'var(--color-text-muted)' }}>
                       <FileText size={10} /> {text('点击查看', 'Open')}
                     </span>

@@ -346,7 +346,7 @@ describe('renderer surface E2E runner contract', () => {
         page: { selector: '.skin-workspace-page', alpha: 0.60 },
         solid: { selector: '.skin-solid-surface', alpha: 0.88 },
       },
-      routes: ['project', 'knowledge', 'characters', 'blueprint'],
+      routes: ['project', 'workspace', 'knowledge', 'characters'],
       classicMustBeOpaque: true,
       visualEvidence: {
         outputEnvironment: 'AI_NOVEL_RENDERER_VISUAL_EVIDENCE_DIR',

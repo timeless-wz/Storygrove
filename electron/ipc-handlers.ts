@@ -15,6 +15,8 @@ import { registerOfficialHomepageController } from './controllers/official-homep
 import { registerModelProviderResourceController } from './controllers/model-provider-resource-controller'
 import { registerFinalizationController } from './controllers/finalization-controller'
 import { registerChapterLifecycleController } from './controllers/chapter-lifecycle-controller'
+import { registerProjectDocumentsController } from './controllers/project-documents-controller'
+import { registerWorldMapImageController } from './controllers/world-map-image-controller'
 import { registerExternalFileGrantController } from './controllers/external-file-grant-controller'
 import { registerAppDataController } from './controllers/app-data-controller'
 import { registerSkinController } from './controllers/skin-controller'
@@ -45,6 +47,8 @@ export function registerIPCHandlers() {
   registerAppDataController()
   registerProjectController()
   registerFSController()
+  registerProjectDocumentsController()
+  registerWorldMapImageController()
   registerExternalFileGrantController()
   registerLLMController()
   registerDatabaseController()

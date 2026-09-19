@@ -14,6 +14,7 @@ import { ProjectClearRepository, ProjectClearOptions } from '../repositories/pro
 import {
   BlueprintRepository,
   BlueprintData,
+  type BlueprintVolumeData,
   type BlueprintRangeCommitRequest,
 } from '../repositories/blueprint-repository'
 import { CharacterRepository } from '../repositories/character-repository'
@@ -58,7 +59,8 @@ import { NarrativeThreadRepository } from '../repositories/narrative-thread-repo
 import { PlotTreeRepository } from '../repositories/plot-tree-repository'
 import { isPlotTreeSourceRevision } from '../../src/shared/plot-tree'
 import { WorldMapRepository } from '../repositories/world-map-repository'
-import type { WorldMapNode, WorldMapEdge, WorldMapLayer } from '../../src/shared/world-map'
+import type { WorldMapNode, WorldMapEdge, WorldMap } from '../../src/shared/world-map'
+import { removeDeletedMapImages } from '../services/world-map-image-store'
 import { StoryTimelineRepository } from '../repositories/story-timeline-repository'
 import type { StoryTimelineEvent, StoryTimelineSettings } from '../../src/shared/story-timeline'
 import { RecoveryCandidateRepository } from '../repositories/recovery-candidate-repository'
@@ -92,6 +94,7 @@ const MUTATING_DATABASE_CHANNELS = new Set([
   'db:blueprint-update-notes',
   'db:blueprint-delete',
   'db:blueprint-clear-all',
+  'db:blueprint-volume-upsert',
   'db:character-roster-commit',
   'db:draft-import-finalized-batch',
   'db:draft-create',
@@ -120,13 +123,14 @@ const MUTATING_DATABASE_CHANNELS = new Set([
   'db:narrative-thread-event-confirm',
   'db:plot-tree-save',
   'db:plot-tree-clear',
+  'db:map-upsert',
+  'db:map-delete',
+  'db:map-reorder',
+  'db:map-migration-ack',
   'db:map-node-upsert',
   'db:map-node-delete',
   'db:map-edge-upsert',
   'db:map-edge-delete',
-  'db:map-layer-upsert',
-  'db:map-layer-delete',
-  'db:map-layers-reorder',
   'db:timeline-settings-save',
   'db:timeline-event-upsert',
   'db:timeline-event-delete',
@@ -499,6 +503,21 @@ export function registerDatabaseController() {
   ipcMain.handle('db:blueprint-get-all', async (_event, expectedProjectPath: string) => {
     assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
     return BlueprintRepository.getAll()
+  })
+
+  ipcMain.handle('db:blueprint-volume-list', async (_event, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return BlueprintRepository.getVolumes()
+  })
+
+  ipcMain.handle('db:blueprint-volume-upsert', async (_event, volume: BlueprintVolumeData, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      BlueprintRepository.upsertVolume(volume)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
   })
 
   ipcMain.handle('db:blueprint-get', async (_event, chapterNumber: number, expectedProjectPath: string) => {
@@ -1179,11 +1198,58 @@ export function registerDatabaseController() {
   })
 
   // ============================================================
-  // 10. world_map — 世界地图
+  // 10. world_map — 多地图地图册
   // ============================================================
   ipcMain.handle('db:map-get-all', async (_event, expectedProjectPath: string) => {
     assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
     return WorldMapRepository.getAll()
+  })
+
+  ipcMain.handle('db:map-upsert', async (_event, map: WorldMap, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, map: WorldMapRepository.upsertMap(map) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  /**
+   * 删除地图必须显式给出对子地图的处理方式，并同时清理该地图自己的托管图片副本。
+   * 图片文件只存在于项目受控目录，用户原始图片从不参与。
+   */
+  ipcMain.handle('db:map-delete', async (_event, mapId: string, strategy: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      if (strategy !== 'promote-children' && strategy !== 'cascade') {
+        throw new Error('删除地图必须显式指定对子地图的处理方式')
+      }
+      const plan = WorldMapRepository.deleteMap(mapId, strategy)
+      removeDeletedMapImages(getCurrentProjectPath() as string, plan.images)
+      return { success: true, removedMapIds: plan.mapIds }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:map-reorder', async (_event, orderedIds: string[], expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      WorldMapRepository.reorderMaps(orderedIds)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:map-migration-ack', async (_event, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      WorldMapRepository.acknowledgeMigration()
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
   })
 
   ipcMain.handle('db:map-node-upsert', async (_event, node: WorldMapNode, expectedProjectPath: string) => {
@@ -1229,35 +1295,6 @@ export function registerDatabaseController() {
   ipcMain.handle('db:map-candidates-get', async (_event, expectedProjectPath: string) => {
     assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
     return WorldMapRepository.extractCandidates()
-  })
-
-  ipcMain.handle('db:map-layer-upsert', async (_event, layer: WorldMapLayer, expectedProjectPath: string) => {
-    try {
-      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
-      return { success: true, layer: WorldMapRepository.upsertLayer(layer) }
-    } catch (error) {
-      return { success: false, error: String(error) }
-    }
-  })
-
-  ipcMain.handle('db:map-layer-delete', async (_event, id: string, fallbackLayerId: string, expectedProjectPath: string) => {
-    try {
-      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
-      WorldMapRepository.deleteLayer(id, fallbackLayerId)
-      return { success: true }
-    } catch (error) {
-      return { success: false, error: String(error) }
-    }
-  })
-
-  ipcMain.handle('db:map-layers-reorder', async (_event, orderedIds: string[], expectedProjectPath: string) => {
-    try {
-      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
-      WorldMapRepository.reorderLayers(orderedIds)
-      return { success: true }
-    } catch (error) {
-      return { success: false, error: String(error) }
-    }
   })
 
   // ============================================================

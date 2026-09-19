@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { Save, Trash2, Users, Network, ClipboardList } from 'lucide-react'
+import { Save, Trash2, Users, Network, ClipboardList, AlertTriangle, RefreshCw } from 'lucide-react'
 import { useProjectStore } from '../../stores/project-store'
 import { registerEditorExitSaveHandler } from '../../stores/editor-store'
+import { useLayoutStore, type CharacterProfileView } from '../../stores/layout-store'
 import { useWorkflowStore } from '../../stores/workflow-store'
 import { confirm } from '../ui/Confirm'
 import {
@@ -28,6 +29,11 @@ import {
   isProjectSessionCurrent,
   isProjectSessionPath,
 } from '../project-session-gate'
+import {
+  canExplicitlyRepairCharacterRoster,
+  getCharacterRosterRepairPresentation,
+} from './character-roster-repair-state'
+import { useCharacterRosterRepair } from './use-character-roster-repair'
 
 /**
  * 角色卡编辑器 — 纯编辑区域（角色列表已移至侧栏）
@@ -49,7 +55,7 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
   const deleteCharacter = useCharacterStore(s => s.deleteCharacter)
   const clearAllCharacters = useCharacterStore(s => s.clearAllCharacters)
   const saveAll = useCharacterStore(s => s.saveAll)
-  const [viewMode, setViewMode] = useState<'edit' | 'state' | 'graph'>('edit')
+  const [localViewMode, setLocalViewMode] = useState<CharacterProfileView>('edit')
   const text = useLocaleStore(s => s.text)
   const locale = useLocaleStore(s => s.locale)
   const roleLabel = (role: CharacterCard['role']) => {
@@ -63,6 +69,37 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
     && loadingProjectKey === null
     && lastError === null,
   )
+
+  /*
+   * 角色档案是唯一的角色入口；旧标签页、旧路由或旧项目可能请求直接落到某个
+   * 内部视图（尤其是“关系图谱”）。请求在作者于本页手动切换视图前一直生效，
+   * 因此这里用派生值而不是 effect 同步，避免额外的一次级联渲染。
+   */
+  const characterViewRequest = useLayoutStore(s => s.characterViewRequest)
+  const [dismissedViewRequestId, setDismissedViewRequestId] = useState<number | null>(null)
+  const requestedView = characterViewRequest && characterViewRequest.requestId !== dismissedViewRequestId
+    ? characterViewRequest.view
+    : null
+  const viewMode: CharacterProfileView = requestedView ?? localViewMode
+  const setViewMode = (next: CharacterProfileView) => {
+    if (characterViewRequest) setDismissedViewRequestId(characterViewRequest.requestId)
+    setLocalViewMode(next)
+  }
+
+  // 旧项目可能只有 Markdown 角色图谱而没有角色卡；修复入口随角色入口一起收敛到这里。
+  const {
+    snapshot: rosterSnapshot,
+    repairError: rosterRepairError,
+    isRepairing: repairingRoster,
+    refresh: loadRosterStatus,
+    migrate: repairRoster,
+  } = useCharacterRosterRepair({ projectKey, enabled: projectMatches })
+  const rosterPresentation = getCharacterRosterRepairPresentation(
+    rosterSnapshot,
+    text,
+    rosterRepairError,
+  )
+  const canRepairRoster = canExplicitlyRepairCharacterRoster(rosterPresentation)
 
   // 数据由 ProjectService 统一加载，组件只消费 store 数据
 
@@ -190,7 +227,7 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
         <div className="flex items-center gap-1.5 min-w-0">
           <span className="text-xs font-medium truncate text-[var(--color-text-secondary)]">
             {viewMode === 'graph'
-              ? text('角色图谱', 'Character graph')
+              ? text('角色档案 — 关系图谱（只读投影）', 'Character profile — relationship graph (read-only projection)')
               : selectedCard
                 ? `${selectedCard.name || text('新角色', 'New character')} ${viewMode === 'state' ? text('— 当前状态', '— Current state') : text('— 编辑档案', '— Edit profile')}`
                 : text('角色档案', 'Character profile')}
@@ -241,6 +278,59 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
           )}
         </div>
       </div>
+
+      {/* 旧项目安全修复：角色档案是唯一入口，修复动作始终由作者显式触发。 */}
+      {rosterPresentation
+        && rosterPresentation.kind !== 'ready'
+        && rosterPresentation.kind !== 'empty' && (
+        <div
+          role="status"
+          className="flex flex-wrap items-center gap-2 px-3 py-2 text-xs flex-shrink-0"
+          style={{
+            color: 'var(--color-warning-text)',
+            backgroundColor: 'var(--color-editor-bg)',
+            borderBottom: '1px solid var(--color-border)',
+          }}
+        >
+          <AlertTriangle size={13} className="flex-shrink-0" aria-hidden="true" />
+          <span className="min-w-0">
+            <strong>{rosterPresentation.label}</strong> · {rosterPresentation.description}
+          </span>
+          {canRepairRoster && rosterPresentation.actionLabel && (
+            <Button
+              size="sm"
+              disabled={repairingRoster}
+              onClick={() => { void repairRoster() }}
+              title={rosterPresentation.actionTitle}
+            >
+              {repairingRoster
+                ? <RefreshCw size={12} className="animate-spin" />
+                : <AlertTriangle size={12} />}
+              {repairingRoster ? text('处理中…', 'Working…') : rosterPresentation.actionLabel}
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" onClick={() => { void loadRosterStatus() }}>
+            <RefreshCw size={12} /> {text('刷新状态', 'Refresh status')}
+          </Button>
+        </div>
+      )}
+
+      {viewMode === 'graph' && (
+        <div
+          role="note"
+          className="px-3 py-1.5 text-[11px] flex-shrink-0"
+          style={{
+            color: 'var(--color-text-secondary)',
+            backgroundColor: 'var(--color-editor-bg)',
+            borderBottom: '1px solid var(--color-border)',
+          }}
+        >
+          {text(
+            '关系图谱由角色档案推导，只读展示。修改角色身份、资料或关系请切回「编辑档案」。',
+            'The relationship graph is derived from character profiles and is read-only. Switch back to Edit profile to change identity, details, or relationships.',
+          )}
+        </div>
+      )}
 
       {/* 主体区 */}
       <div className="flex-1 overflow-y-auto relative">

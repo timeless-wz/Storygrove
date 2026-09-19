@@ -13,6 +13,12 @@ import { WorkspaceScannerService } from '../services/workspace-scanner-service'
 const MAX_FILES_FIXTURE_COUNT = 1001
 const MAX_FILES_FIXTURE_LIMIT = 1000
 
+function accessError(message: string): NodeJS.ErrnoException {
+  const error = new Error(message) as NodeJS.ErrnoException
+  error.code = 'EACCES'
+  return error
+}
+
 describe('Workspace Hub - Scanner Coverage & Boundary Conditions', () => {
   const testRoots: string[] = []
   let maxFilesFixtureDir = ''
@@ -191,25 +197,23 @@ describe('Workspace Hub - Scanner Coverage & Boundary Conditions', () => {
     const originalReaddir = fs.promises.readdir.bind(fs.promises)
     const originalLstat = fs.promises.lstat.bind(fs.promises)
 
-    vi.spyOn(fs.promises, 'readdir').mockImplementation((async (p: any, opts: any) => {
+    vi.spyOn(fs.promises, 'readdir').mockImplementation(async (...args) => {
+      const [p] = args
       const pStr = String(p)
       if (pStr.includes('unreadable_sub')) {
-        const err = new Error('EACCES: permission denied, scandir')
-        ;(err as any).code = 'EACCES'
-        throw err
+        throw accessError('EACCES: permission denied, scandir')
       }
-      return originalReaddir(p, opts)
-    }) as any)
+      return originalReaddir(...args)
+    })
 
-    vi.spyOn(fs.promises, 'lstat').mockImplementation((async (p: any) => {
+    vi.spyOn(fs.promises, 'lstat').mockImplementation(async (...args) => {
+      const [p] = args
       const pStr = String(p)
       if (pStr.includes('bad_lstat.md')) {
-        const err = new Error('EACCES: permission denied, lstat')
-        ;(err as any).code = 'EACCES'
-        throw err
+        throw accessError('EACCES: permission denied, lstat')
       }
-      return originalLstat(p)
-    }) as any)
+      return originalLstat(...args)
+    })
 
     const scanResult = await WorkspaceScannerService.scanDirectory(extDir, 'main')
     expect(scanResult.success).toBe(true)
@@ -238,15 +242,14 @@ describe('Workspace Hub - Scanner Coverage & Boundary Conditions', () => {
 
     // 模拟根目录读取失败：spy readdir 在 canonicalRoot 时抛出致命错误
     const originalReaddir = fs.promises.readdir.bind(fs.promises)
-    vi.spyOn(fs.promises, 'readdir').mockImplementation((async (p: any, opts: any) => {
+    vi.spyOn(fs.promises, 'readdir').mockImplementation(async (...args) => {
+      const [p] = args
       const pStr = String(p).toLowerCase()
       if (pStr.includes('ext-root-err')) {
-        const err = new Error('EACCES: permission denied on root')
-        ;(err as any).code = 'EACCES'
-        throw err
+        throw accessError('EACCES: permission denied on root')
       }
-      return originalReaddir(p, opts)
-    }) as any)
+      return originalReaddir(...args)
+    })
 
     const failedScan = await WorkspaceScannerService.scanDirectory(extDir, 'main')
     expect(failedScan.success).toBe(false)

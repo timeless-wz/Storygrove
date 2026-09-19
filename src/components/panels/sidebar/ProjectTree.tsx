@@ -5,7 +5,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { ChevronRight, ChevronDown, RefreshCw, CheckCircle2, Circle, FolderOpen, Copy, FolderTree, Trash2 } from 'lucide-react'
+import { ChevronRight, ChevronDown, RefreshCw, CheckCircle2, Circle, FolderOpen, Copy, FolderTree, Sparkles, Trash2 } from 'lucide-react'
 import { useProjectStore } from '../../../stores/project-store'
 import { useWorkflowStore } from '../../../stores/workflow-store'
 import { useDraftStore } from '../../../stores/draft-store'
@@ -46,9 +46,8 @@ import { shouldRefreshBlueprints } from '../../editor/blueprint-refresh'
 
 const ARCH_FILE_EN: Record<string, { label: string; desc: string }> = {
   premise: { label: 'Premise', desc: 'Core premise and conflict' },
-  characters: { label: 'Character map', desc: 'Character arcs and relationships' },
   worldbuilding: { label: 'World building', desc: 'World rules and systems' },
-  synopsis: { label: 'Plot synopsis', desc: 'Overall plot structure' },
+  synopsis: { label: 'Plot outline', desc: 'Whole-book plan and pacing' },
 }
 
 export default function ProjectTree() {
@@ -243,11 +242,11 @@ export default function ProjectTree() {
   const clearDisabled = activeRuns.length > 0
 
   const openOverview = () => openBuiltinEditor('project-overview', text('项目总览', 'Project overview'), 'overview')
-  const openWorldMap = () => openBuiltinEditor('world-map-editor', text('世界地图', 'World map'), 'world-map')
+  const openWorldMap = () => openBuiltinEditor('world-map-editor', text('多地图地图册', 'Map atlas'), 'world-map')
   const openStoryTimeline = () => openBuiltinEditor('story-timeline-editor', text('故事时间线', 'Story timeline'), 'story-timeline')
   const openConfigEditor = () => useEditorStore.getState().openFile({
     id: 'config',
-    name: text('小说配置', 'Novel configuration'),
+    name: text('创作参数', 'Creative parameters'),
     type: 'config',
     projectKey: currentProject.path,
   })
@@ -354,7 +353,7 @@ export default function ProjectTree() {
 
       <LeafItem
         iconName="compass"
-        label={text('世界地图', 'World map')}
+        label={text('多地图地图册', 'Map atlas')}
         desc={text('地点、势力与空间拓扑网络', 'Locations, factions, and spatial network')}
         badge={mapNodes.length > 0 ? text(`${mapNodes.length} 处地点`, `${mapNodes.length} locations`) : text('待创建', 'Empty')}
         badgeColor={mapNodes.length > 0 ? 'var(--color-accent)' : undefined}
@@ -387,11 +386,12 @@ export default function ProjectTree() {
         ], e)}
       />
 
+      {/* 章节脉络：章节蓝图的确定性投影 */}
       <LeafItem
         iconName="git-branch"
-        label={text('剧情树', 'Plot tree')}
-        desc={text('查看主线、支线与章节事件投影', 'View main plots, subplots, and chapter event projection')}
-        onClick={() => openBuiltinEditor('narrative-thread-editor', text('伏笔与叙事线索', 'Foreshadowing & narrative threads'), 'narrative-thread')}
+        label={text('章节脉络', 'Chapter thread')}
+        desc={text('由章节蓝图确定性投影的章节事件与伏笔脉络，零模型依赖', 'Deterministic projection of blueprints into chapter events and setups')}
+        onClick={() => openBuiltinEditor('narrative-thread-editor', text('章节脉络', 'Chapter thread'), 'narrative-thread')}
       />
 
       <LeafItem
@@ -402,51 +402,65 @@ export default function ProjectTree() {
       />
 
       <ProjectTreeSection
-        title={text('资料与设定', 'Sources & Setup')}
-        detail={text('小说配置、故事架构与资料中枢', 'Novel configuration, story architecture, and sources')}
+        title={text('故事设定', 'Story setup')}
+        detail={text('创作参数、架构文档与角色档案', 'Creative parameters, architecture documents, and characters')}
       />
 
-      {/* 小说配置 */}
+      {/* 创作参数：作品元数据与创作约束 */}
       <LeafItem
         iconName="book-open"
-        label={text('小说配置', 'Novel configuration')}
-        desc={text('基础参数与写作要求', 'Core parameters and writing guidance')}
+        label={text('创作参数', 'Creative parameters')}
+        desc={text('书名、题材、受众、章数与叙事视角', 'Title metadata, genre, audience, chapters, and point of view')}
         badge={configDone ? text('已完成', 'Complete') : text('待配置', 'Pending')}
         badgeDone={configDone}
         onClick={openConfigEditor}
         onContextMenu={e => showSidebarMenu([
           {
             key: 'open',
-            label: text('打开小说配置', 'Open novel configuration'),
+            label: text('打开创作参数', 'Open creative parameters'),
             icon: <FolderOpen size={13} />,
             onClick: openConfigEditor,
           },
         ], e)}
       />
 
-      {/* 故事架构 */}
+      {/* 故事架构：分组标题不再直接打开编辑器，下面只有三个可编辑的架构文档 */}
       <WorldBuildingGroup archStatus={archStatus} archDone={archDone} onCleared={refreshAll} />
 
-      {/* 角色档案 */}
+      {/* 角色档案：唯一的角色入口，关系图谱是它内部的只读视图 */}
       <LeafItem
         iconName="users"
-        label={text('角色档案', 'Character roster')}
-        desc={text('主要人物、配角与人际关系', 'Characters, roles and relationships')}
-        onClick={() => setSidebarView('characters')}
+        label={text('角色档案', 'Character profile')}
+        desc={text('角色事实来源：档案、关系、动机、弧光与当前状态', 'Single source of truth: profiles, relationships, motivations, arcs, and state')}
+        onClick={() => useLayoutStore.getState().openCharacterProfile('edit')}
       />
 
-      {/* 创作资料中枢 */}
+      <ProjectTreeSection
+        title={text('资料库', 'Library')}
+        detail={text('自由文档、资料来源审核与知识检索', 'Free documents, source review, and knowledge retrieval')}
+      />
+
+      {/* 项目文档：作者自由创建的 Markdown 资料 */}
+      <LeafItem
+        iconName="file-pen"
+        label={text('项目文档', 'Project documents')}
+        desc={text('设定笔记、卷纲、灵感与资料摘录的自由 Markdown 文档', 'Free Markdown notes, outlines, ideas, and excerpts')}
+        onClick={() => setSidebarView('documents')}
+      />
+
+      {/* 资料来源与审核：原始资料、快照、批准与版本 */}
       <LeafItem
         iconName="target"
-        label={text('创作资料中枢', 'Writing sources hub')}
-        desc={text('批准资料、快照追溯与规则中枢', 'Approved sources, snapshot provenance and rules')}
+        label={text('资料来源与审核', 'Sources & review')}
+        desc={text('原始资料、文件来源、审核、批准快照与章节上下文', 'Raw sources, file provenance, review, approved snapshots, and chapter context')}
         onClick={() => setSidebarView('workspace')}
       />
 
+      {/* 知识检索：只检索作者已明确加入的内容 */}
       <LeafItem
         iconName="brain-circuit"
-        label={text('项目知识库', 'Project knowledge')}
-        desc={text('仅查看和管理当前项目绑定的知识资料', 'Browse and manage knowledge bound to this project only')}
+        label={text('知识检索', 'Knowledge retrieval')}
+        desc={text('检索作者已明确加入的内容；不会自动收录资料或项目文档', 'Search only what the author explicitly added; nothing is indexed automatically')}
         onClick={() => setSidebarView('knowledge')}
       />
 
@@ -524,25 +538,30 @@ function WorldBuildingGroup({
 
   return (
     <div>
-      {/* 组标题行 — 点击打开故事架构编辑器，双击展开/折叠子文件 */}
+      {/*
+       * 分组标题本身不再打开编辑器：故事架构下只有三个可编辑的架构文档，
+       * 打开总览（AI 生成 / 断点续写）保留为独立的显式动作。
+       */}
       <div
-        className="tree-item gap-1.5 cursor-pointer select-none"
+        className="tree-item gap-1.5 select-none"
         style={{ paddingLeft: 10 }}
-        onClick={() => openBuiltinEditor('world-building-editor', text('故事架构', 'Story architecture'), 'world-building')}
-        title={text('打开故事架构编辑器（可生成架构文档）', 'Open the story architecture editor')}
+        title={text('故事前提、世界观、情节大纲', 'Premise, worldbuilding, and plot outline')}
       >
-        <span
+        <button
+          type="button"
           style={{ width: 12, flexShrink: 0, display: 'flex', alignItems: 'center', cursor: 'pointer' }}
-          onClick={(e) => { e.stopPropagation(); setOpen(v => !v) }}
+          aria-expanded={open}
+          aria-label={open ? text('折叠故事架构', 'Collapse story architecture') : text('展开故事架构', 'Expand story architecture')}
+          onClick={() => setOpen(v => !v)}
         >
           {open
             ? <ChevronDown size={12} style={{ color: 'var(--color-text-muted)' }} />
             : <ChevronRight size={12} style={{ color: 'var(--color-text-muted)' }} />
           }
-        </span>
+        </button>
         <FolderTree size={14} style={{ color: 'var(--color-text-muted)' }} />
         <span className="text-sm font-medium flex-1 min-w-0 truncate" style={{ color: 'var(--color-text)' }}>{text('故事架构', 'Story architecture')}</span>
-        {/* 进度徽章 */}
+        {/* 进度徽章：故事前提、世界观、情节大纲三项 */}
         <span
           className="text-[0.7rem] flex-shrink-0 ml-1"
           style={{
@@ -555,6 +574,17 @@ function WorldBuildingGroup({
         >
           {archDone}/{ARCH_FILES.length}
         </span>
+        <IconTooltip label={text('打开架构总览（AI 生成 / 断点续写）', 'Open architecture overview (AI generation / resume)')}>
+          <button
+            type="button"
+            className="opacity-70 hover:opacity-100 rounded p-0.5 flex-shrink-0"
+            aria-label={text('打开架构总览', 'Open architecture overview')}
+            onClick={() => openBuiltinEditor('world-building-editor', text('故事架构', 'Story architecture'), 'world-building')}
+            style={{ color: 'var(--color-text-muted)' }}
+          >
+            <Sparkles size={11} />
+          </button>
+        </IconTooltip>
       </div>
 
       {/* 子文件列表（点击直接在 Markdown 编辑器打开） */}

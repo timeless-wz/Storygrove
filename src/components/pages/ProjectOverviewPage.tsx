@@ -27,6 +27,7 @@ export default function ProjectOverviewPage() {
   const draftsByChapter = useDraftStore(s => s.draftsByChapter)
   const nodes = useWorldMapStore(s => s.nodes)
   const edges = useWorldMapStore(s => s.edges)
+  const maps = useWorldMapStore(s => s.maps)
   const loadWorldMap = useWorldMapStore(s => s.loadAll)
   const timelineEvents = useStoryTimelineStore(s => s.events)
   const timelineDataProjectKey = useStoryTimelineStore(s => s.dataProjectKey)
@@ -39,7 +40,7 @@ export default function ProjectOverviewPage() {
   const wordsPerChapter = currentProject?.novelConfig?.wordsPerChapter ?? 3000
   const expectedTotalWords = totalChapters * wordsPerChapter
 
-  // 加载世界地图和章节蓝图
+  // 加载地图册和章节蓝图
   useEffect(() => {
     if (!projectPath) return
     void loadWorldMap(projectPath)
@@ -81,10 +82,8 @@ export default function ProjectOverviewPage() {
     return { draftedChaptersCount: draftedCount, totalDraftedWords: words }
   }, [draftsByChapter])
 
-  // 地下与遗境等特殊地点统计
-  const specialNodes = useMemo(() => {
-    return nodes.filter(n => n.mapLayer === 'underground' || n.mapLayer === 'astral' || n.type === 'relic')
-  }, [nodes])
+  // 遗境/秘境等特殊地点统计（地图之间不再有图层，只按地点类型统计）
+  const specialNodes = useMemo(() => nodes.filter(n => n.type === 'relic'), [nodes])
 
   const timelineSummary = useMemo(() => ({
     planned: timelineEvents.filter(event => event.status === 'planned').length,
@@ -92,16 +91,16 @@ export default function ProjectOverviewPage() {
     finalized: timelineEvents.filter(event => event.status === 'finalized').length,
   }), [timelineEvents])
 
-  // 打开世界地图
+  // 打开地图册
   const handleOpenWorldMap = () => {
     if (!projectPath) return
-    openBuiltinEditor('world-map-editor', text('世界地图', 'World map'), 'world-map')
+    openBuiltinEditor('world-map-editor', text('多地图地图册', 'Map atlas'), 'world-map')
   }
 
-  // 打开剧情树
+  // 打开章节脉络（章节蓝图的确定性投影）
   const handleOpenPlotTree = () => {
     if (!projectPath) return
-    openBuiltinEditor('narrative-thread-editor', text('伏笔与叙事线索', 'Foreshadowing & narrative threads'), 'narrative-thread', 'plot-tree')
+    openBuiltinEditor('narrative-thread-editor', text('章节脉络', 'Chapter thread'), 'narrative-thread', 'plot-tree')
   }
 
   // 打开章节蓝图
@@ -175,7 +174,7 @@ export default function ProjectOverviewPage() {
               </h1>
               <p className="text-xs mt-1 text-[var(--color-text-secondary)]">
                 {text(
-                  '纯粹由作者主导的创作空间：世界地图、章节蓝图、直接码字、只读审核。',
+                  '纯粹由作者主导的创作空间：地图册、章节蓝图、直接码字、只读审核。',
                   'Author-driven fiction workspace: World map, blueprints, prose writing, read-only audit.',
                 )}
               </p>
@@ -189,11 +188,11 @@ export default function ProjectOverviewPage() {
               </Button>
               <Button variant="outline" size="sm" onClick={handleOpenWorldMap}>
                 <Compass size={13} />
-                {text('世界地图', 'World map')}
+                {text('多地图地图册', 'Map atlas')}
               </Button>
               <Button variant="outline" size="sm" onClick={handleOpenPlotTree}>
                 <GitBranch size={13} />
-                {text('剧情树', 'Plot tree')}
+                {text('章节脉络', 'Chapter thread')}
               </Button>
               <Button variant="outline" size="sm" onClick={handleOpenStoryTimeline}>
                 <Clock3 size={13} />
@@ -227,7 +226,7 @@ export default function ProjectOverviewPage() {
               </div>
             </div>
             <div>
-              <div className="text-xs text-[var(--color-text-muted)]">{text('世界地图节点', 'Map locations')}</div>
+              <div className="text-xs text-[var(--color-text-muted)]">{text('地图地点', 'Map locations')}</div>
               <div className="text-lg font-semibold mt-0.5 tabular-nums text-[var(--color-text)]">
                 {nodes.length} <span className="text-xs font-normal text-[var(--color-text-muted)]">{text('处地点', 'locations')}</span>
               </div>
@@ -237,11 +236,11 @@ export default function ProjectOverviewPage() {
 
         {/* 核心功能卡片网格 */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {/* 卡片 1: 世界地图 */}
+          {/* 卡片 1: 多地图地图册 */}
           <Card
             role="button"
             tabIndex={0}
-            aria-label={text('打开世界地图', 'Open world map')}
+            aria-label={text('打开地图册', 'Open map atlas')}
             onClick={handleOpenWorldMap}
             onKeyDown={(event) => activateCardOnKey(event, handleOpenWorldMap)}
             className="p-5 flex flex-col justify-between hover:border-[var(--color-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)] cursor-pointer group"
@@ -253,7 +252,7 @@ export default function ProjectOverviewPage() {
                     <Compass size={18} />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-sm text-[var(--color-text)]">{text('世界地图拓扑', 'World Map Topology')}</h3>
+                    <h3 className="font-semibold text-sm text-[var(--color-text)]">{text('地图册拓扑', 'Map atlas topology')}</h3>
                     <span className="text-[0.7rem] text-[var(--color-text-muted)]">
                       {text('可视化空间与势力网络', 'Spatial nodes and connections')}
                     </span>
@@ -265,32 +264,42 @@ export default function ProjectOverviewPage() {
               </div>
               <p className="text-xs leading-relaxed mb-3 text-[var(--color-text-secondary)]">
                 {text(
-                  '支持表世界/里世界等多图层切换，拖拽布局，节点连线与地理危险等级标注。正文写作时右侧自动联动所在地点规则。',
-                  'Multi-layer spatial topology with interactive pan/zoom canvas, edges, and danger levels.',
+                  '地图册由多张独立地图组成层级：每张地图有自己的图片、地点与内部连接，通过左侧地图册树和面包屑切换。正文写作时右侧自动联动所在地点规则。',
+                  'An atlas of independent maps: each map has its own image, locations, and internal connections, switched through the atlas tree and breadcrumb.',
                 )}
               </p>
               <div className="flex flex-wrap gap-1.5 mb-4">
                 <span className="text-[10px] px-2 py-0.5 rounded-full border border-[var(--color-border)] bg-[var(--color-hover)] text-[var(--color-text-muted)]">
-                  {text(`路线连接: ${edges.length} 条`, `Routes: ${edges.length}`)}
+                  {text(`地图: ${maps.length} 张`, `Maps: ${maps.length}`)}
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full border border-[var(--color-border)] bg-[var(--color-hover)] text-[var(--color-text-muted)]">
+                  {text(`地点连接: ${edges.length} 条`, `Locations links: ${edges.length}`)}
                 </span>
                 {specialNodes.length > 0 && (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full border border-amber-600/30 bg-amber-500/10 text-amber-700 dark:text-amber-400 font-medium">
-                    {text(`地下/异界/遗境: ${specialNodes.length} 处`, `Underground/Relics: ${specialNodes.length}`)}
+                  <span
+                    className="text-[10px] px-2 py-0.5 rounded-full border font-medium"
+                    style={{
+                      borderColor: 'color-mix(in srgb, var(--color-warning) 30%, transparent)',
+                      backgroundColor: 'color-mix(in srgb, var(--color-warning) 10%, transparent)',
+                      color: 'var(--color-warning-text)',
+                    }}
+                  >
+                    {text(`遗境/秘境: ${specialNodes.length} 处`, `Relics: ${specialNodes.length}`)}
                   </span>
                 )}
               </div>
             </div>
             <span className="writer-overview-card-action w-full justify-between">
-              <span>{text('进入世界地图画布', 'Open world map')}</span>
+              <span>{text('进入地图册画布', 'Open map atlas')}</span>
               <ArrowRight size={13} className="group-hover:translate-x-0.5 transition-transform" />
             </span>
           </Card>
 
-          {/* 卡片 2: 剧情树与伏笔 */}
+          {/* 卡片 2: 章节脉络（章节蓝图的确定性投影） */}
           <Card
             role="button"
             tabIndex={0}
-            aria-label={text('打开剧情树', 'Open plot tree')}
+            aria-label={text('打开章节脉络', 'Open chapter thread')}
             onClick={handleOpenPlotTree}
             onKeyDown={(event) => activateCardOnKey(event, handleOpenPlotTree)}
             className="p-5 flex flex-col justify-between hover:border-[var(--color-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)] cursor-pointer group"
@@ -302,7 +311,7 @@ export default function ProjectOverviewPage() {
                     <GitBranch size={18} />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-sm text-[var(--color-text)]">{text('剧情树与伏笔', 'Plot Tree & Narrative')}</h3>
+                    <h3 className="font-semibold text-sm text-[var(--color-text)]">{text('章节脉络', 'Chapter thread')}</h3>
                     <span className="text-[0.7rem] text-[var(--color-text-muted)]">
                       {text('算法确定性投影，零模型依赖', 'Algorithmic projection, no LLM')}
                     </span>
@@ -328,7 +337,7 @@ export default function ProjectOverviewPage() {
               </div>
             </div>
             <span className="writer-overview-card-action w-full justify-between">
-              <span>{text('查看剧情树脉络', 'Open plot tree')}</span>
+              <span>{text('查看章节脉络', 'Open chapter thread')}</span>
               <ArrowRight size={13} className="group-hover:translate-x-0.5 transition-transform" />
             </span>
           </Card>

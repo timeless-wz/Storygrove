@@ -18,8 +18,8 @@ import { IconTooltip } from '../ui/Tooltip'
 const sidebarActivities: Array<{ id: SidebarView; icon: typeof FolderOpen; zh: string; en: string }> = [
   { id: 'project', icon: FolderOpen, zh: '创作', en: 'Writing' },
   { id: 'workspace', icon: Compass, zh: '资料', en: 'Sources' },
-  { id: 'knowledge', icon: BookOpen, zh: '知识库', en: 'Knowledge' },
-  { id: 'characters', icon: Users, zh: '角色', en: 'Characters' },
+  { id: 'knowledge', icon: BookOpen, zh: '知识检索', en: 'Knowledge' },
+  { id: 'characters', icon: Users, zh: '角色档案', en: 'Characters' },
 ]
 
 /** 底部面板 Tab 按钮配置 */

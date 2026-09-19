@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Save, BookOpen, RefreshCw, Plus, Trash2,
-  PenLine, AlertTriangle, MapPin
+  PenLine, AlertTriangle, MapPin, ChevronDown, ChevronRight, FolderPlus
 } from 'lucide-react'
 import { useProjectStore } from '../../stores/project-store'
 import { useWorkflowStore } from '../../stores/workflow-store'
 import { useDraftStore, readDraftBody } from '../../stores/draft-store'
 import { useWorldMapStore } from '../../stores/world-map-store'
-import { WORLD_MAP_NODE_TYPE_LABELS } from '../../shared/world-map'
+import { WORLD_MAP_NODE_TYPE_LABELS, getWorldMapName } from '../../shared/world-map'
 import { ipc } from '../../services/ipc-client'
 import { clearProjectData } from '../../services/project-clear-service'
 import type { ProjectSessionContext } from '../../shared/ipc-channels'
@@ -22,6 +22,7 @@ import {
   saveAllBlueprints,
   type ChapterBlueprint,
 } from '../../services/workflows/directory-workflow'
+import type { BlueprintVolumeData } from '../../../electron/repositories/blueprint-repository'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
 import { Textarea } from '../ui/Textarea'
@@ -56,6 +57,15 @@ import {
 } from '../../services/authoritative-chapter-sequence'
 
 const ROLES = ['建置', '铺垫', '发展', '冲突', '高潮', '转折', '收尾']
+const DEFAULT_VOLUME_ID = 'volume-1'
+
+function blueprintVolumeId(blueprint: ChapterBlueprint): string {
+  return blueprint.volumeId?.trim() || DEFAULT_VOLUME_ID
+}
+
+function createBlueprintVolumeId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `volume-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
 
 const ROLE_COLORS: Record<string, string> = {
   高潮: 'bg-red-500/20 text-[var(--color-error-text)]',
@@ -100,9 +110,13 @@ export default function ChapterCardEditor({
   const currentProject = useProjectStore(s => s.currentProject)
   const draftsByChapter = useDraftStore(s => s.draftsByChapter)
   const worldMapNodes = useWorldMapStore(s => s.nodes)
+  const worldMaps = useWorldMapStore(s => s.maps)
   // ✅ action 用 getState() 获取，不订阅 workflow store 高频更新
   const addLog = useWorkflowStore.getState().addLog
   const [blueprints, setBlueprints] = useState<ChapterBlueprint[]>([])
+  const [volumes, setVolumes] = useState<BlueprintVolumeData[]>([])
+  const [selectedVolumeId, setSelectedVolumeId] = useState(DEFAULT_VOLUME_ID)
+  const [collapsedVolumeIds, setCollapsedVolumeIds] = useState<Set<string>>(() => new Set())
   const [selectedIdx, setSelectedIdx] = useState<number>(0)
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -227,6 +241,8 @@ export default function ChapterCardEditor({
       setAuthorityError(null)
       setLegacyImportedTextRecoveryChapter(null)
       setSaving(false)
+      setVolumes([])
+      setSelectedVolumeId(DEFAULT_VOLUME_ID)
       applyVisibleDraftState([], new Set())
       setLoading(false)
       return
@@ -245,10 +261,13 @@ export default function ChapterCardEditor({
       setAuthorityError(null)
       setLegacyImportedTextRecoveryChapter(null)
       setSaving(false)
+      setVolumes([])
+      setSelectedVolumeId(DEFAULT_VOLUME_ID)
       applyVisibleDraftState([], new Set())
     }
     try {
-      const restored = await refreshChapterCardDraftFromRemote({
+      const [restored, loadedVolumes] = await Promise.all([
+        refreshChapterCardDraftFromRemote({
         projectKey,
         loadRemote: () => loadDirectoryBlueprints(projectKey, projectSession),
         readLedger: readDraftLedgerFromFixedTab,
@@ -267,10 +286,20 @@ export default function ChapterCardEditor({
             applyVisibleDraftState(state.blueprints, state.dirtyChapterNumbers)
           }
         },
-      })
+        }),
+        ipc.invokeWithProjectSession(projectSession, 'db:blueprint-volume-list', projectKey),
+      ])
       // 项目可能在远端读取期间切换；旧项目结果不会进入 commit。
       if (!restored || !isLatestProjectRequest()) return
       const data = restored.blueprints
+      const remoteVolumes = Array.isArray(loadedVolumes) && loadedVolumes.length > 0
+        ? loadedVolumes
+        : [{ id: DEFAULT_VOLUME_ID, name: text('第1卷', 'Volume 1'), sortOrder: 1 }]
+      setVolumes(remoteVolumes)
+      setSelectedVolumeId(current => {
+        if (remoteVolumes.some(volume => volume.id === current)) return current
+        return data[0] ? blueprintVolumeId(data[0]) : (remoteVolumes[0]?.id ?? DEFAULT_VOLUME_ID)
+      })
       if (data.length > 0) setSelectedIdx(0)
       try {
         const nextChapter = await readAuthoritativeNextChapter(projectSession, locale)
@@ -455,6 +484,10 @@ export default function ChapterCardEditor({
       || !projectSession
       || !sameProjectSessionContext(dataProjectSessionRef.current, projectSession)
     ) return
+    if (!volumes.some(volume => volume.id === selectedVolumeId)) {
+      toast.warning(text('请先在左侧目录中新建或选择一个卷。', 'Create or select a volume in the outline first.'))
+      return
+    }
     if (nextWriteChapter === null) {
       toast.warning(authorityError || text(
         '当前无法确定权威下一章，请先修复定稿章节。',
@@ -471,6 +504,7 @@ export default function ChapterCardEditor({
       : nextWriteChapter
     const newBlueprint: ChapterBlueprint = {
       chapterNumber,
+      volumeId: selectedVolumeId,
       title: '',
       role: '发展',
       purpose: '',
@@ -489,6 +523,40 @@ export default function ChapterCardEditor({
         `The Chapter ${nextWriteChapter} blueprint already exists. Added Chapter ${chapterNumber}; the writing entry remains Chapter ${nextWriteChapter}.`,
       ))
     }
+  }
+
+  /** 新增一个项目级卷目录，并立即把后续新章归入该卷。 */
+  const handleAddVolume = async () => {
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (
+      !projectMatches
+      || !projectSession
+      || !sameProjectSessionContext(dataProjectSessionRef.current, projectSession)
+    ) return
+    const nextVolume: BlueprintVolumeData = {
+      id: createBlueprintVolumeId(),
+      name: text(`第${volumes.length + 1}卷`, `Volume ${volumes.length + 1}`),
+      sortOrder: volumes.length + 1,
+    }
+    const result = await ipc.invokeWithProjectSession(
+      projectSession,
+      'db:blueprint-volume-upsert',
+      nextVolume,
+      projectKey,
+    )
+    if (!isCurrentProjectSession(projectSession)) return
+    if (!result.success) {
+      toast.error(text(`新增卷失败\n\n${result.error ?? '未知错误'}`, `Could not create volume.\n\n${result.error ?? 'Unknown error'}`))
+      return
+    }
+    setVolumes(current => [...current, nextVolume])
+    setSelectedVolumeId(nextVolume.id)
+    setCollapsedVolumeIds(current => {
+      const next = new Set(current)
+      next.delete(nextVolume.id)
+      return next
+    })
+    toast.success(text(`已新增${nextVolume.name}`, `Created ${nextVolume.name}`))
   }
 
   /** 删除选中章节 */
@@ -769,9 +837,6 @@ export default function ChapterCardEditor({
           <Button variant="ghost" size="icon" onClick={() => loadBlueprints()} title={text('重新加载', 'Reload')} disabled={loading}>
             <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
           </Button>
-          <Button variant="ghost" size="icon" onClick={handleAddChapter} disabled={!projectDataReady || nextWriteChapter === null || Boolean(authorityError)} title={text('新建章节', 'New chapter')}>
-            <Plus size={14} />
-          </Button>
           <Button
             variant="destructive"
             size="sm"
@@ -837,85 +902,119 @@ export default function ChapterCardEditor({
 
       {/* 主区域：左侧列表 + 右侧编辑 */}
       <div className="flex-1 flex overflow-hidden">
-        {/* 左侧章节列表 */}
+        {/* 左侧卷 / 章节目录 */}
         <div
-          className="flex flex-col flex-shrink-0 w-[200px] border-r overflow-hidden"
+          className="flex flex-col flex-shrink-0 w-[232px] border-r overflow-hidden"
           style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-sidebar)' }}
         >
-          {visibleBlueprints.length === 0 ? (
+          <div className="flex items-center justify-between gap-2 border-b px-2.5 py-2" style={{ borderColor: 'var(--color-border)' }}>
+            <span className="text-xs font-semibold" style={{ color: 'var(--color-text)' }}>{text('卷与章节', 'Volumes & chapters')}</span>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => void handleAddVolume()}
+                disabled={!projectDataReady}
+                title={text('新增卷', 'Add volume')}
+                aria-label={text('新增卷', 'Add volume')}
+              >
+                <FolderPlus size={14} />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={handleAddChapter}
+                disabled={!projectDataReady || nextWriteChapter === null || Boolean(authorityError)}
+                title={text('在当前卷新增章节', 'Add chapter to current volume')}
+                aria-label={text('在当前卷新增章节', 'Add chapter to current volume')}
+              >
+                <Plus size={14} />
+              </Button>
+            </div>
+          </div>
+          {volumes.length === 0 ? (
             <div className="flex flex-col items-center justify-center flex-1 gap-3 opacity-40 p-4">
               <BookOpen size={28} />
               <span className="text-xs text-center">{text(
-                '暂无蓝图，可点击右上角「+」手动新建，或用「AI 生成蓝图」批量创建。',
-                'No blueprints yet. Use “+” to add one manually, or “AI generate blueprints” to create a batch.',
+                '暂无章节。可先新增卷，再用上方「+」在该卷中添加章节；也可用「AI 生成蓝图」批量创建。',
+                'No chapters yet. Add a volume, then use “+” above to add chapters to it, or generate a batch with AI.',
               )}</span>
             </div>
           ) : (
-          <div className="flex-1 overflow-y-auto p-1">
-            {visibleBlueprints.map((bp, idx) => (
-              <div
-                key={bp.chapterNumber}
-                className={cn(
-                  'group relative px-2.5 py-2 rounded-md text-xs cursor-pointer mb-0.5 transition-colors',
-                  selectedIdx === idx
-                    ? 'bg-[var(--color-active)] text-[var(--color-text)]'
-                    : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]'
-                )}
-                onClick={() => setSelectedIdx(idx)}
-                onDoubleClick={() => void handleOpenOrNewDraft(bp)}
-                title={text('单击查看/编辑蓝图，双击打开正文', 'Click to view/edit blueprint, double click to open draft')}
-              >
-                <div className="flex items-center gap-1.5">
-                  <span className="font-mono text-[0.7rem] opacity-40 flex-shrink-0">
-                    {bp.chapterNumber}
-                  </span>
-                  <span className="font-medium truncate flex-1">{bp.title || text('未命名', 'Untitled')}</span>
-                </div>
-                <div className="flex items-center gap-1 mt-0.5 flex-wrap">
-                  <span className={cn(
-                    'text-[0.7rem] px-1 py-0.5 rounded',
-                    ROLE_COLORS[bp.role] || 'bg-[var(--color-hover)] text-[var(--color-text-muted)]'
-                  )}>
-                    {roleLabel(bp.role)}
-                  </span>
-                  {(draftsByChapter[bp.chapterNumber]?.length ?? 0) > 0 ? (
-                    <span
-                      className="text-[0.7rem] px-1 py-0.5 rounded font-mono"
-                      style={{ backgroundColor: 'rgba(34,197,94,0.15)', color: 'rgb(34,197,94)' }}
-                      title={text('已有正文草稿', 'Draft exists')}
-                    >
-                      {text('有正文', 'Draft')}
-                    </span>
-                  ) : (
-                    <span
-                      className="text-[0.7rem] px-1 py-0.5 rounded font-mono opacity-40"
-                      style={{ backgroundColor: 'var(--color-hover)', color: 'var(--color-text-muted)' }}
-                    >
-                      {text('待写作', 'No draft')}
-                    </span>
-                  )}
-                  {bp.userGuidance && (
-                    <span
-                      className="text-[0.7rem] px-1 py-0.5 rounded"
-                      style={{ backgroundColor: 'rgba(var(--accent-rgb), 0.15)', color: 'var(--color-accent)' }}
-                      title={text('已有作者微操指导', 'Author guidance is available')}
-                    >
-                      {text('有指导', 'Guidance')}
-                    </span>
-                  )}
-                  {bp.notes && (
-                    <span
-                      className="text-[0.7rem] px-1 py-0.5 rounded"
-                      style={{ backgroundColor: 'rgba(34,197,94,0.15)', color: 'rgb(34,197,94)' }}
-                      title={text('已生成章节要点', 'Chapter notes are available')}
-                    >
-                      {text('有要点', 'Notes')}
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
+           <div className="flex-1 overflow-y-auto p-1">
+             {volumes.map(volume => {
+               const volumeBlueprints = visibleBlueprints
+                 .map((blueprint, index) => ({ blueprint, index }))
+                 .filter(({ blueprint }) => blueprintVolumeId(blueprint) === volume.id)
+               const collapsed = collapsedVolumeIds.has(volume.id)
+               return (
+                 <div key={volume.id} className="mb-1">
+                   <button
+                     type="button"
+                     className={cn(
+                       'flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors',
+                       selectedVolumeId === volume.id
+                         ? 'bg-[var(--color-hover)] text-[var(--color-text)]'
+                         : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]',
+                     )}
+                     onClick={() => {
+                       setSelectedVolumeId(volume.id)
+                       setCollapsedVolumeIds(current => {
+                         const next = new Set(current)
+                         if (next.has(volume.id)) next.delete(volume.id)
+                         else next.add(volume.id)
+                         return next
+                       })
+                     }}
+                     title={text('展开或收起本卷章节', 'Expand or collapse this volume')}
+                   >
+                     {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+                     <BookOpen size={13} className="opacity-70" />
+                     <span className="flex-1 truncate font-semibold">{volume.name}</span>
+                     <span className="text-[10px] opacity-50">{volumeBlueprints.length}</span>
+                   </button>
+                   {!collapsed && (
+                     <div className="ml-2 border-l pl-1" style={{ borderColor: 'var(--color-border)' }}>
+                       {volumeBlueprints.length === 0 ? (
+                         <p className="px-2 py-1.5 text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+                           {text('暂无章节', 'No chapters')}
+                         </p>
+                       ) : volumeBlueprints.map(({ blueprint: bp, index: idx }) => (
+                         <div
+                           key={bp.chapterNumber}
+                           className={cn(
+                             'group relative px-2 py-1.5 rounded-md text-xs cursor-pointer mb-0.5 transition-colors',
+                             selectedIdx === idx
+                               ? 'bg-[var(--color-active)] text-[var(--color-text)]'
+                               : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]',
+                           )}
+                           onClick={() => { setSelectedIdx(idx); setSelectedVolumeId(volume.id) }}
+                           onDoubleClick={() => void handleOpenOrNewDraft(bp)}
+                           title={text('单击查看/编辑蓝图，双击打开正文', 'Click to view/edit blueprint, double click to open draft')}
+                         >
+                           <div className="flex items-center gap-1.5">
+                             <span className="font-mono text-[0.7rem] opacity-40 flex-shrink-0">{bp.chapterNumber}</span>
+                             <span className="font-medium truncate flex-1">{bp.title || text('未命名', 'Untitled')}</span>
+                           </div>
+                           <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                             <span className={cn('text-[0.7rem] px-1 py-0.5 rounded', ROLE_COLORS[bp.role] || 'bg-[var(--color-hover)] text-[var(--color-text-muted)]')}>
+                               {roleLabel(bp.role)}
+                             </span>
+                             <span className="text-[0.7rem] px-1 py-0.5 rounded font-mono opacity-60" style={{ backgroundColor: 'var(--color-hover)', color: 'var(--color-text-muted)' }}>
+                               {(draftsByChapter[bp.chapterNumber]?.length ?? 0) > 0 ? text('有正文', 'Draft') : text('待写作', 'No draft')}
+                             </span>
+                             {bp.userGuidance && <span className="text-[0.7rem] px-1 py-0.5 rounded" style={{ backgroundColor: 'rgba(var(--accent-rgb), 0.15)', color: 'var(--color-accent)' }}>{text('有指导', 'Guidance')}</span>}
+                           </div>
+                         </div>
+                       ))}
+                     </div>
+                   )}
+                 </div>
+               )
+             })}
+           </div>
           )}
         </div>
 
@@ -981,6 +1080,19 @@ export default function ChapterCardEditor({
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label>{text('所属卷', 'Volume')}</Label>
+                    <NativeSelect
+                      value={blueprintVolumeId(selected)}
+                      onChange={event => {
+                        const volumeId = event.target.value
+                        updateField('volumeId', volumeId)
+                        setSelectedVolumeId(volumeId)
+                      }}
+                    >
+                      {volumes.map(volume => <option key={volume.id} value={volume.id}>{volume.name}</option>)}
+                    </NativeSelect>
+                  </div>
                   <div>
                     <Label>{text('章节定位', 'Chapter role')}</Label>
                     <NativeSelect value={selected.role} onChange={e => updateField('role', e.target.value)}>
@@ -1111,13 +1223,13 @@ export default function ChapterCardEditor({
                       onClick={() => {
                         useEditorStore.getState().openFile({
                           id: 'world-map',
-                          name: text('世界地图', 'World map'),
+                          name: text('多地图地图册', 'Map atlas'),
                           type: 'world-map',
                           projectKey,
                         })
                       }}
                     >
-                      {text('在世界地图中查看', 'View in world map')}
+                      {text('在地图册中查看', 'View in map atlas')}
                     </Button>
                   </div>
                   {(() => {
@@ -1152,7 +1264,7 @@ export default function ChapterCardEditor({
                               {WORLD_MAP_NODE_TYPE_LABELS[node.type]?.[locale === 'zh-CN' ? 'zh' : 'en'] || node.type}
                             </span>
                             <span className="text-[0.7rem]" style={{ color: 'var(--color-text-muted)' }}>
-                              {node.mapLayer}
+                              {getWorldMapName(worldMaps, node.mapId)}
                             </span>
                             {node.description && (
                               <span className="text-[0.7rem] truncate max-w-[200px]" style={{ color: 'var(--color-text-muted)' }}>

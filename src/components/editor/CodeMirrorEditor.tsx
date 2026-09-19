@@ -27,6 +27,13 @@ export type CodeMirrorEditorProps = {
   placeholder?: string
   hideStatusBar?: boolean
   mode?: 'document' | 'prose'
+  /**
+   * 外部请求跳到某一行（0 基）。只在 requestId 变化时执行一次，
+   * 因此目录点击、章节跳转都不会在每次渲染时抢占光标。
+   */
+  jumpTarget?: { line: number; requestId: number } | null
+  /** 外部请求在光标处插入文本（例如插入图片引用）；同样只在 requestId 变化时执行一次。 */
+  insertRequest?: { text: string; requestId: number } | null
 }
 
 type EditorAIAction = {
@@ -59,6 +66,8 @@ export default function CodeMirrorEditor({
   onCharCountChange,
   placeholder,
   mode = 'document',
+  jumpTarget,
+  insertRequest,
 }: CodeMirrorEditorProps) {
   const uiText = useLocaleStore(s => s.text)
   const uiLocale = useLocaleStore(s => s.locale)
@@ -84,6 +93,42 @@ export default function CodeMirrorEditor({
       onCharCountChange?.(countDraftUnits(content))
     }
   }, [content, onCharCountChange])
+
+  // 外部目录跳转：只在 requestId 变化时执行一次。
+  const lastJumpRequestRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (!jumpTarget) return
+    if (lastJumpRequestRef.current === jumpTarget.requestId) return
+    const view = editorRef.current?.view
+    if (!view) return
+    lastJumpRequestRef.current = jumpTarget.requestId
+    const lineNumber = Math.min(
+      Math.max(1, Math.floor(jumpTarget.line) + 1),
+      view.state.doc.lines,
+    )
+    const position = view.state.doc.line(lineNumber).from
+    view.dispatch({
+      selection: { anchor: position },
+      effects: EditorView.scrollIntoView(position, { y: 'center' }),
+    })
+    view.focus()
+  }, [jumpTarget])
+
+  // 外部插入：只在 requestId 变化时执行一次，插入后把光标停在插入内容之后。
+  const lastInsertRequestRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (!insertRequest) return
+    if (lastInsertRequestRef.current === insertRequest.requestId) return
+    const view = editorRef.current?.view
+    if (!view || view.state.readOnly) return
+    lastInsertRequestRef.current = insertRequest.requestId
+    const position = view.state.selection.main.head
+    view.dispatch({
+      changes: { from: position, insert: insertRequest.text },
+      selection: { anchor: position + insertRequest.text.length },
+    })
+    view.focus()
+  }, [insertRequest])
 
   // ===== Bubble Menu 逻辑 =====
   const [bubbleOpen, setBubbleOpen] = useState(false)

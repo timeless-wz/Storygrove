@@ -6,6 +6,7 @@ import type {
 import type { DraftStatus } from '../../../shared/draft-status'
 import { ipc } from '../../../services/ipc-client'
 import { useEditorStore } from '../../../stores/editor-store'
+import { useLayoutStore } from '../../../stores/layout-store'
 import { useProjectStore } from '../../../stores/project-store'
 import { useLocaleStore } from '../../../stores/locale-store'
 import { toast } from '../../ui/Toast'
@@ -17,6 +18,7 @@ import {
   createProjectArchTabId,
   shouldSyncProjectArchTab,
 } from '../../editor/arch-file-refresh-policy'
+import { readProjectDocument } from '../../../services/project-documents-service'
 
 type SessionProject = Pick<ProjectData, 'id' | 'path' | 'sessionLease'>
 
@@ -45,8 +47,27 @@ function reportFileReadFailure(error: string | undefined): void {
   ))
 }
 
+/**
+ * 角色图谱不再是独立入口。
+ *
+ * 旧标签页、旧路由或旧项目若仍指向 `characters.md` / `vela://core/characters`，
+ * 统一改道到「角色档案 → 关系图谱」视图：内容仍然来自同一份只读投影，
+ * 既不会报错也不会丢失。
+ */
+function isLegacyCharacterGraphPath(filePath: string): boolean {
+  return filePath === 'vela://core/characters' || /(^|[/\\])characters\.md$/i.test(filePath)
+}
+
+function redirectToCharacterProfileGraph(): void {
+  useLayoutStore.getState().openCharacterProfile('graph')
+}
+
 /** 打开架构文件（带 AI 生成工具栏；若 tab 已存在则刷新内容） */
 export async function openArchFile(filePath: string, name: string): Promise<void> {
+  if (isLegacyCharacterGraphPath(filePath)) {
+    redirectToCharacterProfileGraph()
+    return
+  }
   const projectSession = captureProjectSession(useProjectStore.getState().currentProject)
   if (!projectSession) return
   const projectKey = projectSession.projectPath
@@ -116,6 +137,32 @@ export function openBuiltinEditor(
       : {}),
     ...(type === 'chapter-card' && chapterNumber !== undefined ? { chapterNumber } : {}),
     ...(projectKey ? { projectKey } : {}),
+  })
+}
+
+/**
+ * 打开一份项目自由 Markdown 文档。
+ *
+ * 同一项目同一路径复用同一个标签页；读取失败时提示而不是创建空标签页。
+ */
+export async function openProjectDocument(documentPath: string): Promise<void> {
+  const projectSession = captureProjectSession(useProjectStore.getState().currentProject)
+  if (!projectSession) return
+  const projectKey = projectSession.projectPath
+  const result = await readProjectDocument(projectSession, documentPath)
+  if (!isProjectSessionCurrent(projectSession)) return
+  if (!result.success) {
+    reportFileReadFailure(result.error)
+    return
+  }
+  useEditorStore.getState().openFile({
+    id: `project-document:${projectKey}:${documentPath}`,
+    name: documentPath.split('/').pop() ?? documentPath,
+    type: 'project-document',
+    filePath: documentPath,
+    content: result.content,
+    savedContent: result.content,
+    projectKey,
   })
 }
 

@@ -203,6 +203,9 @@ describe('release dependency contract', () => {
       PATH: process.env.PATH,
       SystemRoot: process.env.SystemRoot,
       npm_lifecycle_event: 'build:win:artifacts',
+      // Electron-as-Node is used for the Windows-native test runtime. Keep
+      // that host in Node mode for this isolated script-process assertion.
+      ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
     } as unknown as NodeJS.ProcessEnv
     const bypass = spawnSync(process.execPath, ['scripts/require-release-gate.mjs'], {
       cwd: process.cwd(),

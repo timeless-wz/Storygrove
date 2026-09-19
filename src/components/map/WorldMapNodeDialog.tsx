@@ -9,15 +9,16 @@ import { useLocaleStore } from '../../stores/locale-store'
 import {
   type WorldMapNode,
   type WorldMapNodeType,
-  type WorldMapLayer,
   WORLD_MAP_NODE_TYPE_LABELS,
 } from '../../shared/world-map'
 
 interface Props {
   open: boolean
   node: WorldMapNode | null
+  /** 只包含当前地图内部的地点：父地点选择绝不能跨地图。 */
   existingNodes: WorldMapNode[]
-  layers: WorldMapLayer[]
+  mapId: string
+  mapName: string
   onClose: () => void
   onSave: (node: WorldMapNode) => Promise<boolean>
 }
@@ -26,7 +27,8 @@ export default function WorldMapNodeDialog({
   open,
   node,
   existingNodes,
-  layers,
+  mapId,
+  mapName,
   onClose,
   onSave,
 }: Props) {
@@ -35,7 +37,6 @@ export default function WorldMapNodeDialog({
 
   const [name, setName] = useState('')
   const [type, setType] = useState<WorldMapNodeType>('city')
-  const [mapLayer, setMapLayer] = useState('')
   const [parentId, setParentId] = useState<string>('')
   const [description, setDescription] = useState('')
   const [x, setX] = useState(250)
@@ -48,7 +49,6 @@ export default function WorldMapNodeDialog({
       if (node) {
         setName(node.name)
         setType(node.type)
-        setMapLayer(node.mapLayer || layers[0]?.id || '')
         setParentId(node.parentId || '')
         setDescription(node.description || '')
         setX(node.x ?? 250)
@@ -57,7 +57,6 @@ export default function WorldMapNodeDialog({
       } else {
         setName('')
         setType('city')
-        setMapLayer(layers[0]?.id || '')
         setParentId('')
         setDescription('')
         setX(250 + Math.floor(Math.random() * 80))
@@ -65,7 +64,7 @@ export default function WorldMapNodeDialog({
         setSourceRef('')
       }
     })
-  }, [node, open, layers])
+  }, [node, open])
 
   const handleSave = async () => {
     if (!name.trim()) return
@@ -80,7 +79,8 @@ export default function WorldMapNodeDialog({
       id: node?.id || `node-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       name: name.trim(),
       type,
-      mapLayer,
+      // 归属地图不可编辑：一个地点必须且只能绑定一张地图。
+      mapId,
       parentId: parentId || null,
       description: description.trim(),
       x,
@@ -106,14 +106,21 @@ export default function WorldMapNodeDialog({
         <DialogHeader>
           <DialogTitle>
             {isEditing
-              ? text(`编辑节点：${node?.name}`, `Edit Node: ${node?.name}`)
-              : text('新建地图节点', 'New Map Node')}
+              ? text(`编辑地点：${node?.name}`, `Edit location: ${node?.name}`)
+              : text('新建地图地点', 'New map location')}
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-3 py-2 text-xs">
+          <p className="text-[var(--color-text-muted)]">
+            {text(
+              `这个地点属于「${mapName}」，只会在该地图上出现。父地点与本地图内的连接都限制在同一张地图。`,
+              `This location belongs to “${mapName}” and only appears on that map. Parent locations and connections are limited to this map.`,
+            )}
+          </p>
+
           <div>
-            <Label>{text('节点名称 *', 'Node Name *')}</Label>
+            <Label>{text('地点名称 *', 'Location name *')}</Label>
             <Input
               value={name}
               onChange={e => setName(e.target.value)}
@@ -124,7 +131,7 @@ export default function WorldMapNodeDialog({
 
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <Label>{text('节点类型', 'Type')}</Label>
+              <Label>{text('地点类型', 'Type')}</Label>
               <NativeSelect
                 value={type}
                 onChange={e => setType(e.target.value as WorldMapNodeType)}
@@ -138,27 +145,18 @@ export default function WorldMapNodeDialog({
             </div>
 
             <div>
-              <Label>{text('所属位面/层级', 'Layer')}</Label>
-              <NativeSelect
-                value={mapLayer}
-                onChange={e => setMapLayer(e.target.value)}
-              >
-                {layers.map(l => (
-                  <option key={l.id} value={l.id}>
-                    {l.name}
-                  </option>
-                ))}
-              </NativeSelect>
+              <Label>{text('所属地图', 'Map')}</Label>
+              <Input value={mapName} readOnly disabled />
             </div>
           </div>
 
           <div>
-            <Label>{text('父级区域/上级节点（可选）', 'Parent Node (optional)')}</Label>
+            <Label>{text('父级地点（可选，仅限本地图）', 'Parent location (optional, this map only)')}</Label>
             <NativeSelect
               value={parentId}
               onChange={e => setParentId(e.target.value)}
             >
-              <option value="">{text('（无父级 / 根节点）', '(None / Root Node)')}</option>
+              <option value="">{text('（无父级 / 顶层地点）', '(None / Top-level)')}</option>
               {potentialParents.map(p => (
                 <option key={p.id} value={p.id}>
                   {p.name} ({text(WORLD_MAP_NODE_TYPE_LABELS[p.type]?.zh || p.type, p.type)})
@@ -178,7 +176,7 @@ export default function WorldMapNodeDialog({
           </div>
 
           <div>
-            <Label>{text('关联资料 / 来源出处（逗号分隔）', 'Source References')}</Label>
+            <Label>{text('关联资料 / 来源出处（逗号分隔）', 'Source references')}</Label>
             <Input
               value={sourceRef}
               onChange={e => setSourceRef(e.target.value)}
@@ -192,7 +190,7 @@ export default function WorldMapNodeDialog({
             {text('取消', 'Cancel')}
           </Button>
           <Button onClick={handleSave} disabled={saving || !name.trim()}>
-            {saving ? text('保存中...', 'Saving...') : text('保存节点', 'Save Node')}
+            {saving ? text('保存中...', 'Saving...') : text('保存地点', 'Save location')}
           </Button>
         </DialogFooter>
       </DialogContent>

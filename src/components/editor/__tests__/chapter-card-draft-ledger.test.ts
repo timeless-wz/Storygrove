@@ -310,19 +310,16 @@ describe('chapter-card draft ledger', () => {
     )
   })
 
-  it('only exposes writing actions for an actual next blueprint instead of rendering a no-op button', () => {
+  it('lets the author open or create a prose draft for every visible blueprint', () => {
     const source = normalizeSourceEol(
       readFileSync('src/components/editor/ChapterCardEditor.tsx', 'utf8'),
     )
 
-    expect(source).toContain(
-      'const nextWritableBlueprint = nextWriteChapter === null\n    ? null\n    : visibleBlueprints.find(blueprint => blueprint.chapterNumber === nextWriteChapter)',
-    )
-    expect(source).toContain('{projectDataReady && nextWritableBlueprint && (')
-    expect(source).toContain('onClick={() => handleWriteChapter(nextWritableBlueprint)}')
-    expect(source).not.toContain(
-      "const bp = visibleBlueprints.find(b => b.chapterNumber === nextWriteChapter)\n                if (bp) handleWriteChapter(bp)",
-    )
+    expect(source).toContain('const handleOpenOrNewDraft = async (bp: ChapterBlueprint) => {')
+    expect(source).toContain('onDoubleClick={() => void handleOpenOrNewDraft(bp)}')
+    expect(source).toContain('onClick={() => handleOpenOrNewDraft(selected)}')
+    expect(source).toContain("text('新建正文草稿', 'New draft')")
+    expect(source).not.toContain('nextWritableBlueprint')
   })
 
   it('offers a confirmed recovery path when legacy imported text creates a writing gap', () => {

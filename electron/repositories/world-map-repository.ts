@@ -1,12 +1,16 @@
 import { getProjectDb } from '../database'
-import type {
-  WorldMapNode,
-  WorldMapEdge,
-  WorldMapCandidate,
-  WorldMapLayer,
-  WorldMapNodeType,
-  WorldMapEdgeType,
-  WorldMapEdgeStatus,
+import {
+  isSafeWorldMapId,
+  type WorldMap,
+  type WorldMapAtlas,
+  type WorldMapCandidate,
+  type WorldMapEdge,
+  type WorldMapEdgeStatus,
+  type WorldMapEdgeType,
+  type WorldMapImage,
+  type WorldMapMigrationReport,
+  type WorldMapNode,
+  type WorldMapNodeType,
 } from '../../src/shared/world-map'
 
 function requireDb(): NonNullable<ReturnType<typeof getProjectDb>> {
@@ -15,56 +19,131 @@ function requireDb(): NonNullable<ReturnType<typeof getProjectDb>> {
   return db
 }
 
-const LEGACY_LAYER_SEEDS: Array<Pick<WorldMapLayer, 'id' | 'name' | 'sortOrder'>> = [
-  { id: 'surface', name: '主世界', sortOrder: 1 },
-  { id: 'underground', name: '里世界', sortOrder: 2 },
-  { id: 'astral', name: '星界', sortOrder: 3 },
-]
+const MIGRATION_ID = 'world-map-atlas-v1'
 
-function ensureProjectLayers(db: NonNullable<ReturnType<typeof getProjectDb>>): WorldMapLayer[] {
-  const now = new Date().toISOString()
-  const count = (db.prepare('SELECT COUNT(*) AS count FROM world_map_layers').get() as { count: number }).count
-  if (count === 0) {
-    const insert = db.prepare(`
-      INSERT INTO world_map_layers (id, name, sort_order, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?)
-    `)
-    const seed = db.transaction(() => {
-      for (const layer of LEGACY_LAYER_SEEDS) insert.run(layer.id, layer.name, layer.sortOrder, now, now)
-    })
-    seed()
+/** 删除一张地图时必须显式选择对子地图的处理方式，禁止静默级联。 */
+export type WorldMapDeleteStrategy = 'promote-children' | 'cascade'
+
+export interface WorldMapDeletePlan {
+  /** 本次真正被删除的地图（cascade 含整棵子树）。 */
+  mapIds: string[]
+  /** 直接子地图；promote 策略下它们会改挂到被删地图的父地图。 */
+  childMapIds: string[]
+  nodeCount: number
+  edgeCount: number
+  /** 需要随之清理的项目托管图片副本。 */
+  images: Array<{ mapId: string; fileName: string }>
+}
+
+interface MapRow {
+  id: string
+  name: string
+  parent_map_id: string | null
+  sort_order: number
+  image_file_name: string | null
+  image_mime_type: string | null
+  image_bytes: number | null
+  created_at: string
+  updated_at: string
+}
+
+interface NodeRow {
+  id: string
+  name: string
+  type: string
+  description: string
+  parent_id: string | null
+  map_id: string
+  x: number
+  y: number
+  source_refs: string
+  created_at: string
+  updated_at: string
+}
+
+function toMap(row: MapRow): WorldMap {
+  const image: WorldMapImage | null = row.image_file_name && row.image_mime_type && row.image_bytes
+    ? {
+        fileName: row.image_file_name,
+        mimeType: row.image_mime_type,
+        bytes: row.image_bytes,
+        updatedAt: row.updated_at,
+      }
+    : null
+  return {
+    id: row.id,
+    name: row.name,
+    parentMapId: row.parent_map_id,
+    sortOrder: row.sort_order,
+    image,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   }
+}
 
-  // A project created by an older version can have arbitrary legacy strings in map_layer.
-  // Keep every existing location visible by materializing such values as editable layers.
-  const knownIds = new Set((db.prepare('SELECT id FROM world_map_layers').all() as Array<{ id: string }>).map(row => row.id))
-  const legacyIds = db.prepare(`
-    SELECT DISTINCT map_layer AS id FROM world_map_nodes
-    WHERE map_layer IS NOT NULL AND TRIM(map_layer) <> ''
-  `).all() as Array<{ id: string }>
-  let nextOrder = (db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS value FROM world_map_layers').get() as { value: number }).value
-  const insertLegacy = db.prepare(`
-    INSERT OR IGNORE INTO world_map_layers (id, name, sort_order, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?)
-  `)
-  for (const layer of legacyIds) {
-    if (knownIds.has(layer.id)) continue
-    nextOrder += 1
-    insertLegacy.run(layer.id, layer.id, nextOrder, now, now)
-  }
-
-  return (db.prepare(`
-    SELECT id, name, sort_order, created_at, updated_at
-    FROM world_map_layers
+function listMaps(db: NonNullable<ReturnType<typeof getProjectDb>>): WorldMap[] {
+  const rows = db.prepare(`
+    SELECT id, name, parent_map_id, sort_order, image_file_name, image_mime_type, image_bytes, created_at, updated_at
+    FROM world_maps
     ORDER BY sort_order ASC, created_at ASC
-  `).all() as Array<{ id: string; name: string; sort_order: number; created_at: string; updated_at: string }>)
-    .map(row => ({
-      id: row.id,
-      name: row.name,
-      sortOrder: row.sort_order,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }))
+  `).all() as MapRow[]
+  return rows.map(toMap)
+}
+
+function requireMap(db: NonNullable<ReturnType<typeof getProjectDb>>, mapId: string): WorldMap {
+  const row = db.prepare(`
+    SELECT id, name, parent_map_id, sort_order, image_file_name, image_mime_type, image_bytes, created_at, updated_at
+    FROM world_maps WHERE id = ?
+  `).get(mapId) as MapRow | undefined
+  if (!row) throw new Error('地点必须绑定一张存在的地图')
+  return toMap(row)
+}
+
+/** 地图树不允许成环，否则面包屑与删除子树都会失控。 */
+function assertNoMapCycle(
+  db: NonNullable<ReturnType<typeof getProjectDb>>,
+  mapId: string,
+  parentMapId: string | null,
+): void {
+  if (!parentMapId) return
+  if (parentMapId === mapId) throw new Error('地图不能以自己为父地图')
+  const parentById = new Map(
+    (db.prepare('SELECT id, parent_map_id FROM world_maps').all() as Array<{ id: string; parent_map_id: string | null }>)
+      .map(row => [row.id, row.parent_map_id]),
+  )
+  if (!parentById.has(parentMapId)) throw new Error('父地图不存在')
+  const seen = new Set<string>()
+  let cursor: string | null = parentMapId
+  while (cursor && !seen.has(cursor)) {
+    if (cursor === mapId) throw new Error('地图层级不能形成环')
+    seen.add(cursor)
+    cursor = parentById.get(cursor) ?? null
+  }
+}
+
+/** 地点父级也必须留在同一张地图内，跨地图层级同样被禁止。 */
+function assertNodeParentWithinMap(
+  db: NonNullable<ReturnType<typeof getProjectDb>>,
+  nodeId: string,
+  parentId: string | null,
+  mapId: string,
+): void {
+  if (!parentId) return
+  if (parentId === nodeId) throw new Error('地点不能以自己为父地点')
+  const parent = db.prepare('SELECT map_id FROM world_map_nodes WHERE id = ?').get(parentId) as { map_id: string } | undefined
+  if (!parent) throw new Error('父地点不存在')
+  if (parent.map_id !== mapId) throw new Error('父地点必须与当前地点属于同一张地图')
+  const parentById = new Map(
+    (db.prepare('SELECT id, parent_id FROM world_map_nodes WHERE map_id = ?').all(mapId) as Array<{ id: string; parent_id: string | null }>)
+      .map(row => [row.id, row.parent_id]),
+  )
+  const seen = new Set<string>()
+  let cursor: string | null = parentId
+  while (cursor && !seen.has(cursor)) {
+    if (cursor === nodeId) throw new Error('地点层级不能形成环')
+    seen.add(cursor)
+    cursor = parentById.get(cursor) ?? null
+  }
 }
 
 function inferNodeType(name: string, description: string = ''): WorldMapNodeType {
@@ -78,31 +157,69 @@ function inferNodeType(name: string, description: string = ''): WorldMapNodeType
   return 'landmark'
 }
 
+function mapDeletePlan(
+  db: NonNullable<ReturnType<typeof getProjectDb>>,
+  mapId: string,
+  strategy: WorldMapDeleteStrategy,
+): WorldMapDeletePlan {
+  const maps = listMaps(db)
+  const ids = new Set(maps.map(map => map.id))
+  if (!ids.has(mapId)) throw new Error('要删除的地图不存在')
+
+  const childrenByParent = new Map<string, string[]>()
+  for (const map of maps) {
+    if (!map.parentMapId || !ids.has(map.parentMapId)) continue
+    const bucket = childrenByParent.get(map.parentMapId)
+    if (bucket) bucket.push(map.id)
+    else childrenByParent.set(map.parentMapId, [map.id])
+  }
+
+  const childMapIds = childrenByParent.get(mapId) ?? []
+  const removed = new Set<string>([mapId])
+  if (strategy === 'cascade') {
+    const queue = [...childMapIds]
+    while (queue.length > 0) {
+      const current = queue.shift() as string
+      if (removed.has(current)) continue
+      removed.add(current)
+      queue.push(...(childrenByParent.get(current) ?? []))
+    }
+  }
+
+  const removedIds = [...removed]
+  const placeholders = removedIds.map(() => '?').join(', ')
+  const nodeCount = (db.prepare(`
+    SELECT COUNT(*) AS count FROM world_map_nodes WHERE map_id IN (${placeholders})
+  `).get(...removedIds) as { count: number }).count
+  const edgeCount = (db.prepare(`
+    SELECT COUNT(*) AS count FROM world_map_edges
+    WHERE from_node_id IN (SELECT id FROM world_map_nodes WHERE map_id IN (${placeholders}))
+       OR to_node_id IN (SELECT id FROM world_map_nodes WHERE map_id IN (${placeholders}))
+  `).get(...removedIds, ...removedIds) as { count: number }).count
+
+  const images = maps
+    .filter(map => removed.has(map.id) && map.image)
+    .map(map => ({ mapId: map.id, fileName: (map.image as WorldMapImage).fileName }))
+
+  return { mapIds: removedIds, childMapIds, nodeCount, edgeCount, images }
+}
+
 export class WorldMapRepository {
-  static getAll(): { nodes: WorldMapNode[]; edges: WorldMapEdge[]; layers: WorldMapLayer[] } {
+  /** 一次读取地图册树、全部地点与未被隔离的连接。 */
+  static getAll(): WorldMapAtlas {
     const db = requireDb()
-    const layers = ensureProjectLayers(db)
+    const maps = listMaps(db)
+
     const nodeRows = db.prepare(`
-      SELECT id, name, type, description, parent_id, map_layer, x, y, source_refs, created_at, updated_at
+      SELECT id, name, type, description, parent_id, map_id, x, y, source_refs, created_at, updated_at
       FROM world_map_nodes
       ORDER BY created_at ASC
-    `).all() as Array<{
-      id: string
-      name: string
-      type: string
-      description: string
-      parent_id: string | null
-      map_layer: string
-      x: number
-      y: number
-      source_refs: string
-      created_at: string
-      updated_at: string
-    }>
+    `).all() as NodeRow[]
 
     const edgeRows = db.prepare(`
-      SELECT id, from_node_id, to_node_id, type, description, status, created_at, updated_at
+      SELECT id, from_node_id, to_node_id, type, description, status, map_id, created_at, updated_at
       FROM world_map_edges
+      WHERE map_id IS NOT NULL
       ORDER BY created_at ASC
     `).all() as Array<{
       id: string
@@ -111,6 +228,7 @@ export class WorldMapRepository {
       type: string
       description: string
       status: string
+      map_id: string | null
       created_at: string
       updated_at: string
     }>
@@ -128,7 +246,7 @@ export class WorldMapRepository {
         type: row.type as WorldMapNodeType,
         description: row.description,
         parentId: row.parent_id,
-        mapLayer: row.map_layer,
+        mapId: row.map_id,
         x: row.x,
         y: row.y,
         sourceRefs,
@@ -144,50 +262,124 @@ export class WorldMapRepository {
       type: row.type as WorldMapEdgeType,
       description: row.description,
       status: row.status as WorldMapEdgeStatus,
+      mapId: row.map_id,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }))
 
-    return { nodes, edges, layers }
+    return { maps, nodes, edges, migration: WorldMapRepository.getMigrationReport() }
   }
 
-  static upsertLayer(layer: WorldMapLayer): WorldMapLayer {
+  static upsertMap(map: WorldMap): WorldMap {
     const db = requireDb()
-    if (!layer.id.trim() || !layer.name.trim() || !Number.isFinite(layer.sortOrder)) {
-      throw new Error('图层必须包含标识、名称与排序位置')
-    }
+    if (!isSafeWorldMapId(map.id)) throw new Error('地图标识无效')
+    const name = map.name?.trim()
+    if (!name) throw new Error('地图必须包含名称')
+    if (!Number.isFinite(map.sortOrder)) throw new Error('地图必须包含排序位置')
+    const parentMapId = map.parentMapId || null
+    assertNoMapCycle(db, map.id, parentMapId)
+
     const now = new Date().toISOString()
+    const existing = db.prepare('SELECT created_at, image_file_name, image_mime_type, image_bytes FROM world_maps WHERE id = ?')
+      .get(map.id) as { created_at: string; image_file_name: string | null; image_mime_type: string | null; image_bytes: number | null } | undefined
+
+    const keepImage = Boolean(existing?.image_file_name)
     db.prepare(`
-      INSERT INTO world_map_layers (id, name, sort_order, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO world_maps (
+        id, name, parent_map_id, sort_order,
+        image_file_name, image_mime_type, image_bytes, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
+        parent_map_id = excluded.parent_map_id,
         sort_order = excluded.sort_order,
         updated_at = excluded.updated_at
-    `).run(layer.id.trim(), layer.name.trim(), layer.sortOrder, layer.createdAt || now, now)
-    return { ...layer, id: layer.id.trim(), name: layer.name.trim(), createdAt: layer.createdAt || now, updatedAt: now }
+    `).run(
+      map.id,
+      name,
+      parentMapId,
+      map.sortOrder,
+      keepImage ? existing?.image_file_name ?? null : null,
+      keepImage ? existing?.image_mime_type ?? null : null,
+      keepImage ? existing?.image_bytes ?? null : null,
+      existing?.created_at ?? (map.createdAt || now),
+      now,
+    )
+
+    const saved = requireMap(db, map.id)
+    if (saved.image && saved.image.mimeType && saved.image.bytes) return { ...saved, createdAt: existing?.created_at ?? now }
+    return { ...saved, createdAt: existing?.created_at ?? now }
   }
 
-  static deleteLayer(id: string, fallbackLayerId: string): void {
+  /** 只改地图图片元数据；图片文件本体由主进程的图片存储服务管理。 */
+  static saveMapImage(mapId: string, image: WorldMapImage | null): void {
     const db = requireDb()
-    if (!id || !fallbackLayerId || id === fallbackLayerId) {
-      throw new Error('删除图层时必须指定另一个图层接收已有地点')
+    requireMap(db, mapId)
+    const now = new Date().toISOString()
+    if (!image) {
+      db.prepare(`
+        UPDATE world_maps SET image_file_name = NULL, image_mime_type = NULL, image_bytes = NULL, updated_at = ? WHERE id = ?
+      `).run(now, mapId)
+      return
     }
-    const fallbackExists = db.prepare('SELECT 1 FROM world_map_layers WHERE id = ?').get(fallbackLayerId)
-    if (!fallbackExists) throw new Error('指定的迁移目标图层不存在')
+    if (!Number.isSafeInteger(image.bytes) || image.bytes <= 0) throw new Error('地图图片元数据无效')
+    db.prepare(`
+      UPDATE world_maps SET image_file_name = ?, image_mime_type = ?, image_bytes = ?, updated_at = ? WHERE id = ?
+    `).run(image.fileName, image.mimeType, image.bytes, now, mapId)
+  }
+
+  static planMapDelete(mapId: string, strategy: WorldMapDeleteStrategy): WorldMapDeletePlan {
+    return mapDeletePlan(requireDb(), mapId, strategy)
+  }
+
+  /**
+   * 删除一张地图。子地图要么改挂到被删地图的父地图（promote-children），要么
+   * 整棵子树一起删除（cascade）；两种情况都会同时删除该地图内部的地点、连接
+   * 与其项目托管图片副本。调用方必须先把计划展示给作者。
+   */
+  static deleteMap(mapId: string, strategy: WorldMapDeleteStrategy): WorldMapDeletePlan {
+    const db = requireDb()
+    if (strategy !== 'promote-children' && strategy !== 'cascade') {
+      throw new Error('删除地图必须显式指定对子地图的处理方式')
+    }
+    const plan = mapDeletePlan(db, mapId, strategy)
+    const removed = new Set(plan.mapIds)
+    const parentMapId = (db.prepare('SELECT parent_map_id FROM world_maps WHERE id = ?').get(mapId) as { parent_map_id: string | null })
+      .parent_map_id
+    const now = new Date().toISOString()
+
     const tx = db.transaction(() => {
-      db.prepare('UPDATE world_map_nodes SET map_layer = ? WHERE map_layer = ?').run(fallbackLayerId, id)
-      db.prepare('DELETE FROM world_map_layers WHERE id = ?').run(id)
+      for (const childMapId of plan.childMapIds) {
+        if (removed.has(childMapId)) continue
+        db.prepare('UPDATE world_maps SET parent_map_id = ?, updated_at = ? WHERE id = ?')
+          .run(parentMapId, now, childMapId)
+      }
+      const placeholders = plan.mapIds.map(() => '?').join(', ')
+      // 连接只在所属地图内部成立，因此随地点一起清理，绝不留下跨地图悬空行。
+      db.prepare(`
+        DELETE FROM world_map_edges
+        WHERE from_node_id IN (SELECT id FROM world_map_nodes WHERE map_id IN (${placeholders}))
+           OR to_node_id IN (SELECT id FROM world_map_nodes WHERE map_id IN (${placeholders}))
+      `).run(...plan.mapIds, ...plan.mapIds)
+      db.prepare(`
+        UPDATE world_map_nodes SET parent_id = NULL
+        WHERE parent_id IN (SELECT id FROM world_map_nodes WHERE map_id IN (${placeholders}))
+      `).run(...plan.mapIds)
+      db.prepare(`DELETE FROM world_map_nodes WHERE map_id IN (${placeholders})`).run(...plan.mapIds)
+      db.prepare(`DELETE FROM world_maps WHERE id IN (${placeholders})`).run(...plan.mapIds)
     })
     tx()
+
+    return plan
   }
 
-  static reorderLayers(orderedIds: string[]): void {
+  /** 只在同一父地图的兄弟之间重排；跨层级排序由地图自己的 sortOrder 维持。 */
+  static reorderMaps(orderedIds: string[]): void {
     const db = requireDb()
     const uniqueIds = [...new Set(orderedIds.filter(Boolean))]
+    const now = new Date().toISOString()
     const tx = db.transaction(() => {
-      const update = db.prepare('UPDATE world_map_layers SET sort_order = ?, updated_at = ? WHERE id = ?')
-      const now = new Date().toISOString()
+      const update = db.prepare('UPDATE world_maps SET sort_order = ?, updated_at = ? WHERE id = ?')
       uniqueIds.forEach((id, index) => update.run(index + 1, now, id))
     })
     tx()
@@ -196,25 +388,24 @@ export class WorldMapRepository {
   static upsertNode(node: WorldMapNode): WorldMapNode {
     const db = requireDb()
     if (!node.id || !node.name?.trim() || !node.type) {
-      throw new Error('节点参数无效：必须包含 id, name, type')
+      throw new Error('地点参数无效：必须包含 id, name, type')
     }
-    const layers = ensureProjectLayers(db)
-    const mapLayer = layers.some(layer => layer.id === node.mapLayer)
-      ? node.mapLayer
-      : layers[0]?.id
-    if (!mapLayer) throw new Error('项目至少需要一个地图图层')
+    if (!isSafeWorldMapId(node.mapId)) throw new Error('地点必须绑定一张有效地图')
+    requireMap(db, node.mapId)
+    assertNodeParentWithinMap(db, node.id, node.parentId || null, node.mapId)
+
     const sourceRefsJson = JSON.stringify(node.sourceRefs || [])
     const now = new Date().toISOString()
 
     db.prepare(`
-      INSERT INTO world_map_nodes (id, name, type, description, parent_id, map_layer, x, y, source_refs, created_at, updated_at)
+      INSERT INTO world_map_nodes (id, name, type, description, parent_id, map_id, x, y, source_refs, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         type = excluded.type,
         description = excluded.description,
         parent_id = excluded.parent_id,
-        map_layer = excluded.map_layer,
+        map_id = excluded.map_id,
         x = excluded.x,
         y = excluded.y,
         source_refs = excluded.source_refs,
@@ -225,7 +416,7 @@ export class WorldMapRepository {
       node.type,
       node.description || '',
       node.parentId || null,
-      mapLayer,
+      node.mapId,
       node.x ?? 0,
       node.y ?? 0,
       sourceRefsJson,
@@ -235,7 +426,6 @@ export class WorldMapRepository {
 
     return {
       ...node,
-      mapLayer,
       updatedAt: now,
       createdAt: node.createdAt || now,
     }
@@ -251,22 +441,36 @@ export class WorldMapRepository {
     tx()
   }
 
+  /**
+   * 连接的归属地图由两个端点推导，写入方无法伪造。两端不在同一张地图时直接拒绝，
+   * 这是「禁止跨地图连接」的唯一执行点。
+   */
   static upsertEdge(edge: WorldMapEdge): WorldMapEdge {
     const db = requireDb()
     if (!edge.id || !edge.fromNodeId || !edge.toNodeId || !edge.type) {
-      throw new Error('连线参数无效：必须包含 id, fromNodeId, toNodeId, type')
+      throw new Error('连接参数无效：必须包含 id, fromNodeId, toNodeId, type')
     }
-    const now = new Date().toISOString()
+    const from = db.prepare('SELECT map_id, name FROM world_map_nodes WHERE id = ?')
+      .get(edge.fromNodeId) as { map_id: string; name: string } | undefined
+    const to = db.prepare('SELECT map_id, name FROM world_map_nodes WHERE id = ?')
+      .get(edge.toNodeId) as { map_id: string; name: string } | undefined
+    if (!from || !to) throw new Error('地点连接的两端都必须是已存在的地图地点')
+    if (from.map_id !== to.map_id) {
+      throw new Error(`禁止跨地图连接：「${from.name}」与「${to.name}」不在同一张地图`)
+    }
+    requireMap(db, from.map_id)
 
+    const now = new Date().toISOString()
     db.prepare(`
-      INSERT INTO world_map_edges (id, from_node_id, to_node_id, type, description, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO world_map_edges (id, from_node_id, to_node_id, type, description, status, map_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         from_node_id = excluded.from_node_id,
         to_node_id = excluded.to_node_id,
         type = excluded.type,
         description = excluded.description,
         status = excluded.status,
+        map_id = excluded.map_id,
         updated_at = excluded.updated_at
     `).run(
       edge.id,
@@ -275,12 +479,14 @@ export class WorldMapRepository {
       edge.type,
       edge.description || '',
       edge.status || 'active',
+      from.map_id,
       edge.createdAt || now,
       now,
     )
 
     return {
       ...edge,
+      mapId: from.map_id,
       updatedAt: now,
       createdAt: edge.createdAt || now,
     }
@@ -289,6 +495,31 @@ export class WorldMapRepository {
   static deleteEdge(id: string): void {
     const db = requireDb()
     db.prepare(`DELETE FROM world_map_edges WHERE id = ?`).run(id)
+  }
+
+  /** 旧图层/单图结构的迁移报告；没有值得说明的结果时返回 null。 */
+  static getMigrationReport(): WorldMapMigrationReport | null {
+    const db = requireDb()
+    const row = db.prepare(`
+      SELECT report_json, acknowledged_at FROM world_map_atlas_migration WHERE migration_id = ?
+    `).get(MIGRATION_ID) as { report_json: string; acknowledged_at: string | null } | undefined
+    if (!row) return null
+    let parsed: Omit<WorldMapMigrationReport, 'acknowledged'>
+    try {
+      parsed = JSON.parse(row.report_json)
+    } catch {
+      return null
+    }
+    const noteworthy = (parsed.mapCount ?? 0) > 0 || (parsed.isolatedEdgeCount ?? 0) > 0 || parsed.imageMigrated
+    if (!noteworthy) return null
+    return { ...parsed, acknowledged: Boolean(row.acknowledged_at) }
+  }
+
+  static acknowledgeMigration(): void {
+    const db = requireDb()
+    db.prepare(`
+      UPDATE world_map_atlas_migration SET acknowledged_at = ? WHERE migration_id = ?
+    `).run(new Date().toISOString(), MIGRATION_ID)
   }
 
   static extractCandidates(projectId?: string): WorldMapCandidate[] {
@@ -335,21 +566,12 @@ export class WorldMapRepository {
           const cleanName = rawTitle.replace(/^#+\s*/, '').replace(/^[0-9]+[、. ]*/, '').trim()
           if (!cleanName || cleanName.length < 2 || cleanName.length > 30 || existingNodeNames.has(cleanName.toLowerCase())) continue
 
-          const type = inferNodeType(cleanName, rule.content)
-          const suggestedLayer = (
-            rule.relative_path?.includes('里世界') ||
-            cleanName.includes('里世界') ||
-            cleanName.includes('深层') ||
-            cleanName.includes('界隙')
-          ) ? 'underground' : 'surface'
-
           candidates.push({
             id: `cand-${rule.id}`,
             name: cleanName,
-            type,
+            type: inferNodeType(cleanName, rule.content),
             description: (rule.content || '').slice(0, 200),
             sourceRef: rule.relative_path || rule.id,
-            suggestedLayer,
           })
           existingNodeNames.add(cleanName.toLowerCase())
         }
@@ -391,21 +613,12 @@ export class WorldMapRepository {
           const cleanName = heading.replace(/^#+\s*/, '').replace(/^[0-9]+[、. ]*/, '').trim()
           if (!cleanName || cleanName.length < 2 || cleanName.length > 30 || existingNodeNames.has(cleanName.toLowerCase())) continue
 
-          const type = inferNodeType(cleanName, frag.content)
-          const suggestedLayer = (
-            frag.relative_path?.includes('里世界') ||
-            cleanName.includes('里世界') ||
-            cleanName.includes('深层') ||
-            cleanName.includes('界隙')
-          ) ? 'underground' : 'surface'
-
           candidates.push({
             id: `cand-frag-${frag.id}`,
             name: cleanName,
-            type,
+            type: inferNodeType(cleanName, frag.content),
             description: (frag.content || '').slice(0, 200),
             sourceRef: `${frag.relative_path} (${heading})`,
-            suggestedLayer,
           })
           existingNodeNames.add(cleanName.toLowerCase())
         }
@@ -429,14 +642,12 @@ export class WorldMapRepository {
                     break
                   }
                 }
-                const type = inferNodeType(cleanName, desc)
                 candidates.push({
                   id: `cand-wb-${candidates.length + 1}`,
                   name: cleanName,
-                  type,
+                  type: inferNodeType(cleanName, desc),
                   description: desc.slice(0, 200),
                   sourceRef: '项目设定: 故事架构/世界观',
-                  suggestedLayer: 'surface',
                 })
                 existingNodeNames.add(cleanName.toLowerCase())
               }
@@ -447,7 +658,7 @@ export class WorldMapRepository {
 
       return candidates
     } catch (error) {
-      throw new Error(`[WorldMapRepository] 提取地图候选节点失败: ${error instanceof Error ? error.message : String(error)}`)
+      throw new Error(`[WorldMapRepository] 提取地图候选地点失败: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 }

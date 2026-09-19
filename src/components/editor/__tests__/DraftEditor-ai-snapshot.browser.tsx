@@ -1,11 +1,10 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { EditorView } from '@codemirror/view'
 import { page } from 'vitest/browser'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { setActiveProjectSessionContext } from '../../../shared/project-session-context'
-import { RefineDraftCommand } from '../../../services/workflows/commands/refine-draft.command'
+import { countDraftUnits } from '../../../shared/draft-units'
 import { ReviewChapterCommand } from '../../../services/workflows/commands/review-chapter.command'
 import { useEditorStore } from '../../../stores/editor-store'
 import { useProjectStore } from '../../../stores/project-store'
@@ -24,19 +23,46 @@ const TAB_ID = 'draft-ai-snapshot-tab'
 const FILE_PATH = 'vela://draft/7'
 const SAVED_BODY = '数据库中的旧稿正文'
 const SCREEN_BODY = '屏幕上的未保存正文'
+/** Vditor 会把正文归一化为 Markdown，正文本身仍必须包含作者输入的内容。 */
+const READY_TIMEOUT = 20000
 
 let root: Root
 let container: HTMLDivElement
 let invoke: ReturnType<typeof vi.fn>
 let startWorkflow: ReturnType<typeof vi.fn>
-let refineExecute: ReturnType<typeof vi.spyOn>
 let reviewExecute: ReturnType<typeof vi.spyOn>
+let screenBody: string
 const originalEditorState = useEditorStore.getState()
 const originalProjectState = useProjectStore.getState()
 const originalWorkflowState = useWorkflowStore.getState()
 
+/** 等 Vditor 载入本地解析器并渲染出可编辑正文。 */
+async function readyProse(): Promise<HTMLElement> {
+  await act(async () => {
+    await vi.waitFor(
+      () => expect(container.querySelector('[data-vditor-ready="true"]')).not.toBeNull(),
+      { timeout: READY_TIMEOUT },
+    )
+  })
+  return container.querySelector('.vditor-ir pre.vditor-reset') as HTMLElement
+}
+
+/** 用浏览器原生输入替换（replace=true）或追加正文，走完整的 Vditor input 事件链。 */
+async function typeIntoProse(value: string, replace: boolean): Promise<void> {
+  const prose = await readyProse()
+  await act(async () => {
+    prose.focus()
+    const range = document.createRange()
+    range.selectNodeContents(prose)
+    if (!replace) range.collapse(false)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    document.execCommand('insertText', false, value)
+  })
+}
+
 beforeEach(async () => {
-  refineExecute = vi.spyOn(RefineDraftCommand.prototype, 'execute').mockResolvedValue('')
   reviewExecute = vi.spyOn(ReviewChapterCommand.prototype, 'execute').mockResolvedValue('')
   container = document.createElement('div')
   document.body.append(container)
@@ -134,16 +160,19 @@ beforeEach(async () => {
       projectKey={PROJECT_PATH}
     />,
   ))
+  await readyProse()
   await expect.element(page.getByRole('button', { name: 'AI 审稿' })).toBeVisible()
 
-  const view = EditorView.findFromDOM(container.querySelector('.cm-editor')!)!
-  await act(async () => view.dispatch({
-    changes: { from: 0, to: view.state.doc.length, insert: SCREEN_BODY },
-  }))
-  expect(useEditorStore.getState().tabs[0]).toMatchObject({
-    content: SCREEN_BODY,
-    dirty: true,
+  await typeIntoProse(SCREEN_BODY, true)
+  await act(async () => {
+    await vi.waitFor(() => {
+      expect(useEditorStore.getState().tabs[0]).toMatchObject({ dirty: true })
+    })
   })
+  const tab = useEditorStore.getState().tabs[0]
+  expect(tab.content).toContain(SCREEN_BODY)
+  expect(tab.content).not.toContain(SAVED_BODY)
+  screenBody = tab.content ?? ''
 })
 
 afterEach(async () => {
@@ -152,30 +181,34 @@ afterEach(async () => {
   useEditorStore.setState(originalEditorState)
   useProjectStore.setState(originalProjectState)
   useWorkflowStore.setState(originalWorkflowState)
-  refineExecute.mockRestore()
   reviewExecute.mockRestore()
   setActiveProjectSessionContext(null)
   Reflect.deleteProperty(window, 'velaAPI')
 })
 
 describe('DraftEditor AI source snapshot', () => {
-  it.each([
-    { action: 'AI 修稿', command: 'refine' },
-    { action: 'AI 审稿', command: 'review' },
-  ] as const)('freezes the dirty screen body before starting $action', async ({ action, command }) => {
-    await act(async () => page.getByRole('button', { name: action }).click())
-    await act(async () => page.getByRole('button', { name: '确认执行' }).click())
+  it('freezes the dirty screen body before starting AI review and verifies automated refine entry is absent', async () => {
+    // 确认不存在自动修稿与待合并入口
+    expect(container.textContent).not.toContain('AI 修稿')
+    expect(container.textContent).not.toContain('待合并')
+    expect(container.textContent).not.toContain('自动修稿')
 
-    await vi.waitFor(() => expect(startWorkflow).toHaveBeenCalled())
+    await act(async () => page.getByRole('button', { name: 'AI 审稿' }).click())
+    await expect.element(page.getByRole('button', { name: '开始一致性审核' })).toBeVisible()
+    await act(async () => page.getByRole('button', { name: '开始一致性审核' }).click())
+
+    await act(async () => {
+      await vi.waitFor(() => expect(startWorkflow).toHaveBeenCalled())
+    })
     const definition = startWorkflow.mock.calls[0]?.[0] as WorkflowDefinition
     await definition.steps[0].executor({} as never, {} as never, {} as never)
-    const instance = (command === 'refine' ? refineExecute : reviewExecute).mock.instances[0] as unknown as {
+    const instance = reviewExecute.mock.instances[0] as unknown as {
       params: {
         draftContent: string
         sourceDraft: { id: number; chapterNumber: number; version: number; status: string; contentRevision: number }
       }
     }
-    expect(instance.params.draftContent).toBe(SCREEN_BODY)
+    expect(instance.params.draftContent).toBe(screenBody)
     expect(instance.params.sourceDraft).toEqual({
       id: 7,
       chapterNumber: 1,
@@ -186,54 +219,57 @@ describe('DraftEditor AI source snapshot', () => {
     expect(invoke.mock.calls).toContainEqual([
       'db:draft-update-content',
       7,
-      SCREEN_BODY,
-      SCREEN_BODY.length,
+      screenBody,
+      countDraftUnits(screenBody),
       PROJECT_PATH,
       PROJECT_SESSION,
     ])
     expect(invoke.mock.calls.some(([channel]) => channel === 'db:draft-get-full')).toBe(false)
+    // 审核后正文未被自动改写
+    expect(useEditorStore.getState().tabs[0].content).toBe(screenBody)
   })
 
-  it.each(['AI 修稿', 'AI 审稿'] as const)(
-    'does not start %s when the author keeps typing while the frozen source is being verified',
-    async (action) => {
-      const originalInvoke = invoke.getMockImplementation() as
-        | ((channel: string, ...args: unknown[]) => unknown)
-        | undefined
-      if (!originalInvoke) throw new Error('missing IPC fixture')
-      let releaseDraftSave!: () => void
-      const draftSaveGate = new Promise<void>((resolve) => {
-        releaseDraftSave = resolve
-      })
-      invoke.mockImplementation(async (channel: string, ...args: unknown[]) => {
-        if (channel === 'db:draft-update-content') await draftSaveGate
-        return originalInvoke(channel, ...args)
-      })
+  it('does not start AI review when the author keeps typing while the frozen source is being verified', async () => {
+    const originalInvoke = invoke.getMockImplementation() as
+      | ((channel: string, ...args: unknown[]) => unknown)
+      | undefined
+    if (!originalInvoke) throw new Error('missing IPC fixture')
+    let releaseDraftSave!: () => void
+    const draftSaveGate = new Promise<void>((resolve) => {
+      releaseDraftSave = resolve
+    })
+    invoke.mockImplementation(async (channel: string, ...args: unknown[]) => {
+      if (channel === 'db:draft-update-content') await draftSaveGate
+      return originalInvoke(channel, ...args)
+    })
 
-      await act(async () => page.getByRole('button', { name: action }).click())
-      await act(async () => page.getByRole('button', { name: '确认执行' }).click())
+    await act(async () => page.getByRole('button', { name: 'AI 审稿' }).click())
+    await expect.element(page.getByRole('button', { name: '开始一致性审核' })).toBeVisible()
+    await act(async () => page.getByRole('button', { name: '开始一致性审核' }).click())
+    await act(async () => {
       await vi.waitFor(() => expect(
         invoke.mock.calls.some(([channel]) => channel === 'db:draft-update-content'),
       ).toBe(true))
+    })
 
-      const bodyAfterConfirmation = `${SCREEN_BODY}，确认后继续输入。`
-      const view = EditorView.findFromDOM(container.querySelector('.cm-editor')!)!
-      await act(async () => view.dispatch({
-        changes: { from: view.state.doc.length, insert: '，确认后继续输入。' },
-      }))
-      expect(useEditorStore.getState().tabs[0]).toMatchObject({
-        content: bodyAfterConfirmation,
+    const bodyAfterConfirmation = `${SCREEN_BODY}，确认后继续输入。`
+    await typeIntoProse('，确认后继续输入。', false)
+    const tabAfterTyping = await act(async () => vi.waitFor(() => {
+      const current = useEditorStore.getState().tabs[0]
+      expect(current).toMatchObject({
         contentRevision: 2,
         dirty: true,
       })
+      return current
+    }))
+    expect(tabAfterTyping.content).toContain(bodyAfterConfirmation)
 
-      releaseDraftSave()
-      await act(async () => {
-        await draftSaveGate
-        await new Promise(resolve => setTimeout(resolve, 20))
-      })
+    releaseDraftSave()
+    await act(async () => {
+      await draftSaveGate
+      await new Promise(resolve => setTimeout(resolve, 20))
+    })
 
-      expect(startWorkflow).not.toHaveBeenCalled()
-    },
-  )
+    expect(startWorkflow).not.toHaveBeenCalled()
+  })
 })

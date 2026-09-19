@@ -470,6 +470,8 @@ function inspectQualificationSourceTree(repositoryRoot) {
   const result = spawnSync(
     'git',
     [
+      '-C',
+      path.resolve(repositoryRoot),
       '-c',
       `safe.directory=${path.resolve(repositoryRoot)}`,
       'status',
@@ -478,7 +480,6 @@ function inspectQualificationSourceTree(repositoryRoot) {
       '--untracked-files=all',
     ],
     {
-      cwd: repositoryRoot,
       encoding: 'utf8',
       windowsHide: true,
       env: sanitizedChildEnvironment(),

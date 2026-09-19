@@ -42,7 +42,8 @@ afterEach(async () => {
 
 describe('LeftToolWindowBar navigation hierarchy', () => {
   it('keeps only workspace-level destinations on the primary rail', async () => {
-    for (const label of ['首页', '创作', '资料', '知识库', '角色']) {
+    // 知识检索与角色档案是资料库/角色入口的最终命名。
+    for (const label of ['首页', '创作', '资料', '知识检索', '角色档案']) {
       expect(findButton(label), `${label} should be a primary destination`).toBeDefined()
     }
     expect(findButton('蓝图')).toBeUndefined()

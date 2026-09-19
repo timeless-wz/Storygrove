@@ -1,6 +1,19 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+const childProcessMockState = vi.hoisted(() => ({ gitStatusResult: undefined as unknown }))
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>()
+  return {
+    ...actual,
+    spawnSync: (...args: Parameters<typeof actual.spawnSync>) => (
+      childProcessMockState.gitStatusResult ?? actual.spawnSync(...args)
+    ),
+  }
+})
+
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -36,25 +49,14 @@ async function withCurrentPriceSnapshotClock<T>(run: () => Promise<T>): Promise<
 }
 
 function createDirtyQualificationRepository() {
-  const cacheRoot = path.join(repositoryRoot, '.runtime', '.cache')
-  mkdirSync(cacheRoot, { recursive: true })
-  const dirtyRepositoryRoot = mkdtempSync(path.join(cacheRoot, 'qualification-dirty-source-'))
-  const runGit = (...args: string[]) => spawnSync('git', args, {
-    cwd: dirtyRepositoryRoot,
-    encoding: 'utf8',
-    windowsHide: true,
-  })
-
-  expect(runGit('init').status).toBe(0)
-  writeFileSync(path.join(dirtyRepositoryRoot, 'tracked.txt'), 'frozen\n', 'utf8')
-  expect(runGit('add', 'tracked.txt').status).toBe(0)
-  expect(runGit(
-    '-c', 'user.name=Qualification Test',
-    '-c', 'user.email=qualification@example.invalid',
-    'commit', '-m', 'test fixture',
-  ).status).toBe(0)
+  const dirtyRepositoryRoot = mkdtempSync(path.join(tmpdir(), 'qualification-dirty-source-'))
+  // The qualification preflight reads HEAD directly before invoking Git
+  // status. A small static repository shape keeps this test independent from
+  // Git's Windows file handles; the status response itself is supplied below.
+  mkdirSync(path.join(dirtyRepositoryRoot, '.git', 'refs', 'heads'), { recursive: true })
+  writeFileSync(path.join(dirtyRepositoryRoot, '.git', 'HEAD'), 'ref: refs/heads/main\n', 'utf8')
+  writeFileSync(path.join(dirtyRepositoryRoot, '.git', 'refs', 'heads', 'main'), `${'0'.repeat(40)}\n`, 'utf8')
   writeFileSync(path.join(dirtyRepositoryRoot, 'tracked.txt'), 'dirty\n', 'utf8')
-  expect(runGit('status', '--porcelain=v1').stdout.trim()).not.toBe('')
   return dirtyRepositoryRoot
 }
 
@@ -428,6 +430,12 @@ describe('real provider generation qualification contract', () => {
     const fetchSpy = vi.fn(() => Promise.reject(new Error('dirty tree must block fetch')))
     vi.stubGlobal('fetch', fetchSpy)
     const dirtyRepositoryRoot = createDirtyQualificationRepository()
+    childProcessMockState.gitStatusResult = {
+      status: 0,
+      stdout: ' M tracked.txt\0',
+      stderr: '',
+      error: undefined,
+    }
 
     try {
       await expect(runRealProviderGenerationQualification({
@@ -438,6 +446,7 @@ describe('real provider generation qualification contract', () => {
       })).rejects.toMatchObject({ code: 'SOURCE_TREE_DIRTY' })
       expect(fetchSpy).not.toHaveBeenCalled()
     } finally {
+      childProcessMockState.gitStatusResult = undefined
       rmSync(dirtyRepositoryRoot, { recursive: true, force: true })
     }
   })
