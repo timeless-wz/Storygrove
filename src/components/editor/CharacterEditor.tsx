@@ -148,15 +148,16 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
     }
   }
 
-  const handleSave = async () => {
+  const handleSave = async ({ returnToOverview = false }: { returnToOverview?: boolean } = {}) => {
     const projectSession = captureProjectSession(currentProject)
     if (!projectMatches || !projectSession || !isProjectSessionPath(projectSession, projectKey)) return
     try {
       await saveAll(projectKey)
       if (!isProjectSessionCurrent(projectSession)) return
       addLog('info', text(`已保存 ${characters.length} 个角色卡`, `Saved ${characters.length} character cards`))
-      // 只有真的保存成功才回到只读概览，让作者看到落盘后的结果。
-      setViewMode('overview')
+      // “保存”保持编辑上下文；“完成”则在保存成功后才回到概览。
+      // 这样不会发生点了完成却丢掉本次编辑的情况。
+      if (returnToOverview) setViewMode('overview')
     } catch (error) {
       if (!isProjectSessionCurrent(projectSession)) return
       addLog('error', text(`角色卡保存失败：${error}`, 'Could not save character cards.'))
@@ -283,7 +284,13 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
                 <Network size={12} /> {text('关系图谱', 'Relationship graph')}
               </Button>
               {viewMode === 'edit' ? (
-                <Button variant="outline" size="sm" onClick={() => setViewMode('overview')} title={text('返回人物概览', 'Back to the character overview')}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => { void handleSave({ returnToOverview: true }) }}
+                  disabled={identityBusy || !dataReady}
+                  title={text('保存并返回人物概览', 'Save and return to the character overview')}
+                >
                   <Check size={12} /> {text('完成', 'Done')}
                 </Button>
               ) : (
@@ -294,7 +301,13 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
               <Button variant="destructive" size="sm" onClick={handleDelete} disabled={identityBusy || !dataReady}>
                 <Trash2 size={12} /> {text('删除', 'Delete')}
               </Button>
-              <Button variant="outline" size="sm" onClick={handleSave} disabled={identityBusy || !dataReady}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { void handleSave() }}
+                disabled={identityBusy || !dataReady}
+                title={text('保存并继续编辑', 'Save and keep editing')}
+              >
                 <Save size={12} /> {saving ? text('保存中...', 'Saving...') : text('保存', 'Save')}
               </Button>
             </>

@@ -288,7 +288,7 @@ describe('character profile edit mode', () => {
     expect(container?.querySelector<HTMLInputElement>('input[aria-label="姓名"]')?.value).toBe('沈砺')
   })
 
-  it('saves every edited field, persists through reload and returns to the overview', async () => {
+  it('saves every edited field without leaving edit mode, and completes only after saving', async () => {
     await renderEditor()
     await enterEditMode()
 
@@ -318,7 +318,15 @@ describe('character profile edit mode', () => {
     })
     expect(saved?.currentState).toMatchObject({ location: '黑水城', updatedAtChapter: 2 })
 
-    // 保存成功后回到只读概览。
+    // 单独保存后继续留在编辑页，作者可连续补充字段。
+    await expect.element(page.getByTestId('character-profile-form')).toBeVisible()
+    expect(container?.querySelector('[data-testid="character-summary"]')).toBeNull()
+
+    // “完成”必须先保存，再安全地回到只读概览。
+    await act(async () => {
+      await page.getByRole('button', { name: '完成' }).click()
+      await new Promise(resolve => setTimeout(resolve, 20))
+    })
     await expect.element(page.getByTestId('character-summary')).toBeVisible()
     expect(container?.querySelector('[data-testid="character-profile-form"]')).toBeNull()
 
