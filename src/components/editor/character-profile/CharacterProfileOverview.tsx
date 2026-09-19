@@ -10,7 +10,6 @@ import {
   characterProfileSummaryFacts,
   characterRelationshipPresentation,
   characterStateProvenanceKind,
-  truncateProfileText,
   type CharacterProfileDetailSectionId,
 } from '../../../shared/character-profile-presentation'
 
@@ -192,20 +191,50 @@ export default function CharacterProfileOverview({
               key={section.id}
               data-testid="profile-detail-section"
               data-section={section.id}
-              className="rounded-lg border"
+              className="group rounded-lg border"
               style={{ borderColor: 'var(--color-border)' }}
             >
-              <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs font-medium text-[var(--color-text)]">
-                <ChevronDown size={12} className="flex-shrink-0" />
-                <span>{text(zhCN, enUS)}</span>
-                <span className="ml-auto min-w-0 truncate text-[11px] font-normal text-[var(--color-text-muted)]">
-                  {value ? truncateProfileText(value, 40) : text('未填写', 'Not filled in')}
-                </span>
+              <summary
+                data-testid="profile-detail-summary"
+                className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs font-medium text-[var(--color-text)]"
+              >
+                <ChevronDown
+                  size={12}
+                  aria-hidden="true"
+                  className="flex-shrink-0 transition-transform duration-150 group-open:rotate-180"
+                />
+                <span className="min-w-0 flex-1 break-words">{text(zhCN, enUS)}</span>
+                {/*
+                 * 折叠行只报告“有没有内容”，正文一律留在标题下方，
+                 * 避免同一段文字在标题右侧和正文里各出现一次。
+                 */}
+                {!value && (
+                  <span className="flex-shrink-0 text-[11px] font-normal text-[var(--color-text-muted)]">
+                    {text('未填写', 'Not filled in')}
+                  </span>
+                )}
               </summary>
-              <div className="px-3 pb-3 text-xs text-[var(--color-text-secondary)]">
-                <p className="whitespace-pre-wrap">
-                  {value || text('未填写', 'Not filled in')}
-                </p>
+              <div
+                data-testid="profile-detail-body"
+                className="min-w-0 px-3 pb-3 text-xs text-[var(--color-text-secondary)]"
+              >
+                {value ? (
+                  /*
+                   * 换行必须由容器负责：长文本（含无空格长串）在卡片内换行，
+                   * 不产生横向溢出，也不与标题行混排。这里用内联样式而不是
+                   * 工具类，保证正文的换行行为不依赖样式表是否加载。
+                   */
+                  <p
+                    data-testid="profile-detail-text"
+                    style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: 0, minWidth: 0 }}
+                  >
+                    {value}
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-[var(--color-text-muted)]">
+                    {text('未填写', 'Not filled in')}
+                  </p>
+                )}
               </div>
             </details>
           )
