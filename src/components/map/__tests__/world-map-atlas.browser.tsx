@@ -201,6 +201,34 @@ describe('world map atlas view', () => {
     expect(container.querySelector('image')?.getAttribute('href')).toBe(mapImageDataUrl)
   })
 
+  it('pans the zoomed map when dragging its image or grid background', async () => {
+    mapImageDataUrl = 'data:image/png;base64,aW1hZ2U='
+    await render()
+
+    // 先放大，模拟作者查看大地图时的操作。
+    await clickButton('+')
+    const canvas = container.querySelector<HTMLElement>('[data-testid="world-map-canvas"]')
+    const grid = canvas?.querySelector<SVGRectElement>('svg rect')
+    const surface = container.querySelector<SVGSVGElement>('[data-testid="world-map-surface"]')
+    expect(canvas).toBeDefined()
+    expect(grid).toBeDefined()
+    expect(surface).toBeDefined()
+
+    // 底图 pointer-events=none 时事件会落到网格 rect；仍应开始平移。
+    await act(async () => {
+      grid?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: 300, clientY: 180 }))
+    })
+    await act(async () => {
+      window.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 430, clientY: 245 }))
+    })
+    await act(async () => {
+      window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }))
+    })
+
+    expect(surface?.style.transform).toContain('translate(130px, 65px)')
+    expect(surface?.style.transform).toContain('scale(1.2)')
+  })
+
   it('renders a breadcrumb trail from the atlas root to the selected map', async () => {
     await render()
 

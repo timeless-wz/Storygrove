@@ -80,12 +80,17 @@ export default function WorldMapCanvas({
 
   // Pan start
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button === 0 && e.target === containerRef.current || (e.target as HTMLElement)?.tagName === 'svg') {
-      setIsPanning(true)
-      startPanRef.current = { x: e.clientX - pan.x, y: e.clientY - pan.y }
-      onSelectNode(null)
-      onSelectEdge(null)
-    }
+    // 底图开启 pointer-events="none" 后，鼠标实际命中的是下面的网格 <rect>，
+    // 而不是 <svg> 本身。以前仅允许 div/svg 起拖，导致放大后无法拖动地图。
+    // 地点、连接与缩放工具各自拦截事件，其余画布区域都可以平移。
+    if (e.button !== 0) return
+    const target = e.target as Element
+    if (target.closest('[data-map-canvas-control]')) return
+
+    setIsPanning(true)
+    startPanRef.current = { x: e.clientX - pan.x, y: e.clientY - pan.y }
+    onSelectNode(null)
+    onSelectEdge(null)
   }
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
@@ -150,13 +155,15 @@ export default function WorldMapCanvas({
   return (
     <div
       ref={containerRef}
+      data-testid="world-map-canvas"
       className="relative w-full h-full overflow-hidden select-none bg-[var(--color-bg)]"
       onWheel={handleWheel}
       onMouseDown={handleMouseDown}
-      style={{ cursor: isPanning ? 'grabbing' : 'default' }}
+      style={{ cursor: isPanning ? 'grabbing' : 'grab' }}
     >
       {/* Background grid pattern */}
       <svg
+        data-testid="world-map-surface"
         className="w-full h-full"
         style={{
           transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
@@ -220,7 +227,12 @@ export default function WorldMapCanvas({
           const midY = (fromNode.y + toNode.y) / 2
 
           return (
-            <g key={edge.id} className="cursor-pointer" onClick={e => { e.stopPropagation(); onSelectEdge(edge.id) }}>
+            <g
+              key={edge.id}
+              className="cursor-pointer"
+              onMouseDown={e => e.stopPropagation()}
+              onClick={e => { e.stopPropagation(); onSelectEdge(edge.id) }}
+            >
               <line
                 x1={fromNode.x}
                 y1={fromNode.y}
@@ -313,7 +325,7 @@ export default function WorldMapCanvas({
       </svg>
 
       {/* Mini zoom controls */}
-      <div className="absolute bottom-4 right-4 flex items-center gap-1 bg-[var(--color-panel)] border border-[var(--color-border)] rounded-md p-1 text-xs">
+      <div data-map-canvas-control className="absolute bottom-4 right-4 flex items-center gap-1 bg-[var(--color-panel)] border border-[var(--color-border)] rounded-md p-1 text-xs">
         <button
           type="button"
           className="px-2 py-1 hover:bg-[var(--color-hover)] rounded"
