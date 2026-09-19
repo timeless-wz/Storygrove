@@ -321,4 +321,80 @@ describe('relationship canvas', () => {
     expect(container?.querySelectorAll('[data-testid="relationship-edge-chip"]')).toHaveLength(0)
     expect(container?.textContent).toContain('0 条关系')
   })
+
+  it('binds edge start and end points strictly to the circular avatar centers of characters', async () => {
+    await renderGraph()
+
+    const edgePath = container?.querySelector<SVGPathElement>('.react-flow__edge-path')
+    expect(edgePath).toBeTruthy()
+    const d = edgePath?.getAttribute('d')
+    // 沈砚 at (120, 90) -> avatar center (120 + 32, 90 + 32) = (152, 122)
+    // 许渡 at (420, 90) -> avatar center (420 + 32, 90 + 32) = (452, 122)
+    expect(d).toBe('M 152,122 L 452,122')
+  })
+
+  it('keeps edge endpoints bound to circle center when node is dragged', async () => {
+    await renderGraph()
+
+    const initialD = container?.querySelector('.react-flow__edge-path')?.getAttribute('d')
+    expect(initialD).toBe('M 152,122 L 452,122')
+
+    const shenNode = nodeOf(SHEN_ID)
+    expect(shenNode).toBeTruthy()
+
+    await act(async () => {
+      dragNode(shenNode!, 30, 60)
+      await new Promise(resolve => setTimeout(resolve, 50))
+    })
+
+    const edgePath = container?.querySelector<SVGPathElement>('.react-flow__edge-path')
+    expect(edgePath).toBeTruthy()
+    const d = edgePath?.getAttribute('d') ?? ''
+
+    const match = d.match(/^M\s*(-?\d+),(-?\d+)\s*L\s*(-?\d+),(-?\d+)$/)
+    expect(match).toBeTruthy()
+    const [, startX, startY, endX, endY] = match!.map(Number)
+
+    // 验证起点坐标与沈砚节点在画布上的实时圆心位置完全一致
+    const nodeWrapper = shenNode?.closest<HTMLElement>('.react-flow__node')
+    const transform = nodeWrapper?.style.transform ?? ''
+    const matchTranslate = transform.match(/translate\(\s*(-?[\d.]+)px,\s*(-?[\d.]+)px\)/)
+    if (matchTranslate) {
+      const nodeX = parseFloat(matchTranslate[1])
+      const nodeY = parseFloat(matchTranslate[2])
+      expect(startX).toBe(Math.round(nodeX + 32))
+      expect(startY).toBe(Math.round(nodeY + 32))
+    } else {
+      expect(startX).toBeGreaterThan(152)
+      expect(startY).toBeGreaterThan(122)
+    }
+
+    // 终点仍精准固定在未移动的许渡头像圆心 (452, 122)
+    expect(endX).toBe(452)
+    expect(endY).toBe(122)
+  })
+
+  it('renders circular nodes above relationship edge lines to occlude line endpoints inside circles', async () => {
+    await renderGraph()
+
+    const nodeElement = nodeOf(SHEN_ID)
+    const circleElement = nodeElement?.querySelector('.rounded-full')
+    expect(circleElement).toBeTruthy()
+
+    // Circular avatar body is styled as opaque with higher stacking context
+    const circleStyle = (circleElement as HTMLElement).style
+    expect(circleStyle.backgroundColor).toBeTruthy()
+    expect(circleStyle.zIndex).toBe('2')
+
+    // Edge element is in .react-flow__edges which is rendered underneath nodes
+    const edgeSvg = container?.querySelector('.react-flow__edges')
+    const nodesContainer = container?.querySelector('.react-flow__nodes')
+    expect(edgeSvg).toBeTruthy()
+    expect(nodesContainer).toBeTruthy()
+
+    // In DOM order inside .react-flow__viewport, edges SVG precedes nodes container
+    const parent = edgeSvg?.parentElement
+    const children = Array.from(parent?.children ?? [])
+    expect(children.indexOf(edgeSvg!)).toBeLessThan(children.indexOf(nodesContainer!))
+  })
 })

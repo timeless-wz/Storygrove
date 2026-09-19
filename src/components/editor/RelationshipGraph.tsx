@@ -10,8 +10,10 @@ import {
   Panel,
   Position,
   ReactFlow,
+  useInternalNode,
   type Edge,
   type EdgeProps,
+  type InternalNode,
   type Node,
   type NodeChange,
   type NodeProps,
@@ -95,7 +97,8 @@ function CharacterGraphNodeView({ data, selected }: NodeProps<CharacterGraphNode
 
   return (
     <div
-      className="group relative flex flex-col items-center cursor-pointer select-none"
+      className="group relative flex flex-col items-center cursor-pointer select-none w-28"
+      style={{ zIndex: 2 }}
       data-testid="relationship-graph-node"
       data-character-id={data.characterId}
       data-character-name={data.name}
@@ -105,19 +108,45 @@ function CharacterGraphNodeView({ data, selected }: NodeProps<CharacterGraphNode
         data.onContextMenu?.(e, data.characterId, data.name)
       }}
     >
-      {/* Invisible Handles around the circle for smooth edge routing */}
-      <Handle type="source" position={Position.Top} id="top" style={{ opacity: 0 }} isConnectable={false} />
-      <Handle type="source" position={Position.Bottom} id="bottom" style={{ opacity: 0 }} isConnectable={false} />
-      <Handle type="source" position={Position.Left} id="left" style={{ opacity: 0 }} isConnectable={false} />
-      <Handle type="source" position={Position.Right} id="right" style={{ opacity: 0 }} isConnectable={false} />
-      <Handle type="target" position={Position.Top} id="t-top" style={{ opacity: 0 }} isConnectable={false} />
-      <Handle type="target" position={Position.Bottom} id="t-bottom" style={{ opacity: 0 }} isConnectable={false} />
-      <Handle type="target" position={Position.Left} id="t-left" style={{ opacity: 0 }} isConnectable={false} />
-      <Handle type="target" position={Position.Right} id="t-right" style={{ opacity: 0 }} isConnectable={false} />
+      {/* 连线圆心锚点：严格绑定在 64px 圆形头像几何中心 (水平居中 50%, 垂直中心 32px) */}
+      <Handle
+        type="source"
+        position={Position.Top}
+        id="center-source"
+        className="!w-0 !h-0 !min-w-0 !min-h-0 !border-0 !opacity-0 !pointer-events-none"
+        style={{
+          position: 'absolute',
+          left: '50%',
+          top: 32,
+          transform: 'translate(-50%, -50%)',
+          pointerEvents: 'none',
+          opacity: 0,
+          border: 'none',
+          background: 'transparent',
+        }}
+        isConnectable={false}
+      />
+      <Handle
+        type="target"
+        position={Position.Top}
+        id="center-target"
+        className="!w-0 !h-0 !min-w-0 !min-h-0 !border-0 !opacity-0 !pointer-events-none"
+        style={{
+          position: 'absolute',
+          left: '50%',
+          top: 32,
+          transform: 'translate(-50%, -50%)',
+          pointerEvents: 'none',
+          opacity: 0,
+          border: 'none',
+          background: 'transparent',
+        }}
+        isConnectable={false}
+      />
 
-      {/* Circular Node Body (64px x 64px) */}
+      {/* Circular Node Body (64px x 64px) - 实心不透明圆形节点，绘制在连线上层并遮挡进入圆内的线段 */}
       <div
-        className="w-16 h-16 rounded-full flex items-center justify-center shadow-md transition-transform group-hover:scale-105"
+        className="relative w-16 h-16 rounded-full flex items-center justify-center shadow-md transition-transform group-hover:scale-105"
         style={{
           backgroundColor: roleColor,
           border: isSource
@@ -130,6 +159,7 @@ function CharacterGraphNodeView({ data, selected }: NodeProps<CharacterGraphNode
             : selected
               ? `0 0 0 4px color-mix(in srgb, ${roleColor} 30%, transparent)`
               : undefined,
+          zIndex: 2,
         }}
       >
         {data.avatar ? (
@@ -146,7 +176,7 @@ function CharacterGraphNodeView({ data, selected }: NodeProps<CharacterGraphNode
       </div>
 
       {/* Centered Name and Role Tag below circle */}
-      <div className="mt-1.5 flex flex-col items-center max-w-28 text-center pointer-events-none">
+      <div className="relative mt-1.5 flex flex-col items-center max-w-28 text-center pointer-events-none" style={{ zIndex: 2 }}>
         <span
           className="text-xs font-semibold text-[var(--color-text)] truncate max-w-24 leading-tight"
           title={data.name}
@@ -168,22 +198,51 @@ function CharacterGraphNodeView({ data, selected }: NodeProps<CharacterGraphNode
   )
 }
 
+function getNodeCircleCenter(node?: InternalNode<CharacterGraphNode> | null): { x: number; y: number } | null {
+  if (!node) return null
+  const pos = node.internals?.positionAbsolute ?? node.position
+  if (!pos || typeof pos.x !== 'number' || typeof pos.y !== 'number') return null
+  const width = node.measured?.width ?? node.width ?? 112
+  return {
+    x: Math.round(pos.x + width / 2),
+    y: Math.round(pos.y + 32),
+  }
+}
+
 function RelationshipEdgeView({
+  source,
+  target,
   sourceX,
   sourceY,
   targetX,
   targetY,
   data,
+  markerEnd,
+  markerStart,
 }: EdgeProps<RelationshipFlowEdge>) {
-  const labelX = (sourceX + targetX) / 2
-  const labelY = (sourceY + targetY) / 2
-  const path = `M ${sourceX},${sourceY} L ${targetX},${targetY}`
+  const sourceNode = useInternalNode(source)
+  const targetNode = useInternalNode(target)
+
+  const sCenter = getNodeCircleCenter(sourceNode as InternalNode<CharacterGraphNode> | undefined)
+  const tCenter = getNodeCircleCenter(targetNode as InternalNode<CharacterGraphNode> | undefined)
+
+  // 严格绑定起点与终点至各自角色头像圆心坐标
+  const startX = sCenter?.x ?? Math.round(sourceX)
+  const startY = sCenter?.y ?? Math.round(sourceY)
+  const endX = tCenter?.x ?? Math.round(targetX)
+  const endY = tCenter?.y ?? Math.round(targetY)
+
+  const labelX = Math.round((startX + endX) / 2)
+  const labelY = Math.round((startY + endY) / 2)
+  const path = `M ${startX},${startY} L ${endX},${endY}`
   const label = data?.relation ?? ''
 
   return (
     <>
       <BaseEdge
         path={path}
+        markerEnd={markerEnd}
+        markerStart={markerStart}
         style={{
           stroke: 'var(--color-text-muted, #94a3b8)',
           strokeWidth: 2,
@@ -338,6 +397,9 @@ export default function RelationshipGraph({
         type: 'relationship' as const,
         source: rel.character1Id,
         target: rel.character2Id,
+        sourceHandle: 'center-source',
+        targetHandle: 'center-target',
+        zIndex: 0,
         data: {
           relation: rel.relation,
           description: rel.description,

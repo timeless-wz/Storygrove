@@ -446,7 +446,7 @@ describe('character profile edit mode', () => {
       await page.getByLabelText('当前位置/阵营').fill('黑水城')
     })
     await act(async () => {
-      await page.getByRole('button', { name: '保存' }).click()
+      await page.getByRole('button', { name: '完成' }).click()
     })
     await act(async () => {
       await new Promise(resolve => setTimeout(resolve, 20))
