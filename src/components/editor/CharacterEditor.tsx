@@ -91,9 +91,10 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
 
   // 数据由 ProjectService 统一加载，组件只消费 store 数据
 
-  const selectedCard = dataReady
-    ? characters.find((c) => c.name === selectedName) || null
-    : null
+  const selectedIndex = dataReady
+    ? characters.findIndex((c) => c.name === selectedName)
+    : -1
+  const selectedCard = selectedIndex >= 0 ? characters[selectedIndex] : null
 
   const handleDelete = async () => {
     const projectSession = captureProjectSession(currentProject)
@@ -123,6 +124,8 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
       await saveAll(projectKey)
       if (!isProjectSessionCurrent(projectSession)) return
       addLog('info', text(`已保存 ${characters.length} 个角色卡`, `Saved ${characters.length} character cards`))
+      // 只有真的保存成功才回到只读概览，让作者看到落盘后的结果。
+      setViewMode('overview')
     } catch (error) {
       if (!isProjectSessionCurrent(projectSession)) return
       addLog('error', text(`角色卡保存失败：${error}`, 'Could not save character cards.'))
@@ -344,7 +347,11 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
         ) : (
           viewMode === 'edit' ? (
             <CharacterProfileForm
-              key={selectedCard.name}
+              /*
+               * 用选中位置而不是姓名做身份键：改名会让姓名变化，用它会每次按键都
+               * 重挂整个表单（输入框失焦、本地关系草稿被清空），作者就再也改不动名字。
+               */
+              key={selectedIndex}
               card={selectedCard}
               characters={characters}
               identityBusy={identityBusy}

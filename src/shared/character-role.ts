@@ -3,6 +3,11 @@ export const CHARACTER_ROLES = [
   'antagonist',
   'supporting',
   'minor',
+  /**
+   * 尚未决定定位。它是显式的持久化值，专门用来避免“没选定位就等于配角”：
+   * 新建角色默认落在这里，历史数据里的 supporting 不会被改写。
+   */
+  'unassigned',
 ] as const
 
 export type CharacterRole = typeof CHARACTER_ROLES[number]
@@ -12,12 +17,20 @@ export interface CharacterRoleLabels {
   enUS: string
 }
 
+/**
+ * 定位标签的唯一来源。`minor` 的持久化键保持不变（历史数据原样可读），
+ * 展示文案统一为“其他”，与新建浮层给出的五个选项一一对应。
+ */
 export const CHARACTER_ROLE_LABELS: Readonly<Record<CharacterRole, CharacterRoleLabels>> = {
   protagonist: { zhCN: '主角', enUS: 'Protagonist' },
   antagonist: { zhCN: '反派', enUS: 'Antagonist' },
   supporting: { zhCN: '配角', enUS: 'Supporting character' },
-  minor: { zhCN: '龙套', enUS: 'Minor character' },
+  minor: { zhCN: '其他', enUS: 'Other' },
+  unassigned: { zhCN: '暂未设定', enUS: 'Not set yet' },
 }
+
+/** 新建角色在作者未选择定位时使用的值；绝不能默认成配角。 */
+export const DEFAULT_CHARACTER_CREATION_ROLE: CharacterRole = 'unassigned'
 
 const CHARACTER_ROLE_ALIASES: Readonly<Record<string, CharacterRole>> = {
   protagonist: 'protagonist',
@@ -39,6 +52,12 @@ const CHARACTER_ROLE_ALIASES: Readonly<Record<string, CharacterRole>> = {
   minor: 'minor',
   龙套: 'minor',
   次要角色: 'minor',
+  其他: 'minor',
+  其它: 'minor',
+  unassigned: 'unassigned',
+  暂未设定: 'unassigned',
+  未设定: 'unassigned',
+  待定: 'unassigned',
 }
 
 /**

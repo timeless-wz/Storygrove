@@ -82,7 +82,8 @@ const ROLE_LABELS: Record<string, [string, string]> = {
   protagonist: ['主角', 'Protagonist'],
   antagonist: ['反派', 'Antagonist'],
   supporting: ['配角', 'Supporting'],
-  minor: ['次要角色', 'Minor'],
+  minor: ['其他', 'Other'],
+  unassigned: ['暂未设定', 'Not set yet'],
 }
 
 const HANDLE_POSITIONS = {

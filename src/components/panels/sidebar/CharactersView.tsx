@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { Users, RefreshCw, Plus, Search } from 'lucide-react'
 import { useProjectStore } from '../../../stores/project-store'
 import { useCharacterStore, type CharacterCard } from '../../../stores/character-store'
+import { useLayoutStore } from '../../../stores/layout-store'
 import { Button } from '../../ui/Button'
 import { Input } from '../../ui/Input'
 import { EmptyState } from '../../ui/EmptyState'
@@ -18,6 +19,7 @@ import {
   truncateProfileText,
 } from '../../../shared/character-profile-presentation'
 import { CharacterCardImportButton } from '../../characters/CharacterCardImportButton'
+import CharacterCreateDialog from '../../characters/CharacterCreateDialog'
 
 /**
  * 列表里的一行有用摘要：先讲“在哪、刚发生什么”，只在确实有更新章节时
@@ -52,6 +54,7 @@ function CharacterStateSummary({ card }: { card: CharacterCard }) {
 
 export default function CharactersView() {
   const [searchQuery, setSearchQuery] = useState('')
+  const [createOpen, setCreateOpen] = useState(false)
   const currentProject = useProjectStore(s => s.currentProject)
   const characters = useCharacterStore(s => s.characters)
   const dataProjectKey = useCharacterStore(s => s.dataProjectKey)
@@ -105,7 +108,7 @@ export default function CharactersView() {
           <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => load(currentProject.path)} disabled={identityBusy || loadingProjectKey !== null} title={text('刷新列表', 'Refresh list')}>
             <RefreshCw size={14} strokeWidth={2} />
           </Button>
-          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={addCharacter} disabled={identityBusy || !dataReady} title={text('新建角色', 'New character')}>
+          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setCreateOpen(true)} disabled={identityBusy || !dataReady} title={text('新建角色', 'New character')} aria-label={text('新建角色', 'New character')}>
             <Plus size={14} strokeWidth={2} />
           </Button>
         </div>
@@ -151,6 +154,16 @@ export default function CharactersView() {
           </div>
         )}
       </div>
+      <CharacterCreateDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        existingNames={visibleCharacters.map(character => character.name)}
+        create={addCharacter}
+        onCreated={() => {
+          // 创建后直接进入可编辑档案，不先落到只读概览。
+          useLayoutStore.getState().openCharacterProfile('edit')
+        }}
+      />
     </div>
   )
 }
