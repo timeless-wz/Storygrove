@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Save, Trash2, Users, Network, PencilLine, Check, AlertTriangle, RefreshCw } from 'lucide-react'
 import { useProjectStore } from '../../stores/project-store'
 import { registerEditorExitSaveHandler } from '../../stores/editor-store'
@@ -48,6 +48,9 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
   const deleteCharacter = useCharacterStore(s => s.deleteCharacter)
   const clearAllCharacters = useCharacterStore(s => s.clearAllCharacters)
   const saveAll = useCharacterStore(s => s.saveAll)
+  const characterIdentities = useCharacterStore(s => s.characterIdentities)
+  const sharedRelationships = useCharacterStore(s => s.relationships)
+  const loadRelationshipsAndPositions = useCharacterStore(s => s.loadRelationshipsAndPositions)
   const [localViewMode, setLocalViewMode] = useState<CharacterProfileView>('overview')
   const text = useLocaleStore(s => s.text)
   const projectMatches = currentProject?.path === projectKey
@@ -95,6 +98,34 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
     ? characters.findIndex((c) => c.name === selectedName)
     : -1
   const selectedCard = selectedIndex >= 0 ? characters[selectedIndex] : null
+
+  // 画布只认稳定人物 ID；未保存角色在进入画布前会先补齐身份。
+  const graphCharacters = useMemo(
+    () => characters.map(character => ({
+      id: characterIdentities[character.name] ?? '',
+      name: character.name,
+      role: character.role,
+    })),
+    [characterIdentities, characters],
+  )
+  const selectedCharacterId = selectedCard ? characterIdentities[selectedCard.name] ?? '' : ''
+  const selectedSharedRelationships = useMemo(
+    () => (selectedCharacterId
+      ? sharedRelationships.filter(rel => (
+        rel.character1Id === selectedCharacterId || rel.character2Id === selectedCharacterId
+      ))
+      : []),
+    [selectedCharacterId, sharedRelationships],
+  )
+
+  /*
+   * 画布节点需要一个可用的 ID；角色名单落盘时会补齐身份，所以打开画布前先
+   * 显式补齐一次，避免刚建的角色连不上线。
+   */
+  useEffect(() => {
+    if (viewMode !== 'graph' || !dataReady) return
+    void loadRelationshipsAndPositions(projectKey)
+  }, [dataReady, loadRelationshipsAndPositions, projectKey, viewMode])
 
   const handleDelete = async () => {
     const projectSession = captureProjectSession(currentProject)
@@ -322,8 +353,8 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
           }}
         >
           {text(
-            '关系图谱由角色档案推导，只读展示。点击节点会打开对应人物卡，修改关系请切回「编辑档案」。',
-            'The relationship graph is derived from character profiles and is read-only. Clicking a node opens that character card; switch back to Edit profile to change relationships.',
+            '关系画布与角色档案读写同一份共享关系：连线、编辑关系都在这里生效。点击节点可打开对应人物卡。',
+            'This canvas and the character profiles share one relationship source: connecting and editing here take effect everywhere. Click a node to open that character card.',
           )}
         </div>
       )}
@@ -332,7 +363,7 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
       <div className="flex-1 overflow-y-auto relative">
         {viewMode === 'graph' ? (
           <RelationshipGraph
-            characters={characters}
+            characters={graphCharacters}
             projectKey={projectKey}
             onCharacterSelect={openCharacterCard}
           />
@@ -354,6 +385,8 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
               key={selectedIndex}
               card={selectedCard}
               characters={characters}
+              characterId={selectedCharacterId}
+              sharedRelationships={selectedSharedRelationships}
               identityBusy={identityBusy}
               onRename={(nextName) => renameCurrentCharacter(selectedCard.name, nextName)}
               onUpdateField={(key, value) => updateCurrentField(selectedCard.name, key, value)}
@@ -362,6 +395,8 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
             <CharacterProfileOverview
               card={selectedCard}
               characters={characters}
+              characterId={selectedCharacterId}
+              sharedRelationships={selectedSharedRelationships}
               onOpenCharacter={openCharacterCard}
             />
           )

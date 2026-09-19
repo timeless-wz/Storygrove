@@ -4,6 +4,7 @@
  * currentState 子结构已拍平为 cs_* 前缀列，杜绝 JSON 大字段。
  */
 import { getProjectDb } from '../database'
+import { CharacterRelationshipRepository } from './character-relationship-repository'
 import {
     normalizeCharacterRole,
     type CharacterRole,
@@ -295,11 +296,15 @@ export class CharacterRepository {
                         updateBlueprint.run(JSON.stringify(renamed), blueprint.chapter_number)
                     }
                 }
+                // 改名只更新展示名镜像；关系端点与坐标主键都是稳定 ID，不受改名影响。
+                CharacterRelationshipRepository.applyRenames(normalizedRenames, db)
             }
 
             for (const char of normalizedCharacters) {
                 CharacterRepository.upsert(char)
             }
+            CharacterRelationshipRepository.reconcileIdentities(db, { renames: normalizedRenames })
+            CharacterRelationshipRepository.migrateLegacyRelationships(db)
         })
         tx()
     }
@@ -309,7 +314,11 @@ export class CharacterRepository {
         const db = getProjectDb()
         if (!db) return
 
-        db.prepare('DELETE FROM characters WHERE name = ?').run(name)
+        const tx = db.transaction(() => {
+            CharacterRelationshipRepository.deleteCharacterCascade(name, db)
+            db.prepare('DELETE FROM characters WHERE name = ?').run(name)
+        })
+        tx()
     }
 
     /** 仅更新角色动态状态（后处理时使用） */

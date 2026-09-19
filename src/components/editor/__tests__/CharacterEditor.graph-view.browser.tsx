@@ -91,6 +91,10 @@ beforeEach(() => {
     loadingProjectKey: null,
     loadingProjectSession: null,
     lastError: null,
+    // 画布节点与坐标都按稳定人物 ID 渲染。
+    characterIdentities: { 沈砚: 'id-shen-yan', 林晚: 'id-lin-wan' },
+    relationships: [],
+    graphPositions: {},
   })
   useLayoutStore.setState({ sidebarView: 'project', characterViewRequest: null })
   setActiveProjectSessionContext(PROJECT_SESSION)
@@ -99,6 +103,11 @@ beforeEach(() => {
     if (channel === 'db:character-roster-read') {
       return { status: 'ready', revision: 1, entries: [], renderedMarkdown: 'Character roster' }
     }
+    if (channel === 'db:character-identities-ensure') {
+      return { 沈砚: 'id-shen-yan', 林晚: 'id-lin-wan' }
+    }
+    if (channel === 'db:character-relationships-get-all') return []
+    if (channel === 'db:character-graph-positions-get') return {}
     return { success: false, error: `unexpected channel ${channel}` }
   })
   Object.defineProperty(window, 'velaAPI', {

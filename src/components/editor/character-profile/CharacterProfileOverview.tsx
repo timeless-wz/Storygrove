@@ -8,14 +8,22 @@ import {
   CHARACTER_STATE_FIELD_LABELS,
   characterProfileDetailSections,
   characterProfileSummaryFacts,
-  characterRelationshipPresentation,
   characterStateProvenanceKind,
   type CharacterProfileDetailSectionId,
 } from '../../../shared/character-profile-presentation'
+import {
+  otherCharacterIdInRelationship,
+  otherCharacterNameInRelationship,
+  type CharacterSharedRelationship,
+} from '../../../shared/character-relationship'
+import { classifyRelationshipStorage } from '../../../shared/relationship-presentation'
 
 interface CharacterProfileOverviewProps {
   card: CharacterCard
   characters: readonly CharacterCard[]
+  /** 本角色的稳定 ID；关系画布与这里读写同一份共享关系表。 */
+  characterId: string
+  sharedRelationships: readonly CharacterSharedRelationship[]
   onOpenCharacter: (name: string) => void
 }
 
@@ -34,15 +42,32 @@ const DETAIL_SECTION_LABELS: Readonly<Record<CharacterProfileDetailSectionId, [s
 export default function CharacterProfileOverview({
   card,
   characters,
+  characterId,
+  sharedRelationships,
   onOpenCharacter,
 }: CharacterProfileOverviewProps) {
   const text = useLocaleStore(state => state.text)
   const roleLabels = getCharacterRoleLabels(card.role)
   const summary = characterProfileSummaryFacts(card)
-  const relationships = characterRelationshipPresentation(card.relationships, {
-    knownNames: characters.map(character => character.name),
-    selfName: card.name,
+  const knownNames = new Set(characters.map(character => character.name.trim()))
+  /*
+   * 关系只来自共享关系表。角色卡里的旧 relationships 字段仅剩历史证据：
+   * 无法解析的自由文本原样展示，解析得出的关系一律不再当作第二条事实源。
+   */
+  const relatedCharacters = sharedRelationships.map(rel => {
+    const targetName = otherCharacterNameInRelationship(rel, characterId).trim()
+    return {
+      id: otherCharacterIdInRelationship(rel, characterId),
+      targetName,
+      relation: rel.relation,
+      description: rel.description,
+      resolvable: Boolean(targetName) && knownNames.has(targetName),
+    }
   })
+  const hasSharedRelationships = relatedCharacters.length > 0
+  const legacyRelationshipText = classifyRelationshipStorage(card.relationships) === 'legacy'
+    ? card.relationships.trim()
+    : ''
   const stateFields = CHARACTER_STATE_TEXT_FIELDS
     .map(field => ({ field, value: card.currentState?.[field]?.trim() ?? '' }))
     .filter(entry => entry.value)
@@ -126,17 +151,61 @@ export default function CharacterProfileOverview({
 
       <ProfileSection
         title={text('关系', 'Relationships')}
-        aside={relationships.kind === 'structured'
-          ? text(`${relationships.groups.length} 位相关角色`, `${relationships.groups.length} related characters`)
+        aside={hasSharedRelationships
+          ? text(`${relatedCharacters.length} 位关联人物`, `${relatedCharacters.length} associated characters`)
           : undefined}
       >
-        {relationships.kind === 'empty' && (
+        {!hasSharedRelationships && !legacyRelationshipText && (
           <p className="text-[11px] text-[var(--color-text-muted)]">
-            {text('尚未填写关系，可在编辑档案里按关系行补充。', 'No relationships yet. Add them as rows in Edit profile.')}
+            {text('尚未填写关系，可在关系画布或编辑档案里补充。', 'No relationships yet. Add them in relationship canvas or Edit profile.')}
           </p>
         )}
-        {relationships.kind === 'legacy' && (
-          <div className="space-y-1.5" data-testid="overview-legacy-relationships">
+        {hasSharedRelationships && (
+          <ul className="space-y-2">
+            {relatedCharacters.map(row => (
+              <li key={row.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                {row.resolvable ? (
+                  <button
+                    type="button"
+                    data-testid="relationship-target"
+                    className="rounded font-semibold text-[var(--color-accent)] underline-offset-2 hover:underline"
+                    title={text(`打开「${row.targetName}」的人物卡`, `Open the character card for “${row.targetName}”`)}
+                    onClick={() => onOpenCharacter(row.targetName)}
+                  >
+                    {row.targetName}
+                  </button>
+                ) : (
+                  <span className="font-medium" style={{ color: 'var(--color-warning-text)' }}>
+                    {row.targetName || text('未知人物', 'Unknown character')}
+                    <span className="ml-1 text-[0.65rem] font-normal">
+                      {text('（不在名单中）', '(not in roster)')}
+                    </span>
+                  </span>
+                )}
+                <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                  <span
+                    data-testid="relationship-chip"
+                    className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium"
+                    style={{
+                      borderColor: 'var(--color-border)',
+                      backgroundColor: 'var(--color-hover)',
+                      color: 'var(--color-text)',
+                    }}
+                  >
+                    {row.relation}
+                  </span>
+                  {row.description && (
+                    <span className="text-[11px] text-[var(--color-text-secondary)]">
+                      {row.description}
+                    </span>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        {legacyRelationshipText && (
+          <div className={hasSharedRelationships ? 'mt-2 space-y-1.5' : 'space-y-1.5'} data-testid="overview-legacy-relationships">
             <p className="text-[11px] text-[var(--color-text-muted)]">
               {text(
                 '旧版关系文本，未解析，已按原样保留。',
@@ -147,38 +216,9 @@ export default function CharacterProfileOverview({
               className="overflow-x-auto whitespace-pre-wrap rounded-md border px-2.5 py-2 text-[11px]"
               style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
             >
-              {relationships.text}
+              {legacyRelationshipText}
             </pre>
           </div>
-        )}
-        {relationships.kind === 'structured' && (
-          <ul className="space-y-1.5">
-            {relationships.groups.map(group => (
-              <li key={group.target} className="flex flex-wrap items-baseline gap-x-2 text-xs">
-                {group.resolvable ? (
-                  <button
-                    type="button"
-                    data-testid="relationship-target"
-                    className="rounded font-medium text-[var(--color-accent)] underline-offset-2 hover:underline"
-                    title={text(`打开「${group.target}」的人物卡`, `Open the character card for “${group.target}”`)}
-                    onClick={() => onOpenCharacter(group.target)}
-                  >
-                    {group.target}
-                  </button>
-                ) : (
-                  <span className="font-medium" style={{ color: 'var(--color-warning-text)' }}>
-                    {group.target}
-                    <span className="ml-1 text-[0.65rem] font-normal">
-                      {text('（不在名单中）', '(not in roster)')}
-                    </span>
-                  </span>
-                )}
-                <span className="min-w-0 flex-1 text-[var(--color-text-secondary)]">
-                  {group.relations.join(' · ')}
-                </span>
-              </li>
-            ))}
-          </ul>
         )}
       </ProfileSection>
 

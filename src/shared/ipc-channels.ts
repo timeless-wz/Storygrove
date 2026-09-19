@@ -46,6 +46,11 @@ import type {
   StoryTimelineSettings,
   StoryTimelineSnapshot,
 } from './story-timeline'
+import type {
+  CharacterSharedRelationship,
+  CharacterGraphPosition,
+  CharacterIdentityMap,
+} from './character-relationship'
 import type { Phase38Channels } from './phase3-8'
 import type {
   UpdateActionResponse,
@@ -984,6 +989,43 @@ export interface DatabaseChannels {
   'db:character-roster-commit': {
     args: [request: CharacterRosterCommitRequest, expectedProjectPath: string]
     return: { success: boolean; receipt?: CharacterRosterCommitReceipt; error?: string }
+  }
+  'db:character-identities-get': {
+    args: [expectedProjectPath: string]
+    return: CharacterIdentityMap
+  }
+  'db:character-identities-ensure': {
+    args: [names: string[], expectedProjectPath: string]
+    return: CharacterIdentityMap
+  }
+  'db:character-relationships-get-all': {
+    args: [expectedProjectPath: string]
+    return: CharacterSharedRelationship[]
+  }
+  'db:character-relationship-upsert': {
+    args: [
+      data: {
+        id?: string
+        character1Id: string
+        character2Id: string
+        relation: string
+        description?: string
+      },
+      expectedProjectPath: string,
+    ]
+    return: { success: boolean; relationship?: CharacterSharedRelationship; error?: string }
+  }
+  'db:character-relationship-delete': {
+    args: [id: string, expectedProjectPath: string]
+    return: { success: boolean; error?: string }
+  }
+  'db:character-graph-positions-get': {
+    args: [expectedProjectPath: string]
+    return: Record<string, CharacterGraphPosition>
+  }
+  'db:character-graph-positions-save': {
+    args: [positions: Record<string, CharacterGraphPosition>, expectedProjectPath: string]
+    return: { success: boolean; error?: string }
   }
 
   // 4. drafts

@@ -1,233 +1,261 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Plus, Trash2, Wand2 } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Link2, PencilLine, Trash2 } from 'lucide-react'
 import type { CharacterCard } from '../../../stores/character-store'
+import { useCharacterStore } from '../../../stores/character-store'
 import { useLocaleStore } from '../../../stores/locale-store'
 import { Button } from '../../ui/Button'
-import { Input } from '../../ui/Input'
 import { NativeSelect } from '../../ui/NativeSelect'
 import { Textarea } from '../../ui/Textarea'
+import RelationshipModal from '../RelationshipModal'
 import {
-  classifyRelationshipStorage,
-  relationshipRepairGuidance,
-  relationshipStorageFromEditor,
-  relationshipStorageFromRows,
-  structuredRelationshipRows,
-} from '../../../shared/relationship-presentation'
-import {
-  persistableRelationshipEdges,
-  validateCharacterRelationshipRows,
-  type CharacterRelationshipRowDraft,
-  type CharacterRelationshipRowIssue,
-} from '../../../shared/character-profile-presentation'
-
-interface RelationshipRowDraft extends CharacterRelationshipRowDraft {
-  id: string
-}
+  otherCharacterIdInRelationship,
+  otherCharacterNameInRelationship,
+  type CharacterSharedRelationship,
+} from '../../../shared/character-relationship'
+import { classifyRelationshipStorage } from '../../../shared/relationship-presentation'
 
 interface CharacterRelationshipsFieldProps {
   card: CharacterCard
   characters: readonly CharacterCard[]
-  onStorageChange: (storage: string) => void
+  /** 本角色的稳定 ID；没有 ID（尚未落盘）时不能建立关系。 */
+  characterId: string
+  /** 与关系画布同源：共享关系表中涉及本角色的记录。 */
+  sharedRelationships: readonly CharacterSharedRelationship[]
 }
 
-let relationshipRowSequence = 0
-
-function nextRelationshipRowId(): string {
-  relationshipRowSequence += 1
-  return `relationship-row-${relationshipRowSequence}`
+interface ModalState {
+  open: boolean
+  targetId: string
+  targetName: string
+  existing: CharacterSharedRelationship | null
 }
 
-/** 旧文本不在这里解析：它始终走只读文本通道，直到作者显式转换。 */
-function structuredRowsFromStorage(value: string): RelationshipRowDraft[] {
-  if (classifyRelationshipStorage(value) === 'legacy') return []
-  return (structuredRelationshipRows(value) ?? []).map(row => ({ id: nextRelationshipRowId(), ...row }))
-}
+const CLOSED_MODAL: ModalState = { open: false, targetId: '', targetName: '', existing: null }
 
 /**
- * 关系行编辑器。
+ * 编辑档案里的关系入口。
  *
- * 只有“目标 + 说明”都完整、且不自指/不重复的行才会写回存储，因为角色名单
- * 事务会整体拒绝这类残行。无法解析的旧关系文本不做任何猜测，原样保留在
- * 文本通道里，并提供一次显式的“转为关系行”动作。
+ * 与关系画布读写同一份共享关系表：这里新增、修改、删除都会立刻反映到画布，
+ * 不再编辑角色卡里的第二套 relationships JSON。旧字段只作为历史证据展示，
+ * 其中的自由文本保持原样，不会被猜测成关系。
  */
 export default function CharacterRelationshipsField({
   card,
   characters,
-  onStorageChange,
+  characterId,
+  sharedRelationships,
 }: CharacterRelationshipsFieldProps) {
   const text = useLocaleStore(state => state.text)
-  const locale = useLocaleStore(state => state.locale)
-  const legacy = classifyRelationshipStorage(card.relationships) === 'legacy'
-  const [rows, setRows] = useState<RelationshipRowDraft[]>(
-    () => structuredRowsFromStorage(card.relationships),
+  const upsertRelationship = useCharacterStore(state => state.upsertRelationship)
+  const deleteRelationship = useCharacterStore(state => state.deleteRelationship)
+  const [targetName, setTargetName] = useState('')
+  const [modal, setModal] = useState<ModalState>(CLOSED_MODAL)
+  const [busy, setBusy] = useState(false)
+
+  const legacyRelationshipText = classifyRelationshipStorage(card.relationships) === 'legacy'
+    ? card.relationships
+    : ''
+
+  const rows = useMemo(
+    () => sharedRelationships.map(rel => ({
+      id: rel.id,
+      targetId: otherCharacterIdInRelationship(rel, characterId),
+      targetName: otherCharacterNameInRelationship(rel, characterId).trim(),
+      relation: rel.relation,
+      description: rel.description,
+      relationship: rel,
+    })),
+    [characterId, sharedRelationships],
   )
-  const lastWrittenRef = useRef(card.relationships)
 
-  // 项目重新加载、草稿回滚等外部变更必须以存储为准，避免本地草稿覆盖事实。
-  useEffect(() => {
-    if (card.relationships === lastWrittenRef.current) return
-    lastWrittenRef.current = card.relationships
-    setRows(structuredRowsFromStorage(card.relationships))
-  }, [card.relationships])
-
-  const knownNames = useMemo(
-    () => characters
-      .map(character => character.name.trim())
-      .filter(name => name && name !== card.name),
+  const otherCharacters = useMemo(
+    () => characters.filter(character => (
+      character.name.trim() && character.name.trim() !== card.name.trim()
+    )),
     [card.name, characters],
   )
-  const knownNameSet = useMemo(() => new Set(knownNames), [knownNames])
 
-  const validations = validateCharacterRelationshipRows(rows, { selfName: card.name })
-  const persistableCount = persistableRelationshipEdges(rows, { selfName: card.name }).length
+  const resolveCharacterId = (name: string): string => (
+    useCharacterStore.getState().characterIdentities[name.trim()] ?? ''
+  )
 
-  const commit = (nextRows: RelationshipRowDraft[]) => {
-    setRows(nextRows)
-    const storage = relationshipStorageFromRows(
-      persistableRelationshipEdges(nextRows, { selfName: card.name }),
-    )
-    lastWrittenRef.current = storage
-    if (storage !== card.relationships) onStorageChange(storage)
+  const openCreateModal = () => {
+    const target = otherCharacters.find(character => character.name.trim() === targetName)
+    if (!target) return
+    // 同一对人物只有一条关系：已有关系时打开编辑，而不是新增重复连线。
+    const existing = rows.find(row => row.targetName === target.name.trim())?.relationship ?? null
+    setModal({
+      open: true,
+      targetId: resolveCharacterId(target.name),
+      targetName: target.name.trim(),
+      existing,
+    })
   }
 
-  const updateRow = (id: string, patch: Partial<CharacterRelationshipRowDraft>) => {
-    commit(rows.map(row => (row.id === id ? { ...row, ...patch } : row)))
+  const handleSave = async (data: { relation: string; description?: string }) => {
+    if (!characterId) return
+    const targetId = modal.existing
+      ? otherCharacterIdInRelationship(modal.existing, characterId)
+      : resolveCharacterId(modal.targetName)
+    if (!targetId) return
+    setBusy(true)
+    try {
+      await upsertRelationship({
+        id: modal.existing?.id,
+        character1Id: characterId,
+        character2Id: targetId,
+        relation: data.relation,
+        description: data.description,
+      })
+    } finally {
+      setBusy(false)
+    }
   }
 
-  const convertedStorage = legacy
-    ? relationshipStorageFromEditor(card.relationships, { knownNames, selfName: card.name })
-    : card.relationships
-  const canConvertLegacy = legacy && convertedStorage !== card.relationships
-
-  const convertLegacy = () => {
-    if (!canConvertLegacy) return
-    setRows(structuredRowsFromStorage(convertedStorage))
-    lastWrittenRef.current = convertedStorage
-    onStorageChange(convertedStorage)
-  }
-
-  const issueMessage = (issue: CharacterRelationshipRowIssue): string => {
-    if (issue === 'missingTarget') return text('请选择关系目标', 'Choose a relationship target')
-    if (issue === 'missingRelation') return text('请填写关系说明', 'Describe the relationship')
-    if (issue === 'selfTarget') return text('不能与自己建立关系', 'A character cannot relate to itself')
-    return text('与上面某一行完全重复，不会保存', 'Identical to another row and will not be saved')
-  }
-
-  if (legacy) {
-    return (
-      <div className="space-y-1.5" data-testid="legacy-relationships">
-        <div
-          className="rounded-md border px-2.5 py-2 text-[11px] leading-relaxed"
-          style={{
-            borderColor: 'var(--color-border)',
-            backgroundColor: 'var(--color-hover)',
-            color: 'var(--color-text-secondary)',
-          }}
-        >
-          {text(
-            '这段关系是旧项目里的自由文本，无法解析为结构化关系，将按原样保存。',
-            'These relationships are free-form text from an older project. They cannot be parsed as structured relationships and are saved verbatim.',
-          )}
-        </div>
-        <Textarea
-          value={card.relationships}
-          onChange={(event) => {
-            lastWrittenRef.current = event.target.value
-            onStorageChange(event.target.value)
-          }}
-          rows={4}
-          aria-label={text('旧版关系文本', 'Legacy relationship text')}
-          placeholder={text('原样保留的关系文本', 'Relationship text kept verbatim')}
-        />
-        <p className="text-[11px] text-[var(--color-text-muted)]">
-          {relationshipRepairGuidance(locale)}
-        </p>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={!canConvertLegacy}
-          onClick={convertLegacy}
-          title={canConvertLegacy
-            ? text('把“角色：关系”逐行文本转为可编辑的关系行', 'Turn “Character: relationship” lines into editable rows')
-            : text('需要每行都是“角色：关系”，且角色名在名单中', 'Every line must read “Character: relationship” with a name from the roster')}
-        >
-          <Wand2 size={12} /> {text('转为关系行', 'Convert to relationship rows')}
-        </Button>
-      </div>
-    )
+  const handleDelete = async () => {
+    if (!modal.existing?.id) return
+    setBusy(true)
+    try {
+      await deleteRelationship(modal.existing.id)
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
+    <div className="space-y-2" data-testid="shared-relationships-field">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-[11px] text-[var(--color-text-muted)]">
-          {text(`共 ${persistableCount} 条关系`, `${persistableCount} relationships`)}
+          {text(`共 ${rows.length} 条关系`, `${rows.length} relationships`)}
         </span>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => commit([...rows, { id: nextRelationshipRowId(), target: '', relation: '' }])}
-        >
-          <Plus size={12} /> {text('添加关系', 'Add relationship')}
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <NativeSelect
+            value={targetName}
+            aria-label={text('关系目标', 'Relationship target')}
+            className="h-6 w-32 text-[11px]"
+            onChange={event => setTargetName(event.target.value)}
+          >
+            <option value="">{text('选择角色…', 'Select a character…')}</option>
+            {otherCharacters.map(character => (
+              <option key={character.name} value={character.name}>{character.name}</option>
+            ))}
+          </NativeSelect>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!targetName || !characterId}
+            data-testid="shared-relationship-create"
+            onClick={openCreateModal}
+          >
+            <Link2 size={12} /> {text('建立关系', 'Connect')}
+          </Button>
+        </div>
       </div>
-      {rows.length === 0 && (
-        <div className="rounded-md border border-dashed px-2.5 py-3 text-center text-[11px] text-[var(--color-text-muted)]" style={{ borderColor: 'var(--color-border)' }}>
-          {text('暂无关系，点击“添加关系”补充', 'No relationships yet. Use “Add relationship”.')}
+
+      {!characterId && (
+        <p className="text-[11px]" style={{ color: 'var(--color-warning-text)' }}>
+          {text('该角色尚未保存，保存后才能建立关系。', 'Save this character before creating relationships.')}
+        </p>
+      )}
+
+      {rows.length === 0 ? (
+        <div
+          className="rounded-md border border-dashed px-2.5 py-3 text-center text-[11px] text-[var(--color-text-muted)]"
+          style={{ borderColor: 'var(--color-border)' }}
+        >
+          {text(
+            '暂无关系，可在上方选择角色建立，或直接到关系画布连线',
+            'No relationships yet. Pick a character above, or connect them on the canvas.',
+          )}
+        </div>
+      ) : (
+        <ul className="space-y-1.5">
+          {rows.map(row => (
+            <li
+              key={row.id}
+              data-testid="shared-relationship-row"
+              data-target-name={row.targetName}
+              className="flex items-center gap-2 rounded-md border px-2 py-1.5"
+              style={{ borderColor: 'var(--color-border)' }}
+            >
+              <span className="min-w-0 flex-shrink-0 text-xs font-medium text-[var(--color-text)]">
+                {row.targetName || text('未知人物', 'Unknown character')}
+              </span>
+              <span
+                data-testid="shared-relationship-chip"
+                className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px]"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+              >
+                {row.relation}
+              </span>
+              {row.description && (
+                <span
+                  className="min-w-0 flex-1 truncate text-[11px] text-[var(--color-text-muted)]"
+                  title={row.description}
+                >
+                  {row.description}
+                </span>
+              )}
+              <div className="ml-auto flex items-center gap-0.5">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  aria-label={text('编辑关系', 'Edit relationship')}
+                  title={text('编辑关系', 'Edit relationship')}
+                  disabled={busy}
+                  onClick={() => setModal({
+                    open: true,
+                    targetId: row.targetId,
+                    targetName: row.targetName,
+                    existing: row.relationship,
+                  })}
+                >
+                  <PencilLine size={12} />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  aria-label={text('删除关系', 'Remove relationship')}
+                  title={text('删除关系', 'Remove relationship')}
+                  disabled={busy}
+                  onClick={() => { void deleteRelationship(row.id) }}
+                >
+                  <Trash2 size={12} />
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {legacyRelationshipText && (
+        <div className="space-y-1.5" data-testid="legacy-relationships">
+          <p className="text-[11px] text-[var(--color-text-muted)]">
+            {text(
+              '旧版关系文本（历史证据，不参与图谱与关系事实）：',
+              'Legacy relationship text (historical evidence only; not part of the graph):',
+            )}
+          </p>
+          <Textarea
+            value={legacyRelationshipText}
+            rows={3}
+            readOnly
+            aria-label={text('旧版关系文本', 'Legacy relationship text')}
+          />
         </div>
       )}
-      {rows.map((row, index) => {
-        const validation = validations[index]
-        const targetUnknown = Boolean(row.target.trim()) && !knownNameSet.has(row.target.trim())
-        return (
-          <div key={row.id} className="space-y-1" data-testid="relationship-row">
-            <div className="flex items-start gap-1.5">
-              <NativeSelect
-                value={row.target}
-                aria-label={text('关系目标', 'Relationship target')}
-                onChange={(event) => updateRow(row.id, { target: event.target.value })}
-              >
-                <option value="">{text('选择角色…', 'Select a character…')}</option>
-                {knownNames.map(name => <option key={name} value={name}>{name}</option>)}
-                {row.target.trim() && !knownNameSet.has(row.target.trim()) && (
-                  <option value={row.target}>
-                    {text(`${row.target}（不在名单中）`, `${row.target} (not in roster)`)}
-                  </option>
-                )}
-              </NativeSelect>
-              <Input
-                value={row.relation}
-                aria-label={text('关系说明', 'Relationship description')}
-                placeholder={text('关系说明，例如：竞争对手', 'Description, e.g. rival')}
-                onChange={(event) => updateRow(row.id, { relation: event.target.value })}
-              />
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 flex-shrink-0"
-                aria-label={text('删除关系', 'Remove relationship')}
-                title={text('删除关系', 'Remove relationship')}
-                onClick={() => commit(rows.filter(candidate => candidate.id !== row.id))}
-              >
-                <Trash2 size={13} />
-              </Button>
-            </div>
-            {(validation?.issues.length ?? 0) > 0 && (
-              <p className="text-[11px]" style={{ color: 'var(--color-warning-text)' }}>
-                {validation!.issues.map(issueMessage).join('；')}
-              </p>
-            )}
-            {targetUnknown && (validation?.issues.length ?? 0) === 0 && (
-              <p className="text-[11px]" style={{ color: 'var(--color-warning-text)' }}>
-                {text(
-                  '该角色不在当前名单中，保存会被角色名单事务拒绝。',
-                  'This name is not in the roster; the roster transaction will reject the save.',
-                )}
-              </p>
-            )}
-          </div>
-        )
-      })}
+
+      <RelationshipModal
+        open={modal.open}
+        character1={{ id: characterId, name: card.name }}
+        character2={{ id: modal.targetId, name: modal.targetName }}
+        initialRelationship={modal.existing}
+        onClose={() => setModal(CLOSED_MODAL)}
+        onSave={handleSave}
+        onDelete={modal.existing?.id ? handleDelete : undefined}
+      />
     </div>
   )
 }

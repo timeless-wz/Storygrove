@@ -119,6 +119,18 @@ beforeEach(() => {
     dataProjectKey: PROJECT_PATH,
     dataProjectSession: PROJECT_SESSION,
     rosterRevision: 1,
+    // 关系入口与画布同源：共享关系表 + 稳定人物 ID。
+    characterIdentities: { 沈砺: 'id-shen-li', 陆云飞: 'id-lu-yunfei' },
+    relationships: [{
+      id: 'rel-shen-lu',
+      character1Id: 'id-lu-yunfei',
+      character2Id: 'id-shen-li',
+      character1Name: '陆云飞',
+      character2Name: '沈砺',
+      relation: '竞争对手',
+      description: '',
+    }],
+    graphPositions: {},
     loadingProjectKey: null,
     loadingProjectSession: null,
     lastError: null,
@@ -242,27 +254,26 @@ describe('character profile edit mode', () => {
     expect(container?.querySelector('[data-testid="character-profile-form"]')).toBeTruthy()
   })
 
-  it('keeps half-typed relationship rows while another field is being edited', async () => {
+  it('keeps the shared relationship entry intact while the name is being edited', async () => {
     await renderEditor()
     await enterEditMode()
 
-    await act(async () => {
-      await page.getByRole('button', { name: '添加关系' }).click()
-    })
-    await act(async () => {
-      await page.getByLabelText('关系目标').selectOptions('陆云飞')
-    })
-    expect(container?.querySelectorAll('[data-testid="relationship-row"]')).toHaveLength(1)
+    // 编辑入口直接列出共享关系表里的关系，改名不会影响它。
+    const rowsBefore = Array.from(
+      container?.querySelectorAll('[data-testid="shared-relationship-row"]') ?? [],
+    ).map(row => row.getAttribute('data-target-name'))
+    expect(rowsBefore).toEqual(['陆云飞'])
 
     await act(async () => {
       await page.getByLabelText('姓名').click()
     })
     await typeIntoFocusedField('之')
 
-    // 行草稿属于本次编辑会话，不因为改名被清空。
-    expect(container?.querySelectorAll('[data-testid="relationship-row"]')).toHaveLength(1)
-    expect(container?.querySelector<HTMLSelectElement>('[data-testid="relationship-row"] select')?.value)
-      .toBe('陆云飞')
+    expect(container?.querySelector('[data-testid="character-profile-form"]')).toBeTruthy()
+    const rowsAfter = Array.from(
+      container?.querySelectorAll('[data-testid="shared-relationship-row"]') ?? [],
+    ).map(row => row.getAttribute('data-target-name'))
+    expect(rowsAfter).toEqual(['陆云飞'])
   })
 
   it('refuses to rename onto an existing character name', async () => {

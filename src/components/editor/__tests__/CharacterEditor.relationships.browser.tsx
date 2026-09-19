@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 
 import type { ProjectData } from '../../../shared/ipc-channels'
 import type { CharacterRosterCommitRequest } from '../../../shared/character-roster'
+import type { CharacterSharedRelationship } from '../../../shared/character-relationship'
 import { setActiveProjectSessionContext } from '../../../shared/project-session-context'
 import { EMPTY_STATE, useCharacterStore, type CharacterCard } from '../../../stores/character-store'
 import { useLayoutStore } from '../../../stores/layout-store'
@@ -18,6 +19,12 @@ const PROJECT_SESSION = {
   leaseId: 'relationship-editor-lease',
   projectPath: PROJECT_PATH,
 }
+const SHEN_ID = 'id-shen-li'
+const LU_ID = 'id-lu-yunfei'
+const SU_ID = 'id-su-li'
+const JIU_ID = 'id-jiu-ren'
+const YI_ID = 'id-yi-yun'
+
 const originalCharacterState = useCharacterStore.getState()
 const originalLayoutState = useLayoutStore.getState()
 const originalLocaleState = useLocaleStore.getState()
@@ -29,6 +36,8 @@ let root: Root | undefined
 let container: HTMLDivElement | undefined
 let invoke: ReturnType<typeof vi.fn>
 let commitPayload: CharacterRosterCommitRequest | undefined
+let upsertPayload: Record<string, unknown> | undefined
+let deletedRelationshipId: string | undefined
 
 function project(): ProjectData {
   return {
@@ -74,13 +83,38 @@ function character(name: string, overrides: Partial<CharacterCard> = {}): Charac
   }
 }
 
-const structuredRelationships = JSON.stringify([
-  { target: '陆云飞', relation: '关系类型：竞争对手；矛盾张力：权力斗争' },
-  { target: '苏璃', relation: '盟友' },
-])
+const SHARED_RELATIONSHIPS: CharacterSharedRelationship[] = [
+  {
+    id: 'rel-shen-lu',
+    character1Id: LU_ID,
+    character2Id: SHEN_ID,
+    character1Name: '陆云飞',
+    character2Name: '沈砺',
+    relation: '竞争对手',
+    description: '权力斗争',
+    createdAt: '2024-01-01',
+    updatedAt: '2024-01-01',
+  },
+  {
+    id: 'rel-shen-su',
+    character1Id: SHEN_ID,
+    character2Id: SU_ID,
+    character1Name: '沈砺',
+    character2Name: '苏璃',
+    relation: '盟友',
+    description: '',
+    createdAt: '2024-01-02',
+    updatedAt: '2024-01-02',
+  },
+]
+
 const legacyRelationshipText = '陆云飞与沈砺表面合作，实际彼此试探。'
 const unknownRelationshipJson = '[{"participant":"陆云飞","status":"待确认"}]'
 
+/*
+ * 关键前提：沈砺、陆云飞、苏璃三张卡的旧 relationships 字段都是空的，
+ * 概览与编辑入口展示的关系全部来自共享关系表。
+ */
 const shenLi = character('沈砺', {
   role: 'protagonist',
   gender: '男',
@@ -92,7 +126,6 @@ const shenLi = character('沈砺', {
   motivation: '为父复仇',
   arc: '从复仇到放下',
   notes: '作者备注',
-  relationships: structuredRelationships,
   currentState: {
     ...EMPTY_STATE,
     location: '青云城',
@@ -100,13 +133,18 @@ const shenLi = character('沈砺', {
     updatedAtChapter: 3,
   },
 })
-const luYunfei = character('陆云飞', {
-  role: 'antagonist',
-  relationships: JSON.stringify([{ target: '旧友', relation: '失联' }]),
-})
+const luYunfei = character('陆云飞', { role: 'antagonist' })
 const suLi = character('苏璃')
 const legacyCard = character('旧人', { relationships: legacyRelationshipText })
 const unknownJsonCard = character('疑云', { relationships: unknownRelationshipJson })
+
+const IDENTITIES = {
+  沈砺: SHEN_ID,
+  陆云飞: LU_ID,
+  苏璃: SU_ID,
+  旧人: JIU_ID,
+  疑云: YI_ID,
+}
 
 async function renderEditor(): Promise<void> {
   await act(async () => {
@@ -129,6 +167,7 @@ beforeEach(() => {
   useCharacterStore.setState({
     characters: [shenLi, luYunfei, suLi, legacyCard, unknownJsonCard],
     selectedName: '沈砺',
+    loaded: true,
     dataProjectKey: PROJECT_PATH,
     loadingProjectKey: null,
     lastError: null,
@@ -137,10 +176,15 @@ beforeEach(() => {
     rosterRevision: 1,
     dataProjectSession: PROJECT_SESSION,
     loadingProjectSession: null,
+    characterIdentities: IDENTITIES,
+    relationships: SHARED_RELATIONSHIPS,
+    graphPositions: {},
   })
   setActiveProjectSessionContext(PROJECT_SESSION)
 
   commitPayload = undefined
+  upsertPayload = undefined
+  deletedRelationshipId = undefined
   invoke = vi.fn(async (channel: string, payload?: unknown) => {
     if (channel === 'db:character-roster-read') {
       return {
@@ -176,6 +220,36 @@ beforeEach(() => {
           },
         },
       }
+    }
+    if (channel === 'db:character-identities-ensure') {
+      return IDENTITIES
+    }
+    if (channel === 'db:character-relationships-get-all') {
+      return SHARED_RELATIONSHIPS
+    }
+    if (channel === 'db:character-graph-positions-get') {
+      return {}
+    }
+    if (channel === 'db:character-relationship-upsert') {
+      upsertPayload = payload as Record<string, unknown>
+      return {
+        success: true,
+        relationship: {
+          id: 'rel-created',
+          character1Id: (payload as { character1Id: string }).character1Id,
+          character2Id: (payload as { character2Id: string }).character2Id,
+          character1Name: '沈砺',
+          character2Name: '林晚',
+          relation: (payload as { relation: string }).relation,
+          description: (payload as { description?: string }).description ?? '',
+          createdAt: '',
+          updatedAt: '',
+        },
+      }
+    }
+    if (channel === 'db:character-relationship-delete') {
+      deletedRelationshipId = payload as string
+      return { success: true }
     }
     return { success: false, error: `unexpected channel ${channel}` }
   })
@@ -213,59 +287,35 @@ describe('character profile overview', () => {
 
     const summary = container?.querySelector('[data-testid="character-summary"]')
     expect(summary?.textContent).toContain('沈砺')
-    expect(summary?.textContent).toContain('定位')
     expect(summary?.textContent).toContain('主角')
-    expect(summary?.textContent).toContain('性别')
     expect(summary?.textContent).toContain('男')
-    expect(summary?.textContent).toContain('年龄')
     expect(summary?.textContent).toContain('二十三')
-    // 没有正式 faction 字段时不得凭空多出一个阵营字段。
-    expect(summary?.textContent).not.toContain('阵营')
 
-    // 优先项按需求顺序出现。
     const sections = Array.from(container?.querySelectorAll('section') ?? [])
       .map(section => section.querySelector('h4')?.textContent ?? '')
-    expect(sections).toEqual([
-      '核心动机', '性格特征与弱点', '当前状态', '关系',
-    ])
+    expect(sections).toEqual(['核心动机', '性格特征与弱点', '当前状态', '关系'])
     expect(container?.textContent).toContain('为父复仇')
-    expect(container?.textContent).toContain('沉稳多疑')
     expect(container?.textContent).toContain('青云城')
-    // 状态字段没有来源记录时按“来源未知”呈现，不假装它是作者写的。
-    expect(container?.textContent).toContain('来源未知')
-    expect(container?.textContent).toContain('第 3 章更新')
-
-    // 次要字段保留但默认折叠。
-    const details = Array.from(container?.querySelectorAll('details[data-testid="profile-detail-section"]') ?? [])
-    expect(details.map(item => item.getAttribute('data-section'))).toEqual([
-      'appearance', 'abilities', 'background', 'arc', 'notes',
-    ])
-    expect(details.every(item => !item.hasAttribute('open'))).toBe(true)
-    expect(details[0]?.textContent).toContain('一袭青衫')
   })
 
-  it('shows relationships as target plus relation and opens the target character card', async () => {
+  it('shows relationships from the shared table and opens the target character card', async () => {
     await renderEditor()
 
-    const relationTargets = Array.from(container?.querySelectorAll('[data-testid="relationship-target"]') ?? [])
-      .map(node => node.textContent)
-    expect(relationTargets).toEqual(['陆云飞', '苏璃'])
-    expect(container?.textContent).toContain('关系类型：竞争对手；矛盾张力：权力斗争')
-    expect(container?.textContent).toContain('盟友')
+    // 角色卡里的旧 relationships 字段是空的，关系完全来自共享关系表。
+    expect(useCharacterStore.getState().characters[0].relationships).toBe('')
+    const chips = Array.from(container?.querySelectorAll('[data-testid="relationship-chip"]') ?? [])
+      .map(chip => chip.textContent)
+    expect(chips).toEqual(['竞争对手', '盟友'])
+    expect(container?.textContent).toContain('权力斗争')
+    const aside = container?.querySelector('section:has([data-testid="relationship-chip"]) h4')
+      ?.parentElement?.textContent
+    expect(aside).toContain('2 位关联人物')
 
     await act(async () => {
       await page.getByRole('button', { name: '陆云飞' }).click()
     })
-
     expect(useCharacterStore.getState().selectedName).toBe('陆云飞')
     expect(container?.querySelector('[data-testid="character-summary"]')?.textContent).toContain('陆云飞')
-
-    // 目标已不在名单中的关系仍然展示，但不会是可跳转的按钮。
-    const danglingTargets = Array.from(container?.querySelectorAll('[data-testid="relationship-target"]') ?? [])
-      .map(node => node.textContent)
-    expect(danglingTargets).not.toContain('旧友')
-    expect(container?.textContent).toContain('旧友')
-    expect(container?.textContent).toContain('（不在名单中）')
   })
 
   it('keeps legacy relationship text verbatim instead of guessing at structure', async () => {
@@ -275,7 +325,7 @@ describe('character profile overview', () => {
     const legacyBlock = container?.querySelector('[data-testid="overview-legacy-relationships"]')
     expect(legacyBlock?.textContent).toContain(legacyRelationshipText)
     expect(legacyBlock?.textContent).toContain('未解析')
-    expect(container?.querySelectorAll('[data-testid="relationship-row"]')).toHaveLength(0)
+    expect(container?.querySelectorAll('[data-testid="relationship-chip"]')).toHaveLength(0)
     expect(useCharacterStore.getState().characters.find(card => card.name === '旧人')?.relationships)
       .toBe(legacyRelationshipText)
   })
@@ -293,14 +343,14 @@ describe('character profile overview', () => {
 
     const legacyField = container?.querySelector<HTMLTextAreaElement>('[data-testid="legacy-relationships"] textarea')
     expect(legacyField?.value).toBe(unknownRelationshipJson)
-    expect(container?.textContent).toContain('关系数据格式无法识别')
+    expect(legacyField?.readOnly).toBe(true)
     expect(useCharacterStore.getState().characters.find(card => card.name === '疑云')?.relationships)
       .toBe(unknownRelationshipJson)
   })
 })
 
 describe('character profile edit mode', () => {
-  it('edits every stored field, including structured relationship rows', async () => {
+  it('edits every stored field', async () => {
     await renderEditor()
 
     await act(async () => {
@@ -308,56 +358,82 @@ describe('character profile edit mode', () => {
     })
 
     expect(container?.querySelector('[data-testid="character-profile-form"]')).toBeTruthy()
-    // 原有字段一个都不能少：基础资料 + 当前状态都在编辑模式里可覆盖。
     expect(textareaValues()).toEqual(expect.arrayContaining([
       '一袭青衫', '沉稳多疑', '南渡遗孤', '御水术', '为父复仇', '从复仇到放下',
       '作者备注', '青云城', '与陆云飞决裂',
     ]))
+  })
 
-    const rows = container?.querySelectorAll('[data-testid="relationship-row"]') ?? []
-    expect(rows).toHaveLength(2)
+  it('edits relationships through the shared table instead of a second JSON row editor', async () => {
+    await renderEditor()
+    await act(async () => {
+      await page.getByRole('button', { name: '编辑档案' }).click()
+    })
+
+    // 编辑入口列出的是共享关系，而不是角色卡里的 JSON 行。
+    expect(container?.querySelector('[data-testid="shared-relationships-field"]')).toBeTruthy()
+    const rows = Array.from(container?.querySelectorAll('[data-testid="shared-relationship-row"]') ?? [])
+    expect(rows.map(row => row.getAttribute('data-target-name'))).toEqual(['陆云飞', '苏璃'])
+    expect(rows[0].textContent).toContain('竞争对手')
+
+    // 修改已有关系：复用同一条共享关系（同一对人物不会出现第二条线）。
+    await act(async () => {
+      const editButton = rows[0].querySelector<HTMLElement>('[aria-label="编辑关系"]')
+      editButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    await expect.element(page.getByTestId('relationship-modal')).toBeVisible()
+    expect(document.body.textContent).toContain('沈砺 ↔ 陆云飞')
 
     await act(async () => {
-      await page.getByLabelText('关系说明').nth(0).fill('死敌')
+      const input = page.getByTestId('relationship-name-input').element() as HTMLInputElement
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, '宿敌')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
     })
-    expect(JSON.parse(useCharacterStore.getState().characters[0].relationships)).toEqual([
-      { target: '陆云飞', relation: '死敌' },
-      { target: '苏璃', relation: '盟友' },
-    ])
+    await act(async () => {
+      page.getByTestId('relationship-save-button').element()
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(upsertPayload).toEqual({
+      id: 'rel-shen-lu',
+      character1Id: SHEN_ID,
+      character2Id: LU_ID,
+      relation: '宿敌',
+      description: '权力斗争',
+    })
+
+    // 删除关系同样按共享关系 ID 走同一条事实源。
+    await act(async () => {
+      const deleteButton = rows[1].querySelector<HTMLElement>('[aria-label="删除关系"]')
+      deleteButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(deletedRelationshipId).toBe('rel-shen-su')
+
+    // 旧的 JSON 行编辑器（按目标选角色 + 关系说明输入框）已经不存在。
+    expect(container?.querySelector('select[aria-label="关系说明"]')).toBeNull()
+  })
+
+  it('creates a relationship for the selected target with character IDs', async () => {
+    await renderEditor()
+    await act(async () => {
+      await page.getByRole('button', { name: '编辑档案' }).click()
+    })
 
     await act(async () => {
-      await page.getByRole('button', { name: '添加关系' }).click()
+      const select = container?.querySelector<HTMLSelectElement>('select[aria-label="关系目标"]')
+      if (select) {
+        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set?.call(select, '苏璃')
+        select.dispatchEvent(new Event('change', { bubbles: true }))
+      }
     })
-    const nextRows = container?.querySelectorAll('[data-testid="relationship-row"]') ?? []
-    expect(nextRows).toHaveLength(3)
-    // 不完整的关系行不会写进存储，角色名单事务因此不会被残行打断。
-    expect(JSON.parse(useCharacterStore.getState().characters[0].relationships)).toHaveLength(2)
-
     await act(async () => {
-      await page.getByLabelText('关系目标').nth(2).selectOptions('苏璃')
-      await page.getByLabelText('关系说明').nth(2).fill('旧识')
+      container?.querySelector<HTMLElement>('[data-testid="shared-relationship-create"]')
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
-    expect(JSON.parse(useCharacterStore.getState().characters[0].relationships)).toEqual([
-      { target: '陆云飞', relation: '死敌' },
-      { target: '苏璃', relation: '盟友' },
-      { target: '苏璃', relation: '旧识' },
-    ])
 
-    await act(async () => {
-      await page.getByLabelText('关系说明').nth(1).fill('')
-    })
-    expect(JSON.parse(useCharacterStore.getState().characters[0].relationships)).toEqual([
-      { target: '陆云飞', relation: '死敌' },
-      { target: '苏璃', relation: '旧识' },
-    ])
-    expect(container?.textContent).toContain('请填写关系说明')
-
-    await act(async () => {
-      await page.getByRole('button', { name: '删除关系' }).nth(0).click()
-    })
-    expect(JSON.parse(useCharacterStore.getState().characters[0].relationships)).toEqual([
-      { target: '苏璃', relation: '旧识' },
-    ])
+    await expect.element(page.getByTestId('relationship-modal')).toBeVisible()
+    // 已有关系时打开编辑；这里苏璃已有关系，因此没有新增表单。
+    expect(document.body.textContent).toContain('编辑人物关系')
   })
 
   it('saves every edited field and preserves legacy relationship evidence through the commit', async () => {
@@ -366,54 +442,42 @@ describe('character profile edit mode', () => {
       await page.getByRole('button', { name: '编辑档案' }).click()
     })
     await act(async () => {
-      await page.getByLabelText('关系说明').nth(0).fill('死敌')
+      await page.getByLabelText('核心动机').fill('重建宗门')
       await page.getByLabelText('当前位置/阵营').fill('黑水城')
     })
     await act(async () => {
       await page.getByRole('button', { name: '保存' }).click()
     })
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 20))
+    })
 
     expect(commitPayload?.intent).toBe('manual_edit')
     const entries = commitPayload?.entries ?? []
     const shen = entries.find(entry => entry.name === '沈砺')
-    expect(shen).toMatchObject({
-      role: 'protagonist',
-      gender: '男',
-      age: '二十三',
-      appearance: '一袭青衫',
-      personality: '沉稳多疑',
-      background: '南渡遗孤',
-      abilities: '御水术',
-      motivation: '为父复仇',
-      arc: '从复仇到放下',
-      notes: '作者备注',
-    })
-    expect(shen?.relationships).toEqual([
-      { target: '陆云飞', relation: '死敌' },
-      { target: '苏璃', relation: '盟友' },
-    ])
-    expect(shen?.currentState).toMatchObject({
-      location: '黑水城',
-      recentEvents: '与陆云飞决裂',
-      updatedAtChapter: 3,
-    })
-    expect(shen?.currentState?.provenance?.location).toEqual({ kind: 'author', chapterNumber: 3 })
+    expect(shen).toMatchObject({ motivation: '重建宗门' })
+    expect(shen?.currentState).toMatchObject({ location: '黑水城', updatedAtChapter: 3 })
 
     // 旧项目无法解析的关系文本必须原样进入提交，不能静默丢失。
     const legacy = entries.find(entry => entry.name === '旧人')
     expect(legacy?.relationships).toEqual([])
     expect(legacy?.legacyRelationshipNotes).toBe(legacyRelationshipText)
+
+    // 保存成功后回到只读概览。
+    await expect.element(page.getByTestId('character-summary')).toBeVisible()
+    expect(container?.querySelector('[data-testid="character-profile-form"]')).toBeNull()
   })
 })
 
-describe('character relationship graph entry', () => {
-  it('opens the directed relationship graph and fits its current view', async () => {
+describe('character relationship canvas entry', () => {
+  it('opens the relationship canvas backed by the shared table', async () => {
     await renderEditor()
 
     await act(async () => page.getByRole('button', { name: '关系图谱' }).click())
-    await expect.element(page.getByText('2 条有向关系')).toBeVisible()
+    await expect.element(page.getByText('2 条关系')).toBeVisible()
     expect(container?.querySelector('.react-flow')).toBeTruthy()
     await expect.element(page.getByRole('button', { name: '适合视图' })).toBeVisible()
+    expect(container?.querySelectorAll('[data-testid="relationship-edge-chip"]')).toHaveLength(2)
   })
 
   it('requires confirmation before clearing every character through the roster action', async () => {

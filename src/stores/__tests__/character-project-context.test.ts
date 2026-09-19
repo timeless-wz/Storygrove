@@ -97,6 +97,17 @@ beforeEach(() => {
     channel: string,
     ...args: unknown[]
   ) => {
+    // 关系/身份/坐标通道直接给空结果，避免吃掉用例按顺序排好的 mock 队列。
+    if (channel === 'db:character-identities-ensure') {
+      const names = Array.isArray(args[0]) ? args[0] as string[] : []
+      return Object.fromEntries(names.map((name, index) => [name, `id-${index}`]))
+    }
+    if (channel === 'db:character-relationships-get-all') return []
+    if (channel === 'db:character-graph-positions-get') return {}
+    if (channel === 'db:character-relationship-upsert') return { success: false }
+    if (channel === 'db:character-relationship-delete') return { success: false }
+    if (channel === 'db:character-graph-positions-save') return { success: false }
+
     const result = await invoke(channel, ...args)
     if (channel === 'db:character-roster-read' && Array.isArray(result)) {
       return rosterReadFromCards(result)

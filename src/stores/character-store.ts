@@ -17,6 +17,17 @@ import {
   characterRosterEntriesFromCards,
 } from '../services/character-roster-client'
 import { randomUUID } from '../utils/id'
+import { classifyRelationshipStorage } from '../shared/relationship-presentation'
+import type {
+  CharacterSharedRelationship,
+  CharacterGraphPosition,
+  CharacterIdentityMap,
+} from '../shared/character-relationship'
+import {
+  isMatchingRelationship,
+  projectLegacyRelationshipsField,
+  projectSharedRelationshipEdge,
+} from '../shared/character-relationship'
 import { useEditorStore } from './editor-store'
 import { useProjectStore } from './project-store'
 import {
@@ -140,6 +151,49 @@ function normalizeCharacterCards(value: unknown): CharacterCard[] {
   })
 }
 
+/**
+ * 旧 characters.relationships 字段的派生投影。
+ *
+ * 共享关系表是唯一事实源；这里只把共享关系按人物 ID 投影回旧字段（旧导出兼容）。
+ * 自由文本、未迁移、目标不存在或与共享关系冲突的旧内容一律保持原样，绝不覆盖。
+ */
+export function syncCardsWithRelationships(
+  cards: readonly CharacterCard[],
+  relationships: readonly CharacterSharedRelationship[],
+  identities: CharacterIdentityMap,
+  options: { removedNames?: readonly string[] } = {},
+): CharacterCard[] {
+  const knownNames = cards.map(card => card.name)
+  return cards.map(card => {
+    if (classifyRelationshipStorage(card.relationships) === 'legacy') return card
+    const characterId = identities[card.name]
+    if (!characterId) return card
+    const edges = relationships
+      .filter(rel => rel.character1Id === characterId || rel.character2Id === characterId)
+      .map(rel => projectSharedRelationshipEdge(rel, characterId))
+      .filter((edge): edge is { target: string; relation: string } => edge !== null)
+    const projected = projectLegacyRelationshipsField(card.relationships, edges, {
+      knownNames,
+      removedNames: options.removedNames,
+    })
+    if (projected === null || projected === card.relationships) return card
+    return { ...card, relationships: projected }
+  })
+}
+
+/**
+ * 身份表响应校验：写通道在项目上下文过期时返回结构化失败而不是映射，
+ * 这种情况下宁可暂时没有 ID，也不能把失败对象当成身份表使用。
+ */
+function identityMapFromResponse(value: unknown): CharacterIdentityMap {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  if ('success' in (value as Record<string, unknown>)) return {}
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+  )
+}
+
 function persistCharacterDraftLedger(ledger: ReturnType<typeof readCharacterDraftLedger>) {
   persistProjectEditorDraftLedger(useEditorStore.getState(), CHARACTER_DRAFT_TAB, ledger)
 }
@@ -237,12 +291,31 @@ interface CharacterState {
     operationKind?: 'delete',
   ) => Promise<void>
 
+  // 关系画布与共用关系
+  /** 姓名 → 稳定人物 ID；关系与画布坐标只认 ID。 */
+  characterIdentities: CharacterIdentityMap
+  relationships: CharacterSharedRelationship[]
+  graphPositions: Record<string, CharacterGraphPosition>
+  loadRelationshipsAndPositions: (projectPath?: string, expectedProjectSession?: ProjectSessionContext) => Promise<void>
+  upsertRelationship: (data: {
+    id?: string
+    character1Id: string
+    character2Id: string
+    relation: string
+    description?: string
+  }) => Promise<CharacterSharedRelationship | null>
+  deleteRelationship: (id: string) => Promise<boolean>
+  saveGraphPositions: (positions: Record<string, CharacterGraphPosition>) => Promise<void>
+
   // 兼容旧接口
   loadCharacters: (projectPath: string, expectedProjectSession?: ProjectSessionContext) => Promise<void>
 }
 
 export const useCharacterStore = create<CharacterState>()((set, get) => ({
   characters: [],
+  characterIdentities: {},
+  relationships: [],
+  graphPositions: {},
   selectedName: null,
   saving: false,
   identityBusy: false,
@@ -329,10 +402,35 @@ export const useCharacterStore = create<CharacterState>()((set, get) => ({
         || requestSequence !== characterLoadSequence
       ) return
       const visibleCards = normalizeCharacterCards(restored.value)
+      let identities: CharacterIdentityMap = {}
+      let sharedRels: CharacterSharedRelationship[] = []
+      let positions: Record<string, CharacterGraphPosition> = {}
+      try {
+        // 旧项目打开时安全补齐稳定人物 ID，再读取共享关系与画布坐标。
+        identities = identityMapFromResponse(await ipc.invokeWithProjectSession(
+          projectSession,
+          'db:character-identities-ensure',
+          visibleCards.map(card => card.name),
+          requestedProjectKey,
+        ))
+        const [relsResult, posResult] = await Promise.all([
+          ipc.invokeWithProjectSession(projectSession, 'db:character-relationships-get-all', requestedProjectKey),
+          ipc.invokeWithProjectSession(projectSession, 'db:character-graph-positions-get', requestedProjectKey),
+        ])
+        if (Array.isArray(relsResult)) sharedRels = relsResult
+        if (posResult && typeof posResult === 'object') positions = posResult
+      } catch {
+        // 关系通道不可用时角色卡本身仍然可用；关系随后可重试加载。
+      }
+
+      const syncedCards = syncCardsWithRelationships(visibleCards, sharedRels, identities)
 
       const { selectedName } = get()
       set({
-        characters: visibleCards,
+        characters: syncedCards,
+        characterIdentities: identities,
+        relationships: sharedRels,
+        graphPositions: positions,
         loaded: true,
         dataProjectKey: requestedProjectKey,
         dataProjectSession: projectSession,
@@ -340,9 +438,9 @@ export const useCharacterStore = create<CharacterState>()((set, get) => ({
         loadingProjectKey: null,
         loadingProjectSession: null,
         lastError: null,
-        selectedName: visibleCards.find(c => c.name === selectedName)
+        selectedName: syncedCards.find(c => c.name === selectedName)
           ? selectedName
-          : (visibleCards.length > 0 ? visibleCards[0].name : null),
+          : (syncedCards.length > 0 ? syncedCards[0].name : null),
       })
     } catch (error) {
       if (
@@ -470,12 +568,26 @@ export const useCharacterStore = create<CharacterState>()((set, get) => ({
     const ledger = readCharacterDraftLedger(projectKey)
     const renames = getCharacterDraftRenames(ledger, projectKey)
     const remaining = removeFirstCharacterNamed(characters, name)
+    const deletedId = get().characterIdentities[name]
+    const remainingRels = deletedId
+      ? get().relationships.filter(r => r.character1Id !== deletedId && r.character2Id !== deletedId)
+      : get().relationships
+    const nextPositions = { ...get().graphPositions }
+    const nextIdentities = { ...get().characterIdentities }
+    if (deletedId) {
+      delete nextPositions[deletedId]
+      delete nextIdentities[name]
+    }
     const pendingRename = renames.find(rename => rename.newName === name)
     const nextRenames = pendingRename
       ? renames.filter(rename => rename !== pendingRename)
       : renames
     set({
-      characters: remaining,
+      // 被删除人物的旧边随之过期：其余角色的旧字段同步清理。
+      characters: syncCardsWithRelationships(remaining, remainingRels, nextIdentities, { removedNames: [name] }),
+      characterIdentities: nextIdentities,
+      relationships: remainingRels,
+      graphPositions: nextPositions,
       selectedName: remaining.some(character => character.name === get().selectedName)
         ? get().selectedName
         : (remaining[0]?.name ?? null),
@@ -509,7 +621,7 @@ export const useCharacterStore = create<CharacterState>()((set, get) => ({
     if (characters.length === 0) return Promise.resolve(true)
 
     const ledger = readCharacterDraftLedger(projectKey)
-    set({ characters: [], selectedName: null })
+    set({ characters: [], characterIdentities: {}, relationships: [], graphPositions: {}, selectedName: null })
     let nextLedger = recordProjectEditorEdit(ledger, projectKey, characters, [])
     nextLedger = setCharacterDraftRenames(nextLedger, projectKey, [])
     persistCharacterDraftLedger(nextLedger)
@@ -547,11 +659,23 @@ export const useCharacterStore = create<CharacterState>()((set, get) => ({
     const persistedNames = new Set((existing?.baseValue ?? before).map(character => character.name))
     const nextRenames = updateCharacterRename(renames, name, newName, persistedNames)
 
+    /*
+     * 改名只改展示名：关系端点与画布坐标都是稳定 ID，这里不动。
+     * 只把姓名→ID 的本地解析表换个键，落盘时主进程会同步身份表的名称镜像。
+     */
+    const nextIdentities = { ...get().characterIdentities }
+    const renamedId = nextIdentities[name]
+    if (renamedId) {
+      delete nextIdentities[name]
+      nextIdentities[newName] = renamedId
+    }
+
     const characters = before.map((character, index) => (
       index === targetIndex ? { ...character, name: newName } : character
     ))
     set({
-      characters,
+      characters: syncCardsWithRelationships(characters, get().relationships, nextIdentities),
+      characterIdentities: nextIdentities,
       selectedName: get().selectedName === name ? newName : get().selectedName,
     })
 
@@ -745,5 +869,113 @@ export const useCharacterStore = create<CharacterState>()((set, get) => ({
     characterSaveInFlight = { projectSession, promise: trackedSave, kind: saveKind }
     characterIdentityMutationInFlight = { projectSession, promise: trackedSave, kind: saveKind }
     return trackedSave
+  },
+
+  loadRelationshipsAndPositions: async (projectPath?: string, expectedProjectSession?: ProjectSessionContext) => {
+    const projectSession = currentCharacterProjectSession(projectPath, expectedProjectSession)
+    if (!projectSession) return
+    const requestedProjectKey = projectSession.projectPath
+    try {
+      // 先补齐稳定人物 ID（新角色、旧项目人物都覆盖），关系与坐标才有端点可挂。
+      const identities = identityMapFromResponse(await ipc.invokeWithProjectSession(
+        projectSession,
+        'db:character-identities-ensure',
+        get().characters.map(card => card.name),
+        requestedProjectKey,
+      ))
+      const [relsResult, posResult] = await Promise.all([
+        ipc.invokeWithProjectSession(projectSession, 'db:character-relationships-get-all', requestedProjectKey),
+        ipc.invokeWithProjectSession(projectSession, 'db:character-graph-positions-get', requestedProjectKey),
+      ])
+      const relationships = Array.isArray(relsResult) ? relsResult : []
+      const graphPositions = (posResult && typeof posResult === 'object') ? posResult : {}
+      const characters = syncCardsWithRelationships(get().characters, relationships, identities)
+      set({ characterIdentities: identities, relationships, graphPositions, characters })
+    } catch (err) {
+      console.error('Failed to load character relationships/positions:', err)
+    }
+  },
+
+  upsertRelationship: async (data: {
+    id?: string
+    character1Id: string
+    character2Id: string
+    relation: string
+    description?: string
+  }) => {
+    const projectSession = currentCharacterProjectSession()
+    if (!projectSession) return null
+    const requestedProjectKey = projectSession.projectPath
+    try {
+      const res = await ipc.invokeWithProjectSession(
+        projectSession,
+        'db:character-relationship-upsert',
+        data,
+        requestedProjectKey,
+      )
+      if (res && res.success && res.relationship) {
+        const saved: CharacterSharedRelationship = res.relationship
+        // 一对人物只有一条关系：按 ID 对就地更新，绝不追加重复连线。
+        const existingIndex = get().relationships.findIndex(
+          rel => isMatchingRelationship(rel, saved.character1Id, saved.character2Id),
+        )
+        let nextRels: CharacterSharedRelationship[]
+        if (existingIndex >= 0) {
+          nextRels = [...get().relationships]
+          nextRels[existingIndex] = saved
+        } else {
+          nextRels = [...get().relationships, saved]
+        }
+        const nextCards = syncCardsWithRelationships(get().characters, nextRels, get().characterIdentities)
+        set({ relationships: nextRels, characters: nextCards })
+        return saved
+      }
+      return null
+    } catch (err) {
+      console.error('Failed to upsert relationship:', err)
+      return null
+    }
+  },
+
+  deleteRelationship: async (id: string) => {
+    const projectSession = currentCharacterProjectSession()
+    if (!projectSession) return false
+    const requestedProjectKey = projectSession.projectPath
+    try {
+      const res = await ipc.invokeWithProjectSession(
+        projectSession,
+        'db:character-relationship-delete',
+        id,
+        requestedProjectKey,
+      )
+      if (res && res.success) {
+        const nextRels = get().relationships.filter(r => r.id !== id)
+        const nextCards = syncCardsWithRelationships(get().characters, nextRels, get().characterIdentities)
+        set({ relationships: nextRels, characters: nextCards })
+        return true
+      }
+      return false
+    } catch (err) {
+      console.error('Failed to delete relationship:', err)
+      return false
+    }
+  },
+
+  saveGraphPositions: async (positions: Record<string, CharacterGraphPosition>) => {
+    const projectSession = currentCharacterProjectSession()
+    const mergedPositions = { ...get().graphPositions, ...positions }
+    set({ graphPositions: mergedPositions })
+    if (!projectSession) return
+    const requestedProjectKey = projectSession.projectPath
+    try {
+      await ipc.invokeWithProjectSession(
+        projectSession,
+        'db:character-graph-positions-save',
+        positions,
+        requestedProjectKey,
+      )
+    } catch (err) {
+      console.error('Failed to save graph positions:', err)
+    }
   },
 }))

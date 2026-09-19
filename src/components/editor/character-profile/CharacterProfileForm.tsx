@@ -13,12 +13,16 @@ import {
   characterStateProvenanceKind,
 } from '../../../shared/character-profile-presentation'
 import CharacterRelationshipsField from './CharacterRelationshipsField'
+import type { CharacterSharedRelationship } from '../../../shared/character-relationship'
 
 type CharacterEditableField = Exclude<keyof CharacterCard, 'name'>
 
 interface CharacterProfileFormProps {
   card: CharacterCard
   characters: readonly CharacterCard[]
+  /** 本角色的稳定 ID 与共享关系：关系入口与画布同源。 */
+  characterId: string
+  sharedRelationships: readonly CharacterSharedRelationship[]
   identityBusy: boolean
   onRename: (name: string) => void
   onUpdateField: <K extends CharacterEditableField>(key: K, value: CharacterCard[K]) => void
@@ -31,6 +35,8 @@ interface CharacterProfileFormProps {
 export default function CharacterProfileForm({
   card,
   characters,
+  characterId,
+  sharedRelationships,
   identityBusy,
   onRename,
   onUpdateField,
@@ -128,7 +134,8 @@ export default function CharacterProfileForm({
         <CharacterRelationshipsField
           card={card}
           characters={characters}
-          onStorageChange={(storage) => onUpdateField('relationships', storage)}
+          characterId={characterId}
+          sharedRelationships={sharedRelationships}
         />
       </div>
       <div>

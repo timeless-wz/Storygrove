@@ -1,7 +1,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { page } from 'vitest/browser'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import '../../../../index.css'
 import type { CharacterCard } from '../../../../stores/character-store'
@@ -37,6 +37,8 @@ function card(overrides: Partial<CharacterCard> = {}): CharacterCard {
   }
 }
 
+const SHEN_ID = 'id-shen-li'
+
 const DETAIL_SECTION_IDS = ['appearance', 'abilities', 'background', 'arc', 'notes'] as const
 
 function section(id: string): HTMLDetailsElement {
@@ -57,12 +59,16 @@ function bodyOf(id: string): HTMLElement {
   return element
 }
 
+const OVERVIEW_CHARACTER_ID = 'id-overview-character'
+
 async function renderOverview(overrides: Partial<CharacterCard> = {}): Promise<void> {
   await act(async () => {
     root?.render(
       <CharacterProfileOverview
         card={card(overrides)}
         characters={[card(overrides)]}
+        characterId={OVERVIEW_CHARACTER_ID}
+        sharedRelationships={[]}
         onOpenCharacter={() => {}}
       />,
     )
@@ -184,5 +190,98 @@ describe('character profile detail sections', () => {
     expect(bodyOf('abilities').checkVisibility()).toBe(true)
     // 空字段展开后只是一行提示，不会留下大块留白。
     expect(bodyOf('abilities').getBoundingClientRect().height).toBeLessThan(60)
+  })
+})
+
+describe('character profile associated characters section', () => {
+  it('shows clear empty state when no relationships are set', async () => {
+    await renderOverview({ relationships: '' })
+    expect(container?.textContent).toContain('关系')
+    expect(container?.textContent).toContain('尚未填写关系')
+  })
+
+  it('renders associated characters from the shared relationship table only', async () => {
+    const onOpen = vi.fn()
+    const companionCard = card({ name: '陆云飞', role: 'antagonist' })
+    const mainCard = card({ name: '沈砺' })
+
+    await act(async () => {
+      root?.render(
+        <CharacterProfileOverview
+          card={mainCard}
+          characters={[mainCard, companionCard]}
+          characterId={SHEN_ID}
+          sharedRelationships={[{
+            id: 'rel-1',
+            character1Id: SHEN_ID,
+            character2Id: 'id-lu',
+            character1Name: '沈砺',
+            character2Name: '陆云飞',
+            relation: '师徒',
+            description: '自幼抚养',
+          }]}
+          onOpenCharacter={onOpen}
+        />,
+      )
+    })
+
+    const targetBtn = container?.querySelector<HTMLButtonElement>('[data-testid="relationship-target"]')
+    expect(targetBtn).toBeTruthy()
+    expect(targetBtn?.textContent).toBe('陆云飞')
+
+    const chip = container?.querySelector<HTMLElement>('[data-testid="relationship-chip"]')
+    expect(chip).toBeTruthy()
+    expect(chip?.textContent).toBe('师徒')
+    expect(container?.textContent).toContain('自幼抚养')
+
+    await act(async () => {
+      targetBtn?.click()
+    })
+    expect(onOpen).toHaveBeenCalledWith('陆云飞')
+  })
+
+  it('never derives the associated list from the legacy card JSON', async () => {
+    const mainCard = card({
+      name: '沈砺',
+      // 旧字段里的结构化关系不是事实源：共享表为空时不应显示任何关联人物。
+      relationships: JSON.stringify([{ target: '陆云飞', relation: '师徒' }]),
+    })
+
+    await act(async () => {
+      root?.render(
+        <CharacterProfileOverview
+          card={mainCard}
+          characters={[mainCard, card({ name: '陆云飞' })]}
+          characterId={SHEN_ID}
+          sharedRelationships={[]}
+          onOpenCharacter={() => {}}
+        />,
+      )
+    })
+
+    expect(container?.querySelectorAll('[data-testid="relationship-chip"]')).toHaveLength(0)
+    expect(container?.querySelector('[data-testid="relationship-target"]')).toBeNull()
+    expect(container?.textContent).toContain('尚未填写关系')
+  })
+
+  it('keeps free-form legacy relationship text as verbatim evidence', async () => {
+    const legacyText = '陆云飞与沈砺表面合作，实际彼此试探。'
+    const mainCard = card({ name: '沈砺', relationships: legacyText })
+
+    await act(async () => {
+      root?.render(
+        <CharacterProfileOverview
+          card={mainCard}
+          characters={[mainCard]}
+          characterId={SHEN_ID}
+          sharedRelationships={[]}
+          onOpenCharacter={() => {}}
+        />,
+      )
+    })
+
+    const legacyBlock = container?.querySelector('[data-testid="overview-legacy-relationships"]')
+    expect(legacyBlock?.textContent).toContain(legacyText)
+    expect(legacyBlock?.textContent).toContain('未解析')
   })
 })

@@ -34,6 +34,13 @@ const mocks = vi.hoisted(() => ({
     factHash: 'empty-fact',
   })),
   characterRosterCommit: vi.fn(),
+  characterRelationshipGetAll: vi.fn((): Array<Record<string, unknown>> => []),
+  characterRelationshipUpsert: vi.fn((data: unknown) => data),
+  characterRelationshipDelete: vi.fn(),
+  characterIdentityGetIdentities: vi.fn((): Record<string, string> => ({})),
+  characterIdentityEnsure: vi.fn((_names: string[] = []): Record<string, string> => ({})),
+  characterGraphPositionsGetAll: vi.fn((): Record<string, { x: number; y: number }> => ({})),
+  characterGraphPositionsSave: vi.fn(),
   finalizedDraftImportCommit: vi.fn(),
   finalizedDraftImportPreview: vi.fn(),
   importGlobalFactsCommit: vi.fn(),
@@ -110,6 +117,18 @@ vi.mock('../../repositories/character-roster-repository', () => ({
   CharacterRosterRepository: {
     read: mocks.characterRosterRead,
     commit: mocks.characterRosterCommit,
+  },
+}))
+
+vi.mock('../../repositories/character-relationship-repository', () => ({
+  CharacterRelationshipRepository: {
+    getAll: mocks.characterRelationshipGetAll,
+    getIdentities: mocks.characterIdentityGetIdentities,
+    ensureIdentities: mocks.characterIdentityEnsure,
+    upsert: mocks.characterRelationshipUpsert,
+    delete: mocks.characterRelationshipDelete,
+    getGraphPositions: mocks.characterGraphPositionsGetAll,
+    saveGraphPositions: mocks.characterGraphPositionsSave,
   },
 }))
 
@@ -790,6 +809,84 @@ describe('database controller project context guard', () => {
     expect(mocks.blueprintUpsert).not.toHaveBeenCalled()
     expect(mocks.blueprintDelete).not.toHaveBeenCalled()
     expect(mocks.blueprintClearAll).not.toHaveBeenCalled()
+  })
+
+  it('rejects stale character relationship and identity channels before any repository access', async () => {
+    mocks.currentProjectPath = 'C:/projects/B'
+
+    // 读取通道：直接拒绝。
+    await expect(handler('db:character-relationships-get-all')({}, 'C:/projects/A'))
+      .rejects.toThrow(/项目上下文已切换/)
+    await expect(handler('db:character-identities-get')({}, 'C:/projects/A'))
+      .rejects.toThrow(/项目上下文已切换/)
+    await expect(handler('db:character-graph-positions-get')({}, 'C:/projects/A'))
+      .rejects.toThrow(/项目上下文已切换/)
+
+    // 写入通道：以结构化失败返回，绝不落到仓库层。
+    expect(await handler('db:character-identities-ensure')({}, ['沈砚'], 'C:/projects/A'))
+      .toMatchObject({ success: false })
+    expect(await handler('db:character-relationship-upsert')(
+      {},
+      { character1Id: 'id-a', character2Id: 'id-b', relation: '师徒' },
+      'C:/projects/A',
+    )).toMatchObject({ success: false })
+    expect(await handler('db:character-relationship-delete')({}, 'rel-1', 'C:/projects/A'))
+      .toMatchObject({ success: false })
+    expect(await handler('db:character-graph-positions-save')({}, { 'id-a': { x: 1, y: 2 } }, 'C:/projects/A'))
+      .toMatchObject({ success: false })
+
+    expect(mocks.characterRelationshipGetAll).not.toHaveBeenCalled()
+    expect(mocks.characterIdentityGetIdentities).not.toHaveBeenCalled()
+    expect(mocks.characterGraphPositionsGetAll).not.toHaveBeenCalled()
+    expect(mocks.characterIdentityEnsure).not.toHaveBeenCalled()
+    expect(mocks.characterRelationshipUpsert).not.toHaveBeenCalled()
+    expect(mocks.characterRelationshipDelete).not.toHaveBeenCalled()
+    expect(mocks.characterGraphPositionsSave).not.toHaveBeenCalled()
+  })
+
+  it('serves character relationships and identities for the explicitly current project', async () => {
+    mocks.characterIdentityGetIdentities.mockReturnValueOnce({ 沈砚: 'id-shen' })
+    const relationship = {
+      id: 'rel-1',
+      character1Id: 'id-shen',
+      character2Id: 'id-su',
+      character1Name: '沈砚',
+      character2Name: '苏璃',
+      relation: '师徒',
+      description: '',
+    }
+    mocks.characterRelationshipGetAll.mockReturnValueOnce([relationship])
+    mocks.characterGraphPositionsGetAll.mockReturnValueOnce({ 'id-shen': { x: 3, y: 4 } })
+
+    await expect(handler('db:character-relationships-get-all')({}, 'C:/projects/A'))
+      .resolves.toEqual([relationship])
+    await expect(handler('db:character-identities-get')({}, 'C:/projects/A'))
+      .resolves.toEqual({ 沈砚: 'id-shen' })
+    await expect(handler('db:character-graph-positions-get')({}, 'C:/projects/A'))
+      .resolves.toEqual({ 'id-shen': { x: 3, y: 4 } })
+
+    mocks.characterIdentityEnsure.mockReturnValueOnce({ 沈砚: 'id-shen' })
+    expect(await handler('db:character-identities-ensure')({}, ['沈砚'], 'C:/projects/A'))
+      .toEqual({ 沈砚: 'id-shen' })
+    expect(await handler('db:character-relationship-upsert')(
+      {},
+      { character1Id: 'id-shen', character2Id: 'id-su', relation: '师徒' },
+      'C:/projects/A',
+    )).toEqual({
+      success: true,
+      relationship: { character1Id: 'id-shen', character2Id: 'id-su', relation: '师徒' },
+    })
+    expect(await handler('db:character-relationship-delete')({}, 'rel-1', 'C:/projects/A'))
+      .toEqual({ success: true })
+    expect(await handler('db:character-graph-positions-save')({}, { 'id-shen': { x: 3, y: 4 } }, 'C:/projects/A'))
+      .toEqual({ success: true })
+
+    expect(mocks.characterRelationshipGetAll).toHaveBeenCalledOnce()
+    expect(mocks.characterIdentityGetIdentities).toHaveBeenCalledOnce()
+    expect(mocks.characterIdentityEnsure).toHaveBeenCalledWith(['沈砚'])
+    expect(mocks.characterRelationshipUpsert).toHaveBeenCalledOnce()
+    expect(mocks.characterRelationshipDelete).toHaveBeenCalledWith('rel-1')
+    expect(mocks.characterGraphPositionsSave).toHaveBeenCalledWith({ 'id-shen': { x: 3, y: 4 } })
   })
 
   it('allows same-project character and blueprint access with an explicit context', async () => {

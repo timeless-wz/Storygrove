@@ -19,6 +19,10 @@ import type BetterSqlite3 from 'better-sqlite3'
 import { ensureCharacterRosterSchema } from './repositories/character-roster-schema'
 import { ensureStoryDomainSchema } from './services/story-domain-schema'
 import { ensurePhase2To8Schema } from './services/phase2-8-schema'
+import {
+  CharacterRelationshipRepository,
+  ensureCharacterRelationshipSchema,
+} from './repositories/character-relationship-repository'
 
 let projectDb: BetterSqlite3.Database | null = null
 let currentProjectPath: string | null = null
@@ -209,6 +213,9 @@ export function initProjectDatabase(projectPath: string, importSourceSecret?: Bu
   // 旧项目只有「一张项目底图 + 图层筛选」的结构。一次性把旧图层转换成同名地图，
   // 并把旧底图迁入其中一张地图的受控目录；迁移不删除任何既有地点、图层或连接。
   migrateWorldMapAtlas(projectDb, projectPath)
+  // 人物关系表以稳定人物 ID 为端点；旧项目在这里安全补齐身份并增量迁移旧结构化关系。
+  ensureCharacterRelationshipSchema(projectDb)
+  CharacterRelationshipRepository.migrateLegacyRelationships(projectDb)
 
   console.log(`[Vela DB] 项目数据库已打开: ${dbPath}`)
 }
@@ -718,6 +725,8 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
       ON story_timeline_events(sort_order, created_at);
     CREATE INDEX IF NOT EXISTS idx_story_timeline_events_branch
       ON story_timeline_events(branch_id, sort_order);
+
+    -- 人物关系与画布坐标的表结构由 ensureCharacterRelationshipSchema 统一创建（人物 ID 主键）。
 
     -- Reference imports are recoverable project facts, not generic workflow history.
     CREATE TABLE IF NOT EXISTS import_runs (
@@ -2038,6 +2047,8 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
   if (!settingsColumns.has('has_custom_range')) {
     db.exec('ALTER TABLE story_timeline_settings ADD COLUMN has_custom_range INTEGER NOT NULL DEFAULT 0')
   }
+
+  ensureCharacterRelationshipSchema(db)
 
   migrateDraftUnitCounts(db)
 }

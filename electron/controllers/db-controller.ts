@@ -18,6 +18,7 @@ import {
   type BlueprintRangeCommitRequest,
 } from '../repositories/blueprint-repository'
 import { CharacterRepository } from '../repositories/character-repository'
+import { CharacterRelationshipRepository } from '../repositories/character-relationship-repository'
 import { CharacterRosterRepository } from '../repositories/character-roster-repository'
 import type { CharacterRosterCommitRequest } from '../../src/shared/character-roster'
 import { DraftRepository } from '../repositories/draft-repository'
@@ -96,6 +97,10 @@ const MUTATING_DATABASE_CHANNELS = new Set([
   'db:blueprint-clear-all',
   'db:blueprint-volume-upsert',
   'db:character-roster-commit',
+  'db:character-identities-ensure',
+  'db:character-relationship-upsert',
+  'db:character-relationship-delete',
+  'db:character-graph-positions-save',
   'db:draft-import-finalized-batch',
   'db:draft-create',
   'db:draft-update-status',
@@ -644,6 +649,80 @@ export function registerDatabaseController() {
     try {
       assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
       return { success: true, receipt: CharacterRosterRepository.commit(request) }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  // ============================================================
+  // 3b. character shared relationships & graph positions
+  // ============================================================
+  ipcMain.handle('db:character-identities-get', async (_event, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return CharacterRelationshipRepository.getIdentities()
+  })
+
+  ipcMain.handle('db:character-identities-ensure', async (
+    _event,
+    names: string[],
+    expectedProjectPath: string,
+  ) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return CharacterRelationshipRepository.ensureIdentities(Array.isArray(names) ? names : [])
+  })
+
+  ipcMain.handle('db:character-relationships-get-all', async (_event, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return CharacterRelationshipRepository.getAll()
+  })
+
+  ipcMain.handle('db:character-relationship-upsert', async (
+    _event,
+    data: {
+      id?: string
+      character1Id: string
+      character2Id: string
+      relation: string
+      description?: string
+    },
+    expectedProjectPath: string,
+  ) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, relationship: CharacterRelationshipRepository.upsert(data) }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('db:character-relationship-delete', async (
+    _event,
+    id: string,
+    expectedProjectPath: string,
+  ) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      CharacterRelationshipRepository.delete(id)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('db:character-graph-positions-get', async (_event, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return CharacterRelationshipRepository.getGraphPositions()
+  })
+
+  ipcMain.handle('db:character-graph-positions-save', async (
+    _event,
+    positions: Record<string, { x: number; y: number }>,
+    expectedProjectPath: string,
+  ) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      CharacterRelationshipRepository.saveGraphPositions(positions)
+      return { success: true }
     } catch (err) {
       return { success: false, error: String(err) }
     }
