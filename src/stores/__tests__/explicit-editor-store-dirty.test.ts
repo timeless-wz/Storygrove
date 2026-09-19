@@ -428,7 +428,7 @@ describe('explicit editor dirty integration', () => {
       project().path,
     )
     expect(useCharacterStore.getState().identityBusy).toBe(true)
-    useCharacterStore.getState().addCharacter()
+    useCharacterStore.getState().addCharacter({ name: '不应创建的角色' })
     expect(useCharacterStore.getState().renameCharacter('待删除角色', '新名字')).toBe(false)
     await expect(
       useCharacterStore.getState().deleteCharacter('待删除角色', project().path),
@@ -685,7 +685,7 @@ describe('explicit editor dirty integration', () => {
       .mockResolvedValueOnce([character('新名', '保存前')])
 
     const save = useCharacterStore.getState().saveAll(project().path)
-    useCharacterStore.getState().addCharacter()
+    useCharacterStore.getState().addCharacter({ name: '不应创建的角色' })
     expect(useCharacterStore.getState().renameCharacter('新名', '另一个名字')).toBe(false)
     await expect(
       useCharacterStore.getState().deleteCharacter('新名', project().path),
@@ -729,7 +729,7 @@ describe('explicit editor dirty integration', () => {
       saving: false,
       loaded: true,
     })
-    useCharacterStore.getState().addCharacter()
+    useCharacterStore.getState().addCharacter({ name: '占位角色' })
     const placeholderName = useCharacterStore.getState().selectedName
     expect(placeholderName).toBeTruthy()
     useCharacterStore.getState().renameCharacter(placeholderName!, '首个正式名字')

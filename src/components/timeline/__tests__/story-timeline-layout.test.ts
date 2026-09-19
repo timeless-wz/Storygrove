@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { StoryTimelineEvent, StoryTimelinePrecision } from '../../../shared/story-timeline'
+import { parseStoryTimelineMentions } from '../../../shared/story-timeline'
 import {
   buildStoryTimelineLayout,
   estimateTimelineLabelWidth,
@@ -117,12 +118,13 @@ describe('story timeline layout', () => {
     expect(above[2].y).toBeLessThan(above[1].y)
     // 每层错开一个固定步长，而不是把横轴拉宽。
     expect(above[0].y - above[1].y).toBe(TIMELINE_STAGGER_STEP)
-    expect(above[0].x).toBeLessThan(above[1].x)
+    // 同一刻度共享同一水平基准列
+    expect(above[0].x).toBe(above[1].x)
   })
 
-  it('keeps dense but short labels on a single layer', () => {
+  it('keeps dense but short labels on separate columns without extra vertical stagger', () => {
     const layout = buildStoryTimelineLayout(
-      [0, 1, 2].map(index => makeEvent(`e${index}`, 7, { title: 'A', timeLabel: 'B' })),
+      [1, 2, 3].map(order => makeEvent(`e${order}`, order, { title: 'A', timeLabel: 'B' })),
     )
 
     expect(layout.events.map(event => event.staggerLevel)).toEqual([0, 0, 0])
@@ -157,12 +159,17 @@ describe('story timeline layout', () => {
       status: 'finalized',
     })])
 
-    // 时间轴标注字段就是全部可见内容：状态/描述/章节/角色/地点一律不到时间轴。
+    // 时间轴标注字段不包含大段描述与关联元数据，但包含分支与层级状态
     expect(Object.keys(layout.events[0]).sort()).toEqual([
+      'branchId',
+      'childBranchCount',
       'height',
       'id',
+      'isExpanded',
+      'parentEventId',
       'side',
       'staggerLevel',
+      'status',
       'timeText',
       'title',
       'width',
@@ -171,6 +178,7 @@ describe('story timeline layout', () => {
     ])
     expect(layout.events[0].title).toBe('标题')
     expect(layout.events[0].timeText).toBe('时间')
+    expect(layout.events[0].status).toBe('finalized')
   })
 
   it('clamps estimated label width between the configured bounds', () => {
@@ -180,11 +188,17 @@ describe('story timeline layout', () => {
       .toBe(TIMELINE_LABEL_MAX_WIDTH)
   })
 
-  it('returns an empty axis for an empty timeline without inventing events', () => {
+  it('maintains a trunk width of at least 1000px for empty timeline with start and end anchors', () => {
     const layout = buildStoryTimelineLayout([])
 
     expect(layout.events).toEqual([])
-    expect(layout.axis.width).toBe(0)
+    expect(layout.axis.width).toBeGreaterThanOrEqual(1000)
+    expect(layout.startAnchor).toBeDefined()
+    expect(layout.endAnchor).toBeDefined()
+    expect(layout.startAnchor.id).toBe('timeline-anchor-start')
+    expect(layout.endAnchor.id).toBe('timeline-anchor-end')
+    expect(layout.startAnchor.x).toBeLessThan(layout.endAnchor.x)
+    expect(layout.endAnchor.x - layout.startAnchor.x).toBeGreaterThanOrEqual(1000)
   })
 
   it('derives identical geometry for identical input and never stores positions on events', () => {
@@ -220,5 +234,192 @@ describe('story timeline layout', () => {
       .reduce((deepest, event) => (event.y < deepest.y ? event : deepest))
     expect(layout.axis.y - (deepestAbove.y + deepestAbove.height))
       .toBe(TIMELINE_LABEL_AXIS_GAP + deepestAbove.staggerLevel * TIMELINE_STAGGER_STEP)
+  })
+
+  it('keeps branches collapsed by default and only shows main line events', () => {
+    const mainEvent = makeEvent('m1', 10, { title: '主线事件' })
+    const branchEvent = makeEvent('b1', 20, { title: '支线事件', branchId: 'side-branch' })
+    const branches = [
+      { id: 'main', name: '主时间轴', sourceEventId: null, sortOrder: 0 },
+      { id: 'side-branch', name: '暗线分支', sourceEventId: 'm1', sortOrder: 1 },
+    ]
+
+    // 默认折叠：expandedBranchIds 仅 main
+    const layout = buildStoryTimelineLayout([mainEvent, branchEvent], branches, ['main'])
+    expect(layout.events.map(e => e.id)).toEqual(['m1'])
+    // 源事件标记有 1 条支线，且处于未展开状态
+    expect(layout.events[0].childBranchCount).toBe(1)
+    expect(layout.events[0].isExpanded).toBe(false)
+  })
+
+  it('lays out branch events to the right of source event when expanded and creates branch edge', () => {
+    const mainEvent = makeEvent('m1', 10, { title: '主线事件' })
+    const branchEvent1 = makeEvent('b1', 20, { title: '支线事件 1', branchId: 'side-branch' })
+    const branchEvent2 = makeEvent('b2', 30, { title: '支线事件 2', branchId: 'side-branch' })
+    const branches = [
+      { id: 'main', name: '主时间轴', sourceEventId: null, sortOrder: 0 },
+      { id: 'side-branch', name: '暗线分支', sourceEventId: 'm1', sortOrder: 1, color: '#10b981' },
+    ]
+
+    const layout = buildStoryTimelineLayout(
+      [mainEvent, branchEvent1, branchEvent2],
+      branches,
+      ['main', 'side-branch'],
+    )
+
+    expect(layout.events.map(e => e.id)).toEqual(['m1', 'b1', 'b2'])
+    const m1 = layout.events.find(e => e.id === 'm1')!
+    const b1 = layout.events.find(e => e.id === 'b1')!
+    const b2 = layout.events.find(e => e.id === 'b2')!
+
+    // 支线事件必须严格位于源事件的右侧（向后发展）
+    expect(b1.x).toBeGreaterThan(m1.x)
+    expect(b2.x).toBeGreaterThan(b1.x)
+    // 支线事件处于不同的 Y 泳道
+    expect(b1.y).not.toBe(m1.y)
+    expect(b2.y).toBe(b1.y)
+
+    // 源事件标记为已展开
+    expect(m1.childBranchCount).toBe(1)
+    expect(m1.isExpanded).toBe(true)
+
+    // 包含 branch 类型的平滑连接线与支线内部顺序连线
+    const branchEdge = layout.edges.find(e => e.type === 'timeline-branch')
+    expect(branchEdge).toBeDefined()
+    expect(branchEdge?.source).toBe('m1')
+    expect(branchEdge?.target).toBe('b1')
+    expect(branchEdge?.color).toBe('#10b981')
+
+    const seqEdge = layout.edges.find(e => e.id === 'branch-seq-b1-b2')
+    expect(seqEdge).toBeDefined()
+  })
+
+  it('symmetrically staggers multiple events on the same tick above and below without overlapping', () => {
+    const eventA = makeEvent('a', 10, { title: '事件 A' })
+    const eventB = makeEvent('b', 10, { title: '事件 B' })
+    const eventC = makeEvent('c', 10, { title: '事件 C' })
+    const eventD = makeEvent('d', 10, { title: '事件 D' })
+
+    const layout = buildStoryTimelineLayout([eventA, eventB, eventC, eventD])
+    expect(layout.events).toHaveLength(4)
+
+    const a = layout.events.find(e => e.id === 'a')!
+    const b = layout.events.find(e => e.id === 'b')!
+    const c = layout.events.find(e => e.id === 'c')!
+    const d = layout.events.find(e => e.id === 'd')!
+
+    // 同一刻度多事件共享同一水平基准列
+    expect(a.x).toBe(b.x)
+    expect(b.x).toBe(c.x)
+    expect(c.x).toBe(d.x)
+
+    // 上下对称分布
+    expect(a.side).toBe('above')
+    expect(b.side).toBe('below')
+    expect(c.side).toBe('above')
+    expect(d.side).toBe('below')
+
+    // 垂直方向不重叠：同侧逐层错开
+    expect(c.y).toBeLessThan(a.y)
+    expect(d.y).toBeGreaterThan(b.y)
+    expect(a.y).not.toBe(b.y)
+    expect(c.y).not.toBe(d.y)
+  })
+
+  it('calculates start and end anchor coordinates and properties accurately', () => {
+    const customSettings = {
+      title: '主线故事',
+      rulerLabel: '年代',
+      rulerUnit: '年',
+      startLabel: '起源纪元',
+      startTimeLabel: '前 100 年',
+      startOrder: 5,
+      endLabel: '终局之战',
+      endTimeLabel: '后 200 年',
+      endOrder: 25,
+      hasCustomRange: true,
+    }
+
+    const layout = buildStoryTimelineLayout([], [], ['main'], customSettings)
+    expect(layout.startAnchor).toEqual({
+      id: 'timeline-anchor-start',
+      anchorType: 'start',
+      label: '起源纪元',
+      timeLabel: '前 100 年',
+      order: 5,
+      x: expect.any(Number),
+      y: expect.any(Number),
+      width: 120,
+      height: 42,
+    })
+    expect(layout.endAnchor).toEqual({
+      id: 'timeline-anchor-end',
+      anchorType: 'end',
+      label: '终局之战',
+      timeLabel: '后 200 年',
+      order: 25,
+      x: expect.any(Number),
+      y: expect.any(Number),
+      width: 120,
+      height: 42,
+    })
+    expect(layout.startAnchor.x).toBeLessThan(layout.endAnchor.x)
+    expect(layout.axis.width).toBeGreaterThanOrEqual(1000)
+  })
+
+  it('clamps events with sortOrder outside [startOrder, endOrder] within timeline boundaries', () => {
+    const customSettings = {
+      title: '范围测试',
+      rulerLabel: '刻度',
+      rulerUnit: '点',
+      startLabel: '开端',
+      startTimeLabel: '0',
+      startOrder: 10,
+      endLabel: '结束',
+      endTimeLabel: '30',
+      endOrder: 30,
+      hasCustomRange: true,
+    }
+
+    const under = makeEvent('under', 2, { title: '太早的事件' })
+    const normal = makeEvent('normal', 20, { title: '正常事件' })
+    const over = makeEvent('over', 99, { title: '太晚的事件' })
+
+    const layout = buildStoryTimelineLayout([under, normal, over], [], ['main'], customSettings)
+    const underPlaced = layout.events.find(e => e.id === 'under')!
+    const normalPlaced = layout.events.find(e => e.id === 'normal')!
+    const overPlaced = layout.events.find(e => e.id === 'over')!
+
+    // 边界保护：超出范围的刻度被约束在锚点区间内，不会溢出到主干之外
+    expect(underPlaced.x).toBeGreaterThanOrEqual(layout.startAnchor.x)
+    expect(overPlaced.x).toBeLessThanOrEqual(layout.endAnchor.x)
+    expect(normalPlaced.x).toBeGreaterThan(underPlaced.x)
+    expect(overPlaced.x).toBeGreaterThan(normalPlaced.x)
+  })
+})
+
+describe('story timeline mention parsing', () => {
+  it('extracts @character and [[character]] mentions from description', () => {
+    const text = '在雾港与 @许渡 碰头，随后寻找 [[沈砚]] 和 [[周晓]]。'
+    const mentions = parseStoryTimelineMentions(text)
+
+    expect(mentions).toEqual([
+      { raw: '[[沈砚]]', name: '沈砚', type: 'character' },
+      { raw: '[[周晓]]', name: '周晓', type: 'character' },
+      { raw: '@许渡', name: '许渡', type: 'character' },
+    ])
+  })
+
+  it('deduplicates multiple mentions of the same character and avoids empty matches', () => {
+    const text = '@许渡 再次出现，许渡在想什么？@许渡 离开了。'
+    const mentions = parseStoryTimelineMentions(text)
+
+    expect(mentions).toHaveLength(1)
+    expect(mentions[0]).toEqual({ raw: '@许渡', name: '许渡', type: 'character' })
+  })
+
+  it('returns empty array when no mentions are found', () => {
+    expect(parseStoryTimelineMentions('')).toEqual([])
+    expect(parseStoryTimelineMentions('普通纯文本描述，没有任何引用标记')).toEqual([])
   })
 })

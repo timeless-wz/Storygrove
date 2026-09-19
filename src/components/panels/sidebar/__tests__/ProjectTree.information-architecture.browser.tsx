@@ -161,7 +161,7 @@ describe('ProjectTree information architecture', () => {
     expect(text).toContain('Story timeline')
   })
 
-  it('opens the character profile graph view instead of a separate graph editor', async () => {
+  it('opens the character profile overview instead of a separate graph editor', async () => {
     await act(async () => root.render(<ProjectTree />))
     await act(async () => { await Promise.resolve() })
 
@@ -174,6 +174,7 @@ describe('ProjectTree information architecture', () => {
     })
 
     expect(useLayoutStore.getState().sidebarView).toBe('characters')
-    expect(useLayoutStore.getState().characterViewRequest?.view).toBe('edit')
+    // 角色入口先给概览，完整字段留给显式编辑模式。
+    expect(useLayoutStore.getState().characterViewRequest?.view).toBe('overview')
   })
 })

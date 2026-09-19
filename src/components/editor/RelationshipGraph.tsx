@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   applyNodeChanges,
   Background,
@@ -7,8 +7,6 @@ import {
   Controls,
   EdgeLabelRenderer,
   Handle,
-  MarkerType,
-  MiniMap,
   Panel,
   Position,
   ReactFlow,
@@ -20,49 +18,52 @@ import {
   type ReactFlowInstance,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Maximize2, RotateCcw } from 'lucide-react'
+import { Link2, Maximize2, User, X } from 'lucide-react'
+import { useCharacterStore } from '../../stores/character-store'
 import { useLocaleStore } from '../../stores/locale-store'
-import {
-  buildRelationshipGraphModel,
-  readRelationshipGraphPositions,
-  relationshipGraphLayoutStorageKey,
-  writeRelationshipGraphPositions,
-  type RelationshipGraphCharacter,
-  type RelationshipGraphEdgeModel,
-  type RelationshipGraphEdgeTone,
-  type RelationshipGraphModel,
-  type RelationshipGraphNodeModel,
-  type RelationshipGraphPosition,
-} from './relationship-graph-model'
+import { Button } from '../ui/Button'
+import RelationshipModal from './RelationshipModal'
+import type {
+  CharacterSharedRelationship,
+  CharacterGraphPosition,
+} from '../../shared/character-relationship'
+import { isMatchingRelationship } from '../../shared/character-relationship'
 
-interface RelationshipGraphProps {
+/** 画布只需要稳定 ID + 展示名 + 定位标签：关系事实一律来自共享关系表。 */
+export interface RelationshipGraphCharacter {
+  id: string
+  name: string
+  role: string
+}
+
+export interface RelationshipGraphProps {
   characters: RelationshipGraphCharacter[]
-  /** Local-only layout preferences are scoped to the project, never to character facts. */
   projectKey?: string
   onCharacterSelect?: (name: string) => void
 }
 
-interface RelationshipGraphSurfaceProps extends RelationshipGraphProps {
-  graphModel: RelationshipGraphModel
-}
-
-type CharacterGraphNodeData = Record<string, unknown> & {
+export type CharacterGraphNodeData = {
+  characterId: string
   name: string
   role: string
-  relationships: number
+  relationshipsCount: number
+  avatar?: string
+  isConnectSource?: boolean
+  onContextMenu?: (event: React.MouseEvent, characterId: string, characterName: string) => void
 }
 
-type CharacterGraphNode = Node<CharacterGraphNodeData, 'character'>
+export type CharacterGraphNode = Node<CharacterGraphNodeData, 'character'>
 
-type RelationshipFlowEdgeData = Record<string, unknown> & {
-  label: string
-  tone: RelationshipGraphEdgeTone
-  lane: number
-  sourceName: string
-  targetName: string
+export type RelationshipFlowEdgeData = {
+  relation: string
+  description?: string
+  character1Name: string
+  character2Name: string
+  relationship: CharacterSharedRelationship
+  onEdgeClick?: (relationship: CharacterSharedRelationship) => void
 }
 
-type RelationshipFlowEdge = Edge<RelationshipFlowEdgeData, 'relationship'>
+export type RelationshipFlowEdge = Edge<RelationshipFlowEdgeData, 'relationship'>
 
 const ROLE_COLORS: Record<string, string> = {
   protagonist: 'var(--color-role-protagonist, #2563eb)',
@@ -71,123 +72,97 @@ const ROLE_COLORS: Record<string, string> = {
   minor: 'var(--color-role-minor, #64748b)',
 }
 
-const EDGE_COLORS: Record<RelationshipGraphEdgeTone, string> = {
-  family: '#a16207',
-  conflict: '#dc2626',
-  alliance: '#059669',
-  neutral: '#64748b',
-}
-
 const ROLE_LABELS: Record<string, [string, string]> = {
   protagonist: ['主角', 'Protagonist'],
   antagonist: ['反派', 'Antagonist'],
   supporting: ['配角', 'Supporting'],
-  minor: ['次要角色', 'Minor'],
+  minor: ['其他', 'Other'],
+  unassigned: ['暂未设定', 'Not set yet'],
 }
 
-const HANDLE_POSITIONS = {
-  left: Position.Left,
-  right: Position.Right,
-  top: Position.Top,
-  bottom: Position.Bottom,
-} as const
-
-function compactLabel(value: string, maxCharacters = 15): string {
+function compactLabel(value: string, maxCharacters = 12): string {
   const characters = Array.from(value.trim())
   return characters.length > maxCharacters
     ? `${characters.slice(0, maxCharacters).join('')}…`
     : characters.join('')
 }
 
-function handleForDirection(
-  source: RelationshipGraphPosition,
-  target: RelationshipGraphPosition,
-  kind: 'source' | 'target',
-): string {
-  const dx = target.x - source.x
-  const dy = target.y - source.y
-  let direction: 'left' | 'right' | 'top' | 'bottom'
-  if (Math.abs(dx) >= Math.abs(dy)) direction = dx >= 0 ? 'right' : 'left'
-  else direction = dy >= 0 ? 'bottom' : 'top'
-
-  if (kind === 'target') {
-    direction = ({ left: 'right', right: 'left', top: 'bottom', bottom: 'top' } as const)[direction]
-  }
-  return `${kind}-${direction}`
-}
-
-function toFlowNodes(nodes: RelationshipGraphNodeModel[], edges: RelationshipGraphEdgeModel[]): CharacterGraphNode[] {
-  const relationshipCounts = new Map<string, number>()
-  for (const edge of edges) {
-    relationshipCounts.set(edge.source, (relationshipCounts.get(edge.source) ?? 0) + 1)
-    relationshipCounts.set(edge.target, (relationshipCounts.get(edge.target) ?? 0) + 1)
-  }
-  return nodes.map(node => ({
-    id: node.id,
-    type: 'character',
-    position: node.position,
-    data: {
-      name: node.name,
-      role: node.role,
-      relationships: relationshipCounts.get(node.id) ?? 0,
-    },
-  }))
-}
-
-function toFlowEdges(
-  edges: RelationshipGraphEdgeModel[],
-  nodes: readonly CharacterGraphNode[],
-): RelationshipFlowEdge[] {
-  const positions = new Map(nodes.map(node => [node.id, node.position]))
-  return edges.flatMap((edge) => {
-    const sourcePosition = positions.get(edge.source)
-    const targetPosition = positions.get(edge.target)
-    if (!sourcePosition || !targetPosition) return []
-    return [{
-      id: edge.id,
-      type: 'relationship',
-      source: edge.source,
-      target: edge.target,
-      sourceHandle: handleForDirection(sourcePosition, targetPosition, 'source'),
-      targetHandle: handleForDirection(sourcePosition, targetPosition, 'target'),
-      markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: EDGE_COLORS[edge.tone] },
-      data: {
-        label: edge.label,
-        tone: edge.tone,
-        lane: edge.lane,
-        sourceName: edge.sourceName,
-        targetName: edge.targetName,
-      },
-    }]
-  })
-}
-
 function CharacterGraphNodeView({ data, selected }: NodeProps<CharacterGraphNode>) {
   const text = useLocaleStore(state => state.text)
-  const color = ROLE_COLORS[data.role] ?? ROLE_COLORS.minor
-  const relationshipCount = data.relationships
+  const roleColor = ROLE_COLORS[data.role] ?? ROLE_COLORS.minor
   const [roleZhCN, roleEnUS] = ROLE_LABELS[data.role] ?? ROLE_LABELS.minor
+  const isSource = data.isConnectSource
+
   return (
     <div
-      className="min-w-32 max-w-48 rounded-lg border px-3 py-2 shadow-sm transition-shadow"
-      style={{
-        borderColor: selected ? color : 'var(--color-border)',
-        background: 'var(--color-raised)',
-        boxShadow: selected ? `0 0 0 2px color-mix(in srgb, ${color} 24%, transparent)` : undefined,
+      className="group relative flex flex-col items-center cursor-pointer select-none"
+      data-testid="relationship-graph-node"
+      data-character-id={data.characterId}
+      data-character-name={data.name}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        data.onContextMenu?.(e, data.characterId, data.name)
       }}
-      title={data.name}
     >
-      {(['left', 'right', 'top', 'bottom'] as const).flatMap(side => [
-        <Handle key={`source-${side}`} id={`source-${side}`} type="source" position={HANDLE_POSITIONS[side]} isConnectable={false} style={{ opacity: 0 }} />,
-        <Handle key={`target-${side}`} id={`target-${side}`} type="target" position={HANDLE_POSITIONS[side]} isConnectable={false} style={{ opacity: 0 }} />,
-      ])}
-      <div className="flex items-center gap-2">
-        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: color }} />
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--color-text)]">{data.name}</span>
+      {/* Invisible Handles around the circle for smooth edge routing */}
+      <Handle type="source" position={Position.Top} id="top" style={{ opacity: 0 }} isConnectable={false} />
+      <Handle type="source" position={Position.Bottom} id="bottom" style={{ opacity: 0 }} isConnectable={false} />
+      <Handle type="source" position={Position.Left} id="left" style={{ opacity: 0 }} isConnectable={false} />
+      <Handle type="source" position={Position.Right} id="right" style={{ opacity: 0 }} isConnectable={false} />
+      <Handle type="target" position={Position.Top} id="t-top" style={{ opacity: 0 }} isConnectable={false} />
+      <Handle type="target" position={Position.Bottom} id="t-bottom" style={{ opacity: 0 }} isConnectable={false} />
+      <Handle type="target" position={Position.Left} id="t-left" style={{ opacity: 0 }} isConnectable={false} />
+      <Handle type="target" position={Position.Right} id="t-right" style={{ opacity: 0 }} isConnectable={false} />
+
+      {/* Circular Node Body (64px x 64px) */}
+      <div
+        className="w-16 h-16 rounded-full flex items-center justify-center shadow-md transition-transform group-hover:scale-105"
+        style={{
+          backgroundColor: roleColor,
+          border: isSource
+            ? '3px solid var(--color-accent, #3b82f6)'
+            : selected
+              ? `3px solid ${roleColor}`
+              : '2px solid rgba(255, 255, 255, 0.9)',
+          boxShadow: isSource
+            ? '0 0 0 4px color-mix(in srgb, var(--color-accent, #3b82f6) 40%, transparent)'
+            : selected
+              ? `0 0 0 4px color-mix(in srgb, ${roleColor} 30%, transparent)`
+              : undefined,
+        }}
+      >
+        {data.avatar ? (
+          <img
+            src={data.avatar}
+            alt={data.name}
+            className="w-full h-full rounded-full object-cover"
+          />
+        ) : (
+          <span className="text-xl font-bold text-white tracking-wide">
+            {data.name.slice(0, 1)}
+          </span>
+        )}
       </div>
-      <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-[var(--color-text-muted)]">
-        <span>{text(roleZhCN, roleEnUS)}</span>
-        {relationshipCount > 0 && <span>{text(`${relationshipCount} 条关系`, `${relationshipCount} relations`)}</span>}
+
+      {/* Centered Name and Role Tag below circle */}
+      <div className="mt-1.5 flex flex-col items-center max-w-28 text-center pointer-events-none">
+        <span
+          className="text-xs font-semibold text-[var(--color-text)] truncate max-w-24 leading-tight"
+          title={data.name}
+        >
+          {data.name}
+        </span>
+        <span
+          className="mt-0.5 inline-block rounded-full px-1.5 py-0.2 text-[10px] font-medium border leading-tight"
+          style={{
+            borderColor: roleColor,
+            color: roleColor,
+            backgroundColor: 'var(--color-bg, #ffffff)',
+          }}
+        >
+          {text(roleZhCN, roleEnUS)}
+        </span>
       </div>
     </div>
   )
@@ -198,43 +173,45 @@ function RelationshipEdgeView({
   sourceY,
   targetX,
   targetY,
-  markerEnd,
   data,
 }: EdgeProps<RelationshipFlowEdge>) {
-  const lane = typeof data?.lane === 'number' ? data.lane : 0
-  const tone = data?.tone ?? 'neutral'
-  const color = EDGE_COLORS[tone]
-  const dx = targetX - sourceX
-  const dy = targetY - sourceY
-  const distance = Math.max(Math.hypot(dx, dy), 1)
-  const normalX = -dy / distance
-  const normalY = dx / distance
-  const curveOffset = Math.max(-56, Math.min(56, lane * 18))
-  const controlX = (sourceX + targetX) / 2 + normalX * curveOffset
-  const controlY = (sourceY + targetY) / 2 + normalY * curveOffset
-  const labelX = (sourceX + 2 * controlX + targetX) / 4
-  const labelY = (sourceY + 2 * controlY + targetY) / 4
-  const path = `M ${sourceX},${sourceY} Q ${controlX},${controlY} ${targetX},${targetY}`
-  const label = data?.label ?? ''
+  const labelX = (sourceX + targetX) / 2
+  const labelY = (sourceY + targetY) / 2
+  const path = `M ${sourceX},${sourceY} L ${targetX},${targetY}`
+  const label = data?.relation ?? ''
 
   return (
     <>
-      <BaseEdge path={path} markerEnd={markerEnd} style={{ stroke: color, strokeWidth: 1.8, opacity: 0.9 }} />
+      <BaseEdge
+        path={path}
+        style={{
+          stroke: 'var(--color-text-muted, #94a3b8)',
+          strokeWidth: 2,
+          opacity: 0.8,
+          cursor: 'pointer',
+        }}
+      />
       <EdgeLabelRenderer>
-        <span
-          className="nodrag nopan absolute rounded border px-1.5 py-0.5 text-[10px] leading-none shadow-sm"
-          data-testid="relationship-edge-label"
-          title={label}
+        <button
+          type="button"
+          data-testid="relationship-edge-chip"
+          className="nodrag nopan absolute rounded-full border px-2.5 py-0.5 text-xs font-medium shadow-sm transition-all hover:scale-105 cursor-pointer"
           style={{
-            transform: `translate(-50%, -50%) translate(${labelX}px,${labelY}px)`,
-            borderColor: color,
-            background: 'var(--color-raised)',
-            color,
+            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+            borderColor: 'var(--color-border)',
+            backgroundColor: 'var(--color-raised, #ffffff)',
+            color: 'var(--color-text)',
             pointerEvents: 'all',
+            zIndex: 1000,
           }}
+          onClick={(e) => {
+            e.stopPropagation()
+            if (data?.relationship) data.onEdgeClick?.(data.relationship)
+          }}
+          title={data?.description ? `${label}：${data.description}` : label}
         >
           {compactLabel(label)}
-        </span>
+        </button>
       </EdgeLabelRenderer>
     </>
   )
@@ -243,24 +220,160 @@ function RelationshipEdgeView({
 const nodeTypes = { character: CharacterGraphNodeView }
 const edgeTypes = { relationship: RelationshipEdgeView }
 
+interface ModalState {
+  open: boolean
+  character1: RelationshipGraphCharacter
+  character2: RelationshipGraphCharacter
+  existing: CharacterSharedRelationship | null
+}
+
+const EMPTY_CHARACTER: RelationshipGraphCharacter = { id: '', name: '', role: 'minor' }
+
 /**
- * Relationship visualisation deliberately remains a projection of the approved
- * roster. It gives every directed relation a separate labelled curve, while
- * editing facts continues to go through CharacterEditor and its revision guard.
+ * 可编辑的共用关系画布。
+ *
+ * 节点、连线与坐标全部以稳定人物 ID 为身份：改名只影响展示名。
+ * 关系事实只来自共享关系表（store.relationships），不再从角色卡旧
+ * relationships 字段推导连线。
  */
-function RelationshipGraphSurface({
+export default function RelationshipGraph({
   characters,
-  projectKey,
+  projectKey: _projectKey,
   onCharacterSelect,
-  graphModel,
-}: RelationshipGraphSurfaceProps) {
+}: RelationshipGraphProps) {
   const text = useLocaleStore(state => state.text)
-  const [nodes, setNodes] = useState<CharacterGraphNode[]>(() => toFlowNodes(graphModel.nodes, graphModel.edges))
-  const [edges, setEdges] = useState<RelationshipFlowEdge[]>(() => {
-    const initialNodes = toFlowNodes(graphModel.nodes, graphModel.edges)
-    return toFlowEdges(graphModel.edges, initialNodes)
+  const relationships = useCharacterStore(state => state.relationships)
+  const graphPositions = useCharacterStore(state => state.graphPositions)
+  const upsertRelationship = useCharacterStore(state => state.upsertRelationship)
+  const deleteRelationship = useCharacterStore(state => state.deleteRelationship)
+  const saveGraphPositions = useCharacterStore(state => state.saveGraphPositions)
+
+  const [isConnectMode, setIsConnectMode] = useState(false)
+  const [connectSourceId, setConnectSourceId] = useState<string | null>(null)
+  const [contextMenu, setContextMenu] = useState<{
+    x: number
+    y: number
+    type: 'pane' | 'node'
+    characterId?: string
+    characterName?: string
+  } | null>(null)
+  const [connectNotice, setConnectNotice] = useState<string | null>(null)
+
+  const [modalState, setModalState] = useState<ModalState>({
+    open: false,
+    character1: EMPTY_CHARACTER,
+    character2: EMPTY_CHARACTER,
+    existing: null,
   })
+
   const flowRef = useRef<ReactFlowInstance<CharacterGraphNode, RelationshipFlowEdge> | null>(null)
+
+  const characterById = useMemo(
+    () => new Map(characters.filter(character => character.id && character.name.trim()).map(character => [character.id, character])),
+    [characters],
+  )
+
+  const handleNodeContextMenu = useCallback(
+    (event: React.MouseEvent, characterId: string, characterName: string) => {
+      setContextMenu({ x: event.clientX, y: event.clientY, type: 'node', characterId, characterName })
+    },
+    [],
+  )
+
+  // Generate nodes from characters & stored positions (positions keyed by character ID)
+  const initialNodes = useMemo(() => {
+    const visible = characters.filter(character => character.name.trim())
+    const count = visible.length
+    const relationshipCount = new Map<string, number>()
+    for (const rel of relationships) {
+      if (rel.character1Id) relationshipCount.set(rel.character1Id, (relationshipCount.get(rel.character1Id) ?? 0) + 1)
+      if (rel.character2Id) relationshipCount.set(rel.character2Id, (relationshipCount.get(rel.character2Id) ?? 0) + 1)
+    }
+
+    return visible.map((character, index) => {
+      const storedPosition = character.id ? graphPositions[character.id] : undefined
+      let pos: { x: number; y: number }
+      if (storedPosition && typeof storedPosition.x === 'number' && typeof storedPosition.y === 'number') {
+        pos = { x: storedPosition.x, y: storedPosition.y }
+      } else {
+        const angle = count > 1 ? (index / count) * 2 * Math.PI - Math.PI / 2 : 0
+        const radius = Math.max(160, count * 35)
+        pos = {
+          x: Math.round(360 + radius * Math.cos(angle)),
+          y: Math.round(260 + radius * Math.sin(angle)),
+        }
+      }
+
+      return {
+        // 尚未落盘的角色还没有稳定 ID，先用姓名占位保证画布完整；
+        // 它不能建立关系（保存后由主进程补齐身份）。
+        id: character.id || `pending:${character.name}`,
+        type: 'character' as const,
+        position: pos,
+        data: {
+          characterId: character.id,
+          name: character.name,
+          role: character.role,
+          relationshipsCount: relationshipCount.get(character.id) ?? 0,
+          isConnectSource: connectSourceId === character.id,
+          onContextMenu: handleNodeContextMenu,
+        },
+      }
+    })
+  }, [characters, relationships, graphPositions, connectSourceId, handleNodeContextMenu])
+
+  const [nodes, setNodes] = useState<CharacterGraphNode[]>(initialNodes)
+
+  useEffect(() => {
+    setNodes(initialNodes)
+  }, [initialNodes])
+
+  const edges = useMemo<RelationshipFlowEdge[]>(() => {
+    const nodeIds = new Set(nodes.map(node => node.id))
+    return relationships.flatMap((rel) => {
+      if (!rel.character1Id || !rel.character2Id) return []
+      if (!nodeIds.has(rel.character1Id) || !nodeIds.has(rel.character2Id)) return []
+      return [{
+        id: `relationship-edge-${rel.id}`,
+        type: 'relationship' as const,
+        source: rel.character1Id,
+        target: rel.character2Id,
+        data: {
+          relation: rel.relation,
+          description: rel.description,
+          character1Name: rel.character1Name,
+          character2Name: rel.character2Name,
+          relationship: rel,
+          onEdgeClick: (relationship: CharacterSharedRelationship) => {
+            setContextMenu(null)
+            const first = characterById.get(relationship.character1Id)
+            const second = characterById.get(relationship.character2Id)
+            if (!first || !second) return
+            setModalState({ open: true, character1: first, character2: second, existing: relationship })
+          },
+        },
+      }]
+    })
+  }, [relationships, nodes, characterById])
+
+  const onNodesChange = useCallback((changes: NodeChange<CharacterGraphNode>[]) => {
+    setNodes(current => applyNodeChanges(changes, current))
+  }, [])
+
+  const onNodeDragStop = useCallback(
+    (_event: React.MouseEvent, _node: CharacterGraphNode, nextNodes: CharacterGraphNode[]) => {
+      // 坐标主键是人物 ID：改名不会让已拖拽的位置失效。
+      const positionsToSave: Record<string, CharacterGraphPosition> = {}
+      for (const node of nextNodes) {
+        positionsToSave[node.id] = {
+          x: Math.round(node.position.x),
+          y: Math.round(node.position.y),
+        }
+      }
+      void saveGraphPositions(positionsToSave)
+    },
+    [saveGraphPositions],
+  )
 
   const fitGraph = useCallback(() => {
     requestAnimationFrame(() => {
@@ -268,36 +381,80 @@ function RelationshipGraphSurface({
     })
   }, [])
 
-  const onNodesChange = useCallback((changes: NodeChange<CharacterGraphNode>[]) => {
-    setNodes(current => applyNodeChanges(changes, current))
+  const handleNodeClick = useCallback(
+    (_event: React.MouseEvent, node: CharacterGraphNode) => {
+      setContextMenu(null)
+      const clickedId = node.data.characterId
+      const clickedName = node.data.name
+
+      if (!isConnectMode) {
+        onCharacterSelect?.(clickedName)
+        return
+      }
+      if (!clickedId) {
+        setConnectNotice(text('该角色尚未保存，保存后才能建立关系。', 'Save this character before connecting.'))
+        return
+      }
+      setConnectNotice(null)
+      if (!connectSourceId) {
+        setConnectSourceId(clickedId)
+        return
+      }
+      if (connectSourceId === clickedId) {
+        setConnectSourceId(null)
+        return
+      }
+
+      const source = characterById.get(connectSourceId)
+      const target = characterById.get(clickedId)
+      if (!source || !target) {
+        setConnectSourceId(null)
+        return
+      }
+      // 两个人之间只有一条共用关系：已有关系时打开编辑，而不是新增重复连线。
+      const existing = relationships.find(rel => isMatchingRelationship(rel, connectSourceId, clickedId))
+      setModalState({ open: true, character1: source, character2: target, existing: existing ?? null })
+      setIsConnectMode(false)
+      setConnectSourceId(null)
+    },
+    [characterById, connectSourceId, isConnectMode, onCharacterSelect, relationships, text],
+  )
+
+  const handlePaneContextMenu = useCallback((event: React.MouseEvent | MouseEvent) => {
+    event.preventDefault()
+    setContextMenu({ x: event.clientX, y: event.clientY, type: 'pane' })
   }, [])
 
-  const persistLayout = useCallback((nextNodes: readonly CharacterGraphNode[]) => {
-    writeRelationshipGraphPositions(
-      projectKey,
-      Object.fromEntries(nextNodes.map(node => [node.id, { x: node.position.x, y: node.position.y }])),
-    )
-  }, [projectKey])
-
-  const onNodeDragStop = useCallback((_event: React.MouseEvent, _node: CharacterGraphNode, nextNodes: CharacterGraphNode[]) => {
-    setEdges(toFlowEdges(graphModel.edges, nextNodes))
-    persistLayout(nextNodes)
-  }, [graphModel.edges, persistLayout])
-
-  const resetLayout = useCallback(() => {
-    if (projectKey && typeof window !== 'undefined') {
-      try {
-        window.localStorage.removeItem(relationshipGraphLayoutStorageKey(projectKey))
-      } catch {
-        // Resetting a local presentation preference is best-effort only.
+  const toggleConnectMode = useCallback(() => {
+    setConnectNotice(null)
+    setIsConnectMode(prev => {
+      if (prev) {
+        setConnectSourceId(null)
+        return false
       }
+      return true
+    })
+  }, [])
+
+  const handlePaneClick = useCallback(() => {
+    setContextMenu(null)
+  }, [])
+
+  const handleModalSave = async (data: { relation: string; description?: string }) => {
+    await upsertRelationship({
+      id: modalState.existing?.id,
+      character1Id: modalState.character1.id,
+      character2Id: modalState.character2.id,
+      relation: data.relation,
+      description: data.description,
+    })
+  }
+
+  const handleModalDelete = async () => {
+    if (modalState.existing?.id) {
+      await deleteRelationship(modalState.existing.id)
     }
-    const resetModel = buildRelationshipGraphModel(characters)
-    const resetNodes = toFlowNodes(resetModel.nodes, resetModel.edges)
-    setNodes(resetNodes)
-    setEdges(toFlowEdges(resetModel.edges, resetNodes))
-    fitGraph()
-  }, [characters, fitGraph, projectKey])
+  }
 
   if (characters.length === 0) {
     return (
@@ -307,8 +464,14 @@ function RelationshipGraphSurface({
     )
   }
 
+  const connectSourceName = connectSourceId ? characterById.get(connectSourceId)?.name ?? '' : ''
+
   return (
-    <div className="h-full min-h-100 w-full" aria-label={text('角色关系图谱', 'Character relationship graph')}>
+    <div
+      className="relative h-full min-h-100 w-full select-none"
+      aria-label={text('角色关系图谱', 'Character relationship graph')}
+      onClick={handlePaneClick}
+    >
       <ReactFlow<CharacterGraphNode, RelationshipFlowEdge>
         nodes={nodes}
         edges={edges}
@@ -316,7 +479,8 @@ function RelationshipGraphSurface({
         edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onNodeDragStop={onNodeDragStop}
-        onNodeClick={(_event, node) => onCharacterSelect?.(node.data.name)}
+        onNodeClick={handleNodeClick}
+        onPaneContextMenu={handlePaneContextMenu}
         onInit={(instance) => {
           flowRef.current = instance
           fitGraph()
@@ -330,49 +494,170 @@ function RelationshipGraphSurface({
         proOptions={{ hideAttribution: true }}
         className="bg-[var(--color-bg)]"
       >
-        <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="var(--color-border)" />
+        {/* Story timeline fine dot background */}
+        <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="var(--color-border)" />
+
+        {/* Bottom right zoom & fit controls */}
         <Controls showInteractive={false} position="bottom-right" />
-        {nodes.length > 6 && (
-          <MiniMap
-            position="bottom-left"
-            maskColor="rgba(15, 23, 42, 0.08)"
-            nodeColor={(node) => ROLE_COLORS[(node.data as CharacterGraphNodeData).role] ?? ROLE_COLORS.minor}
-          />
-        )}
-        <Panel position="top-right" className="flex items-center gap-1 rounded-md border p-1 shadow-sm" style={{ borderColor: 'var(--color-border)', background: 'var(--color-panel)' }}>
-          <span className="px-1 text-[11px] text-[var(--color-text-muted)]">
-            {text(`${edges.length} 条有向关系`, `${edges.length} directed relations`)}
+
+        {/* Top Right Tool Panel */}
+        <Panel
+          position="top-right"
+          className="flex items-center gap-2 rounded-lg border px-3 py-1.5 shadow-sm"
+          style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-panel, var(--color-bg))' }}
+        >
+          <span className="text-xs text-[var(--color-text-muted)]">
+            {text(`${edges.length} 条关系`, `${edges.length} relations`)}
           </span>
-          <button type="button" className="rounded p-1 hover:bg-[var(--color-hover)]" title={text('适合视图', 'Fit graph')} aria-label={text('适合视图', 'Fit graph')} onClick={fitGraph}>
+
+          <Button
+            size="sm"
+            variant={isConnectMode ? 'default' : 'outline'}
+            data-testid="relationship-connect-mode-button"
+            onClick={toggleConnectMode}
+            className="gap-1 text-xs"
+          >
+            <Link2 size={13} />
+            <span>{isConnectMode ? text('退出连线', 'Cancel Connect') : text('建立关系', 'Connect')}</span>
+          </Button>
+
+          <button
+            type="button"
+            className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-hover)] hover:text-[var(--color-text)]"
+            title={text('适合视图', 'Fit view')}
+            aria-label={text('适合视图', 'Fit view')}
+            onClick={fitGraph}
+          >
             <Maximize2 size={14} />
           </button>
-          <button type="button" className="rounded p-1 hover:bg-[var(--color-hover)]" title={text('重置布局', 'Reset layout')} aria-label={text('重置布局', 'Reset layout')} onClick={resetLayout}>
-            <RotateCcw size={14} />
-          </button>
         </Panel>
+
+        {/* 未保存角色不能连线的提示 */}
+        {connectNotice && (
+          <Panel
+            position="top-center"
+            className="flex items-center gap-2 rounded-full border px-4 py-1.5 text-xs shadow-md"
+            style={{
+              backgroundColor: 'var(--color-panel, var(--color-bg))',
+              borderColor: 'var(--color-warning-text, #d97706)',
+              color: 'var(--color-warning-text, #d97706)',
+            }}
+            data-testid="relationship-connect-notice"
+          >
+            <span>{connectNotice}</span>
+            <button
+              type="button"
+              className="ml-1 rounded-full p-0.5 hover:bg-[var(--color-hover)]"
+              onClick={() => setConnectNotice(null)}
+              aria-label={text('关闭提示', 'Dismiss')}
+            >
+              <X size={12} />
+            </button>
+          </Panel>
+        )}
+
+        {/* Connect Mode Helper Indicator */}
+        {isConnectMode && (
+          <Panel
+            position="top-center"
+            className="flex items-center gap-2 rounded-full border px-4 py-1.5 text-xs shadow-md bg-[var(--color-panel,var(--color-bg))] border-[var(--color-accent,#3b82f6)] text-[var(--color-accent,#3b82f6)] font-medium"
+          >
+            <Link2 size={13} className="animate-pulse" />
+            <span>
+              {!connectSourceId
+                ? text('连线模式：请先点击第一个人物节点', 'Connect mode: Click the first character')
+                : text(`已选「${connectSourceName}」，请点击第二个人物节点建立关系`, `Selected “${connectSourceName}”, click the second character`)}
+            </span>
+            <button
+              type="button"
+              className="ml-1 rounded-full p-0.5 hover:bg-[var(--color-hover)]"
+              onClick={() => {
+                setIsConnectMode(false)
+                setConnectSourceId(null)
+              }}
+            >
+              <X size={12} />
+            </button>
+          </Panel>
+        )}
       </ReactFlow>
+
+      {/* Context Menu */}
+      {contextMenu && (
+        <div
+          className="fixed z-50 min-w-32 rounded-lg border py-1 shadow-lg text-xs"
+          style={{
+            top: contextMenu.y,
+            left: contextMenu.x,
+            borderColor: 'var(--color-border)',
+            backgroundColor: 'var(--color-bg)',
+            color: 'var(--color-text)',
+          }}
+          onClick={e => e.stopPropagation()}
+        >
+          {contextMenu.type === 'pane' && (
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-[var(--color-hover)] text-left"
+              onClick={() => {
+                setContextMenu(null)
+                fitGraph()
+              }}
+            >
+              <Maximize2 size={13} />
+              <span>{text('适应视图', 'Fit View')}</span>
+            </button>
+          )}
+
+          {contextMenu.type === 'node' && contextMenu.characterId && (
+            <>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-[var(--color-hover)] text-left"
+                onClick={() => {
+                  const targetId = contextMenu.characterId
+                  setContextMenu(null)
+                  setIsConnectMode(true)
+                  if (targetId) {
+                    setConnectNotice(null)
+                    setConnectSourceId(targetId)
+                    return
+                  }
+                  setConnectSourceId(null)
+                  setConnectNotice(text('该角色尚未保存，保存后才能建立关系。', 'Save this character before connecting.'))
+                }}
+              >
+                <Link2 size={13} />
+                <span>{text('建立关系', 'Connect')}</span>
+              </button>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-[var(--color-hover)] text-left"
+                onClick={() => {
+                  const targetName = contextMenu.characterName
+                    ?? characterById.get(contextMenu.characterId ?? '')?.name
+                  setContextMenu(null)
+                  if (targetName) onCharacterSelect?.(targetName)
+                }}
+              >
+                <User size={13} />
+                <span>{text('打开人物卡', 'Open Character Card')}</span>
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Relationship Edit/Create Modal */}
+      <RelationshipModal
+        open={modalState.open}
+        character1={modalState.character1}
+        character2={modalState.character2}
+        initialRelationship={modalState.existing}
+        onClose={() => setModalState(prev => ({ ...prev, open: false }))}
+        onSave={handleModalSave}
+        onDelete={modalState.existing?.id ? handleModalDelete : undefined}
+      />
     </div>
-  )
-}
-
-export default function RelationshipGraph({ characters, projectKey, onCharacterSelect }: RelationshipGraphProps) {
-  const graphKey = [projectKey ?? '', JSON.stringify(characters.map(character => [
-    character.name,
-    character.role,
-    character.relationships,
-  ]))].join('\u0000')
-  const graphModel = useMemo(
-    () => buildRelationshipGraphModel(characters, readRelationshipGraphPositions(projectKey)),
-    [characters, projectKey],
-  )
-
-  return (
-    <RelationshipGraphSurface
-      key={graphKey}
-      characters={characters}
-      projectKey={projectKey}
-      onCharacterSelect={onCharacterSelect}
-      graphModel={graphModel}
-    />
   )
 }

@@ -224,8 +224,21 @@ describe('CharacterRosterRepository public read/commit seam', () => {
       )),
     }))
 
-    expect(receipt.snapshot.renderedMarkdown).toContain('## 龙套：苏绾')
-    expect(receipt.snapshot.renderedMarkdown).not.toContain('## 次要角色：苏绾')
+    // 持久化键仍是 minor，投影文案统一来自 CHARACTER_ROLE_LABELS。
+    expect(receipt.snapshot.renderedMarkdown).toContain('## 其他：苏绾')
+    expect(receipt.snapshot.renderedMarkdown).not.toContain('## 龙套：苏绾')
+    expect(receipt.snapshot.entries.find(entry => entry.name === '苏绾')?.role).toBe('minor')
+  })
+
+  it('keeps an explicitly unassigned role out of the supporting default', () => {
+    const receipt = CharacterRosterRepository.commit(commitRequest({
+      entries: commitRequest().entries.map(entry => (
+        entry.name === '苏绾' ? { ...entry, role: 'unassigned' as const } : entry
+      )),
+    }))
+
+    expect(receipt.snapshot.renderedMarkdown).toContain('## 暂未设定：苏绾')
+    expect(receipt.snapshot.entries.find(entry => entry.name === '苏绾')?.role).toBe('unassigned')
   })
 
   it('renders an English project roster without Chinese projection labels', () => {
@@ -287,10 +300,12 @@ describe('CharacterRosterRepository public read/commit seam', () => {
         ...receipt.snapshot.entries,
         { ...receipt.snapshot.entries[1], name: 'Rowan Vale', role: 'antagonist' as const, relationships: [] },
         { ...receipt.snapshot.entries[1], name: 'Harbor Clerk', role: 'minor' as const, relationships: [] },
+        { ...receipt.snapshot.entries[1], name: 'Unnamed Figure', role: 'unassigned' as const, relationships: [] },
       ],
     })
     expect(extraRoles.snapshot.renderedMarkdown).toContain('## Antagonist: Rowan Vale')
-    expect(extraRoles.snapshot.renderedMarkdown).toContain('## Minor character: Harbor Clerk')
+    expect(extraRoles.snapshot.renderedMarkdown).toContain('## Other: Harbor Clerk')
+    expect(extraRoles.snapshot.renderedMarkdown).toContain('## Not set yet: Unnamed Figure')
   })
 
   it('keeps a historical Chinese projection readable after a project switches to English, then localizes the next commit', () => {

@@ -22,6 +22,7 @@ import {
 import type { FinalizedSourceIdentity } from '../../src/shared/finalized-continuity'
 import { getProjectDb } from '../database'
 import { CharacterRepository, type CharacterData } from './character-repository'
+import { CharacterRelationshipRepository } from './character-relationship-repository'
 import { ensureCharacterRosterSchema } from './character-roster-schema'
 import { CHARACTER_ROLE_LABELS, normalizeCharacterRole } from '../../src/shared/character-role'
 import { DEFAULT_WRITING_LANGUAGE, type WritingLanguage } from '../../src/shared/writing-language'
@@ -48,6 +49,8 @@ const ROLE_ORDER: Record<CharacterRosterRole, number> = {
   supporting: 1,
   antagonist: 2,
   minor: 3,
+  // 定位未定的角色排在最后，不会被当成配角参与排序。
+  unassigned: 4,
 }
 
 function requiredDb(): BetterSqlite3.Database {
@@ -1017,6 +1020,21 @@ export class CharacterRosterRepository {
       } else if (!isLegacyCardsAdoption) {
         for (const entry of committedEntries) CharacterRepository.upsert(characterFromEntry(entry))
       }
+      // 人物身份/关系/画布坐标都挂在稳定 ID 上：这里在同一个事务里补齐新角色身份、
+      // 同步改名后的展示名、按 ID 级联清理被删除的人物，并增量迁移遗留旧关系。
+      const previousNames = new Set(existingEntries.map(entry => entry.name))
+      const committedNames = new Set(committedEntries.map(entry => entry.name))
+      const renamedOriginals = new Set(renameByOriginal.keys())
+      CharacterRelationshipRepository.reconcileIdentities(db, {
+        renames: [...renameByOriginal].map(([originalName, newName]) => ({ originalName, newName })),
+        deletedNames: [...previousNames].filter(name => (
+          !committedNames.has(name) && !renamedOriginals.has(name)
+        )),
+        // 本次事务随后要回读校验 characters 表：这里只维护身份、关系与坐标。
+        projectLegacyField: false,
+      })
+      CharacterRelationshipRepository.migrateLegacyRelationships(db, { projectLegacyField: false })
+
       const coreUpdate = db.prepare(`
         UPDATE project_core
         SET characters_arch = ?

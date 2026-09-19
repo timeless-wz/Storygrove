@@ -97,6 +97,17 @@ beforeEach(() => {
     channel: string,
     ...args: unknown[]
   ) => {
+    // 关系/身份/坐标通道直接给空结果，避免吃掉用例按顺序排好的 mock 队列。
+    if (channel === 'db:character-identities-ensure') {
+      const names = Array.isArray(args[0]) ? args[0] as string[] : []
+      return Object.fromEntries(names.map((name, index) => [name, `id-${index}`]))
+    }
+    if (channel === 'db:character-relationships-get-all') return []
+    if (channel === 'db:character-graph-positions-get') return {}
+    if (channel === 'db:character-relationship-upsert') return { success: false }
+    if (channel === 'db:character-relationship-delete') return { success: false }
+    if (channel === 'db:character-graph-positions-save') return { success: false }
+
     const result = await invoke(channel, ...args)
     if (channel === 'db:character-roster-read' && Array.isArray(result)) {
       return rosterReadFromCards(result)
@@ -172,7 +183,8 @@ describe('character store project context', () => {
     await useCharacterStore.getState().load(PROJECT_A)
 
     expect(useCharacterStore.getState().characters).toEqual([
-      { ...EMPTY_CARD, name: 'A 草稿', notes: '本地修改' },
+      // 草稿只写了姓名与备注，定位沿用草稿基线里的 supporting。
+      { ...EMPTY_CARD, role: 'supporting', name: 'A 草稿', notes: '本地修改' },
     ])
     const persistedLedger = JSON.parse(
       useEditorStore.getState().draftLedgers[CHARACTER_DRAFT_TAB.id],
@@ -329,7 +341,7 @@ describe('character store project context', () => {
     invoke.mockRejectedValueOnce(new Error('database busy'))
     await useCharacterStore.getState().load(PROJECT_A)
 
-    useCharacterStore.getState().addCharacter()
+    useCharacterStore.getState().addCharacter({ name: '不应创建的角色' })
     useCharacterStore.getState().updateField('A 角色', 'notes', '不应覆盖')
     expect(useCharacterStore.getState().renameCharacter('A 角色', '不应改名')).toBe(false)
     await expect(useCharacterStore.getState().deleteCharacter('A 角色', PROJECT_A))

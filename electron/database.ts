@@ -19,6 +19,10 @@ import type BetterSqlite3 from 'better-sqlite3'
 import { ensureCharacterRosterSchema } from './repositories/character-roster-schema'
 import { ensureStoryDomainSchema } from './services/story-domain-schema'
 import { ensurePhase2To8Schema } from './services/phase2-8-schema'
+import {
+  CharacterRelationshipRepository,
+  ensureCharacterRelationshipSchema,
+} from './repositories/character-relationship-repository'
 
 let projectDb: BetterSqlite3.Database | null = null
 let currentProjectPath: string | null = null
@@ -209,6 +213,9 @@ export function initProjectDatabase(projectPath: string, importSourceSecret?: Bu
   // 旧项目只有「一张项目底图 + 图层筛选」的结构。一次性把旧图层转换成同名地图，
   // 并把旧底图迁入其中一张地图的受控目录；迁移不删除任何既有地点、图层或连接。
   migrateWorldMapAtlas(projectDb, projectPath)
+  // 人物关系表以稳定人物 ID 为端点；旧项目在这里安全补齐身份并增量迁移旧结构化关系。
+  ensureCharacterRelationshipSchema(projectDb)
+  CharacterRelationshipRepository.migrateLegacyRelationships(projectDb)
 
   console.log(`[Vela DB] 项目数据库已打开: ${dbPath}`)
 }
@@ -673,11 +680,32 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
       title TEXT NOT NULL DEFAULT '故事时间线',
       ruler_label TEXT NOT NULL DEFAULT '故事时间',
       ruler_unit TEXT NOT NULL DEFAULT '刻度',
+      start_label TEXT NOT NULL DEFAULT '故事开端',
+      start_time_label TEXT NOT NULL DEFAULT '',
+      start_order REAL DEFAULT NULL,
+      end_label TEXT NOT NULL DEFAULT '故事结束',
+      end_time_label TEXT NOT NULL DEFAULT '',
+      end_order REAL DEFAULT NULL,
+      has_custom_range INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS story_timeline_branches (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      source_event_id TEXT DEFAULT NULL,
+      color TEXT DEFAULT NULL,
+      sort_order REAL NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_story_timeline_branches_source
+      ON story_timeline_branches(source_event_id);
+
     CREATE TABLE IF NOT EXISTS story_timeline_events (
       id TEXT PRIMARY KEY,
+      branch_id TEXT NOT NULL DEFAULT 'main',
+      parent_event_id TEXT DEFAULT NULL,
       title TEXT NOT NULL,
       time_label TEXT NOT NULL,
       sort_order REAL NOT NULL,
@@ -695,6 +723,10 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
     );
     CREATE INDEX IF NOT EXISTS idx_story_timeline_events_order
       ON story_timeline_events(sort_order, created_at);
+    CREATE INDEX IF NOT EXISTS idx_story_timeline_events_branch
+      ON story_timeline_events(branch_id, sort_order);
+
+    -- 人物关系与画布坐标的表结构由 ensureCharacterRelationshipSchema 统一创建（人物 ID 主键）。
 
     -- Reference imports are recoverable project facts, not generic workflow history.
     CREATE TABLE IF NOT EXISTS import_runs (
@@ -1962,6 +1994,61 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
     FROM project_core
     WHERE id = 'main'
   `)
+
+  // 故事时间树：旧库的 story_timeline_events 没有 branch_id 与 parent_event_id。
+  // 增量补齐，同时确保默认 main 分支存在。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS story_timeline_branches (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      source_event_id TEXT DEFAULT NULL,
+      color TEXT DEFAULT NULL,
+      sort_order REAL NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_story_timeline_branches_source
+      ON story_timeline_branches(source_event_id);
+    INSERT OR IGNORE INTO story_timeline_branches (id, name, source_event_id, sort_order)
+    VALUES ('main', '主时间轴', NULL, 0);
+  `)
+  const timelineColumns = new Set(
+    (db.prepare('PRAGMA table_info(story_timeline_events)').all() as Array<{ name: string }>).map(column => column.name),
+  )
+  if (!timelineColumns.has('branch_id')) {
+    db.exec("ALTER TABLE story_timeline_events ADD COLUMN branch_id TEXT NOT NULL DEFAULT 'main'")
+  }
+  if (!timelineColumns.has('parent_event_id')) {
+    db.exec('ALTER TABLE story_timeline_events ADD COLUMN parent_event_id TEXT DEFAULT NULL')
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_story_timeline_events_branch ON story_timeline_events(branch_id, sort_order)')
+
+  const settingsColumns = new Set(
+    (db.prepare('PRAGMA table_info(story_timeline_settings)').all() as Array<{ name: string }>).map(column => column.name),
+  )
+  if (!settingsColumns.has('start_label')) {
+    db.exec("ALTER TABLE story_timeline_settings ADD COLUMN start_label TEXT NOT NULL DEFAULT '故事开端'")
+  }
+  if (!settingsColumns.has('start_time_label')) {
+    db.exec("ALTER TABLE story_timeline_settings ADD COLUMN start_time_label TEXT NOT NULL DEFAULT ''")
+  }
+  if (!settingsColumns.has('start_order')) {
+    db.exec('ALTER TABLE story_timeline_settings ADD COLUMN start_order REAL DEFAULT NULL')
+  }
+  if (!settingsColumns.has('end_label')) {
+    db.exec("ALTER TABLE story_timeline_settings ADD COLUMN end_label TEXT NOT NULL DEFAULT '故事结束'")
+  }
+  if (!settingsColumns.has('end_time_label')) {
+    db.exec("ALTER TABLE story_timeline_settings ADD COLUMN end_time_label TEXT NOT NULL DEFAULT ''")
+  }
+  if (!settingsColumns.has('end_order')) {
+    db.exec('ALTER TABLE story_timeline_settings ADD COLUMN end_order REAL DEFAULT NULL')
+  }
+  if (!settingsColumns.has('has_custom_range')) {
+    db.exec('ALTER TABLE story_timeline_settings ADD COLUMN has_custom_range INTEGER NOT NULL DEFAULT 0')
+  }
+
+  ensureCharacterRelationshipSchema(db)
 
   migrateDraftUnitCounts(db)
 }

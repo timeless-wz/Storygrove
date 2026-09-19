@@ -432,7 +432,7 @@ export default function ProjectTree() {
         iconName="users"
         label={text('角色档案', 'Character profile')}
         desc={text('角色事实来源：档案、关系、动机、弧光与当前状态', 'Single source of truth: profiles, relationships, motivations, arcs, and state')}
-        onClick={() => useLayoutStore.getState().openCharacterProfile('edit')}
+        onClick={() => useLayoutStore.getState().openCharacterProfile('overview')}
       />
 
       <ProjectTreeSection
