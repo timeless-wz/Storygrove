@@ -30,7 +30,6 @@ export interface TimelineContextMenuProps {
   onDeleteEvent?: () => void
   onOpenRangeSettings?: (focusField?: 'start' | 'end' | 'general') => void
 }
-
 export function TimelineContextMenu({
   x,
   y,
@@ -264,4 +263,3 @@ export function TimelineContextMenu({
     </div>
   )
 }
-
