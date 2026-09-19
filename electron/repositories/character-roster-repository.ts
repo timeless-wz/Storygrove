@@ -48,6 +48,8 @@ const ROLE_ORDER: Record<CharacterRosterRole, number> = {
   supporting: 1,
   antagonist: 2,
   minor: 3,
+  // 定位未定的角色排在最后，不会被当成配角参与排序。
+  unassigned: 4,
 }
 
 function requiredDb(): BetterSqlite3.Database {

@@ -10,7 +10,8 @@ import type {
   CharacterData,
   CharacterStateData,
 } from '../../electron/repositories/character-repository'
-import { normalizeCharacterRole } from '../shared/character-role'
+import { normalizeCharacterRole, DEFAULT_CHARACTER_CREATION_ROLE, type CharacterRole } from '../shared/character-role'
+import { characterRosterIdentityKey } from '../shared/character-roster'
 import {
   characterCardFromRosterEntry,
   characterRosterEntriesFromCards,
@@ -41,7 +42,7 @@ export type CharacterCurrentState = CharacterStateData
 export type CharacterCard = CharacterData
 
 export const EMPTY_CARD: CharacterCard = {
-  name: '', role: 'supporting', gender: '', age: '',
+  name: '', role: DEFAULT_CHARACTER_CREATION_ROLE, gender: '', age: '',
   appearance: '', personality: '', background: '', abilities: '',
   motivation: '', relationships: '', arc: '', notes: '',
 }
@@ -50,6 +51,18 @@ export const EMPTY_STATE: CharacterCurrentState = {
   location: '', powerLevel: '', physicalState: '', mentalState: '',
   keyItems: '', recentEvents: '', updatedAtChapter: 0,
 }
+
+export type CharacterCreationFailure = 'empty_name' | 'duplicate_name' | 'not_ready'
+
+export interface CharacterCreationRequest {
+  name: string
+  /** 作者未选择定位时按“暂未设定”创建：绝不能默认成配角。 */
+  role?: CharacterRole
+}
+
+export type CharacterCreationResult =
+  | { ok: true; name: string; role: CharacterRole }
+  | { ok: false; reason: CharacterCreationFailure }
 
 function textField(record: Record<string, unknown>, key: string): string {
   return typeof record[key] === 'string' ? record[key] : ''
@@ -197,7 +210,11 @@ interface CharacterState {
   beginProjectLoad: (projectPath: string) => void
   reset: () => void
   setSelectedName: (name: string | null) => void
-  addCharacter: () => void
+  /**
+   * 创建角色卡。姓名必填且必须唯一：校验失败时不写入任何状态，避免留下幽灵角色。
+   * 作者未选定位时按“暂未设定”创建，不再默认成配角。
+   */
+  addCharacter: (request: CharacterCreationRequest) => CharacterCreationResult
   deleteCharacter: (
     name: string,
     projectPath?: string,
@@ -396,25 +413,32 @@ export const useCharacterStore = create<CharacterState>()((set, get) => ({
     set({ selectedName: name })
   },
 
-  addCharacter: () => {
+  addCharacter: (request) => {
     const projectSession = currentCharacterProjectSession()
-    if (!projectSession) return
+    if (!projectSession) return { ok: false, reason: 'not_ready' }
     if (
       characterIdentityMutationInFlight
       && sameProjectSessionContext(characterIdentityMutationInFlight.projectSession, projectSession)
-    ) return
+    ) return { ok: false, reason: 'not_ready' }
     const projectKey = projectSession.projectPath
     const state = get()
     if (
       !sameProjectSessionContext(state.dataProjectSession, projectSession)
       || state.loadingProjectSession !== null
       || state.lastError !== null
-    ) return
+    ) return { ok: false, reason: 'not_ready' }
+
+    const name = request.name.trim()
+    if (!name) return { ok: false, reason: 'empty_name' }
     const before = get().characters
-    const newCard: CharacterCard = {
-      ...EMPTY_CARD,
-      name: `新角色_${Math.random().toString(36).slice(2, 6)}`,
+    // 角色名单以不区分大小写、忽略首尾空白的名字为身份键，创建必须先服从同一条规则。
+    const identityKey = characterRosterIdentityKey(name)
+    if (before.some(character => characterRosterIdentityKey(character.name) === identityKey)) {
+      return { ok: false, reason: 'duplicate_name' }
     }
+
+    const role = normalizeCharacterRole(request.role ?? DEFAULT_CHARACTER_CREATION_ROLE)
+    const newCard: CharacterCard = { ...EMPTY_CARD, name, role }
     set((s) => ({
       characters: [...s.characters, newCard],
       selectedName: newCard.name,
@@ -425,6 +449,7 @@ export const useCharacterStore = create<CharacterState>()((set, get) => ({
       before,
       get().characters,
     ))
+    return { ok: true, name, role }
   },
 
   deleteCharacter: (name, projectPath, expectedProjectSession) => {

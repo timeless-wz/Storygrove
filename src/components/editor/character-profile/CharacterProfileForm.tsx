@@ -60,22 +60,43 @@ export default function CharacterProfileForm({
     <div className="max-w-2xl mx-auto px-6 py-4 space-y-3" data-testid="character-profile-form">
       <div className="grid grid-cols-3 gap-3">
         <div>
-          <Label>{text('姓名', 'Name')}</Label>
-          <Input value={card.name} disabled={identityBusy} onChange={(event) => onRename(event.target.value)} />
+          <Label htmlFor="character-profile-name">{text('姓名', 'Name')}</Label>
+          <Input
+            id="character-profile-name"
+            value={card.name}
+            disabled={identityBusy}
+            aria-label={text('姓名', 'Name')}
+            onChange={(event) => onRename(event.target.value)}
+          />
         </div>
         <div>
-          <Label>{text('性别', 'Gender')}</Label>
-          <Input value={card.gender} onChange={(event) => onUpdateField('gender', event.target.value)} />
+          <Label htmlFor="character-profile-gender">{text('性别', 'Gender')}</Label>
+          <Input
+            id="character-profile-gender"
+            value={card.gender}
+            aria-label={text('性别', 'Gender')}
+            onChange={(event) => onUpdateField('gender', event.target.value)}
+          />
         </div>
         <div>
-          <Label>{text('年龄', 'Age')}</Label>
-          <Input value={card.age} onChange={(event) => onUpdateField('age', event.target.value)} />
+          <Label htmlFor="character-profile-age">{text('年龄', 'Age')}</Label>
+          <Input
+            id="character-profile-age"
+            value={card.age}
+            aria-label={text('年龄', 'Age')}
+            onChange={(event) => onUpdateField('age', event.target.value)}
+          />
         </div>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <Label>{text('定位', 'Role')}</Label>
-          <NativeSelect value={card.role} onChange={(event) => onUpdateField('role', event.target.value as CharacterCard['role'])}>
+          <Label htmlFor="character-profile-role">{text('定位', 'Role')}</Label>
+          <NativeSelect
+            id="character-profile-role"
+            value={card.role}
+            aria-label={text('定位', 'Role')}
+            onChange={(event) => onUpdateField('role', event.target.value as CharacterCard['role'])}
+          >
             {CHARACTER_ROLES.map(role => (
               <option key={role} value={role}>{roleLabel(role)}</option>
             ))}
@@ -83,41 +104,40 @@ export default function CharacterProfileForm({
         </div>
       </div>
       <div>
-        <Label>{text('外貌描写', 'Appearance')}</Label>
-        <Textarea value={card.appearance} onChange={(event) => onUpdateField('appearance', event.target.value)} rows={3} placeholder={text('输入外貌描写...', 'Describe appearance...')} />
+        <Label htmlFor="character-profile-appearance">{text('外貌描写', 'Appearance')}</Label>
+        <Textarea id="character-profile-appearance" aria-label={text('外貌描写', 'Appearance')} value={card.appearance} onChange={(event) => onUpdateField('appearance', event.target.value)} rows={3} placeholder={text('输入外貌描写...', 'Describe appearance...')} />
       </div>
       <div>
-        <Label>{text('性格特征', 'Personality')}</Label>
-        <Textarea value={card.personality} onChange={(event) => onUpdateField('personality', event.target.value)} rows={3} placeholder={text('输入性格特征...', 'Describe personality...')} />
+        <Label htmlFor="character-profile-personality">{text('性格特征', 'Personality')}</Label>
+        <Textarea id="character-profile-personality" aria-label={text('性格特征', 'Personality')} value={card.personality} onChange={(event) => onUpdateField('personality', event.target.value)} rows={3} placeholder={text('输入性格特征...', 'Describe personality...')} />
       </div>
       <div>
-        <Label>{text('背景故事', 'Background')}</Label>
-        <Textarea value={card.background} onChange={(event) => onUpdateField('background', event.target.value)} rows={4} placeholder={text('输入背景故事...', 'Describe background...')} />
+        <Label htmlFor="character-profile-background">{text('背景故事', 'Background')}</Label>
+        <Textarea id="character-profile-background" aria-label={text('背景故事', 'Background')} value={card.background} onChange={(event) => onUpdateField('background', event.target.value)} rows={4} placeholder={text('输入背景故事...', 'Describe background...')} />
       </div>
       <div>
-        <Label>{text('能力/技能', 'Abilities / skills')}</Label>
-        <Textarea value={card.abilities} onChange={(event) => onUpdateField('abilities', event.target.value)} rows={3} placeholder={text('输入能力/技能...', 'Describe abilities or skills...')} />
+        <Label htmlFor="character-profile-abilities">{text('能力/技能', 'Abilities / skills')}</Label>
+        <Textarea id="character-profile-abilities" aria-label={text('能力/技能', 'Abilities and skills')} value={card.abilities} onChange={(event) => onUpdateField('abilities', event.target.value)} rows={3} placeholder={text('输入能力/技能...', 'Describe abilities or skills...')} />
       </div>
       <div>
-        <Label>{text('核心动机', 'Core motivation')}</Label>
-        <Textarea value={card.motivation} onChange={(event) => onUpdateField('motivation', event.target.value)} rows={2} placeholder={text('输入核心动机...', 'Describe core motivation...')} />
+        <Label htmlFor="character-profile-motivation">{text('核心动机', 'Core motivation')}</Label>
+        <Textarea id="character-profile-motivation" aria-label={text('核心动机', 'Core motivation')} value={card.motivation} onChange={(event) => onUpdateField('motivation', event.target.value)} rows={2} placeholder={text('输入核心动机...', 'Describe core motivation...')} />
       </div>
       <div>
         <Label>{text('关系网', 'Relationships')}</Label>
         <CharacterRelationshipsField
-          key={card.name}
           card={card}
           characters={characters}
           onStorageChange={(storage) => onUpdateField('relationships', storage)}
         />
       </div>
       <div>
-        <Label>{text('成长轨迹', 'Character arc')}</Label>
-        <Textarea value={card.arc} onChange={(event) => onUpdateField('arc', event.target.value)} rows={3} placeholder={text('输入成长轨迹...', 'Describe the character arc...')} />
+        <Label htmlFor="character-profile-arc">{text('成长轨迹', 'Character arc')}</Label>
+        <Textarea id="character-profile-arc" aria-label={text('成长轨迹', 'Character arc')} value={card.arc} onChange={(event) => onUpdateField('arc', event.target.value)} rows={3} placeholder={text('输入成长轨迹...', 'Describe the character arc...')} />
       </div>
       <div>
-        <Label>{text('备注', 'Notes')}</Label>
-        <Textarea value={card.notes} onChange={(event) => onUpdateField('notes', event.target.value)} rows={2} placeholder={text('输入备注...', 'Enter notes...')} />
+        <Label htmlFor="character-profile-notes">{text('备注', 'Notes')}</Label>
+        <Textarea id="character-profile-notes" aria-label={text('备注', 'Notes')} value={card.notes} onChange={(event) => onUpdateField('notes', event.target.value)} rows={2} placeholder={text('输入备注...', 'Enter notes...')} />
       </div>
 
       <section
