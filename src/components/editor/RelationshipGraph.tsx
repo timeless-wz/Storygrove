@@ -176,6 +176,8 @@ function CharacterGraphNodeView({ data, selected }: NodeProps<CharacterGraphNode
         boxShadow: selected ? `0 0 0 2px color-mix(in srgb, ${color} 24%, transparent)` : undefined,
       }}
       title={data.name}
+      data-testid="relationship-graph-node"
+      data-character-name={data.name}
     >
       {(['left', 'right', 'top', 'bottom'] as const).flatMap(side => [
         <Handle key={`source-${side}`} id={`source-${side}`} type="source" position={HANDLE_POSITIONS[side]} isConnectable={false} style={{ opacity: 0 }} />,

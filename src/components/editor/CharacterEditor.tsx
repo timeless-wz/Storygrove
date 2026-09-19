@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Save, Trash2, Users, Network, ClipboardList, AlertTriangle, RefreshCw } from 'lucide-react'
+import { Save, Trash2, Users, Network, PencilLine, Check, AlertTriangle, RefreshCw } from 'lucide-react'
 import { useProjectStore } from '../../stores/project-store'
 import { registerEditorExitSaveHandler } from '../../stores/editor-store'
 import { useLayoutStore, type CharacterProfileView } from '../../stores/layout-store'
@@ -7,23 +7,14 @@ import { useWorkflowStore } from '../../stores/workflow-store'
 import { confirm } from '../ui/Confirm'
 import {
   useCharacterStore,
-  EMPTY_STATE,
   type CharacterCard,
-  type CharacterCurrentState,
 } from '../../stores/character-store'
 import RelationshipGraph from './RelationshipGraph'
+import CharacterProfileOverview from './character-profile/CharacterProfileOverview'
+import CharacterProfileForm from './character-profile/CharacterProfileForm'
 import { EmptyState as BaseEmptyState } from '../ui/EmptyState'
 import { Button } from '../ui/Button'
-import { Input } from '../ui/Input'
-import { Textarea } from '../ui/Textarea'
-import { Label } from '../ui/Label'
-import { NativeSelect } from '../ui/NativeSelect'
 import { useLocaleStore } from '../../stores/locale-store'
-import { CHARACTER_ROLES, getCharacterRoleLabels } from '../../shared/character-role'
-import {
-  formatRelationshipsForEditor,
-  relationshipStorageFromEditor,
-} from '../../shared/relationship-presentation'
 import {
   captureProjectSession,
   isProjectSessionCurrent,
@@ -36,8 +27,10 @@ import {
 import { useCharacterRosterRepair } from './use-character-roster-repair'
 
 /**
- * 角色卡编辑器 — 纯编辑区域（角色列表已移至侧栏）
- * 从 character-store 读取选中角色，仅渲染编辑表单。
+ * 角色档案 — 唯一的角色入口。
+ *
+ * 默认是概览（摘要 + 优先字段 + 折叠细节），完整字段留在显式的“编辑档案”里；
+ * 关系图谱只是角色名单的只读投影，不持有任何角色事实。
  */
 export default function CharacterEditor({ projectKey }: { projectKey: string }) {
   const currentProject = useProjectStore(s => s.currentProject)
@@ -55,13 +48,8 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
   const deleteCharacter = useCharacterStore(s => s.deleteCharacter)
   const clearAllCharacters = useCharacterStore(s => s.clearAllCharacters)
   const saveAll = useCharacterStore(s => s.saveAll)
-  const [localViewMode, setLocalViewMode] = useState<CharacterProfileView>('edit')
+  const [localViewMode, setLocalViewMode] = useState<CharacterProfileView>('overview')
   const text = useLocaleStore(s => s.text)
-  const locale = useLocaleStore(s => s.locale)
-  const roleLabel = (role: CharacterCard['role']) => {
-    const { zhCN, enUS } = getCharacterRoleLabels(role)
-    return text(zhCN, enUS)
-  }
   const projectMatches = currentProject?.path === projectKey
   const dataReady = Boolean(
     projectMatches
@@ -106,9 +94,6 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
   const selectedCard = dataReady
     ? characters.find((c) => c.name === selectedName) || null
     : null
-  const relationshipEditorText = selectedCard
-    ? formatRelationshipsForEditor(selectedCard.relationships, { locale })
-    : ''
 
   const handleDelete = async () => {
     const projectSession = captureProjectSession(currentProject)
@@ -202,6 +187,12 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
     renameCharacter(name, nextName)
   }
 
+  /** 关系行与图谱节点都只是“选中并打开”某张已有角色卡的入口。 */
+  const openCharacterCard = (name: string) => {
+    setSelectedName(name)
+    setViewMode('overview')
+  }
+
   // ===== 渲染 =====
 
   if (!projectMatches) {
@@ -213,6 +204,12 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
       />
     )
   }
+
+  const viewTitle = viewMode === 'graph'
+    ? text('角色档案 — 关系图谱（只读投影）', 'Character profile — relationship graph (read-only projection)')
+    : selectedCard
+      ? `${selectedCard.name || text('新角色', 'New character')} ${viewMode === 'edit' ? text('— 编辑档案', '— Edit profile') : text('— 人物概览', '— Character overview')}`
+      : text('角色档案', 'Character profile')
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-[var(--color-bg)]">
@@ -226,14 +223,10 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
       >
         <div className="flex items-center gap-1.5 min-w-0">
           <span className="text-xs font-medium truncate text-[var(--color-text-secondary)]">
-            {viewMode === 'graph'
-              ? text('角色档案 — 关系图谱（只读投影）', 'Character profile — relationship graph (read-only projection)')
-              : selectedCard
-                ? `${selectedCard.name || text('新角色', 'New character')} ${viewMode === 'state' ? text('— 当前状态', '— Current state') : text('— 编辑档案', '— Edit profile')}`
-                : text('角色档案', 'Character profile')}
+            {viewTitle}
           </span>
         </div>
-        
+
         <div className="flex items-center gap-1.5 flex-shrink-0">
           {viewMode === 'graph' ? (
             <>
@@ -246,24 +239,24 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
               >
                 <Trash2 size={12} /> {text('删除全部角色与关系', 'Delete all characters and relationships')}
               </Button>
-              <Button variant="outline" size="sm" onClick={() => setViewMode('edit')} title={text('返回编辑', 'Return to editing')}>
-                <Users size={12} /> {text('编辑模式', 'Edit mode')}
+              <Button variant="outline" size="sm" onClick={() => setViewMode('overview')} title={text('返回人物档案', 'Back to the character profile')}>
+                <Users size={12} /> {text('返回档案', 'Back to profile')}
               </Button>
             </>
           ) : selectedCard ? (
             <>
-              {viewMode === 'state' ? (
-                <Button variant="outline" size="sm" onClick={() => setViewMode('edit')} title={text('返回基础设定', 'Return to core profile')}>
-                  <Users size={12} /> {text('基础设定', 'Core profile')}
-                </Button>
-              ) : (
-                <Button variant="outline" size="sm" onClick={() => setViewMode('state')} title={text('查看当前进展/状态', 'View current state')}>
-                  <ClipboardList size={13} /> {text('当前状态', 'Current state')}
-                </Button>
-              )}
               <Button variant="outline" size="sm" onClick={() => setViewMode('graph')} title={text('查看全员关系网', 'View all character relationships')}>
                 <Network size={12} /> {text('关系图谱', 'Relationship graph')}
               </Button>
+              {viewMode === 'edit' ? (
+                <Button variant="outline" size="sm" onClick={() => setViewMode('overview')} title={text('返回人物概览', 'Back to the character overview')}>
+                  <Check size={12} /> {text('完成', 'Done')}
+                </Button>
+              ) : (
+                <Button variant="default" size="sm" onClick={() => setViewMode('edit')} title={text('编辑全部角色字段', 'Edit every character field')}>
+                  <PencilLine size={12} /> {text('编辑档案', 'Edit profile')}
+                </Button>
+              )}
               <Button variant="destructive" size="sm" onClick={handleDelete} disabled={identityBusy || !dataReady}>
                 <Trash2 size={12} /> {text('删除', 'Delete')}
               </Button>
@@ -326,8 +319,8 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
           }}
         >
           {text(
-            '关系图谱由角色档案推导，只读展示。修改角色身份、资料或关系请切回「编辑档案」。',
-            'The relationship graph is derived from character profiles and is read-only. Switch back to Edit profile to change identity, details, or relationships.',
+            '关系图谱由角色档案推导，只读展示。点击节点会打开对应人物卡，修改关系请切回「编辑档案」。',
+            'The relationship graph is derived from character profiles and is read-only. Clicking a node opens that character card; switch back to Edit profile to change relationships.',
           )}
         </div>
       )}
@@ -338,124 +331,33 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
           <RelationshipGraph
             characters={characters}
             projectKey={projectKey}
-            onCharacterSelect={setSelectedName}
+            onCharacterSelect={openCharacterCard}
           />
         ) : !selectedCard ? (
-          <BaseEmptyState 
-            icon={<Users size={36} />} 
+          <BaseEmptyState
+            icon={<Users size={36} />}
             message={lastError
               ? text(`角色卡读取失败：${lastError}`, `Could not load character cards: ${lastError}`)
               : (currentProject ? text('在左侧选择或创建角色卡', 'Select or create a character card on the left') : text('请先打开项目', 'Open a project first'))}
             opacity={currentProject ? 0.3 : 0.4}
           />
-        ) : viewMode === 'state' ? (
-          <div className="max-w-2xl mx-auto px-6 py-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-bold text-[var(--color-text)]">
-                {text('当前状态档案', 'Current state profile')}
-              </h3>
-              <span className="text-xs text-[var(--color-text-secondary)]">
-                {text(
-                  `最后更新：第 ${selectedCard.currentState?.updatedAtChapter ?? 0} 章`,
-                  `Last updated: Chapter ${selectedCard.currentState?.updatedAtChapter ?? 0}`,
-                )}
-              </span>
-            </div>
-            <div className="space-y-3">
-              {([
-                ['location', text('当前位置/阵营', 'Location / faction')],
-                ['powerLevel', text('修为境界/能力等级', 'Power or ability level')],
-                ['physicalState', text('身体状态（伤势/BUFF/外貌）', 'Physical state (injuries, effects, appearance)')],
-                ['mentalState', text('心理状态（愿望/恐惧/心态）', 'Mental state (goals, fears, mindset)')],
-                ['keyItems', text('关键道具/资源', 'Key items / resources')],
-                ['recentEvents', text('最近重要事件', 'Recent important events')],
-              ] as const).map(([field, label]) => (
-                <div key={field}>
-                  <Label>
-                    {label}
-                    <span className="ml-2 text-[0.65rem] font-normal text-[var(--color-text-secondary)]">
-                      {selectedCard.currentState?.provenance?.[field]?.kind === 'author'
-                        ? text('作者输入', 'Author input')
-                        : selectedCard.currentState?.provenance?.[field]?.kind === 'derived'
-                          ? text('定稿派生', 'Derived from finalized prose')
-                          : text('来源未知', 'Unknown source')}
-                    </span>
-                  </Label>
-                  <Textarea
-                    value={selectedCard.currentState?.[field]?.toString() ?? ''}
-                    onChange={(e) => {
-                      const cs: CharacterCurrentState = {
-                        ...(selectedCard.currentState ?? EMPTY_STATE),
-                        [field]: e.target.value,
-                        provenance: {
-                          ...selectedCard.currentState?.provenance,
-                          [field]: {
-                            kind: 'author',
-                            chapterNumber: selectedCard.currentState?.updatedAtChapter ?? 0,
-                          },
-                        },
-                      }
-                      updateCurrentField(selectedCard.name, 'currentState', cs)
-                    }}
-                    rows={2}
-                    placeholder={`${label}...`}
-                  />
-                </div>
-              ))}
-            </div>
-            {!selectedCard.currentState && (
-              <div className="mt-4 p-3 rounded-lg bg-[var(--color-hover)] text-xs text-[var(--color-text-secondary)]">
-                {text('当前状态档案将在章节定稿后由 AI 自动更新，也可手动填写初始状态。', 'AI updates this profile after a chapter is finalized. You can also enter an initial state manually.')}
-              </div>
-            )}
-          </div>
         ) : (
-          <div className="max-w-2xl mx-auto px-6 py-4">
-            <div className="space-y-3">
-              <div className="grid grid-cols-3 gap-3">
-                <div><Label>{text('姓名', 'Name')}</Label><Input value={selectedCard.name} disabled={identityBusy} onChange={(e) => renameCurrentCharacter(selectedCard.name, e.target.value)} /></div>
-                <div><Label>{text('性别', 'Gender')}</Label><Input value={selectedCard.gender} onChange={(e) => updateCurrentField(selectedCard.name, 'gender', e.target.value)} /></div>
-                <div><Label>{text('年龄', 'Age')}</Label><Input value={selectedCard.age} onChange={(e) => updateCurrentField(selectedCard.name, 'age', e.target.value)} /></div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label>{text('定位', 'Role')}</Label>
-                  <NativeSelect value={selectedCard.role} onChange={(e) => updateCurrentField(selectedCard.name, 'role', e.target.value as typeof selectedCard.role)}>
-                    {CHARACTER_ROLES.map(role => (
-                      <option key={role} value={role}>{roleLabel(role)}</option>
-                    ))}
-                  </NativeSelect>
-                </div>
-              </div>
-              <div><Label>{text('外貌描写', 'Appearance')}</Label><Textarea value={selectedCard.appearance} onChange={(e) => updateCurrentField(selectedCard.name, 'appearance', e.target.value)} rows={3} placeholder={text('输入外貌描写...', 'Describe appearance...')} /></div>
-              <div><Label>{text('性格特征', 'Personality')}</Label><Textarea value={selectedCard.personality} onChange={(e) => updateCurrentField(selectedCard.name, 'personality', e.target.value)} rows={3} placeholder={text('输入性格特征...', 'Describe personality...')} /></div>
-              <div><Label>{text('背景故事', 'Background')}</Label><Textarea value={selectedCard.background} onChange={(e) => updateCurrentField(selectedCard.name, 'background', e.target.value)} rows={4} placeholder={text('输入背景故事...', 'Describe background...')} /></div>
-              <div><Label>{text('能力/技能', 'Abilities / skills')}</Label><Textarea value={selectedCard.abilities} onChange={(e) => updateCurrentField(selectedCard.name, 'abilities', e.target.value)} rows={3} placeholder={text('输入能力/技能...', 'Describe abilities or skills...')} /></div>
-              <div><Label>{text('核心动机', 'Core motivation')}</Label><Textarea value={selectedCard.motivation} onChange={(e) => updateCurrentField(selectedCard.name, 'motivation', e.target.value)} rows={2} placeholder={text('输入核心动机...', 'Describe core motivation...')} /></div>
-              <div>
-                <Label>{text('关系网', 'Relationships')}</Label>
-                <Textarea
-                  value={relationshipEditorText}
-                  onChange={(e) => updateCurrentField(
-                    selectedCard.name,
-                    'relationships',
-                    relationshipStorageFromEditor(e.target.value, {
-                      knownNames: characters.map((character) => character.name),
-                      selfName: selectedCard.name,
-                      previousStorage: selectedCard.relationships,
-                    }),
-                  )}
-                  rows={3}
-                  placeholder={text(
-                    '每行一位角色，例如：陆云飞：竞争对手（权力斗争）',
-                    'One character per line, for example: Lu Yunfei: rival (power struggle)',
-                  )}
-                />
-              </div>
-              <div><Label>{text('成长轨迹', 'Character arc')}</Label><Textarea value={selectedCard.arc} onChange={(e) => updateCurrentField(selectedCard.name, 'arc', e.target.value)} rows={3} placeholder={text('输入成长轨迹...', 'Describe the character arc...')} /></div>
-              <div><Label>{text('备注', 'Notes')}</Label><Textarea value={selectedCard.notes} onChange={(e) => updateCurrentField(selectedCard.name, 'notes', e.target.value)} rows={2} placeholder={text('输入备注...', 'Enter notes...')} /></div>
-            </div>
-          </div>
+          viewMode === 'edit' ? (
+            <CharacterProfileForm
+              key={selectedCard.name}
+              card={selectedCard}
+              characters={characters}
+              identityBusy={identityBusy}
+              onRename={(nextName) => renameCurrentCharacter(selectedCard.name, nextName)}
+              onUpdateField={(key, value) => updateCurrentField(selectedCard.name, key, value)}
+            />
+          ) : (
+            <CharacterProfileOverview
+              card={selectedCard}
+              characters={characters}
+              onOpenCharacter={openCharacterCard}
+            />
+          )
         )}
       </div>
     </div>

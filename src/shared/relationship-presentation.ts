@@ -78,6 +78,40 @@ function isJsonValue(value: string): boolean {
   }
 }
 
+/** 无法解析的关系文本在编辑器里的统一修复指引。 */
+export function relationshipRepairGuidance(locale: Locale = 'zh-CN'): string {
+  return UNKNOWN_JSON_RELATIONSHIP_GUIDANCE[locale]
+}
+
+export type RelationshipStorageKind = 'empty' | 'structured' | 'legacy'
+
+/**
+ * 只判断持久化文本的形态，绝不改写它：`legacy` 表示旧项目里无法解析的关系
+ * 文本，调用方必须原样保留并以只读方式呈现。
+ */
+export function classifyRelationshipStorage(value: string): RelationshipStorageKind {
+  if (!value.trim()) return 'empty'
+  return parseStructuredRelationships(value) === null ? 'legacy' : 'structured'
+}
+
+/**
+ * 已经结构化的关系行；旧文本返回 null，以便与“确有结构但内容为空”区分开。
+ * 角色名单 seam 提交的结构化关系与此形状一致。
+ */
+export function structuredRelationshipRows(value: string): RelationshipEdge[] | null {
+  return parseStructuredRelationships(value)
+}
+
+/** 行编辑器写回存储的唯一序列化入口；没有关系时保持空字符串。 */
+export function relationshipStorageFromRows(rows: readonly RelationshipEdge[]): string {
+  const normalized = deduplicateEdges(rows.flatMap((row) => {
+    const target = row.target.trim()
+    const relation = row.relation.trim()
+    return target && relation ? [{ target, relation }] : []
+  }))
+  return normalized.length > 0 ? JSON.stringify(normalized) : ''
+}
+
 function formatRelationForEditor(relation: string): string {
   const fields = relation
     .split(/[；;]/)
@@ -201,7 +235,7 @@ export function formatRelationshipsForEditor(
   const relationships = parseStructuredRelationships(value)
   if (relationships === null) {
     return isJsonValue(value)
-      ? UNKNOWN_JSON_RELATIONSHIP_GUIDANCE[options.locale ?? 'zh-CN']
+      ? relationshipRepairGuidance(options.locale ?? 'zh-CN')
       : value
   }
   return relationships.map(formatRelationshipEdgeForEditor).join('\n')

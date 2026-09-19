@@ -41,11 +41,27 @@ const protagonist: CharacterCard = {
   appearance: '',
   personality: '',
   background: '',
-  goal: '',
-  ability: '',
+  abilities: '',
+  motivation: '',
   relationships: '林晚：并肩作战的同伴',
   arc: '',
-} as unknown as CharacterCard
+  notes: '',
+}
+
+const companion: CharacterCard = {
+  name: '林晚',
+  role: 'supporting',
+  age: '',
+  gender: '',
+  appearance: '',
+  personality: '',
+  background: '',
+  abilities: '',
+  motivation: '',
+  relationships: '',
+  arc: '',
+  notes: '',
+}
 
 const originalCharacterState = useCharacterStore.getState()
 const originalLayoutState = useLayoutStore.getState()
@@ -64,7 +80,7 @@ beforeEach(() => {
   useProjectStore.setState({ currentProject: project, projectSessionEpoch: 1 })
   useWorkflowStore.setState({ activeRuns: [], history: [] })
   useCharacterStore.setState({
-    characters: [protagonist],
+    characters: [protagonist, companion],
     selectedName: protagonist.name,
     saving: false,
     identityBusy: false,
@@ -128,7 +144,8 @@ describe('character profile as the only character entry', () => {
 
   it('shows the relationship graph inside the profile as a read-only projection', async () => {
     await act(async () => root.render(<CharacterEditor projectKey={PROJECT_PATH} />))
-    // 先确认默认是档案视图，再通过显式请求切到关系图谱。
+    // 先确认默认是人物概览，再通过显式请求切到关系图谱。
+    expect(container.textContent).toContain('人物概览')
     expect(container.textContent).toContain('编辑档案')
 
     await act(async () => {
@@ -142,25 +159,53 @@ describe('character profile as the only character entry', () => {
     })
     expect(container.textContent).toContain('只读投影')
     expect(container.textContent).toContain('角色档案 — 关系图谱')
-    // 关系图谱是只读投影：仍有明确的返回编辑入口，且不出现保存按钮。
-    expect(container.textContent).toContain('编辑模式')
+    // 关系图谱是只读投影：仍有明确的返回档案入口，且不出现保存按钮。
+    expect(container.textContent).toContain('返回档案')
   })
 
-  it('lets the author switch back to editing from the graph', async () => {
+  it('opens the matching character card when a graph node is clicked', async () => {
+    await act(async () => root.render(<CharacterEditor projectKey={PROJECT_PATH} />))
+    await act(async () => {
+      useLayoutStore.setState({ characterViewRequest: { view: 'graph', requestId: 3 } })
+    })
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(container.querySelectorAll('[data-testid="relationship-graph-node"]').length).toBe(2)
+      })
+    })
+
+    const companionNode = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-testid="relationship-graph-node"]'),
+    ).find(node => node.dataset.characterName === '林晚')
+    expect(companionNode).toBeTruthy()
+
+    await act(async () => {
+      companionNode?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+
+    expect(useCharacterStore.getState().selectedName).toBe('林晚')
+    // 图谱点击只是选中/打开人物卡：焦点回到该角色的档案视图。
+    expect(container.querySelector('[data-testid="character-summary"]')?.textContent).toContain('林晚')
+    expect(container.textContent).toContain('人物概览')
+  })
+
+  it('lets the author switch back to the profile from the graph', async () => {
     await act(async () => root.render(<CharacterEditor projectKey={PROJECT_PATH} />))
     await act(async () => {
       useLayoutStore.setState({ characterViewRequest: { view: 'graph', requestId: 1 } })
     })
     await act(async () => {
-      await vi.waitFor(() => expect(container.textContent).toContain('编辑模式'))
+      await vi.waitFor(() => expect(container.textContent).toContain('返回档案'))
     })
 
     const backButton = Array.from(container.querySelectorAll('button'))
-      .find(button => (button.textContent ?? '').includes('编辑模式'))
+      .find(button => (button.textContent ?? '').includes('返回档案'))
     await act(async () => {
       backButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
 
+    expect(container.textContent).toContain('人物概览')
     expect(container.textContent).toContain('编辑档案')
   })
 })
