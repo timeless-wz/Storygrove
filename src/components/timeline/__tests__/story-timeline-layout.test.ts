@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { StoryTimelineEvent, StoryTimelinePrecision } from '../../../shared/story-timeline'
+import { parseStoryTimelineMentions } from '../../../shared/story-timeline'
 import {
   buildStoryTimelineLayout,
   estimateTimelineLabelWidth,
@@ -157,12 +158,17 @@ describe('story timeline layout', () => {
       status: 'finalized',
     })])
 
-    // 时间轴标注字段就是全部可见内容：状态/描述/章节/角色/地点一律不到时间轴。
+    // 时间轴标注字段不包含大段描述与关联元数据，但包含分支与层级状态
     expect(Object.keys(layout.events[0]).sort()).toEqual([
+      'branchId',
+      'childBranchCount',
       'height',
       'id',
+      'isExpanded',
+      'parentEventId',
       'side',
       'staggerLevel',
+      'status',
       'timeText',
       'title',
       'width',
@@ -171,6 +177,7 @@ describe('story timeline layout', () => {
     ])
     expect(layout.events[0].title).toBe('标题')
     expect(layout.events[0].timeText).toBe('时间')
+    expect(layout.events[0].status).toBe('finalized')
   })
 
   it('clamps estimated label width between the configured bounds', () => {
@@ -220,5 +227,101 @@ describe('story timeline layout', () => {
       .reduce((deepest, event) => (event.y < deepest.y ? event : deepest))
     expect(layout.axis.y - (deepestAbove.y + deepestAbove.height))
       .toBe(TIMELINE_LABEL_AXIS_GAP + deepestAbove.staggerLevel * TIMELINE_STAGGER_STEP)
+  })
+
+  it('keeps branches collapsed by default and only shows main line events', () => {
+    const mainEvent = makeEvent('m1', 10, { title: '主线事件' })
+    const branchEvent = makeEvent('b1', 20, { title: '支线事件', branchId: 'side-branch' })
+    const branches = [
+      { id: 'main', name: '主时间轴', sourceEventId: null, sortOrder: 0 },
+      { id: 'side-branch', name: '暗线分支', sourceEventId: 'm1', sortOrder: 1 },
+    ]
+
+    // 默认折叠：expandedBranchIds 仅 main
+    const layout = buildStoryTimelineLayout([mainEvent, branchEvent], branches, ['main'])
+    expect(layout.events.map(e => e.id)).toEqual(['m1'])
+    // 源事件标记有 1 条支线，且处于未展开状态
+    expect(layout.events[0].childBranchCount).toBe(1)
+    expect(layout.events[0].isExpanded).toBe(false)
+  })
+
+  it('lays out branch events to the right of source event when expanded and creates branch edge', () => {
+    const mainEvent = makeEvent('m1', 10, { title: '主线事件' })
+    const branchEvent1 = makeEvent('b1', 20, { title: '支线事件 1', branchId: 'side-branch' })
+    const branchEvent2 = makeEvent('b2', 30, { title: '支线事件 2', branchId: 'side-branch' })
+    const branches = [
+      { id: 'main', name: '主时间轴', sourceEventId: null, sortOrder: 0 },
+      { id: 'side-branch', name: '暗线分支', sourceEventId: 'm1', sortOrder: 1, color: '#10b981' },
+    ]
+
+    const layout = buildStoryTimelineLayout(
+      [mainEvent, branchEvent1, branchEvent2],
+      branches,
+      ['main', 'side-branch'],
+    )
+
+    expect(layout.events.map(e => e.id)).toEqual(['m1', 'b1', 'b2'])
+    const m1 = layout.events.find(e => e.id === 'm1')!
+    const b1 = layout.events.find(e => e.id === 'b1')!
+    const b2 = layout.events.find(e => e.id === 'b2')!
+
+    // 支线事件必须严格位于源事件的右侧（向后发展）
+    expect(b1.x).toBeGreaterThan(m1.x)
+    expect(b2.x).toBeGreaterThan(b1.x)
+    // 支线事件处于不同的 Y 泳道
+    expect(b1.y).not.toBe(m1.y)
+    expect(b2.y).toBe(b1.y)
+
+    // 源事件标记为已展开
+    expect(m1.childBranchCount).toBe(1)
+    expect(m1.isExpanded).toBe(true)
+
+    // 包含 branch 类型的平滑连接线与支线内部顺序连线
+    const branchEdge = layout.edges.find(e => e.type === 'timeline-branch')
+    expect(branchEdge).toBeDefined()
+    expect(branchEdge?.source).toBe('m1')
+    expect(branchEdge?.target).toBe('b1')
+    expect(branchEdge?.color).toBe('#10b981')
+
+    const seqEdge = layout.edges.find(e => e.id === 'branch-seq-b1-b2')
+    expect(seqEdge).toBeDefined()
+  })
+
+  it('supports multiple events at the same sortOrder timepoint', () => {
+    const eventA = makeEvent('a', 10, { title: '事件 A' })
+    const eventB = makeEvent('b', 10, { title: '事件 B' })
+
+    const layout = buildStoryTimelineLayout([eventA, eventB])
+    expect(layout.events).toHaveLength(2)
+    // 两个事件均被布局且互不重叠
+    const a = layout.events.find(e => e.id === 'a')!
+    const b = layout.events.find(e => e.id === 'b')!
+    expect(a.y).not.toBe(b.y)
+  })
+})
+
+describe('story timeline mention parsing', () => {
+  it('extracts @character and [[character]] mentions from description', () => {
+    const text = '在雾港与 @许渡 碰头，随后寻找 [[沈砚]] 和 [[周晓]]。'
+    const mentions = parseStoryTimelineMentions(text)
+
+    expect(mentions).toEqual([
+      { raw: '[[沈砚]]', name: '沈砚', type: 'character' },
+      { raw: '[[周晓]]', name: '周晓', type: 'character' },
+      { raw: '@许渡', name: '许渡', type: 'character' },
+    ])
+  })
+
+  it('deduplicates multiple mentions of the same character and avoids empty matches', () => {
+    const text = '@许渡 再次出现，许渡在想什么？@许渡 离开了。'
+    const mentions = parseStoryTimelineMentions(text)
+
+    expect(mentions).toHaveLength(1)
+    expect(mentions[0]).toEqual({ raw: '@许渡', name: '许渡', type: 'character' })
+  })
+
+  it('returns empty array when no mentions are found', () => {
+    expect(parseStoryTimelineMentions('')).toEqual([])
+    expect(parseStoryTimelineMentions('普通纯文本描述，没有任何引用标记')).toEqual([])
   })
 })

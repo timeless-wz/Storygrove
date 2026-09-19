@@ -676,8 +676,22 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS story_timeline_branches (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      source_event_id TEXT DEFAULT NULL,
+      color TEXT DEFAULT NULL,
+      sort_order REAL NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_story_timeline_branches_source
+      ON story_timeline_branches(source_event_id);
+
     CREATE TABLE IF NOT EXISTS story_timeline_events (
       id TEXT PRIMARY KEY,
+      branch_id TEXT NOT NULL DEFAULT 'main',
+      parent_event_id TEXT DEFAULT NULL,
       title TEXT NOT NULL,
       time_label TEXT NOT NULL,
       sort_order REAL NOT NULL,
@@ -695,6 +709,8 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
     );
     CREATE INDEX IF NOT EXISTS idx_story_timeline_events_order
       ON story_timeline_events(sort_order, created_at);
+    CREATE INDEX IF NOT EXISTS idx_story_timeline_events_branch
+      ON story_timeline_events(branch_id, sort_order);
 
     -- Reference imports are recoverable project facts, not generic workflow history.
     CREATE TABLE IF NOT EXISTS import_runs (
@@ -1962,6 +1978,34 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
     FROM project_core
     WHERE id = 'main'
   `)
+
+  // 故事时间树：旧库的 story_timeline_events 没有 branch_id 与 parent_event_id。
+  // 增量补齐，同时确保默认 main 分支存在。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS story_timeline_branches (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      source_event_id TEXT DEFAULT NULL,
+      color TEXT DEFAULT NULL,
+      sort_order REAL NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_story_timeline_branches_source
+      ON story_timeline_branches(source_event_id);
+    INSERT OR IGNORE INTO story_timeline_branches (id, name, source_event_id, sort_order)
+    VALUES ('main', '主时间轴', NULL, 0);
+  `)
+  const timelineColumns = new Set(
+    (db.prepare('PRAGMA table_info(story_timeline_events)').all() as Array<{ name: string }>).map(column => column.name),
+  )
+  if (!timelineColumns.has('branch_id')) {
+    db.exec("ALTER TABLE story_timeline_events ADD COLUMN branch_id TEXT NOT NULL DEFAULT 'main'")
+  }
+  if (!timelineColumns.has('parent_event_id')) {
+    db.exec('ALTER TABLE story_timeline_events ADD COLUMN parent_event_id TEXT DEFAULT NULL')
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_story_timeline_events_branch ON story_timeline_events(branch_id, sort_order)')
 
   migrateDraftUnitCounts(db)
 }

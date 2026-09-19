@@ -41,6 +41,7 @@ import type {
 import type { PlotTreeSnapshot, PlotTreeSourceBundle } from './plot-tree'
 import type { WorldMapNode, WorldMapEdge, WorldMapCandidate, WorldMapImage, WorldMap, WorldMapAtlas } from './world-map'
 import type {
+  StoryTimelineBranch,
   StoryTimelineEvent,
   StoryTimelineSettings,
   StoryTimelineSnapshot,
@@ -1174,6 +1175,8 @@ export interface DatabaseChannels {
   'db:timeline-event-upsert': { args: [event: StoryTimelineEvent, expectedProjectPath: string]; return: { success: boolean; event?: StoryTimelineEvent; error?: string } }
   'db:timeline-event-delete': { args: [id: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
   'db:timeline-events-reorder': { args: [orderedIds: string[], expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:timeline-branch-upsert': { args: [branch: StoryTimelineBranch, expectedProjectPath: string]; return: { success: boolean; branch?: StoryTimelineBranch; error?: string } }
+  'db:timeline-branch-delete': { args: [id: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
 }
 
 export interface WorldMapImageChannels {

@@ -91,4 +91,35 @@ describe('StoryTimelineRepository', () => {
     StoryTimelineRepository.deleteEvent('arrival')
     expect(StoryTimelineRepository.getAll().events.map(event => event.id)).toEqual(['prologue'])
   })
+
+  it('supports creating, retrieving, and cascading deleting branches and their events', () => {
+    StoryTimelineRepository.upsertEvent(makeEvent({ id: 'main-1', sortOrder: 10, title: '主干事件' }))
+
+    const branch = StoryTimelineRepository.upsertBranch({
+      id: 'branch-1',
+      name: '暗河秘辛',
+      sourceEventId: 'main-1',
+      sortOrder: 1,
+    })
+    expect(branch).toMatchObject({ id: 'branch-1', name: '暗河秘辛', sourceEventId: 'main-1' })
+
+    StoryTimelineRepository.upsertEvent(makeEvent({
+      id: 'branch-event-1',
+      branchId: 'branch-1',
+      parentEventId: 'main-1',
+      sortOrder: 15,
+      title: '支线事件',
+    }))
+
+    const snapshot = StoryTimelineRepository.getAll()
+    expect(snapshot.branches).toHaveLength(1)
+    expect(snapshot.branches[0].name).toBe('暗河秘辛')
+    expect(snapshot.events).toHaveLength(2)
+
+    StoryTimelineRepository.deleteBranch('branch-1')
+    const afterDelete = StoryTimelineRepository.getAll()
+    expect(afterDelete.branches).toHaveLength(0)
+    expect(afterDelete.events).toHaveLength(1)
+    expect(afterDelete.events[0].id).toBe('main-1')
+  })
 })

@@ -1,9 +1,11 @@
 import { getProjectDb } from '../database'
 import type {
+  StoryTimelineBranch,
   StoryTimelineEvent,
   StoryTimelineSettings,
   StoryTimelineSnapshot,
 } from '../../src/shared/story-timeline'
+import { STORY_TIMELINE_MAIN_BRANCH_ID } from '../../src/shared/story-timeline'
 
 function requireDb(): NonNullable<ReturnType<typeof getProjectDb>> {
   const db = getProjectDb()
@@ -28,8 +30,30 @@ function parseChapterNumbers(value: string): number[] {
     .filter(item => Number.isInteger(item) && item > 0)
 }
 
+function mapBranch(row: {
+  id: string
+  name: string
+  source_event_id: string | null
+  color: string | null
+  sort_order: number
+  created_at: string
+  updated_at: string
+}): StoryTimelineBranch {
+  return {
+    id: row.id,
+    name: row.name,
+    sourceEventId: row.source_event_id || null,
+    color: row.color || undefined,
+    sortOrder: row.sort_order,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
 function mapEvent(row: {
   id: string
+  branch_id?: string
+  parent_event_id?: string | null
   title: string
   time_label: string
   sort_order: number
@@ -45,6 +69,8 @@ function mapEvent(row: {
 }): StoryTimelineEvent {
   return {
     id: row.id,
+    branchId: row.branch_id || STORY_TIMELINE_MAIN_BRANCH_ID,
+    parentEventId: row.parent_event_id || null,
     title: row.title,
     timeLabel: row.time_label,
     sortOrder: row.sort_order,
@@ -60,6 +86,13 @@ function mapEvent(row: {
   }
 }
 
+const DEFAULT_MAIN_BRANCH: StoryTimelineBranch = {
+  id: STORY_TIMELINE_MAIN_BRANCH_ID,
+  name: '主时间轴',
+  sourceEventId: null,
+  sortOrder: 0,
+}
+
 export class StoryTimelineRepository {
   static getAll(): StoryTimelineSnapshot {
     const db = requireDb()
@@ -69,8 +102,19 @@ export class StoryTimelineRepository {
       WHERE id = 'main'
     `).get() as { title: string; ruler_label: string; ruler_unit: string; updated_at: string } | undefined
 
+    const branchRows = db.prepare(`
+      SELECT id, name, source_event_id, color, sort_order, created_at, updated_at
+      FROM story_timeline_branches
+      ORDER BY sort_order ASC, created_at ASC
+    `).all() as Parameters<typeof mapBranch>[0][]
+
+    const branches = branchRows.length > 0 ? branchRows.map(mapBranch) : [DEFAULT_MAIN_BRANCH]
+    if (!branches.some(branch => branch.id === STORY_TIMELINE_MAIN_BRANCH_ID)) {
+      branches.unshift(DEFAULT_MAIN_BRANCH)
+    }
+
     const rows = db.prepare(`
-      SELECT id, title, time_label, sort_order, precision, range_end_label, description,
+      SELECT id, branch_id, parent_event_id, title, time_label, sort_order, precision, range_end_label, description,
              chapter_numbers, character_names, location_node_ids, status, created_at, updated_at
       FROM story_timeline_events
       ORDER BY sort_order ASC, created_at ASC
@@ -85,6 +129,7 @@ export class StoryTimelineRepository {
             updatedAt: settingsRow.updated_at,
           }
         : { title: '故事时间线', rulerLabel: '故事时间', rulerUnit: '刻度' },
+      branches,
       events: rows.map(mapEvent),
     }
   }
@@ -107,21 +152,93 @@ export class StoryTimelineRepository {
     return { title, rulerLabel, rulerUnit, updatedAt: now }
   }
 
+  static upsertBranch(branch: StoryTimelineBranch): StoryTimelineBranch {
+    const db = requireDb()
+    if (!branch.id || !branch.name.trim()) {
+      throw new Error('时间线分支必须包含唯一标识与名称')
+    }
+    const now = new Date().toISOString()
+    const name = branch.name.trim()
+    const sourceEventId = branch.id === STORY_TIMELINE_MAIN_BRANCH_ID ? null : (branch.sourceEventId ?? null)
+    const color = branch.color?.trim() || null
+    const sortOrder = Number.isFinite(branch.sortOrder) ? branch.sortOrder : 1
+
+    db.prepare(`
+      INSERT INTO story_timeline_branches (id, name, source_event_id, color, sort_order, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        source_event_id = excluded.source_event_id,
+        color = excluded.color,
+        sort_order = excluded.sort_order,
+        updated_at = excluded.updated_at
+    `).run(branch.id, name, sourceEventId, color, sortOrder, branch.createdAt || now, now)
+
+    return {
+      id: branch.id,
+      name,
+      sourceEventId,
+      color: color ?? undefined,
+      sortOrder,
+      createdAt: branch.createdAt || now,
+      updatedAt: now,
+    }
+  }
+
+  static deleteBranch(branchId: string): void {
+    if (!branchId) throw new Error('缺少分支标识')
+    if (branchId === STORY_TIMELINE_MAIN_BRANCH_ID) {
+      throw new Error('主时间轴为核心基准，不可删除')
+    }
+    const db = requireDb()
+    const tx = db.transaction(() => {
+      // 递归查找该分支及该分支上事件所衍生的全部下级支线
+      const branchIdsToDelete = new Set<string>([branchId])
+      let added = true
+      while (added) {
+        added = false
+        const placeholders = Array.from(branchIdsToDelete).map(() => '?').join(',')
+        const childBranchRows = db.prepare(`
+          SELECT b.id FROM story_timeline_branches b
+          INNER JOIN story_timeline_events e ON b.source_event_id = e.id
+          WHERE e.branch_id IN (${placeholders})
+        `).all(...Array.from(branchIdsToDelete)) as Array<{ id: string }>
+
+        for (const child of childBranchRows) {
+          if (!branchIdsToDelete.has(child.id)) {
+            branchIdsToDelete.add(child.id)
+            added = true
+          }
+        }
+      }
+
+      const placeholders = Array.from(branchIdsToDelete).map(() => '?').join(',')
+      db.prepare(`DELETE FROM story_timeline_events WHERE branch_id IN (${placeholders})`).run(...Array.from(branchIdsToDelete))
+      db.prepare(`DELETE FROM story_timeline_branches WHERE id IN (${placeholders})`).run(...Array.from(branchIdsToDelete))
+    })
+    tx()
+  }
+
   static upsertEvent(event: StoryTimelineEvent): StoryTimelineEvent {
     const db = requireDb()
     if (!event.id || !event.title.trim() || !event.timeLabel.trim() || !Number.isFinite(event.sortOrder)) {
       throw new Error('时间线事件必须包含标题、自定义时间与排序刻度')
     }
+    const branchId = event.branchId?.trim() || STORY_TIMELINE_MAIN_BRANCH_ID
+    const parentEventId = event.parentEventId?.trim() || null
     const now = new Date().toISOString()
     const chapterNumbers = [...new Set(event.chapterNumbers.filter(value => Number.isInteger(value) && value > 0))]
     const characterNames = [...new Set(event.characterNames.map(value => value.trim()).filter(Boolean))]
     const locationNodeIds = [...new Set(event.locationNodeIds.map(value => value.trim()).filter(Boolean))]
+
     db.prepare(`
       INSERT INTO story_timeline_events (
-        id, title, time_label, sort_order, precision, range_end_label, description,
+        id, branch_id, parent_event_id, title, time_label, sort_order, precision, range_end_label, description,
         chapter_numbers, character_names, location_node_ids, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
+        branch_id = excluded.branch_id,
+        parent_event_id = excluded.parent_event_id,
         title = excluded.title,
         time_label = excluded.time_label,
         sort_order = excluded.sort_order,
@@ -135,6 +252,8 @@ export class StoryTimelineRepository {
         updated_at = excluded.updated_at
     `).run(
       event.id,
+      branchId,
+      parentEventId,
       event.title.trim(),
       event.timeLabel.trim(),
       event.sortOrder,
@@ -150,6 +269,8 @@ export class StoryTimelineRepository {
     )
     return {
       ...event,
+      branchId,
+      parentEventId,
       title: event.title.trim(),
       timeLabel: event.timeLabel.trim(),
       rangeEndLabel: event.rangeEndLabel?.trim() || undefined,
@@ -164,7 +285,20 @@ export class StoryTimelineRepository {
 
   static deleteEvent(id: string): void {
     if (!id) throw new Error('缺少时间线事件标识')
-    requireDb().prepare('DELETE FROM story_timeline_events WHERE id = ?').run(id)
+    const db = requireDb()
+    const tx = db.transaction(() => {
+      // 若有以此事件为源头分叉出的支线，连带级联清理其支线及支线下属事件
+      const childBranches = db.prepare(
+        'SELECT id FROM story_timeline_branches WHERE source_event_id = ?',
+      ).all(id) as Array<{ id: string }>
+
+      for (const branch of childBranches) {
+        StoryTimelineRepository.deleteBranch(branch.id)
+      }
+
+      db.prepare('DELETE FROM story_timeline_events WHERE id = ?').run(id)
+    })
+    tx()
   }
 
   static reorderEvents(orderedIds: string[]): void {

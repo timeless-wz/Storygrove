@@ -104,7 +104,7 @@ function labelsInSortOrder(): Array<{ eventId: string; element: HTMLElement; sor
 }
 
 function formField(labelText: string): HTMLInputElement | HTMLTextAreaElement {
-  const label = Array.from(container.querySelectorAll('.writer-timeline-form label'))
+  const label = Array.from(container.querySelectorAll('.writer-timeline-field, .writer-timeline-settings label'))
     .find(node => (node.querySelector('span')?.textContent ?? '').includes(labelText))
   const field = label?.querySelector('input, textarea')
   if (!field) throw new Error(`form field ${labelText} is missing`)
@@ -116,6 +116,24 @@ async function clickLabel(eventId: string): Promise<void> {
   const node = (element.closest('.react-flow__node') as HTMLElement | null) ?? element
   await act(async () => {
     node.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  })
+}
+
+async function rightClickLabel(eventId: string): Promise<void> {
+  const element = labelFor(eventId)
+  const node = (element.closest('.react-flow__node') as HTMLElement | null) ?? element
+  await act(async () => {
+    node.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 200, clientY: 200 }))
+  })
+}
+
+async function openEditModal(eventId: string): Promise<void> {
+  await rightClickLabel(eventId)
+  const menu = container.querySelector('.writer-timeline-context-menu')
+  const editOption = Array.from(menu?.querySelectorAll('.writer-timeline-context-item') ?? [])
+    .find(el => el.textContent?.includes('编辑事件'))
+  await act(async () => {
+    editOption?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
   })
 }
 
@@ -224,26 +242,31 @@ describe('story timeline horizontal axis', () => {
     expect(axisText).toContain('许渡归来')
   })
 
-  it('opens the matching event in the right-hand detail editor when a label is clicked', async () => {
+  it('selects an event on click and opens floating modal editor to edit details', async () => {
     await renderTimeline()
 
     await clickLabel('e2')
+    expect(labelFor('e2').className).toContain('is-selected')
 
-    expect(container.querySelector('.writer-timeline-editor-title strong')?.textContent).toBe('雾港调查')
+    await clickLabel('e5')
+    expect(labelFor('e5').className).toContain('is-selected')
+    expect(labelFor('e2').className).not.toContain('is-selected')
+
+    // 打开浮层编辑模态窗
+    await openEditModal('e2')
+    expect(container.querySelector('.writer-timeline-modal h2')?.textContent).toContain('编辑事件')
     expect((formField('自定义时间') as HTMLInputElement).value).toBe('大荒历 312 年')
     expect((formField('排序刻度') as HTMLInputElement).value).toBe('20')
     expect((formField('事件描述') as HTMLTextAreaElement).value).toBe('仅在详情面板可见的描述')
     expect((formField('关联章节') as HTMLInputElement).value).toBe('3, 4')
     expect((formField('涉及角色') as HTMLInputElement).value).toBe('沈砚')
 
-    // 切换到另一个事件时，面板内容随之切换。
-    await clickLabel('e5')
-    expect(container.querySelector('.writer-timeline-editor-title strong')?.textContent).toBe('终局对峙')
-    expect((formField('自定义时间') as HTMLInputElement).value).toBe('大荒历 320 年')
-
-    // 选中态回写到对应标注上。
-    expect(labelFor('e5').className).toContain('is-selected')
-    expect(labelFor('e2').className).not.toContain('is-selected')
+    // 点击关闭按钮关闭浮层
+    const closeBtn = container.querySelector('.writer-timeline-modal-close')
+    await act(async () => {
+      closeBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(container.querySelector('.writer-timeline-modal')).toBeNull()
   })
 
   it('keeps events non-draggable while the axis itself can pan and zoom', async () => {
@@ -264,38 +287,122 @@ describe('story timeline horizontal axis', () => {
     }
   })
 
-  it('reorders the axis purely from sortOrder when the author moves an event', async () => {
+  it('shows floating context menu on right click of node and canvas', async () => {
     await renderTimeline()
 
+    // 节点右键
+    await rightClickLabel('e1')
+    const menu = container.querySelector('.writer-timeline-context-menu')
+    expect(menu).not.toBeNull()
+    expect(menu?.textContent).toContain('在此后添加事件')
+    expect(menu?.textContent).toContain('在此创建支线')
+    expect(menu?.textContent).toContain('编辑事件')
+    expect(menu?.textContent).toContain('删除事件')
+
+    // 在此创建支线 -> 打开分叉支线模态窗
+    const branchOption = Array.from(menu!.querySelectorAll('.writer-timeline-context-item'))
+      .find(el => el.textContent?.includes('在此创建支线'))
+    await act(async () => {
+      branchOption?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(container.querySelector('.writer-timeline-modal h2')?.textContent).toContain('创建新支线事件')
+    expect((formField('支线名称') as HTMLInputElement).value).toBe('末班车驶出地图 · 支线')
+
+    // 关闭弹窗
+    const closeBtn = container.querySelector('.writer-timeline-modal-close')
+    await act(async () => {
+      closeBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(container.querySelector('.writer-timeline-modal')).toBeNull()
+  })
+
+  it('renders mention chips inside modal when description contains mentions', async () => {
+    const eventWithMentions = makeEvent({
+      id: 'e-mention',
+      sortOrder: 15,
+      title: '暗河密会',
+      timeLabel: '大荒历 311 年',
+      description: '@许渡 正在调查 [[雾港]] 的暗线',
+    })
     invoke.mockImplementation(async (channel: string) => {
-      if (channel === 'db:timeline-get-all') return { settings, events: timelineEvents }
+      if (channel === 'db:timeline-get-all') return { settings, events: [...timelineEvents, eventWithMentions] }
       if (channel === 'db:map-get-all') return { nodes: [], edges: [], layers: [] }
-      if (channel === 'db:timeline-events-reorder') return { success: true }
       return { success: false, error: `unexpected channel ${channel}` }
     })
-
-    await clickLabel('e1')
-    const beforeOrder = useStoryTimelineStore.getState().events.map(event => event.id)
-
-    const moveLater = Array.from(container.querySelectorAll('.writer-timeline-reorder button'))
-      .find(button => (button.getAttribute('aria-label') ?? '').includes('向后移动'))
+    useStoryTimelineStore.setState({
+      events: [...timelineEvents, eventWithMentions],
+    })
     await act(async () => {
-      moveLater?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      root.render(<StoryTimelineView projectKey={PROJECT_PATH} />)
+    })
+    await act(async () => {
+      await vi.waitFor(() => expect(labels().some(l => l.dataset.eventId === 'e-mention')).toBe(true))
     })
 
-    const afterOrder = useStoryTimelineStore.getState().events.map(event => event.id)
-    expect(afterOrder).not.toEqual(beforeOrder)
-    // 排序只改 sortOrder，事件数量与身份不变。
-    expect([...afterOrder].sort()).toEqual([...beforeOrder].sort())
-    for (const event of useStoryTimelineStore.getState().events) {
-      expect(typeof event.sortOrder).toBe('number')
+    await openEditModal('e-mention')
+    const mentionBar = container.querySelector('[data-testid="timeline-mentions-bar"]')
+    expect(mentionBar).not.toBeNull()
+    const tags = Array.from(container.querySelectorAll('[data-testid="timeline-mention-tag"]'))
+    expect(tags.map(t => t.textContent?.trim())).toEqual(expect.arrayContaining(['@许渡', '[[雾港]]']))
+
+    // 关闭弹窗
+    const closeBtn = container.querySelector('.writer-timeline-modal-close')
+    await act(async () => {
+      closeBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+  })
+
+  it('supports branch expansion toggle via branch badge', async () => {
+    // 注入一条带有支线的数据
+    const branchEvent = makeEvent({
+      id: 'e-sub-1',
+      branchId: 'branch-test-1',
+      parentEventId: 'e2',
+      sortOrder: 25,
+      title: '支线：暗河密会',
+      timeLabel: '大荒历 312 年冬',
+    })
+    const branchData = {
+      settings,
+      events: [...timelineEvents, branchEvent],
+      branches: [
+        { id: 'branch-test-1', name: '暗河支线', sourceEventId: 'e2', sortOrder: 1 },
+      ],
     }
-    expect(invoke).toHaveBeenCalledWith(
-      'db:timeline-events-reorder',
-      expect.any(Array),
-      PROJECT_PATH,
-      expect.objectContaining({ projectId: PROJECT_SESSION.projectId }),
-    )
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'db:timeline-get-all') return branchData
+      if (channel === 'db:map-get-all') return { nodes: [], edges: [], layers: [] }
+      return { success: false, error: `unexpected channel ${channel}` }
+    })
+    useStoryTimelineStore.setState({
+      branches: branchData.branches,
+      events: branchData.events,
+      expandedBranchIds: [],
+    })
+
+    await act(async () => {
+      root.render(<StoryTimelineView projectKey={PROJECT_PATH} />)
+    })
+    await act(async () => {
+      await vi.waitFor(() => expect(labels().length).toBe(timelineEvents.length))
+    })
+
+    // 默认折叠：只显示主干 5 个事件，不显示支线事件
+    expect(labels().some(l => l.dataset.eventId === 'e-sub-1')).toBe(false)
+
+    // 存在分支徽标
+    const badge = container.querySelector('[data-testid="timeline-branch-badge"]') as HTMLElement
+    expect(badge).not.toBeNull()
+    expect(badge.textContent).toContain('1 支线')
+
+    // 点击徽标展开
+    await act(async () => {
+      badge.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(useStoryTimelineStore.getState().expandedBranchIds).toContain('branch-test-1')
+    await act(async () => {
+      await vi.waitFor(() => expect(labels().some(l => l.dataset.eventId === 'e-sub-1')).toBe(true))
+    })
   })
 
   it('keeps the existing loading and empty-timeline states', async () => {
@@ -344,8 +451,6 @@ describe('story timeline horizontal axis', () => {
     expect(container.textContent).toContain('Timeline name')
     expect(container.textContent).toContain('Ruler unit')
     expect(container.textContent).toContain('Save ruler')
-    expect(container.textContent).toContain('Event title')
     expect(container.textContent).not.toContain('时间线名称')
-    expect(container.textContent).not.toContain('事件标题')
   })
 })

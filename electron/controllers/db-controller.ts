@@ -62,7 +62,7 @@ import { WorldMapRepository } from '../repositories/world-map-repository'
 import type { WorldMapNode, WorldMapEdge, WorldMap } from '../../src/shared/world-map'
 import { removeDeletedMapImages } from '../services/world-map-image-store'
 import { StoryTimelineRepository } from '../repositories/story-timeline-repository'
-import type { StoryTimelineEvent, StoryTimelineSettings } from '../../src/shared/story-timeline'
+import type { StoryTimelineBranch, StoryTimelineEvent, StoryTimelineSettings } from '../../src/shared/story-timeline'
 import { RecoveryCandidateRepository } from '../repositories/recovery-candidate-repository'
 import type { RecoveryCandidateRecordInput } from '../../src/shared/recovery-candidate'
 
@@ -135,6 +135,8 @@ const MUTATING_DATABASE_CHANNELS = new Set([
   'db:timeline-event-upsert',
   'db:timeline-event-delete',
   'db:timeline-events-reorder',
+  'db:timeline-branch-upsert',
+  'db:timeline-branch-delete',
 ])
 
 function registerProjectDatabaseHandler(channel: string, handler: ProjectDatabaseHandler): void {
@@ -1337,6 +1339,25 @@ export function registerDatabaseController() {
     try {
       assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
       StoryTimelineRepository.reorderEvents(orderedIds)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:timeline-branch-upsert', async (_event, branch: StoryTimelineBranch, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, branch: StoryTimelineRepository.upsertBranch(branch) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:timeline-branch-delete', async (_event, id: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      StoryTimelineRepository.deleteBranch(id)
       return { success: true }
     } catch (error) {
       return { success: false, error: String(error) }
