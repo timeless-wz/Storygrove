@@ -4,7 +4,6 @@ import { useWorkspaceHubStore } from '../../stores/workspace-hub-store'
 import { useLayoutStore } from '../../stores/layout-store'
 import { APP_BRAND } from '../../shared/brand'
 import { useLocaleStore } from '../../stores/locale-store'
-import { UpdateSection } from '../updates/UpdateSection'
 import { Button } from '../ui/Button'
 
 interface WelcomePageProps {
@@ -163,8 +162,6 @@ export default function WelcomePage({ onNewProject, onOpenProject, onImportNovel
             </span>
           </button>
         </div>
-
-        <UpdateSection />
 
         {/* 最近项目 */}
         {recentProjects.length > 0 && (

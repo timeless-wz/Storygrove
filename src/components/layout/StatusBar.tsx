@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   Bot, CheckCircle2, FolderOpen, Languages, ListTodo, Minus, PanelLeft,
-  PanelRight, Plus, Settings, Wifi,
+  PanelRight, Plus, Settings,
 } from 'lucide-react'
 import { useProjectStore } from '../../stores/project-store'
-import { useLLMStore } from '../../stores/llm-store'
 import { useLayoutStore } from '../../stores/layout-store'
 import { useWorkflowStore } from '../../stores/workflow-store'
 import { useEditorStore } from '../../stores/editor-store'
@@ -19,8 +18,6 @@ import BottomPanel from '../panels/BottomPanel'
  */
 export default function StatusBar() {
   const currentProject = useProjectStore(s => s.currentProject)
-  const models = useLLMStore(s => s.models)
-  const defaultModelId = useLLMStore(s => s.defaultModelId)
   const activeTab = useEditorStore(s => s.tabs.find(tab => tab.id === s.activeTabId))
   const hasDirty = useEditorStore(s => countUnsavedEditorItems(s.tabs, s.draftLedgers) > 0)
   const draftsByChapter = useDraftStore(s => s.draftsByChapter)
@@ -37,7 +34,6 @@ export default function StatusBar() {
   const openRightPanel = useLayoutStore(s => s.openRightPanel)
   const bottomPanelOpen = useLayoutStore(s => s.bottomPanelOpen)
   const bottomTab = useLayoutStore(s => s.bottomTab)
-  const defaultModel = models.find(model => model.id === defaultModelId && model.purposes?.some(purpose => purpose !== 'embedding'))
   const totalWords = useMemo(
     () => Object.values(draftsByChapter).reduce((sum, drafts) => sum + (drafts[0]?.wordCount ?? 0), 0),
     [draftsByChapter],
@@ -92,9 +88,6 @@ export default function StatusBar() {
         <StatusBarSegment title={text('重置缩放', 'Reset zoom')} onClick={zoomReset}><span className="tabular-nums">{Math.round(zoom * 100)}%</span></StatusBarSegment>
         <StatusBarSegment title={text('放大', 'Zoom in')} onClick={zoomIn}><Plus size={11} /></StatusBarSegment>
         <StatusBarSegment title={text('切换语言', 'Switch language')} onClick={() => void toggleLocale()}><Languages size={12} /><span>{locale === 'zh-CN' ? 'EN' : '中文'}</span></StatusBarSegment>
-        <StatusBarSegment title={defaultModel ? text(`当前模型：${defaultModel.name}`, `Current model: ${defaultModel.name}`) : text('配置模型', 'Configure model')} onClick={() => openSettings('llm')}>
-          <Wifi size={11} /><span className="max-w-[110px] truncate">{defaultModel?.name ?? text('模型设置', 'Model settings')}</span>
-        </StatusBarSegment>
         <StatusBarSegment title={text('设置（含日志与模型配置）', 'Settings, logs and model configuration')} onClick={() => openSettings('editor')}>
           <Settings size={12} />
         </StatusBarSegment>

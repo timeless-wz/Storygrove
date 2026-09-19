@@ -53,6 +53,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // 构建产物目录结构
 process.env.APP_ROOT = path.join(__dirname, '..')
 
+const appIconPath = path.join(
+  process.env.APP_ROOT,
+  'build',
+  process.platform === 'win32' ? 'ai-novel-writer.ico' : 'icon.png',
+)
+
+// Windows 的任务栏识别 `.ico`；若把开发态窗口指向 PNG，Shell 可能回退显示
+// Electron 默认图标。换用独立身份，避免开发进程复用 Electron/旧版本的任务栏缓存。
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.ai-novel-writer.desktop')
+}
+
 export const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
 export const MAIN_DIST = path.join(process.env.APP_ROOT, 'dist-electron')
 export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
@@ -128,7 +140,7 @@ function createWindow() {
     minWidth: 1024,
     minHeight: 640,
     title: mainT(app.getLocale(), 'app.windowTitle'),
-    icon: path.join(process.env.APP_ROOT!, 'build', 'icon.png'),
+    icon: appIconPath,
     // 使用应用内自绘标题栏，避免 Windows 原生标题栏与棕色标题栏重复显示。
     frame: false,
     backgroundColor: '#1e1e1e',
@@ -139,6 +151,9 @@ function createWindow() {
       contextIsolation: true,
     },
   })
+  // Windows 的任务栏还会依据窗口实例做缓存；构造参数之外再显式设置一次，
+  // 确保开发态 Electron 进程也使用书本图标。
+  win.setIcon(appIconPath)
   installWindowCloseGuard(win)
 
   if (process.platform === 'darwin') {

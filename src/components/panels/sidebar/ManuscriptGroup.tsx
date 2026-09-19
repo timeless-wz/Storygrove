@@ -3,7 +3,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, ChevronRight, ChevronDown, FileText, FolderOpen, Copy, PenTool, RotateCcw, Trash2 } from 'lucide-react'
+import { AlertTriangle, ChevronRight, ChevronDown, FileText, FolderOpen, Copy, PenTool, RotateCcw, Trash2, Plus } from 'lucide-react'
 import type { FileNode, ProjectSessionContext } from '../../../shared/ipc-channels'
 import type { ChapterDeletionOperation } from '../../../shared/chapter-deletion'
 import { ipc } from '../../../services/ipc-client'
@@ -24,6 +24,7 @@ import {
   confirmLegacyKnowledgeAbsentAndContinue,
   deleteFinalizedChapter,
 } from './finalized-chapter-deletion'
+import { NewDraftDialog } from './NewDraftDialog'
 
 type ManuscriptFileNode = FileNode & { chapterTitle?: string }
 
@@ -102,6 +103,7 @@ async function readChapterTitle(
 
 export default function ManuscriptGroup({ files, projectPath }: { files: ManuscriptFileNode[]; projectPath: string }) {
   const [open, setOpen] = useState(true)
+  const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const text = useLocaleStore(s => s.text)
   const currentProject = useProjectStore(s => s.currentProject)
   const [deletionState, setDeletionState] = useState<{
@@ -171,6 +173,10 @@ export default function ManuscriptGroup({ files, projectPath }: { files: Manuscr
 
   // 只显示正文章节（过滤掉旧的 _notes 文件）
   const chapterFiles = files.filter(f => !f.name.includes('_notes'))
+  const suggestedChapterNumber = Math.max(
+    0,
+    ...chapterFiles.map(file => Number(file.name.replace(/\.[^.]+$/, '').match(/^chapter_(\d+)$/)?.[1]) || 0),
+  ) + 1
 
   const fetchIncompleteDeletions = useCallback(async (projectSession: ProjectSessionContext) => {
     const requestId = ++deletionLoadSequence.current
@@ -287,6 +293,19 @@ export default function ManuscriptGroup({ files, projectPath }: { files: Manuscr
         }
         <PenTool size={14} style={{ color: 'var(--color-text-muted)' }} />
         <span className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>{text('正文章节', 'Manuscript chapters')}</span>
+        <button
+          type="button"
+          className="ml-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[0.7rem] hover:bg-[var(--color-hover)]"
+          style={{ color: 'var(--color-accent)' }}
+          title={text('新建章节草稿，定稿后发布到正文', 'Create a draft chapter, then finalize it to publish to the manuscript')}
+          onClick={event => {
+            event.stopPropagation()
+            setCreateDialogOpen(true)
+          }}
+        >
+          <Plus size={12} />
+          <span>{text('新建章节', 'New chapter')}</span>
+        </button>
         {chapterFiles.length > 0 && (
           <span className="ml-auto text-[0.7rem]" style={{ color: 'var(--color-text-muted)' }}>
             {text(`${chapterFiles.length} 章`, `${chapterFiles.length} chapters`)}
@@ -397,6 +416,11 @@ export default function ManuscriptGroup({ files, projectPath }: { files: Manuscr
           )}
         </div>
       )}
+      <NewDraftDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        suggestedChapterNumber={suggestedChapterNumber}
+      />
     </div>
   )
 }

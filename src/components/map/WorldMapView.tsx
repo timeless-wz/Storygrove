@@ -337,7 +337,9 @@ export default function WorldMapView({ projectKey }: { projectKey: string }) {
                 <div className="mt-3"><Button onClick={() => setMapDialogTarget({ kind: 'create-top-level' })}><Plus size={13} />{text('新建顶层地图', 'New top-level map')}</Button></div>
               </EmptyState>
             </div>
-          ) : mapNodes.length === 0 && mapEdges.length === 0 ? (
+          // 即使还没有地点，已经导入的底图也必须进入画布；否则导入成功后会被
+          // "这张地图还是空的" 的占位状态遮住。
+          ) : mapNodes.length === 0 && mapEdges.length === 0 && !mapImage ? (
             <div className="flex flex-1 items-center justify-center p-8">
               <EmptyState icon={<Compass size={40} className="text-[var(--color-text-muted)]" />} message={text('这张地图还是空的', 'This map is still empty')} opacity={1}>
                 <p className="max-w-md text-center text-xs text-[var(--color-text-muted)]">

@@ -13,7 +13,7 @@ import { discardChangesThenRequestInstall } from './update-install-discard'
 import { UpdateStatusCard } from './UpdateStatusCard'
 import { useUpdateState } from './use-update-state'
 
-/** 欢迎页中的更新入口与非阻断状态卡。 */
+/** 设置「关于」中的更新入口与非阻断状态卡。 */
 export function UpdateSection() {
   const text = useLocaleStore(s => s.text)
   const locale = useLocaleStore(s => s.locale)

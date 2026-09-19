@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react'
-import { Languages, Minus, Square, X } from 'lucide-react'
+import { Minus, Square, X } from 'lucide-react'
 import { useProjectStore } from '../../stores/project-store'
 import { useWorkflowStore } from '../../stores/workflow-store'
 import { useEditorStore, saveDirtyEditorChangesForExit } from '../../stores/editor-store'
@@ -24,9 +24,7 @@ const windowControlStyle: CSSProperties = { minHeight: 22, padding: '0 6px' }
  */
 export default function TitleBar() {
   const text = useLocaleStore(s => s.text)
-  const t = useLocaleStore(s => s.t)
   const locale = useLocaleStore(s => s.locale)
-  const toggleLocale = useLocaleStore(s => s.toggleLocale)
   const [exitRequest, setExitRequest] = useState<{ requestId: string; workflowBlocked?: boolean } | null>(null)
   const [exitBusy, setExitBusy] = useState(false)
   const [exitError, setExitError] = useState<string | null>(null)
@@ -129,17 +127,6 @@ export default function TitleBar() {
         </div>
 
         <div className="flex items-center gap-0.5">
-          <button
-            type="button"
-            className="writer-command-button flex items-center gap-1 text-xs"
-            title={t('language.switch')}
-            onClick={() => void toggleLocale()}
-            style={windowControlStyle}
-          >
-            <Languages size={13} strokeWidth={1.5} />
-            <span>{locale === 'zh-CN' ? 'EN' : '中文'}</span>
-          </button>
-          <div className="writer-command-divider h-3.5 w-px mx-0.5" />
           <button className="writer-command-button" aria-label={text('最小化', 'Minimize')} onClick={() => ipc.invoke('window:minimize')} style={windowControlStyle}>
             <Minus size={13} />
           </button>

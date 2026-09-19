@@ -64,6 +64,7 @@ let container: HTMLDivElement
 let root: Root
 let invokedChannels: string[]
 let mapDeleteCalls: Array<{ mapId: string; strategy: string }>
+let mapImageDataUrl: string | undefined
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -77,7 +78,7 @@ function stubApi(): void {
           return { maps: MAPS, nodes: NODES, edges: EDGES, migration: null }
         }
         if (channel === 'db:map-candidates-get') return []
-        if (channel === 'world-map-image:get') return { success: true, image: null, dataUrl: undefined }
+        if (channel === 'world-map-image:get') return { success: true, image: null, dataUrl: mapImageDataUrl }
         if (channel === 'db:map-delete') {
           mapDeleteCalls.push({ mapId: String(args[0]), strategy: String(args[1]) })
           return { success: true, removedMapIds: [String(args[0])] }
@@ -123,6 +124,7 @@ async function clickButton(label: string): Promise<void> {
 beforeEach(() => {
   invokedChannels = []
   mapDeleteCalls = []
+  mapImageDataUrl = undefined
   useLocaleStore.setState({ locale: 'zh-CN', initialized: true })
   useProjectStore.setState({ currentProject: project, projectSessionEpoch: 1, fileTree: [], loading: false })
   useEditorStore.setState({ tabs: [], activeTabId: null })
@@ -186,6 +188,17 @@ describe('world map atlas view', () => {
     // 顶栏计数也只统计这张地图。
     expect(text()).toContain('2 个地点')
     expect(text()).toContain('1 条连接')
+  })
+
+  it('renders an imported base image even before the map has locations', async () => {
+    // "世界总图" 有地点；切到没有地点的地图后，图片仍必须直接进入画布，
+    // 而不是被空状态遮住。
+    mapImageDataUrl = 'data:image/png;base64,aW1hZ2U='
+    await render()
+    await clickButton('苍穹星地图')
+
+    expect(text()).not.toContain('这张地图还是空的')
+    expect(container.querySelector('image')?.getAttribute('href')).toBe(mapImageDataUrl)
   })
 
   it('renders a breadcrumb trail from the atlas root to the selected map', async () => {

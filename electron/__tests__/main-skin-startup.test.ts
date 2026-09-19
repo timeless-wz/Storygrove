@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => {
     }
     this.isDestroyed = () => false
     this.on = vi.fn()
+    this.setIcon = vi.fn()
     this.setMenuBarVisibility = vi.fn()
     this.loadURL = vi.fn()
     this.loadFile = vi.fn()
@@ -40,6 +41,7 @@ const mocks = vi.hoisted(() => {
       getLocale: () => 'zh-CN',
       getVersion: () => '0.7.0',
       isPackaged: false,
+      setAppUserModelId: vi.fn(),
       requestSingleInstanceLock: vi.fn(() => true),
       on: vi.fn(),
       whenReady: vi.fn(() => Promise.resolve()),
@@ -120,6 +122,12 @@ describe('interactive Electron startup', () => {
     expect(mocks.calls.indexOf('ipc')).toBeLessThan(mocks.calls.indexOf('create-window'))
     expect(mocks.calls.indexOf('mcp')).toBeLessThan(mocks.calls.indexOf('create-window'))
     expect(mocks.windows[0]?.on).toHaveBeenCalledWith('close', expect.any(Function))
+    expect(mocks.app.setAppUserModelId).toHaveBeenCalledWith('com.ai-novel-writer.desktop')
+    const windowOptions = mocks.BrowserWindow.mock.calls[0] as unknown as [{ icon?: string }]
+    expect(windowOptions?.[0]).toMatchObject({
+      icon: expect.stringContaining('build\\ai-novel-writer.ico'),
+    })
+    expect(mocks.windows[0]?.setIcon).toHaveBeenCalledWith(expect.stringContaining('build\\ai-novel-writer.ico'))
   })
 
   it('keeps the already-created window available when update startup fails', async () => {

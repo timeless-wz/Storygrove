@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect } from 'react'
-import { ChevronRight, ChevronDown, CheckCircle2, Circle, FileText, FolderOpen, Copy, Trash2, FilePen } from 'lucide-react'
+import { ChevronRight, ChevronDown, CheckCircle2, FileText, FolderOpen, Copy, Trash2, FilePen, Plus } from 'lucide-react'
 import type { DraftMeta } from '../../../stores/draft-store'
 import { useDraftStore, readDraftBody } from '../../../stores/draft-store'
 import { useEditorStore } from '../../../stores/editor-store'
@@ -21,6 +21,7 @@ import {
   isProjectSessionPath,
 } from '../../project-session-gate'
 import { deleteFinalizedChapter } from './finalized-chapter-deletion'
+import { NewDraftDialog } from './NewDraftDialog'
 
 const DRAFT_STATUS_EN: Record<string, string> = {
   draft: 'Draft', revising: 'Revising', reviewed: 'Reviewed', finalized: 'Finalized', archived: 'Archived',
@@ -34,6 +35,7 @@ export default function DraftBoxGroup({
   draftsByChapter: Record<number, DraftMeta[]>
 }) {
   const [open, setOpen] = useState(true)
+  const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const text = useLocaleStore(s => s.text)
   const projectKey = useProjectStore(s => s.currentProject?.path)
   if (!projectKey) return null
@@ -43,10 +45,15 @@ export default function DraftBoxGroup({
     .map(Number)
     .sort((a, b) => a - b)
 
-  // 筛选出包含非保留（活跃）草稿的实际章节数
-  const activeChapterCount = chapterNums.filter(n =>
-    (draftsByChapter[n] || []).some(d => d.status !== 'archived')
-  ).length
+  // 已定稿章节只属于“正文章节”；草稿箱只保留仍可继续创作的稿件。
+  const draftChapterNums = chapterNums.filter(n =>
+    (draftsByChapter[n] || []).some(d => d.status !== 'archived' && d.status !== 'finalized')
+  )
+
+  const openCreateDialog = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    setCreateDialogOpen(true)
+  }
 
   return (
     <div>
@@ -63,25 +70,35 @@ export default function DraftBoxGroup({
         }
         <FilePen size={14} style={{ color: 'var(--color-text-muted)' }} />
         <span className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>{text('草稿箱', 'Draft box')}</span>
-        {activeChapterCount > 0 && (
+        <button
+          type="button"
+          className="ml-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[0.7rem] hover:bg-[var(--color-hover)]"
+          style={{ color: 'var(--color-accent)' }}
+          title={text('新建自由草稿', 'Create free draft')}
+          onClick={openCreateDialog}
+        >
+          <Plus size={12} />
+          <span>{text('新建草稿', 'New draft')}</span>
+        </button>
+        {draftChapterNums.length > 0 && (
           <span className="ml-auto text-[0.7rem]" style={{ color: 'var(--color-text-muted)' }}>
-            {text(`${activeChapterCount} 章`, `${activeChapterCount} chapters`)}
+            {text(`${draftChapterNums.length} 章`, `${draftChapterNums.length} chapters`)}
           </span>
         )}
       </div>
 
       {open && (
         <div>
-          {chapterNums.length === 0 ? (
+          {draftChapterNums.length === 0 ? (
             <div
               className="text-xs py-1"
               style={{ paddingLeft: 34, color: 'var(--color-text-muted)' }}
             >
-              {text('暂无草稿（从章节蓝图点击「写作此章」创作）', 'No drafts. Use “Write chapter” from a chapter blueprint.')}
+              {text('暂无草稿。可新建自由草稿，或从章节蓝图点击「写作此章」创作。', 'No drafts. Create a free draft or use “Write chapter” from a chapter blueprint.')}
             </div>
           ) : (
-            chapterNums.map(chNum => (
-              <DraftChapterGroup
+            draftChapterNums.map(chNum => (
+              <DraftChapterItems
                 key={chNum}
                 chapterNumber={chNum}
                 drafts={draftsByChapter[chNum] || []}
@@ -91,13 +108,19 @@ export default function DraftBoxGroup({
           )}
         </div>
       )}
+
+      <NewDraftDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        suggestedChapterNumber={Math.max(0, ...chapterNums) + 1}
+      />
     </div>
   )
 }
 
 // ===== 单章草稿分组 =====
 
-function DraftChapterGroup({
+function DraftChapterItems({
   chapterNumber,
   drafts,
   projectKey,
@@ -108,10 +131,8 @@ function DraftChapterGroup({
 }) {
   const text = useLocaleStore(s => s.text)
   const currentProject = useProjectStore(s => s.currentProject)
-  const [open, setOpen] = useState(true)
-
-  // 将 archived 草稿折叠，只显示活跃草稿（非 archived）
-  const activeDrafts = drafts.filter(d => d.status !== 'archived')
+  // 定稿后只在正文章节出现；这里不再生成“第 N 章 → 草稿_vN”的二级菜单。
+  const activeDrafts = drafts.filter(d => d.status !== 'archived' && d.status !== 'finalized')
   const archivedDrafts = drafts.filter(d => d.status === 'archived')
   const [showArchived, setShowArchived] = useState(false)
   const [bpTitle, setBpTitle] = useState<{ projectKey: string; title: string } | null>(null)
@@ -128,11 +149,8 @@ function DraftChapterGroup({
     return () => { cancelled = true }
   }, [chapterNumber, currentProject, projectKey])
 
-  // 已定稿的草稿存在时，章节显示绿色标记
-  const hasFinalized = drafts.some(d => d.status === 'finalized')
-  const finalizedTitle = drafts.find(d => d.status === 'finalized' && d.chapterTitle?.trim())?.chapterTitle
   const scopedBlueprintTitle = bpTitle?.projectKey === projectKey ? bpTitle.title : ''
-  const baseTitle = finalizedTitle || scopedBlueprintTitle || drafts[0]?.chapterTitle || ''
+  const baseTitle = scopedBlueprintTitle || drafts[0]?.chapterTitle || ''
   const cleanTitle = baseTitle.startsWith(`第${chapterNumber}章`)
     ? baseTitle.replace(`第${chapterNumber}章`, '').trim()
     : baseTitle
@@ -143,38 +161,14 @@ function DraftChapterGroup({
 
   return (
     <div>
-      {/* 章节行 */}
-      <div
-        className="tree-item gap-1.5 cursor-pointer select-none"
-        style={{ paddingLeft: 26 }}
-        onClick={() => setOpen(v => !v)}
-        title={displayTitle}
-      >
-        {open
-          ? <ChevronDown size={10} style={{ color: 'var(--color-text-muted)', flexShrink: 0 }} />
-          : <ChevronRight size={10} style={{ color: 'var(--color-text-muted)', flexShrink: 0 }} />
-        }
-        {hasFinalized
-          ? <CheckCircle2 size={10} style={{ flexShrink: 0, color: 'var(--color-success)' }} />
-          : <Circle size={6} style={{ flexShrink: 0, fill: 'transparent', stroke: 'var(--color-text-muted)' }} />
-        }
-        <span className="text-sm flex-1 truncate" style={{ color: 'var(--color-text-secondary)' }}>
-          {displayTitle}
-        </span>
-        <span className="ml-auto text-[0.7rem] flex-shrink-0" style={{ color: 'var(--color-text-muted)' }}>
-          {text(`${activeDrafts.length} 稿`, `${activeDrafts.length} drafts`)}
-        </span>
-      </div>
-
-      {/* 草稿列表 */}
-      {open && (
-        <div>
           {activeDrafts.map(draft => (
             <DraftItem
               key={draft.filePath}
               draft={draft}
               chapterTitleText={displayTitle}
               projectKey={projectKey}
+              compact
+              showVersion={activeDrafts.length + archivedDrafts.length > 1}
             />
           ))}
 
@@ -182,7 +176,7 @@ function DraftChapterGroup({
           {archivedDrafts.length > 0 && (
             <div
               className="flex items-center gap-1 cursor-pointer select-none"
-              style={{ paddingLeft: 54 }}
+              style={{ paddingLeft: 30 }}
               onClick={() => setShowArchived(v => !v)}
             >
               <span className="text-[0.7rem]" style={{ color: 'var(--color-text-muted)', opacity: 0.6 }}>
@@ -197,10 +191,10 @@ function DraftChapterGroup({
               chapterTitleText={displayTitle}
               projectKey={projectKey}
               archived
+              compact
+              showVersion
             />
           ))}
-        </div>
-      )}
     </div>
   )
 }
@@ -212,11 +206,15 @@ function DraftItem({
   chapterTitleText,
   projectKey,
   archived = false,
+  compact = false,
+  showVersion = false,
 }: {
   draft: DraftMeta
   chapterTitleText: string
   projectKey: string
   archived?: boolean
+  compact?: boolean
+  showVersion?: boolean
 }) {
   const text = useLocaleStore(s => s.text)
   const currentProject = useProjectStore(s => s.currentProject)
@@ -318,7 +316,7 @@ function DraftItem({
     <div
       className="relative flex items-center gap-1.5 cursor-pointer hover:bg-[var(--color-hover)]"
       style={{
-        paddingLeft: 50,
+        paddingLeft: compact ? 30 : 50,
         paddingRight: 8,
         paddingTop: 3,
         paddingBottom: 3,
@@ -352,7 +350,7 @@ function DraftItem({
     >
       <FileText size={10} style={{ color: 'var(--color-text-muted)', flexShrink: 0 }} />
       <span className="text-xs flex-1 truncate" style={{ color: 'var(--color-text-secondary)' }}>
-        {text(`草稿_v${draft.version}`, `Draft_v${draft.version}`)}
+        {showVersion ? `${chapterTitleText} v${draft.version}` : chapterTitleText}
       </span>
       {/* 状态标签（始终显示） */}
       <span

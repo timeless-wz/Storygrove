@@ -68,9 +68,23 @@ function unblockEditModeMenu(host: HTMLElement): void {
   }
 }
 
+/**
+ * Vditor 的 enable()/disabled() 会直接读取其尚未公开、且会在资源加载期间短暂缺失的
+ * 内部 `currentMode.element`。正文页只操作已经出现在 DOM 中的节点，避免该时序问题把
+ * React 编辑区带进错误边界。
+ */
+function setEditingToolbarEnabled(host: HTMLElement, enabled: boolean): void {
+  for (const button of host.querySelectorAll<HTMLButtonElement>('.vditor-toolbar button[data-type]')) {
+    if (button.dataset.type === 'edit-mode') continue
+    button.classList.toggle('vditor-menu--disabled', !enabled)
+    if (enabled) button.removeAttribute('disabled')
+    else button.setAttribute('disabled', 'true')
+  }
+}
+
 /** 只读状态下加固：正文各模式严格不可写，改写类工具栏禁用，但保留模式切换。 */
-function enforceReadOnlyState(host: HTMLElement, vditor: Vditor): void {
-  vditor.disabled()
+function enforceReadOnlyState(host: HTMLElement): void {
+  setEditingToolbarEnabled(host, false)
   unblockEditModeMenu(host)
 
   // 严格确保三种编辑模式下的元素都处于只读/禁用状态
@@ -84,6 +98,39 @@ function enforceReadOnlyState(host: HTMLElement, vditor: Vditor): void {
   if (svTextarea) {
     svTextarea.disabled = true
     svTextarea.setAttribute('readonly', 'true')
+  }
+}
+
+function enforceEditableState(host: HTMLElement): void {
+  setEditingToolbarEnabled(host, true)
+  for (const pre of host.querySelectorAll<HTMLElement>('.vditor-ir pre.vditor-reset, .vditor-wysiwyg pre.vditor-reset')) {
+    pre.setAttribute('contenteditable', 'true')
+  }
+  const svTextarea = host.querySelector<HTMLTextAreaElement>('textarea.vditor-sv')
+  if (svTextarea) {
+    svTextarea.disabled = false
+    svTextarea.removeAttribute('readonly')
+  }
+}
+
+/**
+ * Vditor 会先异步加载语言包，加载完成前其内部 `vditor` 对象不存在；React StrictMode
+ * 的演练性卸载若直接调用 destroy()，库本身会读取 undefined.element 并抛错。
+ */
+function disposeVditor(vditor: Vditor, host: HTMLElement): void {
+  const internal = vditor as unknown as { vditor?: unknown; isDestroyed?: boolean }
+  if (!internal.vditor) {
+    // 标记实例已废弃，使语言包异步回调中的 init() 直接返回；不调用有缺陷的 destroy()。
+    internal.isDestroyed = true
+    host.replaceChildren()
+    return
+  }
+  try {
+    vditor.destroy()
+  } catch (error) {
+    console.warn('[VditorProseEditor] 销毁未完全初始化的编辑器失败，已清空宿主节点', error)
+    internal.isDestroyed = true
+    host.replaceChildren()
   }
 }
 
@@ -112,6 +159,8 @@ export default function VditorProseEditor({
   /** 最近一次收到的 content prop；初始化期间的变化也要在就绪后补上。 */
   const pendingContentRef = useRef(content)
   const readyRef = useRef(false)
+  /** 上一次已应用的编辑状态；只在状态真的切换时同步 DOM。 */
+  const appliedEditableRef = useRef<boolean | null>(null)
 
   // 回调放进 ref：编辑器只创建一次，父组件重渲染不应重建实例。
   const onChangeRef = useRef(onChange)
@@ -154,11 +203,9 @@ export default function VditorProseEditor({
     const vditor = vditorRef.current
     const host = hostRef.current
     if (!vditor || !readyRef.current || !host) return
-    if (editableRef.current) {
-      vditor.enable()
-    } else {
-      enforceReadOnlyState(host, vditor)
-    }
+    if (editableRef.current && appliedEditableRef.current === false) enforceEditableState(host)
+    if (!editableRef.current) enforceReadOnlyState(host)
+    appliedEditableRef.current = editableRef.current
   }, [])
 
   // 创建编辑器：只在挂载时执行一次。
@@ -167,7 +214,14 @@ export default function VditorProseEditor({
     if (!host) return
     readyRef.current = false
     syncedContentRef.current = pendingContentRef.current
-    const vditor = new Vditor(host, {
+    let disposed = false
+    let vditor: Vditor | null = null
+
+    // StrictMode 会同步执行一次 effect 的挂载和清理。延后到下一轮事件循环后再创建，
+    // 那次演练性挂载会在构造前被取消，不会触发 Vditor 的异步语言包/销毁竞态。
+    const timer = window.setTimeout(() => {
+      if (disposed) return
+      const instance = new Vditor(host, {
       // 本地资源目录，绝不指向公网 CDN。
       cdn: VDITOR_ASSET_BASE,
       lang: 'zh_CN',
@@ -192,25 +246,34 @@ export default function VditorProseEditor({
         handler: () => uploadNoticeRef.current,
       },
       input: (markdown: string) => {
-        if (vditorRef.current !== vditor) return
+        if (vditorRef.current !== instance) return
         emitInput(markdown)
       },
       after: () => {
-        if (vditorRef.current !== vditor) return
+        if (vditorRef.current !== instance) return
         readyRef.current = true
         host.setAttribute('data-vditor-ready', 'true')
         // 初始化期间到达的外部内容在这里补写。
         applyExternalContent()
-        onCharCountRef.current?.(countDraftUnits(vditor.getValue()))
+        onCharCountRef.current?.(countDraftUnits(instance.getValue()))
         applyEditableState()
       },
     })
-    vditorRef.current = vditor
+      if (disposed) {
+        disposeVditor(instance, host)
+        return
+      }
+      vditor = instance
+      vditorRef.current = instance
+    }, 0)
     return () => {
-      vditorRef.current = null
+      disposed = true
+      window.clearTimeout(timer)
+      if (vditorRef.current === vditor) vditorRef.current = null
       readyRef.current = false
+      appliedEditableRef.current = null
       host.removeAttribute('data-vditor-ready')
-      vditor.destroy()
+      if (vditor) disposeVditor(vditor, host)
     }
   }, [applyEditableState, applyExternalContent, emitInput])
 
@@ -247,12 +310,12 @@ export default function VditorProseEditor({
       if (modeBtn && !editableRef.current) {
         queueMicrotask(() => {
           if (!editableRef.current && vditorRef.current && hostRef.current) {
-            enforceReadOnlyState(hostRef.current, vditorRef.current)
+            enforceReadOnlyState(hostRef.current)
           }
         })
         setTimeout(() => {
           if (!editableRef.current && vditorRef.current && hostRef.current) {
-            enforceReadOnlyState(hostRef.current, vditorRef.current)
+            enforceReadOnlyState(hostRef.current)
           }
         }, 0)
       }
@@ -272,7 +335,7 @@ export default function VditorProseEditor({
       if (irEditable || wysiwygEditable || svEditable || editButtonsEnabled) {
         isApplying = true
         try {
-          enforceReadOnlyState(host, vditor)
+          enforceReadOnlyState(host)
         } finally {
           isApplying = false
         }

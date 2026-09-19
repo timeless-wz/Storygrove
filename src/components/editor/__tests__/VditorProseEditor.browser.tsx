@@ -1,4 +1,4 @@
-import { act } from 'react'
+import { act, StrictMode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -294,5 +294,18 @@ describe('Vditor prose editor', () => {
     expect(document.getElementById('vditorIconScript')).toBeNull()
     expect(document.querySelector('.vditor')).toBeNull()
     expect(container.querySelector('.vditor-ir')).toBeNull()
+  })
+
+  it('survives React StrictMode effect replay before the local language asset is ready', async () => {
+    await act(async () => {
+      root.render(
+        <StrictMode>
+          <VditorProseEditor content="StrictMode 草稿。" editable onChange={vi.fn()} />
+        </StrictMode>,
+      )
+    })
+    await waitForReady()
+
+    expect(proseElement().textContent).toContain('StrictMode 草稿。')
   })
 })

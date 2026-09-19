@@ -33,6 +33,7 @@ import { useLocaleStore } from '../../stores/locale-store'
 import { useWorkflowStore } from '../../stores/workflow-store'
 import type { Locale } from '../../i18n/types'
 import { alertError } from '../ui/AlertDialog'
+import { UpdateSection } from '../updates/UpdateSection'
 import {
   ModelReasoningOverrideSettings,
   ProjectCreativeStrategySettings,
@@ -1420,6 +1421,10 @@ function AboutSection() {
           <div className="text-xs font-semibold mb-1" style={{ color: 'var(--color-text)' }}>{text('模型连接', 'Model connections')}</div>
           <p className="text-xs leading-relaxed">{text('支持 OpenAI 兼容接口、Ollama、本地与自定义供应商。', 'Supports OpenAI-compatible APIs, Ollama, local models, and custom providers.')}</p>
         </div>
+      </div>
+
+      <div className="pt-2">
+        <UpdateSection />
       </div>
     </div>
   )

@@ -86,6 +86,9 @@ beforeEach(() => {
     if (channel === 'db:draft-get-full') {
       return { id: args[0], content: '# 不应读取的正文首行' }
     }
+    if (channel === 'db:draft-next-version') return 1
+    if (channel === 'db:draft-create') return { success: true, id: 99 }
+    if (channel === 'db:draft-list') return []
     throw new Error(`Unexpected IPC channel: ${channel}`)
   })
   ;(window as unknown as { velaAPI: TestVelaApi }).velaAPI = {
@@ -132,7 +135,7 @@ describe('authoritative finalized chapter titles', () => {
       )
     })
     await vi.waitFor(() => {
-      expect(container?.textContent?.match(/旧码头的红钟/gu)).toHaveLength(2)
+      expect(container?.textContent?.match(/旧码头的红钟/gu)).toHaveLength(1)
     })
 
     await act(async () => {
@@ -146,7 +149,7 @@ describe('authoritative finalized chapter titles', () => {
     })
 
     expect(container?.textContent).not.toContain('旧码头的红钟')
-    expect(container?.textContent?.match(/第1章/gu)).toHaveLength(2)
+    expect(container?.textContent?.match(/第1章/gu)).toHaveLength(1)
   })
 
   it('never leaks cached chapter titles when switching projects with the same draft identity', async () => {
@@ -171,7 +174,7 @@ describe('authoritative finalized chapter titles', () => {
       )
     })
     await vi.waitFor(() => {
-      expect(container?.textContent?.match(/项目甲标题/gu)).toHaveLength(2)
+      expect(container?.textContent?.match(/项目甲标题/gu)).toHaveLength(1)
     })
 
     await act(async () => {
@@ -185,10 +188,10 @@ describe('authoritative finalized chapter titles', () => {
     })
 
     expect(container?.textContent).not.toContain('项目甲标题')
-    expect(container?.textContent?.match(/项目乙标题/gu)).toHaveLength(2)
+    expect(container?.textContent?.match(/项目乙标题/gu)).toHaveLength(1)
   })
 
-  it('keeps author outbox titles in both finalized surfaces despite missing or conflicting reference blueprints', async () => {
+  it('keeps author outbox titles in the manuscript without retaining finalized chapters in the draft box', async () => {
     const chapterOne = draft(1, 1, '蓝镜初亮')
     const chapterTwo = draft(2, 2, '潮线回声')
     const manuscriptFiles = [chapterOne, chapterTwo].map(item => ({
@@ -211,8 +214,8 @@ describe('authoritative finalized chapter titles', () => {
     })
 
     await vi.waitFor(() => {
-      expect(container?.textContent?.match(/蓝镜初亮/gu)).toHaveLength(2)
-      expect(container?.textContent?.match(/潮线回声/gu)).toHaveLength(2)
+      expect(container?.textContent?.match(/蓝镜初亮/gu)).toHaveLength(1)
+      expect(container?.textContent?.match(/潮线回声/gu)).toHaveLength(1)
       expect(container?.textContent).not.toContain('旧码头的红钟')
       expect(container?.textContent).not.toContain('不应读取的正文首行')
     })
@@ -242,6 +245,73 @@ describe('authoritative finalized chapter titles', () => {
     await vi.waitFor(() => {
       expect(container?.textContent).toContain('第3章 计划中的第三章')
       expect(container?.textContent).toContain('第4章 旧项目第四章')
+    })
+  })
+
+  it('keeps a visible free-draft entry and creates an editable draft without a blueprint', async () => {
+    container = document.createElement('div')
+    document.body.append(container)
+    root = createRoot(container)
+
+    await act(async () => {
+      root?.render(<DraftBoxGroup draftsByChapter={{ 1: [draft(1, 1, undefined, 'draft')] }} />)
+    })
+
+    const entry = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('新建草稿'),
+    )
+    expect(entry).toBeTruthy()
+    await act(async () => entry?.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain('新建章节草稿')
+    })
+    const create = Array.from(document.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('创建并开始写作'),
+    )
+    expect(create).toBeTruthy()
+    await act(async () => create?.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+
+    await vi.waitFor(() => {
+      const call = invoke.mock.calls.find(([channel]) => channel === 'db:draft-create')
+      expect(call).toBeTruthy()
+      expect(call?.[1]).toMatchObject({
+        chapterNumber: 2,
+        version: 1,
+        source: 'write',
+        content: '',
+      })
+      expect(call?.[2]).toBe(PROJECT_PATH)
+    })
+  })
+
+  it('starts a new chapter from the manuscript entry as a draft that can later be finalized', async () => {
+    container = document.createElement('div')
+    document.body.append(container)
+    root = createRoot(container)
+
+    await act(async () => {
+      root?.render(<ManuscriptGroup files={[]} projectPath={PROJECT_PATH} />)
+    })
+
+    const entry = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('新建章节'),
+    )
+    expect(entry).toBeTruthy()
+    await act(async () => entry?.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+
+    const create = await vi.waitFor(() => {
+      const button = Array.from(document.querySelectorAll('button')).find(candidate =>
+        candidate.textContent?.includes('创建并开始写作'),
+      )
+      expect(button).toBeTruthy()
+      return button
+    })
+    await act(async () => create?.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+
+    await vi.waitFor(() => {
+      const call = invoke.mock.calls.find(([channel]) => channel === 'db:draft-create')
+      expect(call?.[1]).toMatchObject({ chapterNumber: 1, version: 1, source: 'write' })
     })
   })
 })
