@@ -28,6 +28,21 @@ export async function commitFinalizationSnapshot(
   ) as Promise<FinalizationResult>
 }
 
+/** 将当前作者正文发布到正文目录；发布后仍可继续编辑并再次同步。 */
+export async function publishChapterSnapshot(
+  snapshot: FinalizationSnapshot,
+): Promise<FinalizationResult> {
+  const currentSession = getActiveProjectSessionContext()
+  if (!sameProjectSessionContext(snapshot.projectSession, currentSession)) {
+    throw new Error('项目会话已变化，已拒绝发布旧正文快照')
+  }
+  return getVelaApi().invoke(
+    'publication:publish',
+    snapshot,
+    snapshot.projectSession,
+  ) as Promise<FinalizationResult>
+}
+
 /** 实体稿重试只带已提交的 finalizationId，正文和路径始终从 SQLite outbox 读取。 */
 export async function retryFinalizationPublication(
   finalizationId: string,

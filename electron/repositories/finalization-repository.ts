@@ -312,6 +312,52 @@ export class FinalizationRepository {
     return transaction()
   }
 
+  /**
+   * 已发布章节仍是作者可编辑的正文。保存后的正文替换发布快照，并将实体稿
+   * 标为待同步；调用方随后只会按这份当前快照重写同一个正文文件。
+   */
+  static replacePublishedContent(input: FinalizationCommitInput): FinalizationRecord {
+    const db = requireDatabase()
+    const transaction = db.transaction(() => {
+      const existing = db.prepare(`
+        SELECT * FROM finalization_outbox WHERE draft_id = ?
+      `).get(input.draftId) as FinalizationRow | undefined
+      if (!existing) return FinalizationRepository.commit(input)
+      if (existing.chapter_number !== input.chapterNumber) {
+        throw new Error('正文与发布章节不匹配')
+      }
+
+      const draft = db.prepare(`
+        SELECT content_id FROM drafts WHERE id = ?
+      `).get(input.draftId) as { content_id: number } | undefined
+      if (!draft) throw new Error(`草稿不存在：${input.draftId}`)
+      db.prepare('UPDATE contents SET body = ? WHERE id = ?').run(input.content, draft.content_id)
+      db.prepare(`
+        UPDATE drafts
+        SET status = 'finalized', word_count = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `).run(countDraftUnits(input.content), input.draftId)
+
+      db.prepare(`
+        UPDATE finalization_outbox
+        SET chapter_title = ?, content_hash = ?, content_revision = ?, content_snapshot = ?,
+            publication_status = 'pending', last_error = '', published_at = NULL,
+            updated_at = datetime('now')
+        WHERE draft_id = ?
+      `).run(
+        input.chapterTitle,
+        input.contentHash,
+        input.contentRevision,
+        input.content,
+        input.draftId,
+      )
+      const row = db.prepare(`SELECT * FROM finalization_outbox WHERE draft_id = ?`)
+        .get(input.draftId) as FinalizationRow
+      return rowToRecord(row)
+    })
+    return transaction()
+  }
+
   static get(finalizationId: string): FinalizationRecord | null {
     const db = requireDatabase()
     const row = db.prepare(`

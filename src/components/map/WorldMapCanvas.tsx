@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
 import {
   type WorldMapNode,
   type WorldMapEdge,
@@ -7,6 +7,12 @@ import {
   WORLD_MAP_EDGE_TYPE_LABELS,
 } from '../../shared/world-map'
 import { useLocaleStore } from '../../stores/locale-store'
+import {
+  getMapImageFitTransform,
+  MAP_IMAGE_SIZE,
+  MAX_MAP_ZOOM,
+  MIN_MAP_ZOOM,
+} from './world-map-canvas-fit'
 
 interface Props {
   /** 当前地图自己的地点；画布绝不显示其他地图的地点。 */
@@ -16,6 +22,8 @@ interface Props {
   selectedEdgeId: string | null
   /** 当前地图自己的托管图片；随同画布的平移和缩放显示。 */
   backgroundImage?: string | null
+  /** 外层会改变画布可用宽度的布局状态（例如“管理地图”面板）。 */
+  layoutKey?: string | number | boolean
   onSelectNode: (id: string | null) => void
   onSelectEdge: (id: string | null) => void
   onUpdateNodePosition: (id: string, x: number, y: number) => void
@@ -46,6 +54,7 @@ export default function WorldMapCanvas({
   selectedNodeId,
   selectedEdgeId,
   backgroundImage,
+  layoutKey,
   onSelectNode,
   onSelectEdge,
   onUpdateNodePosition,
@@ -59,6 +68,9 @@ export default function WorldMapCanvas({
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [isPanning, setIsPanning] = useState(false)
   const startPanRef = useRef({ x: 0, y: 0 })
+  const hasManualViewportRef = useRef(false)
+  const fittedImageRef = useRef<string | null | undefined>(undefined)
+  const [imageSize, setImageSize] = useState(MAP_IMAGE_SIZE)
 
   // Node dragging
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null)
@@ -71,11 +83,79 @@ export default function WorldMapCanvas({
   // Only connections whose both endpoints belong to this map are ever drawn.
   const visibleEdges = edges.filter(e => visibleNodeMap.has(e.fromNodeId) && visibleNodeMap.has(e.toNodeId))
 
+  const fitMapImage = useCallback(() => {
+    const container = containerRef.current
+    if (!container || !backgroundImage) return
+
+    const { width, height } = container.getBoundingClientRect()
+    if (width <= 0 || height <= 0) return
+
+    const fitted = getMapImageFitTransform(width, height, imageSize)
+    setZoom(fitted.zoom)
+    setPan(fitted.pan)
+  }, [backgroundImage, imageSize])
+  const fitMapImageRef = useRef(fitMapImage)
+  useLayoutEffect(() => {
+    fitMapImageRef.current = fitMapImage
+  }, [fitMapImage])
+
+  // SVG 的 preserveAspectRatio 会把竖版图片置于 1200×900 逻辑区域中央。
+  // 适配时必须使用原图的实际比例；若仍按 1200×900 计算，竖版图会被错误地
+  // 缩小到只占很小一块。
+  useEffect(() => {
+    if (!backgroundImage) return
+
+    let cancelled = false
+    const image = new Image()
+    image.onload = () => {
+      if (!cancelled && image.naturalWidth > 0 && image.naturalHeight > 0) {
+        setImageSize({ width: image.naturalWidth, height: image.naturalHeight })
+      }
+    }
+    image.onerror = () => {
+      if (!cancelled) setImageSize(MAP_IMAGE_SIZE)
+    }
+    image.src = backgroundImage
+    return () => { cancelled = true }
+  }, [backgroundImage])
+
+  // ResizeObserver covers application sidebars as well as window resizes. Do
+  // not undo a deliberate author pan/zoom merely because another panel moved.
+  useLayoutEffect(() => {
+    if (fittedImageRef.current !== backgroundImage) {
+      fittedImageRef.current = backgroundImage
+      hasManualViewportRef.current = false
+    }
+    if (!hasManualViewportRef.current) fitMapImage()
+
+    const container = containerRef.current
+    if (!container || !backgroundImage || typeof ResizeObserver === 'undefined') return
+
+    const observer = new ResizeObserver(() => {
+      if (!hasManualViewportRef.current) fitMapImage()
+    })
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [backgroundImage, fitMapImage])
+
+  // “管理地图”会直接增减左侧的固定宽度。这个切换发生在画布外层，部分桌面
+  // WebView 不会可靠地把它作为画布自身的 ResizeObserver 事件派发；因此布局
+  // 完成后的下一帧按新的实际尺寸强制完整适配，绝不沿用展开前的缩放值。
+  useLayoutEffect(() => {
+    if (!backgroundImage) return
+    const frame = requestAnimationFrame(() => {
+      hasManualViewportRef.current = false
+      fitMapImageRef.current()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [backgroundImage, layoutKey])
+
   // Mouse wheel zoom
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault()
     const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9
-    setZoom(prev => Math.min(Math.max(prev * zoomFactor, 0.3), 3))
+    hasManualViewportRef.current = true
+    setZoom(prev => Math.min(Math.max(prev * zoomFactor, MIN_MAP_ZOOM), MAX_MAP_ZOOM))
   }
 
   // Pan start
@@ -87,6 +167,7 @@ export default function WorldMapCanvas({
     const target = e.target as Element
     if (target.closest('[data-map-canvas-control]')) return
 
+    hasManualViewportRef.current = true
     setIsPanning(true)
     startPanRef.current = { x: e.clientX - pan.x, y: e.clientY - pan.y }
     onSelectNode(null)
@@ -164,7 +245,11 @@ export default function WorldMapCanvas({
       {/* Background grid pattern */}
       <svg
         data-testid="world-map-surface"
-        className="w-full h-full"
+        // 这里必须保留完整的逻辑地图尺寸。若 SVG 本身跟随父容器变窄，图片会
+        // 在 SVG 内部先被裁掉右侧，外层再缩放也无法把被裁部分找回来。
+        className="absolute left-0 top-0"
+        width={MAP_IMAGE_SIZE.width}
+        height={MAP_IMAGE_SIZE.height}
         style={{
           transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
           transformOrigin: '0 0',
@@ -206,8 +291,8 @@ export default function WorldMapCanvas({
             href={backgroundImage}
             x="0"
             y="0"
-            width="1200"
-            height="900"
+            width={MAP_IMAGE_SIZE.width}
+            height={MAP_IMAGE_SIZE.height}
             preserveAspectRatio="xMidYMid meet"
             opacity="0.78"
             pointerEvents="none"
@@ -329,7 +414,10 @@ export default function WorldMapCanvas({
         <button
           type="button"
           className="px-2 py-1 hover:bg-[var(--color-hover)] rounded"
-          onClick={() => setZoom(z => Math.max(z * 0.8, 0.3))}
+          onClick={() => {
+            hasManualViewportRef.current = true
+            setZoom(z => Math.max(z * 0.8, MIN_MAP_ZOOM))
+          }}
           title="Zoom out"
         >
           -
@@ -340,7 +428,10 @@ export default function WorldMapCanvas({
         <button
           type="button"
           className="px-2 py-1 hover:bg-[var(--color-hover)] rounded"
-          onClick={() => setZoom(z => Math.min(z * 1.2, 3))}
+          onClick={() => {
+            hasManualViewportRef.current = true
+            setZoom(z => Math.min(z * 1.2, MAX_MAP_ZOOM))
+          }}
           title="Zoom in"
         >
           +
@@ -348,7 +439,10 @@ export default function WorldMapCanvas({
         <button
           type="button"
           className="px-2 py-1 hover:bg-[var(--color-hover)] rounded text-[11px]"
-          onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}
+          onClick={() => {
+            hasManualViewportRef.current = false
+            fitMapImage()
+          }}
           title="Reset"
         >
           {text('重置', 'Reset')}

@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect } from 'react'
-import { ChevronRight, ChevronDown, CheckCircle2, FileText, FolderOpen, Copy, Trash2, FilePen, Plus } from 'lucide-react'
+import { ChevronRight, ChevronDown, CheckCircle2, FileText, FolderOpen, Copy, Trash2, FilePen, Plus, Link2 } from 'lucide-react'
 import type { DraftMeta } from '../../../stores/draft-store'
 import { useDraftStore, readDraftBody } from '../../../stores/draft-store'
 import { useEditorStore } from '../../../stores/editor-store'
@@ -22,9 +22,10 @@ import {
 } from '../../project-session-gate'
 import { deleteFinalizedChapter } from './finalized-chapter-deletion'
 import { NewDraftDialog } from './NewDraftDialog'
+import { BlueprintBindingDialog, type BlueprintBindingTarget } from './BlueprintBindingDialog'
 
 const DRAFT_STATUS_EN: Record<string, string> = {
-  draft: 'Draft', revising: 'Revising', reviewed: 'Reviewed', finalized: 'Finalized', archived: 'Archived',
+  draft: 'Draft', revising: 'Revising', reviewed: 'Reviewed', finalized: 'Published', archived: 'Archived',
 }
 
 // ===== 草稿箱折叠组 =====
@@ -36,6 +37,7 @@ export default function DraftBoxGroup({
 }) {
   const [open, setOpen] = useState(true)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [bindingTarget, setBindingTarget] = useState<BlueprintBindingTarget | null>(null)
   const text = useLocaleStore(s => s.text)
   const projectKey = useProjectStore(s => s.currentProject?.path)
   if (!projectKey) return null
@@ -45,7 +47,7 @@ export default function DraftBoxGroup({
     .map(Number)
     .sort((a, b) => a - b)
 
-  // 已定稿章节只属于“正文章节”；草稿箱只保留仍可继续创作的稿件。
+  // 已发布章节只属于“正文章节”；草稿箱只保留未发布稿件。
   const draftChapterNums = chapterNums.filter(n =>
     (draftsByChapter[n] || []).some(d => d.status !== 'archived' && d.status !== 'finalized')
   )
@@ -62,7 +64,7 @@ export default function DraftBoxGroup({
         className="tree-item gap-1.5 cursor-pointer select-none"
         style={{ paddingLeft: 10 }}
         onClick={() => setOpen(v => !v)}
-        title={text('草稿箱：AI 生成后的章节草稿在此管理，定稿后进入正文章节', 'Draft box: manage AI-generated drafts here. Finalized drafts move to the manuscript.')}
+        title={text('草稿箱：AI 生成后的章节草稿在此管理，发布后进入正文章节', 'Draft box: manage AI-generated drafts here. Published drafts move to the manuscript.')}
       >
         {open
           ? <ChevronDown size={12} style={{ color: 'var(--color-text-muted)', flexShrink: 0 }} />
@@ -103,6 +105,7 @@ export default function DraftBoxGroup({
                 chapterNumber={chNum}
                 drafts={draftsByChapter[chNum] || []}
                 projectKey={projectKey}
+                onBindBlueprint={setBindingTarget}
               />
             ))
           )}
@@ -114,6 +117,11 @@ export default function DraftBoxGroup({
         onOpenChange={setCreateDialogOpen}
         suggestedChapterNumber={Math.max(0, ...chapterNums) + 1}
       />
+      <BlueprintBindingDialog
+        open={bindingTarget !== null}
+        onOpenChange={open => { if (!open) setBindingTarget(null) }}
+        target={bindingTarget}
+      />
     </div>
   )
 }
@@ -124,14 +132,16 @@ function DraftChapterItems({
   chapterNumber,
   drafts,
   projectKey,
+  onBindBlueprint,
 }: {
   chapterNumber: number
   drafts: DraftMeta[]
   projectKey: string
+  onBindBlueprint: (target: BlueprintBindingTarget) => void
 }) {
   const text = useLocaleStore(s => s.text)
   const currentProject = useProjectStore(s => s.currentProject)
-  // 定稿后只在正文章节出现；这里不再生成“第 N 章 → 草稿_vN”的二级菜单。
+  // 发布后只在正文章节出现；这里不再生成“第 N 章 → 草稿_vN”的二级菜单。
   const activeDrafts = drafts.filter(d => d.status !== 'archived' && d.status !== 'finalized')
   const archivedDrafts = drafts.filter(d => d.status === 'archived')
   const [showArchived, setShowArchived] = useState(false)
@@ -167,6 +177,7 @@ function DraftChapterItems({
               draft={draft}
               chapterTitleText={displayTitle}
               projectKey={projectKey}
+              onBindBlueprint={onBindBlueprint}
               compact
               showVersion={activeDrafts.length + archivedDrafts.length > 1}
             />
@@ -190,6 +201,7 @@ function DraftChapterItems({
               draft={draft}
               chapterTitleText={displayTitle}
               projectKey={projectKey}
+              onBindBlueprint={onBindBlueprint}
               archived
               compact
               showVersion
@@ -208,6 +220,7 @@ function DraftItem({
   archived = false,
   compact = false,
   showVersion = false,
+  onBindBlueprint,
 }: {
   draft: DraftMeta
   chapterTitleText: string
@@ -215,6 +228,7 @@ function DraftItem({
   archived?: boolean
   compact?: boolean
   showVersion?: boolean
+  onBindBlueprint: (target: BlueprintBindingTarget) => void
 }) {
   const text = useLocaleStore(s => s.text)
   const currentProject = useProjectStore(s => s.currentProject)
@@ -339,6 +353,18 @@ function DraftItem({
         },
         { key: 'div2', type: 'divider' as const },
         {
+          key: 'bind-blueprint',
+          label: text('绑定蓝图', 'Link blueprint'),
+          icon: <Link2 size={13} />,
+          onClick: () => onBindBlueprint({
+            draftId: draft.id,
+            chapterNumber: draft.chapterNumber,
+            blueprintChapterNumber: draft.blueprintChapterNumber,
+            label: `${chapterTitleText} v${draft.version}`,
+          }),
+        },
+        { key: 'div3', type: 'divider' as const },
+        {
           key: 'delete',
           label: text('删除这一稿', 'Delete draft'),
           icon: <Trash2 size={13} />,
@@ -359,10 +385,27 @@ function DraftItem({
       >
         {statusLabel}
       </span>
-      {/* 已定稿图标 */}
+      {/* 已发布图标 */}
       {isFinalized && (
         <CheckCircle2 size={10} style={{ color: 'var(--color-success)', flexShrink: 0 }} />
       )}
+      <button
+        type="button"
+        className="opacity-70 hover:opacity-100 rounded p-0.5"
+        title={text('绑定蓝图', 'Link blueprint')}
+        onClick={(event) => {
+          event.stopPropagation()
+          onBindBlueprint({
+            draftId: draft.id,
+            chapterNumber: draft.chapterNumber,
+            blueprintChapterNumber: draft.blueprintChapterNumber,
+            label: `${chapterTitleText} v${draft.version}`,
+          })
+        }}
+        style={{ color: 'var(--color-text-muted)' }}
+      >
+        <Link2 size={10} />
+      </button>
       <button
         type="button"
         className="opacity-70 hover:opacity-100 rounded p-0.5"

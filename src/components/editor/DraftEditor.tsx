@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import {
-  Search, BadgeCheck, Save, FileText, Wrench, Check,
+  Search, Upload, Save, FileText, Wrench, Check, Link2,
 } from 'lucide-react'
 
 import { useProjectStore } from '../../stores/project-store'
@@ -23,26 +23,25 @@ import {
 import { getReviewsForVersion } from '../../services/draft-index'
 import { ipc } from '../../services/ipc-client'
 import { requireIpcSuccess } from '../../services/ipc-result'
-import { retryFinalizationPublication } from '../../services/finalization-client'
+import { publishChapterSnapshot, retryFinalizationPublication } from '../../services/finalization-client'
 import { captureFinalizationSnapshot } from '../../services/finalization-snapshot'
 
 import { DRAFT_STATUS_LABEL, DRAFT_STATUS_COLOR } from '../../shared/draft-status'
 import { countDraftUnits } from '../../shared/draft-units'
-import { PostProcessStatusPanel } from '../ui/PostProcessStatusPanel'
-import { getChapterFinalizeScope } from '../../services/workflows/workflow-utils'
-import { guardRepairPostProcess } from '../../services/workflow-guards'
+import { globalEventBus } from '../../shared/event-bus'
 import {
   captureProjectSession,
   isProjectSessionCurrent,
   isProjectSessionPath,
 } from '../project-session-gate'
 import { readDraftBody } from '../../stores/draft-store'
+import { BlueprintBindingDialog } from '../panels/sidebar/BlueprintBindingDialog'
 
 const DRAFT_STATUS_EN: Record<string, string> = {
   draft: 'Draft',
   revised: 'Revised',
   reviewed: 'Reviewed',
-  finalized: 'Finalized',
+  finalized: 'Published',
   archived: 'Archived',
 }
 
@@ -81,9 +80,7 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
   const projectMatches = currentProject?.path === projectKey
   const tabDraftStatus = editorTab?.draftStatus
   const [reviewCount, setReviewCount] = useState(0)
-
-  // 后处理失败状态（用于控制是否展示修复按钮）
-  const [hasProcessFailure, setHasProcessFailure] = useState(false)
+  const [bindingDialogOpen, setBindingDialogOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -98,7 +95,9 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
         projectSession.projectPath,
       )
       if (cancelled || !isProjectSessionCurrent(projectSession)) return
-      const bp = Array.isArray(bps) ? bps.find((b: unknown) => (b as { chapterNumber?: number }).chapterNumber === m.chapterNumber) : null
+      const bp = Array.isArray(bps) ? bps.find((b: unknown) => (
+        b as { chapterNumber?: number }
+      ).chapterNumber === (m.blueprintChapterNumber ?? m.chapterNumber)) : null
       setMeta({ ...m, chapterTitle: bp ? (bp as { title?: string }).title : undefined, filePath, fileName: `v${m.version}`, createdAt: m.updatedAt ?? m.createdAt })
       // 使用 DB 化的虚拟 chapterDir（用于 draft-index 兼容层解析章节号）
       const chapterDir = `vela://draft/ch${m.chapterNumber}`
@@ -116,7 +115,7 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
   }, [currentProject, filePath, projectKey])
 
   const status: DraftStatus = tabDraftStatus ?? meta?.status ?? 'draft'
-  const isReadonly = status === 'finalized' || status === 'archived'
+  const isReadonly = status === 'archived'
 
   // 检查是否有相关章节工作流正在运行
   // ✅ 只订阅 activeRuns，不订阅 globalLogs 等高频更新字段
@@ -176,9 +175,7 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
     )
     if (
       !targetTab
-      || targetTab.draftStatus === 'finalized'
       || targetTab.draftStatus === 'archived'
-      || status === 'finalized'
       || status === 'archived'
     ) return
     const saveSnapshot = {
@@ -199,6 +196,15 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
           projectSession.projectPath,
         )
         if (!result.success) throw new Error(result.error || text('草稿保存失败', 'Could not save the draft'))
+        if (status === 'finalized' && meta) {
+          const snapshot = captureFinalizationSnapshot({
+            tab: { ...targetTab, content: saveSnapshot.content },
+            projectSession,
+            chapterTitle: meta.chapterTitle ?? '',
+          })
+          const publication = await publishChapterSnapshot(snapshot)
+          if (!publication.success) throw new Error(publication.error || text('正文同步失败', 'Could not sync the manuscript'))
+        }
       } else {
         requireIpcSuccess(
           await ipc.invokeWithProjectSession(
@@ -314,30 +320,27 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
     }
   }
 
-  /** 定稿 */
-  const doFinalize = async () => {
+  /** 发布到正文；发布只改变归类，不锁定正文。 */
+  const doPublish = async () => {
     const projectSession = captureProjectSession(currentProject)
     if (!projectMatches || !currentProject || !meta || isChapterBusy || !projectSession || !isProjectSessionPath(projectSession, projectKey)) return
     const ok = await confirm(
       text(
-        `确定要将第 ${meta.chapterNumber} 章定稿吗？\n\n定稿后章节将标记为完成，不再支持修改和重新后处理。`,
-        `Finalize Chapter ${meta.chapterNumber}?\n\nIt will be marked complete and can no longer be edited or post-processed again.`,
+        `将第 ${meta.chapterNumber} 章发布到正文吗？\n\n发布后会移到「正文章节」，仍可随时继续修改。`,
+        `Publish Chapter ${meta.chapterNumber} to the manuscript?\n\nIt will move to “Manuscript” and remain editable.`,
       ),
       {
-        title: text('确认定稿', 'Confirm finalization'),
-        confirmText: text('确认定稿', 'Finalize'),
+        title: text('确认发布', 'Confirm publication'),
+        confirmText: text('发布到正文', 'Publish'),
       }
     )
     if (!ok || !isProjectSessionCurrent(projectSession)) return
     try {
-      const { useWorkflowStore } = await import('../../stores/workflow-store')
-      const { createFinalizeWorkflow } = await import('../../services/workflows/chapter-workflow')
-      if (!isProjectSessionCurrent(projectSession)) return
       const targetTab = useEditorStore.getState().tabs.find(
         tab => tab.id === tabId && tab.projectKey === projectKey,
       )
       if (!targetTab) {
-        throw new Error(text('当前草稿或项目会话已失效，无法冻结定稿内容', 'The draft or project session is no longer available.'))
+        throw new Error(text('当前草稿或项目会话已失效，无法发布正文', 'The draft or project session is no longer available.'))
       }
       const snapshot = captureFinalizationSnapshot({
         tab: {
@@ -352,6 +355,9 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
         chapterTitle: meta.chapterTitle ?? '未知标题',
       })
       if (!isProjectSessionCurrent(projectSession)) return
+      const result = await publishChapterSnapshot(snapshot)
+      if (!isProjectSessionCurrent(projectSession)) return
+      if (!result.committed) throw new Error(result.error || text('正文发布失败', 'Could not publish the manuscript.'))
       useEditorStore.setState(state => ({
         tabs: state.tabs.map(tab => tab.id === snapshot.tabId && tab.projectKey === snapshot.projectPath
           ? {
@@ -359,23 +365,25 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
               draftId: snapshot.draftId,
               chapterNumber: snapshot.chapterNumber,
               projectSessionLease: snapshot.projectSession.leaseId,
+              draftStatus: 'finalized',
+              finalizationId: result.finalizationId,
+              finalizationPublication: result.publicationStatus,
               finalizationConflict: undefined,
             }
           : tab),
       }))
 
-      if (!isProjectSessionCurrent(projectSession)) return
-      useWorkflowStore.getState().startWorkflow(createFinalizeWorkflow({
+      globalEventBus.emit('REFRESH_RESOURCE', {
+        resources: ['drafts', 'fileTree'],
         projectPath: projectSession.projectPath,
-        chapterNumber: meta.chapterNumber,
-        chapterTitle: meta.chapterTitle ?? '未知标题',
-        draftPath: filePath,
-        draftContent: snapshot.content,
-        snapshot,
-      }, projectSession), false)
+        projectSession,
+      })
+      toast.success(result.success
+        ? text('已发布到正文章节', 'Published to manuscript')
+        : text('正文已保存，实体文件将自动重试同步', 'Manuscript saved; its file will retry syncing automatically.'))
     } catch (e) {
       if (!isProjectSessionCurrent(projectSession)) return
-      toast.error(text(`定稿启动失败：${e}`, 'Could not start finalization.'))
+      toast.error(text(`正文发布失败：${e}`, 'Could not publish the manuscript.'))
     }
   }
 
@@ -406,32 +414,6 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
       toast.error(text(`实体稿发布失败：${error}`, 'Could not publish the manuscript.'))
     }
   }, [currentProject, projectKey, tabId, text])
-
-  /** 修复定稿后处理 — 只重跑失败的步骤 */
-  const doRepairFinalize = useCallback(async (stepKey?: string) => {
-    const projectSession = captureProjectSession(currentProject)
-    if (!projectMatches || !currentProject || !meta || isChapterBusy || !projectSession || !isProjectSessionPath(projectSession, projectKey)) return
-    try {
-      const guard = await guardRepairPostProcess(meta.chapterNumber, projectKey, projectSession)
-      if (!isProjectSessionCurrent(projectSession)) return
-      if (!guard.ok) {
-        toast.error(locale === 'zh-CN'
-          ? (guard.message || text('无法执行修复', 'Could not run the repair.'))
-          : text('无法执行修复', 'Could not run the repair.'))
-        return
-      }
-      const { useWorkflowStore } = await import('../../stores/workflow-store')
-      const { createRepairFinalizeWorkflow } = await import('../../services/workflows/chapter-workflow')
-      if (!isProjectSessionCurrent(projectSession)) return
-      useWorkflowStore.getState().startWorkflow(
-        createRepairFinalizeWorkflow(meta.chapterNumber, projectSession.projectPath, projectSession, stepKey),
-        false,
-      )
-    } catch (e) {
-      if (!isProjectSessionCurrent(projectSession)) return
-      toast.error(text(`修复启动失败：${e}`, 'Could not start the repair.'))
-    }
-  }, [currentProject, isChapterBusy, locale, meta, projectKey, projectMatches, text])
 
   /** 打开最新的审稿报告 */
   const openLatestReview = async () => {
@@ -488,7 +470,7 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
           )}
         </div>
 
-        {/* 右侧：字数 + 状态 + 待合并 + AI操作 + 定稿 */}
+        {/* 右侧：字数 + 状态 + AI 操作 + 发布 */}
         {!isReadonly && (
           <div className="flex items-center gap-1.5 flex-shrink-0">
             {/* 字数 */}
@@ -537,8 +519,8 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
                 className="text-[0.7rem] px-1.5 py-0.5 rounded flex-shrink-0"
                 style={{ color: 'var(--color-warning-text)', backgroundColor: 'var(--color-hover)' }}
                 title={text(
-                  '定稿完成事件没有覆盖这次编辑；请先处理本地后续修改与已定稿版本的差异。',
-                  'Finalization did not overwrite this edit. Resolve the difference between your later local changes and the finalized version first.',
+                  '发布完成事件没有覆盖这次编辑；请保存后重新同步正文。',
+                  'Publication did not overwrite this edit. Save it and sync the manuscript again.',
                 )}
               >
                 {text('已保留后续编辑', 'Later edits kept')}
@@ -550,10 +532,22 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
                 variant="outline"
                 size="sm"
                 onClick={doRetryManuscriptPublication}
-                title={text('定稿已提交、实体稿待发布；只重试已提交的发布记录', 'Finalization is submitted and the manuscript is pending publication. Retry only the submitted publication.')}
+                title={text('正文已保存、实体文件待同步；重试当前发布记录', 'The manuscript is saved and its file is pending sync. Retry the current publication.')}
               >
                 <Wrench size={12} />
-                {text('重试实体稿', 'Retry manuscript')}
+                {text('重试同步', 'Retry sync')}
+              </Button>
+            )}
+
+            {meta && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setBindingDialogOpen(true)}
+                title={text('绑定或更换章节蓝图', 'Link or change the chapter blueprint')}
+              >
+                <Link2 size={12} />
+                {text('绑定蓝图', 'Link blueprint')}
               </Button>
             )}
 
@@ -582,21 +576,21 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
               {text('AI 审稿', 'AI review')}
             </Button>
 
-            {/* 定稿 */}
-            <Button
+            {/* 发布 */}
+            {status !== 'finalized' && <Button
               variant="success"
               size="sm"
-              onClick={doFinalize}
+              onClick={doPublish}
               disabled={isChapterBusy || !!finalizationConflict || finalizationPending}
-                title={text('定稿 — 确认终稿并写入正文章节', 'Finalize — confirm the final draft and write it to the manuscript')}
+                title={text('发布到正文 — 移到正文章节，之后仍可编辑', 'Publish — move to manuscript and keep editing')}
             >
-              <BadgeCheck size={12} />
-                {text('定稿', 'Finalize')}
-            </Button>
+              <Upload size={12} />
+                {text('发布到正文', 'Publish')}
+            </Button>}
           </div>
         )}
 
-        {/* 已定稿/归档显示只读提示 */}
+        {/* 归档稿显示只读提示 */}
         {isReadonly && (
           <div className="flex items-center gap-2 flex-shrink-0">
             {charCount > 0 && (
@@ -605,48 +599,22 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
               </span>
             )}
             <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-              {status === 'finalized'
-                ? text('已定稿（只读）', 'Finalized (read-only)')
-                : text('已归档（只读）', 'Archived (read-only)')}
+              {text('已归档（只读）', 'Archived (read-only)')}
             </span>
             {finalizationPending && (
               <Button
                 variant="outline"
                 size="sm"
                 onClick={doRetryManuscriptPublication}
-                title={text('定稿已提交、实体稿待发布；只重试已提交的发布记录', 'Finalization is submitted and the manuscript is pending publication. Retry only the submitted publication.')}
+                title={text('正文实体文件待同步；重试当前发布记录', 'The manuscript file is pending sync. Retry the current publication.')}
               >
                 <Wrench size={11} />
-                {text('重试实体稿', 'Retry manuscript')}
-              </Button>
-            )}
-            {/* 已定稿 → 有失败项时显示修复定稿按钮 */}
-            {status === 'finalized' && meta && hasProcessFailure && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void doRepairFinalize()}
-                disabled={isChapterBusy}
-                title={text('重新执行失败的后处理步骤（角色卡、知识库等）', 'Retry failed post-processing steps such as character cards and knowledge indexing')}
-              >
-                <Wrench size={11} />
-                {text('修复定稿', 'Repair finalization')}
+                {text('重试同步', 'Retry sync')}
               </Button>
             )}
           </div>
         )}
       </div>
-
-      {/* 后处理状态面板（仅定稿草稿显示） */}
-      {status === 'finalized' && meta && (
-        <div className="px-3 py-1.5" style={{ borderBottom: '1px solid var(--color-border)' }}>
-          <PostProcessStatusPanel
-            scope={getChapterFinalizeScope(meta.chapterNumber)}
-            onRetry={doRepairFinalize}
-            onStatusLoad={setHasProcessFailure}
-          />
-        </div>
-      )}
 
       {/* 正文区：Markdown 编辑与预览都由 Vditor 承担。 */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -729,6 +697,16 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <BlueprintBindingDialog
+        open={bindingDialogOpen}
+        onOpenChange={setBindingDialogOpen}
+        target={meta ? {
+          draftId: meta.id,
+          chapterNumber: meta.chapterNumber,
+          blueprintChapterNumber: meta.blueprintChapterNumber,
+          label: text(`第${meta.chapterNumber}章`, `Chapter ${meta.chapterNumber}`),
+        } : null}
+      />
     </div>
   )
 }

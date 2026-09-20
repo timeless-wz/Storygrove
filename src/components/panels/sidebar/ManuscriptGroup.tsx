@@ -1,9 +1,9 @@
 /**
- * ManuscriptGroup — 正文章节折叠组（已定稿章节列表）
+ * ManuscriptGroup — 正文章节折叠组（已发布章节列表）
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, ChevronRight, ChevronDown, FileText, FolderOpen, Copy, PenTool, RotateCcw, Trash2, Plus } from 'lucide-react'
+import { AlertTriangle, ChevronRight, ChevronDown, FileText, FolderOpen, Copy, PenTool, RotateCcw, Trash2, Plus, Link2 } from 'lucide-react'
 import type { FileNode, ProjectSessionContext } from '../../../shared/ipc-channels'
 import type { ChapterDeletionOperation } from '../../../shared/chapter-deletion'
 import { ipc } from '../../../services/ipc-client'
@@ -25,11 +25,12 @@ import {
   deleteFinalizedChapter,
 } from './finalized-chapter-deletion'
 import { NewDraftDialog } from './NewDraftDialog'
+import { BlueprintBindingDialog, type BlueprintBindingTarget } from './BlueprintBindingDialog'
 
-type ManuscriptFileNode = FileNode & { chapterTitle?: string }
+type ManuscriptFileNode = FileNode & { chapterTitle?: string; blueprintChapterNumber?: number }
 
 /**
- * 已定稿 metadata 优先；旧定稿再 fallback 到蓝图和文件首行。
+ * 已发布 metadata 优先；旧正文再 fallback 到蓝图和文件首行。
  *
  * @param filePath    manuscript 文件路径
  * @param fallback    兜底显示名（如 "第1章"）
@@ -55,7 +56,7 @@ async function readChapterTitle(
   }
   if (chapterTitleCache.has(cacheKey)) return chapterTitleCache.get(cacheKey)!
 
-  // 旧定稿没有 outbox 标题时，沿用蓝图 fallback。
+  // 旧正文没有发布标题时，沿用蓝图 fallback。
   if (chapterNumber) {
     try {
       const bpResult = await ipc.invokeWithProjectSession(
@@ -104,6 +105,7 @@ async function readChapterTitle(
 export default function ManuscriptGroup({ files, projectPath }: { files: ManuscriptFileNode[]; projectPath: string }) {
   const [open, setOpen] = useState(true)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [bindingTarget, setBindingTarget] = useState<BlueprintBindingTarget | null>(null)
   const text = useLocaleStore(s => s.text)
   const currentProject = useProjectStore(s => s.currentProject)
   const [deletionState, setDeletionState] = useState<{
@@ -297,7 +299,7 @@ export default function ManuscriptGroup({ files, projectPath }: { files: Manuscr
           type="button"
           className="ml-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[0.7rem] hover:bg-[var(--color-hover)]"
           style={{ color: 'var(--color-accent)' }}
-          title={text('新建章节草稿，定稿后发布到正文', 'Create a draft chapter, then finalize it to publish to the manuscript')}
+          title={text('新建章节草稿，发布后进入正文', 'Create a draft chapter, then publish it to the manuscript')}
           onClick={event => {
             event.stopPropagation()
             setCreateDialogOpen(true)
@@ -356,7 +358,7 @@ export default function ManuscriptGroup({ files, projectPath }: { files: Manuscr
           })}
           {chapterFiles.length === 0 ? (
             <div className="text-xs py-1" style={{ paddingLeft: 34, color: 'var(--color-text-muted)' }}>
-              {text('暂无定稿章节', 'No finalized chapters')}
+              {text('暂无正文章节', 'No manuscript chapters')}
             </div>
           ) : (
             chapterFiles.map(f => {
@@ -384,6 +386,18 @@ export default function ManuscriptGroup({ files, projectPath }: { files: Manuscr
                       onClick: () => navigator.clipboard.writeText(f.path).catch(() => { }),
                     },
                     { key: 'div2', type: 'divider' as const },
+                    ...(chapterNumber === undefined ? [] : [{
+                      key: 'bind-blueprint',
+                      label: text('绑定蓝图', 'Link blueprint'),
+                      icon: <Link2 size={13} />,
+                      onClick: () => setBindingTarget({
+                        draftId: Number(f.path.match(/^vela:\/\/manuscript\/(\d+)$/)?.[1]),
+                        chapterNumber,
+                        blueprintChapterNumber: f.blueprintChapterNumber,
+                        label: displayName,
+                      }),
+                    }]),
+                    ...(chapterNumber === undefined ? [] : [{ key: 'div3', type: 'divider' as const }]),
                     {
                       key: 'delete',
                       label: text('删除正文', 'Delete manuscript'),
@@ -410,6 +424,27 @@ export default function ManuscriptGroup({ files, projectPath }: { files: Manuscr
                   >
                     <Trash2 size={10} />
                   </button>
+                  {chapterNumber !== undefined && (
+                    <button
+                      type="button"
+                      className="opacity-70 hover:opacity-100 rounded p-0.5"
+                      title={text('绑定蓝图', 'Link blueprint')}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        const match = f.path.match(/^vela:\/\/manuscript\/(\d+)$/)
+                        if (!match) return
+                        setBindingTarget({
+                          draftId: Number(match[1]),
+                          chapterNumber,
+                          blueprintChapterNumber: f.blueprintChapterNumber,
+                          label: displayName,
+                        })
+                      }}
+                      style={{ color: 'var(--color-text-muted)' }}
+                    >
+                      <Link2 size={10} />
+                    </button>
+                  )}
                 </div>
               )
             })
@@ -420,6 +455,11 @@ export default function ManuscriptGroup({ files, projectPath }: { files: Manuscr
         open={createDialogOpen}
         onOpenChange={setCreateDialogOpen}
         suggestedChapterNumber={suggestedChapterNumber}
+      />
+      <BlueprintBindingDialog
+        open={bindingTarget !== null}
+        onOpenChange={open => { if (!open) setBindingTarget(null) }}
+        target={bindingTarget}
       />
     </div>
   )

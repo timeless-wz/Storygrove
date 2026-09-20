@@ -121,7 +121,7 @@ describe('FinalizationService publication failure seam', () => {
       .toEqual({ publication_status: 'published' })
   })
 
-  it('is idempotent after a lost response for the same frozen snapshot but rejects a different snapshot', async () => {
+  it('reuses one published chapter identity and synchronizes a later author edit', async () => {
     let id = 0
     const publish = vi.fn(async () => undefined)
     const service = new FinalizationService({
@@ -147,13 +147,12 @@ describe('FinalizationService publication failure seam', () => {
 
     expect(first).toMatchObject({ success: true, finalizationId: 'finalization-1' })
     expect(replay).toMatchObject({ success: true, finalizationId: 'finalization-1' })
-    expect(publish).toHaveBeenCalledOnce()
+    expect(publish).toHaveBeenCalledTimes(2)
     expect(db.prepare('SELECT COUNT(*) AS count FROM finalization_outbox').get())
       .toEqual({ count: 1 })
-    expect(different).toMatchObject({ success: false, committed: false })
-    expect(different.error).toContain('内容不同')
+    expect(different).toMatchObject({ success: true, committed: true, finalizationId: 'finalization-1' })
     expect(db.prepare('SELECT content_snapshot FROM finalization_outbox').get())
-      .toEqual({ content_snapshot: '同一冻结快照' })
+      .toEqual({ content_snapshot: '不是同一快照' })
   })
 
   it('refuses retry before publishing when the immutable snapshot no longer matches its hash', async () => {

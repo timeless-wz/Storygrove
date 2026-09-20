@@ -41,6 +41,32 @@ function snapshotMatchesContext(
  * 重新验证。
  */
 export function registerFinalizationController(): void {
+  // “发布到正文”不再把作者的正文锁定为不可编辑的定稿。它只将当前内容
+  // 投影到正文章节；后续保存会以相同正文身份同步最新内容。
+  ipcMain.handle('publication:publish', async (
+    _event,
+    candidate: unknown,
+    context: unknown,
+  ) => {
+    try {
+      if (!isFinalizationSnapshot(candidate)) throw new Error('正文发布快照无效')
+      if (!isProjectSessionContext(context) || !snapshotMatchesContext(candidate, context)) {
+        throw new Error('正文发布快照与项目会话不匹配')
+      }
+      const active = projectAccess.assertCurrentProjectContext(context, getCurrentProjectPath())
+      return await finalizationService.finalize({
+        projectRoot: active.rootPath,
+        draftId: candidate.draftId,
+        chapterNumber: candidate.chapterNumber,
+        chapterTitle: candidate.chapterTitle,
+        content: candidate.content,
+        contentRevision: candidate.contentRevision,
+      })
+    } catch (error) {
+      return { success: false, committed: false, error: String(error) }
+    }
+  })
+
   ipcMain.handle('finalization:commit', async (
     _event,
     candidate: unknown,

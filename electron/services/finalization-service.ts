@@ -104,16 +104,21 @@ export class FinalizationService {
     try {
       const existing = FinalizationRepository.getByDraftId(request.draftId)
       if (existing) {
-        if (!hasSameFrozenRequest(existing, request, contentHash)) {
-          return {
-            success: false,
-            committed: false,
-            error: '该草稿已有内容不同的不可替换定稿提交',
-          }
-        }
-        // 上次响应可能在客户端收到前丢失。复用既有 finalizationId 与目标文件名，
-        // 而不是因新的 UUID 或文件碰撞创建第二次提交。
-        return this.publishCommitted(request.projectRoot, existing)
+        // 发布不是锁定。后续保存以同一个发布身份和目标文件替换当前快照，
+        // 因此正文列表始终读取作者最后一次保存的内容。
+        record = hasSameFrozenRequest(existing, request, contentHash)
+          ? existing
+          : FinalizationRepository.replacePublishedContent({
+              finalizationId: existing.finalizationId,
+              draftId: request.draftId,
+              chapterNumber: request.chapterNumber,
+              chapterTitle: request.chapterTitle,
+              content: request.content,
+              contentHash,
+              contentRevision: request.contentRevision,
+              targetFileName: existing.targetFileName,
+            })
+        return this.publishCommitted(request.projectRoot, record)
       }
       const target = resolveManuscriptTarget({
         projectRoot: request.projectRoot,

@@ -7,7 +7,7 @@ import { setActiveProjectSessionContext } from '../../../shared/project-session-
 import { countDraftUnits } from '../../../shared/draft-units'
 import { useEditorStore } from '../../../stores/editor-store'
 import { useProjectStore } from '../../../stores/project-store'
-import { useWorkflowStore, type WorkflowDefinition } from '../../../stores/workflow-store'
+import { useWorkflowStore } from '../../../stores/workflow-store'
 import { useLocaleStore } from '../../../stores/locale-store'
 import DraftEditor from '../DraftEditor'
 
@@ -90,6 +90,9 @@ beforeEach(async () => {
     if (channel === 'db:draft-list') return [{ id: 10, version: 1 }]
     if (channel === 'db:revision-get-pending' || channel === 'db:review-list') return []
     if (channel === 'db:draft-update-content') return { success: true }
+    if (channel === 'publication:publish') {
+      return { success: true, committed: true, finalizationId: 'publication-10', publicationStatus: 'published' }
+    }
     throw new Error(`Unexpected IPC channel: ${channel}`)
   })
   Object.defineProperty(window, 'velaAPI', {
@@ -230,8 +233,8 @@ describe('DraftEditor Vditor integration', () => {
     ])
   })
 
-  it('keeps finalized draft strictly read-only and displays finalized status', async () => {
-    // 设置已定稿状态
+  it('keeps a published chapter editable and displays its published status', async () => {
+    // 发布到正文后依旧是作者可修改的正文。
     useEditorStore.setState({
       tabs: [{
         id: TAB_ID,
@@ -280,26 +283,21 @@ describe('DraftEditor Vditor integration', () => {
     ))
 
     const prose = await waitForVditorReady()
-    // 4. 已定稿草稿为真正只读
-    expect(prose.getAttribute('contenteditable')).toBe('false')
-    expect(container.textContent).toContain('已定稿（只读）')
-    expect(container.querySelector('.vditor-toolbar button[data-type="bold"]')?.classList.contains('vditor-menu--disabled')).toBe(true)
-    // 允许切换模式
+    expect(prose.getAttribute('contenteditable')).toBe('true')
+    expect(container.textContent).toContain('已发布')
+    expect(container.textContent).not.toContain('只读')
+    expect(container.querySelector('.vditor-toolbar button[data-type="bold"]')?.classList.contains('vditor-menu--disabled')).toBe(false)
     expect(container.querySelector('.vditor-toolbar button[data-type="edit-mode"]')?.classList.contains('vditor-menu--disabled')).toBe(false)
 
-    // 尝试粘贴与输入不会改写正文
-    const paste = new Event('paste', { bubbles: true, cancelable: true })
+    await typeIntoProse('继续修改')
+    const saveButton = page.getByRole('button', { name: '保存' })
+    await act(async () => saveButton.click())
     await act(async () => {
-      prose.focus()
-      prose.dispatchEvent(paste)
-      document.execCommand('insertText', false, '试图修改终稿')
+      await vi.waitFor(() => expect(invoke.mock.calls.some(([channel]) => channel === 'publication:publish')).toBe(true))
     })
-    expect(paste.defaultPrevented).toBe(true)
-    expect(prose.textContent).not.toContain('试图修改终稿')
-    expect(useEditorStore.getState().tabs[0].dirty).toBe(false)
   })
 
-  it('runs finalization through the existing save and finalize workflow pipeline', async () => {
+  it('publishes a draft directly to the manuscript without starting the finalization workflow', async () => {
     await act(async () => root.render(
       <DraftEditor
         tabId={TAB_ID}
@@ -310,19 +308,15 @@ describe('DraftEditor Vditor integration', () => {
     ))
     await waitForVditorReady()
 
-    // 7. 定稿逻辑触发已有定稿工作流与快照链路
-    const finalizeButton = page.getByRole('button', { name: '定稿' })
-    await expect.element(finalizeButton).toBeVisible()
-    await act(async () => finalizeButton.click())
+    const publishButton = page.getByRole('button', { name: '发布到正文' })
+    await expect.element(publishButton).toBeVisible()
+    await act(async () => publishButton.click())
 
     expect(mockConfirm).toHaveBeenCalled()
     await act(async () => {
-      await vi.waitFor(() => expect(startWorkflow).toHaveBeenCalled())
+      await vi.waitFor(() => expect(invoke.mock.calls.some(([channel]) => channel === 'publication:publish')).toBe(true))
     })
-
-    const definition = startWorkflow.mock.calls[0]?.[0] as WorkflowDefinition
-    expect(definition.type).toBe('chapter_creation')
-    expect(definition.title).toContain('定稿')
-    expect(definition.title).toContain('第2章')
+    expect(useEditorStore.getState().tabs[0]?.draftStatus).toBe('finalized')
+    expect(startWorkflow).not.toHaveBeenCalled()
   })
 })

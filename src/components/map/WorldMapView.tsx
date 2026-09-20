@@ -355,7 +355,7 @@ export default function WorldMapView({ projectKey }: { projectKey: string }) {
             <div className="flex min-h-0 flex-1 overflow-hidden">
               <div className="min-w-0 flex-1 overflow-hidden">
                 {viewMode === 'canvas'
-                  ? <WorldMapCanvas nodes={mapNodes} edges={mapEdges} selectedNodeId={selectedNodeId} selectedEdgeId={selectedEdgeId} backgroundImage={mapImage} onSelectNode={setSelectedNodeId} onSelectEdge={setSelectedEdgeId} onUpdateNodePosition={updateNodePosition} onDoubleNodeClick={node => setNodeDialogTarget(node.id)} />
+                  ? <WorldMapCanvas nodes={mapNodes} edges={mapEdges} selectedNodeId={selectedNodeId} selectedEdgeId={selectedEdgeId} backgroundImage={mapImage} layoutKey={showAtlas} onSelectNode={setSelectedNodeId} onSelectEdge={setSelectedEdgeId} onUpdateNodePosition={updateNodePosition} onDoubleNodeClick={node => setNodeDialogTarget(node.id)} />
                   : <WorldMapListView nodes={mapNodes} edges={mapEdges} selectedNodeId={selectedNodeId} selectedEdgeId={selectedEdgeId} onSelectNode={setSelectedNodeId} onSelectEdge={setSelectedEdgeId} onEditNode={node => setNodeDialogTarget(node.id)} onDeleteNode={removeNode} onEditEdge={edge => setEdgeDialogTarget(edge)} onDeleteEdge={removeEdge} />}
               </div>
               {(selectedNode || selectedEdge) && (

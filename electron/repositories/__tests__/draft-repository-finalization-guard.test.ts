@@ -21,6 +21,7 @@ beforeEach(() => {
     CREATE TABLE drafts (
       id INTEGER PRIMARY KEY,
       chapter_number INTEGER NOT NULL,
+      blueprint_chapter_number INTEGER DEFAULT NULL,
       version INTEGER NOT NULL,
       status TEXT NOT NULL,
       source TEXT NOT NULL DEFAULT 'write',
@@ -35,6 +36,7 @@ beforeEach(() => {
       chapter_number INTEGER NOT NULL,
       chapter_title TEXT NOT NULL
     );
+    CREATE TABLE blueprints (chapter_number INTEGER PRIMARY KEY, title TEXT NOT NULL);
   `)
   db.prepare('INSERT INTO contents (id, body) VALUES (?, ?)').run(1, '定稿快照正文')
   db.prepare(`
@@ -49,7 +51,7 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-describe('DraftRepository finalized immutability guard', () => {
+describe('DraftRepository published manuscript behavior', () => {
   it('lists the finalized outbox chapter title as authoritative draft metadata', () => {
     db.prepare(`
       INSERT INTO finalization_outbox (finalization_id, draft_id, chapter_number, chapter_title)
@@ -89,13 +91,26 @@ describe('DraftRepository finalized immutability guard', () => {
     ])
   })
 
-  it('does not allow a generic content update to silently mutate finalized database fact', () => {
-    expect(() => DraftRepository.updateContent(1, '后续编辑正文', 6))
-      .toThrow('不可变事实')
+  it('allows a published chapter to remain editable', () => {
+    expect(() => DraftRepository.updateContent(1, '后续编辑正文', 6)).not.toThrow()
     expect(db.prepare('SELECT body FROM contents WHERE id = 1').get())
-      .toEqual({ body: '定稿快照正文' })
+      .toEqual({ body: '后续编辑正文' })
     expect(db.prepare('SELECT word_count FROM drafts WHERE id = 1').get())
       .toEqual({ word_count: 6 })
+  })
+
+  it('persists an explicit blueprint binding independently of its chapter number', () => {
+    db.prepare('INSERT INTO blueprints (chapter_number, title) VALUES (?, ?)').run(8, '雨夜入城')
+
+    DraftRepository.setBlueprint(1, 8)
+
+    expect(DraftRepository.getMeta(1)).toMatchObject({
+      id: 1,
+      blueprintChapterNumber: 8,
+      chapterTitle: '雨夜入城',
+    })
+    DraftRepository.setBlueprint(1, null)
+    expect(DraftRepository.getMeta(1)?.blueprintChapterNumber).toBeUndefined()
   })
 
   it('does not allow a generic status update to reopen finalized fact', () => {

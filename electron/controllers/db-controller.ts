@@ -105,6 +105,7 @@ const MUTATING_DATABASE_CHANNELS = new Set([
   'db:draft-create',
   'db:draft-update-status',
   'db:draft-update-content',
+  'db:draft-set-blueprint',
   'db:draft-delete',
   'db:recovery-candidate-record',
   'db:recovery-candidate-update',
@@ -956,10 +957,25 @@ export function registerDatabaseController() {
       assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
       const draft = DraftRepository.getMeta(id)
       if (!draft) throw new Error(`草稿不存在：${id}`)
-      if (draft.status === 'finalized') {
-        throw new Error('已定稿正文为只读内容，不能再修改')
-      }
       DraftRepository.updateContent(id, content, wordCount)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('db:draft-set-blueprint', async (
+    _event,
+    id: number,
+    blueprintChapterNumber: number | null,
+    expectedProjectPath: string,
+  ) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      if (blueprintChapterNumber !== null && (!Number.isSafeInteger(blueprintChapterNumber) || blueprintChapterNumber < 1)) {
+        throw new Error('蓝图章节号无效')
+      }
+      DraftRepository.setBlueprint(id, blueprintChapterNumber)
       return { success: true }
     } catch (err) {
       return { success: false, error: String(err) }

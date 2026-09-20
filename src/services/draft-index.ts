@@ -17,6 +17,7 @@ import type { ReviewMeta as DB_ReviewMeta } from '../../electron/repositories/re
 export interface DraftMeta {
   id: number
   chapterNumber: number
+  blueprintChapterNumber?: number
   chapterTitle?: string       // finalized outbox 的权威标题；旧定稿或未定稿可为空
   version: number
   status: DraftStatus

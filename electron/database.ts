@@ -350,11 +350,12 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
     );
 
     -- ============================================================
-    -- 5. drafts — 草稿主线（finalized = 定稿）
+    -- 5. drafts — 草稿主线（finalized = 已发布正文，仍可编辑）
     -- ============================================================
     CREATE TABLE IF NOT EXISTS drafts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       chapter_number INTEGER NOT NULL,            -- 归属章节
+      blueprint_chapter_number INTEGER DEFAULT NULL, -- 作者显式绑定的章节蓝图
       version INTEGER NOT NULL,                   -- v1, v2...
       status TEXT DEFAULT 'draft',                -- draft/revised/finalized/archived
       source TEXT DEFAULT 'write',                -- write/rewrite
@@ -1153,6 +1154,13 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
   if (!draftColumns.some(column => column.name === 'source_dependencies')) {
     db.exec("ALTER TABLE drafts ADD COLUMN source_dependencies TEXT NOT NULL DEFAULT '[]'")
   }
+  if (!draftColumns.some(column => column.name === 'blueprint_chapter_number')) {
+    db.exec('ALTER TABLE drafts ADD COLUMN blueprint_chapter_number INTEGER DEFAULT NULL')
+  }
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_drafts_blueprint_chapter
+      ON drafts(blueprint_chapter_number);
+  `)
 
   // Legacy candidates did not freeze the draft identity. Keep them marked
   // unknown so update/continue fails closed instead of rebinding to today's draft.

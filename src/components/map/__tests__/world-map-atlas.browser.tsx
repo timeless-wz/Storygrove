@@ -11,6 +11,7 @@ import { useLocaleStore } from '../../../stores/locale-store'
 import { useProjectStore } from '../../../stores/project-store'
 import { useWorldMapStore } from '../../../stores/world-map-store'
 import WorldMapView from '../WorldMapView'
+import { getMapImageFitTransform } from '../world-map-canvas-fit'
 
 const PROJECT_PATH = 'C:\\novels\\map-atlas'
 const PROJECT_SESSION = {
@@ -121,6 +122,21 @@ async function clickButton(label: string): Promise<void> {
   })
 }
 
+async function settleLayout(): Promise<void> {
+  await act(async () => {
+    await new Promise<void>(resolve => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    })
+  })
+}
+
+function readCanvasTransform(): { x: number; y: number; zoom: number } {
+  const transform = container.querySelector<SVGSVGElement>('[data-testid="world-map-surface"]')?.style.transform
+  const values = transform?.match(/translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([-\d.]+)\)/)
+  if (!values) throw new Error(`Unable to read canvas transform: ${transform}`)
+  return { x: Number(values[1]), y: Number(values[2]), zoom: Number(values[3]) }
+}
+
 beforeEach(() => {
   invokedChannels = []
   mapDeleteCalls = []
@@ -156,6 +172,60 @@ afterEach(async () => {
 })
 
 describe('world map atlas view', () => {
+  it('fits the full base image into the narrowed canvas used with a sidebar', () => {
+    // 侧边栏展开后的可用区域比底图窄；适配后左右都应保留边距，不能裁掉右侧。
+    const fitted = getMapImageFitTransform(900, 1000)
+
+    expect(fitted.zoom).toBeCloseTo(0.71)
+    expect(fitted.pan.x).toBeCloseTo(24)
+    expect(fitted.pan.y).toBeCloseTo(180.5)
+    expect(1200 * fitted.zoom).toBeLessThanOrEqual(900 - 48)
+  })
+
+  it('uses the real portrait image bounds instead of shrinking its empty SVG margins', () => {
+    // 竖版底图被放进 1200×900 的逻辑区域后，两侧是 SVG 留白；缩放应以实际
+    // 图片的 5:8 内容为准，不能以包含留白的 4:3 逻辑区域为准。
+    const fitted = getMapImageFitTransform(900, 1000, { width: 800, height: 1280 })
+
+    expect(fitted.zoom).toBeCloseTo(952 / 900)
+    expect(fitted.pan.x).toBeCloseTo((900 - 1200 * fitted.zoom) / 2)
+    expect(fitted.pan.y).toBeCloseTo(24)
+  })
+
+  it('refits the map after the map-management panel changes the canvas width', async () => {
+    mapImageDataUrl = 'data:image/png;base64,aW1hZ2U='
+    await render()
+    await settleLayout()
+
+    const canvas = container.querySelector<HTMLElement>('[data-testid="world-map-canvas"]')
+    expect(canvas).toBeDefined()
+    let viewport = { width: 1200, height: 800 }
+    Object.defineProperty(canvas, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ width: viewport.width, height: viewport.height }),
+    })
+
+    // 默认显示地图册树；先收起再展开，模拟该固定栏使画布从 1200px 缩到 760px。
+    await clickButton('显示或隐藏地图册树')
+    await settleLayout()
+    const expandedExpected = getMapImageFitTransform(viewport.width, viewport.height)
+    const expandedTransform = readCanvasTransform()
+
+    expect(expandedTransform.zoom).toBeCloseTo(expandedExpected.zoom)
+    expect(expandedTransform.x).toBeCloseTo(expandedExpected.pan.x)
+    expect(expandedTransform.y).toBeCloseTo(expandedExpected.pan.y)
+
+    viewport = { width: 760, height: 800 }
+    await clickButton('显示或隐藏地图册树')
+    await settleLayout()
+    const collapsedExpected = getMapImageFitTransform(viewport.width, viewport.height)
+    const collapsedTransform = readCanvasTransform()
+
+    expect(collapsedTransform.zoom).toBeCloseTo(collapsedExpected.zoom)
+    expect(collapsedTransform.x).toBeCloseTo(collapsedExpected.pan.x)
+    expect(collapsedTransform.y).toBeCloseTo(collapsedExpected.pan.y)
+  })
+
   it('renders the atlas tree and defaults to the first map', async () => {
     await render()
 
@@ -201,9 +271,22 @@ describe('world map atlas view', () => {
     expect(container.querySelector('image')?.getAttribute('href')).toBe(mapImageDataUrl)
   })
 
+  it('keeps the complete logical map surface when side panels narrow the viewport', async () => {
+    mapImageDataUrl = 'data:image/png;base64,aW1hZ2U='
+    await render()
+
+    const surface = container.querySelector<SVGSVGElement>('[data-testid="world-map-surface"]')
+    // 画布外层负责裁切；SVG 自身不能再按可视宽度缩小，否则右半张图会在缩放前丢失。
+    expect(surface?.getAttribute('width')).toBe('1200')
+    expect(surface?.getAttribute('height')).toBe('900')
+    expect(surface?.classList.contains('w-full')).toBe(false)
+    expect(surface?.classList.contains('h-full')).toBe(false)
+  })
+
   it('pans the zoomed map when dragging its image or grid background', async () => {
     mapImageDataUrl = 'data:image/png;base64,aW1hZ2U='
     await render()
+    await settleLayout()
 
     // 先放大，模拟作者查看大地图时的操作。
     await clickButton('+')
@@ -213,6 +296,8 @@ describe('world map atlas view', () => {
     expect(canvas).toBeDefined()
     expect(grid).toBeDefined()
     expect(surface).toBeDefined()
+    const beforePan = surface?.style.transform.match(/translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([-\d.]+)\)/)
+    expect(beforePan).not.toBeNull()
 
     // 底图 pointer-events=none 时事件会落到网格 rect；仍应开始平移。
     await act(async () => {
@@ -225,8 +310,11 @@ describe('world map atlas view', () => {
       window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }))
     })
 
-    expect(surface?.style.transform).toContain('translate(130px, 65px)')
-    expect(surface?.style.transform).toContain('scale(1.2)')
+    const afterPan = surface?.style.transform.match(/translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([-\d.]+)\)/)
+    expect(afterPan).not.toBeNull()
+    expect(Number(afterPan?.[1])).toBeCloseTo(Number(beforePan?.[1]) + 130)
+    expect(Number(afterPan?.[2])).toBeCloseTo(Number(beforePan?.[2]) + 65)
+    expect(afterPan?.[3]).toBe(beforePan?.[3])
   })
 
   it('renders a breadcrumb trail from the atlas root to the selected map', async () => {

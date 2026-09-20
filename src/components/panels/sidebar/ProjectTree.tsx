@@ -221,7 +221,7 @@ export default function ProjectTree() {
   }
 
   const p = currentProject.path
-  // 改为彻底的数据驱动：从内存的全部草稿中提取 status='finalized' 的草稿
+  // 改为彻底的数据驱动：从内存的全部草稿中提取已发布正文。
   const manuscriptFiles = Object.values(draftsByChapter)
     .map(drafts => drafts.find(d => d.status === 'finalized'))
     .filter(Boolean)
@@ -231,6 +231,7 @@ export default function ProjectTree() {
       name: `chapter_${draft!.chapterNumber}.md`, // 提供格式化的伪文件名供组件适配解析
       isDir: false,
       chapterTitle: draft!.chapterTitle,
+      blueprintChapterNumber: draft!.blueprintChapterNumber,
     }))
 
   // 小说配置是否已完成（核心大纲非空视为已完成）
@@ -498,13 +499,13 @@ export default function ProjectTree() {
 
       <ProjectTreeSection
         title={text('正文创作', 'Manuscript')}
-        detail={text('草稿与已定稿章节', 'Drafts and finalized chapters')}
+        detail={text('草稿与正文章节', 'Drafts and manuscript chapters')}
       />
 
       {/* 草稿箱 */}
       <DraftBoxGroup draftsByChapter={draftsByChapter} />
 
-      {/* 正文章节 — 仅显示已定稿 */}
+      {/* 正文章节 — 仅显示已发布稿 */}
       <ManuscriptGroup files={manuscriptFiles} projectPath={p} />
     </div>
   )

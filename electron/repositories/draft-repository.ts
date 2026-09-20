@@ -11,16 +11,20 @@ import { ContentRepository } from './content-repository'
 import type { DraftSourceDependency } from '../../src/shared/draft-source-dependency'
 
 const DRAFT_META_SELECT = `
-  SELECT drafts.*, finalization_outbox.chapter_title
+  SELECT drafts.*, finalization_outbox.chapter_title,
+         blueprints.title AS blueprint_title
   FROM drafts
   LEFT JOIN finalization_outbox
     ON drafts.status = 'finalized' AND finalization_outbox.draft_id = drafts.id
+  LEFT JOIN blueprints
+    ON blueprints.chapter_number = COALESCE(drafts.blueprint_chapter_number, drafts.chapter_number)
 `
 
 /** 草稿元数据（不含正文，适合列表查询） */
 export interface DraftMeta {
     id: number
     chapterNumber: number
+    blueprintChapterNumber?: number
     chapterTitle?: string
     version: number
     status: string
@@ -277,10 +281,15 @@ function rowToMeta(
 ): DraftMeta {
     const chapterTitle = typeof row.chapter_title === 'string' && row.chapter_title.trim()
         ? row.chapter_title
-        : undefined
+        : typeof row.blueprint_title === 'string' && row.blueprint_title.trim()
+            ? row.blueprint_title
+            : undefined
     return {
         id: row.id as number,
         chapterNumber: row.chapter_number as number,
+        ...(Number.isSafeInteger(row.blueprint_chapter_number) && (row.blueprint_chapter_number as number) > 0
+            ? { blueprintChapterNumber: row.blueprint_chapter_number as number }
+            : {}),
         ...(chapterTitle ? { chapterTitle } : {}),
         version: row.version as number,
         status: row.status as string,
@@ -478,10 +487,6 @@ export class DraftRepository {
     static updateContent(id: number, content: string, wordCount: number): void {
         const meta = DraftRepository.getMeta(id)
         if (!meta) return
-        if (meta.status === 'finalized') {
-            throw new Error('已定稿正文为不可变事实；如需再编辑，请创建新草稿或处理定稿冲突')
-        }
-
         ContentRepository.updateBody(meta.contentId, content)
 
         const db = getProjectDb()
@@ -491,6 +496,23 @@ export class DraftRepository {
       UPDATE drafts SET word_count = ?, updated_at = datetime('now')
       WHERE id = ?
     `).run(wordCount, id)
+    }
+
+    /** 绑定或解绑章节蓝图；正文和草稿共用同一条记录，因此两处入口即时一致。 */
+    static setBlueprint(id: number, blueprintChapterNumber: number | null): void {
+        const db = getProjectDb()
+        if (!db) throw new Error('项目数据库未打开')
+        if (blueprintChapterNumber !== null) {
+            const blueprint = db.prepare('SELECT 1 FROM blueprints WHERE chapter_number = ?')
+                .get(blueprintChapterNumber)
+            if (!blueprint) throw new Error(`未找到第 ${blueprintChapterNumber} 章蓝图`)
+        }
+        const result = db.prepare(`
+          UPDATE drafts
+          SET blueprint_chapter_number = ?, updated_at = datetime('now')
+          WHERE id = ?
+        `).run(blueprintChapterNumber, id)
+        if (result.changes !== 1) throw new Error(`草稿不存在：${id}`)
     }
 
     /** 删除草稿（级联删除 revisions/reviews，但 contents 需手动清理） */

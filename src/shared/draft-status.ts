@@ -12,7 +12,7 @@ export const DRAFT_STATUS_LABEL: Record<string, string> = {
   draft:     '草稿',
   revised:   '已修稿',
   reviewed:  '已审稿',
-  finalized: '已定稿',
+  finalized: '已发布',
   archived:  '已归档',
 }
 
