@@ -461,7 +461,7 @@ export default function WorkspaceChapterContextTab() {
                               </div>
                               <div className="flex flex-wrap items-center gap-1 pt-0.5 text-[9px]">
                                 {snapId && (
-                                  <span className="px-1 py-0.2 rounded bg-blue-500/10 text-[var(--color-info)]">
+                                  <span className="px-1 py-0.2 rounded bg-[color-mix(in_srgb,var(--color-info)_10%,transparent)] text-[var(--color-info)]">
                                     快照 {snapId.slice(0, 8)}
                                   </span>
                                 )}
@@ -476,7 +476,7 @@ export default function WorkspaceChapterContextTab() {
                                   </span>
                                 )}
                                 {s.provenanceStatus === 'provenance-missing' && (
-                                  <span className="px-1 py-0.2 rounded bg-red-500/10 text-[var(--color-error-text)] font-medium">
+                                  <span className="px-1 py-0.2 rounded bg-[color-mix(in_srgb,var(--color-error)_10%,transparent)] text-[var(--color-error-text)] font-medium">
                                     凭证缺失
                                   </span>
                                 )}

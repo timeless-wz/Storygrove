@@ -479,12 +479,12 @@ export default function DirectoryConfigDialog({ isOpen, onClose, existingCount, 
             />
           </div>
           {launchError && (
-            <p className="whitespace-pre-line rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-3 py-2.5 text-xs text-[var(--color-warning-text)]">
+            <p className="whitespace-pre-line rounded-lg border border-[color-mix(in_srgb,var(--color-warning)_30%,transparent)] bg-[color-mix(in_srgb,var(--color-warning)_10%,transparent)] px-3 py-2.5 text-xs text-[var(--color-warning-text)]">
               {launchError}
             </p>
           )}
           {authorityError && (
-            <p className="whitespace-pre-line rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-3 py-2.5 text-xs text-[var(--color-warning-text)]">
+            <p className="whitespace-pre-line rounded-lg border border-[color-mix(in_srgb,var(--color-warning)_30%,transparent)] bg-[color-mix(in_srgb,var(--color-warning)_10%,transparent)] px-3 py-2.5 text-xs text-[var(--color-warning-text)]">
               {authorityError}
             </p>
           )}

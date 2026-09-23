@@ -139,7 +139,7 @@ export function PostProcessStatusPanel({
     return (
       <div className={cn(
         'flex items-center gap-1.5 px-2 py-1 rounded text-[10px] text-[var(--color-text-secondary)]',
-        'bg-amber-500/8',
+        'bg-[color-mix(in_srgb,var(--color-warning)_8%,transparent)]',
         className,
       )}>
         <Clock size={12} className="text-[var(--color-warning,#f59e0b)]" />
@@ -155,7 +155,7 @@ export function PostProcessStatusPanel({
     return (
       <div className={cn(
         'flex items-center gap-1.5 px-2 py-1 rounded text-[10px] text-[var(--color-success-text,#386042)]',
-        'bg-green-500/8',
+        'bg-[color-mix(in_srgb,var(--color-success)_8%,transparent)]',
         className,
       )}>
         <CheckCircle2 size={12} />
@@ -172,8 +172,8 @@ export function PostProcessStatusPanel({
     <div className={cn(
       'rounded-md border overflow-hidden',
       hasCriticalFailure
-        ? 'border-red-500 bg-red-500/8'
-        : 'border-amber-500 bg-amber-500/8',
+        ? 'border-[var(--color-error)] bg-[color-mix(in_srgb,var(--color-error)_8%,transparent)]'
+        : 'border-[var(--color-warning)] bg-[color-mix(in_srgb,var(--color-warning)_8%,transparent)]',
       className,
     )}>
       {/* 折叠头部 */}
@@ -230,7 +230,7 @@ export function PostProcessStatusPanel({
                   </span>
                 )}
                 {step.critical && presentation === 'failed' && (
-                  <span className="shrink-0 px-1 py-0.5 rounded text-[9px] bg-red-500/15 text-[var(--color-error-text)]">
+                  <span className="shrink-0 px-1 py-0.5 rounded text-[9px] bg-[color-mix(in_srgb,var(--color-error)_15%,transparent)] text-[var(--color-error-text)]">
                     {text('关键', 'Critical')}
                   </span>
                 )}

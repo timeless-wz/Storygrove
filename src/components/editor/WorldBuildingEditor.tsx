@@ -496,7 +496,7 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
                 <div className="flex flex-col items-end gap-1 flex-shrink-0">
                   {isWorldBuildingCandidate ? (
                     <>
-                      <span className="text-[0.7rem] px-1.5 py-0.5 rounded font-medium bg-yellow-500/15 text-[var(--color-warning-text)]">
+                      <span className="text-[0.7rem] px-1.5 py-0.5 rounded font-medium bg-[color-mix(in_srgb,var(--color-warning)_15%,transparent)] text-[var(--color-warning-text)]">
                         {text(
                           generated ? '正式内容保留 · 有未完成候选' : '未完成候选 · 未写入正式内容',
                           generated ? 'Formal content kept · incomplete candidate' : 'Incomplete candidate · not formal content',
@@ -533,7 +533,7 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
                         <Button
                           size="sm"
                           disabled={worldBuildingBusy}
-                          className="gap-1.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white border-none"
+                          className="gap-1.5 bg-[var(--color-accent)] text-[var(--color-accent-foreground)] border-none"
                           onClick={(e) => {
                             e.stopPropagation()
                             void handleResumeWorldBuilding()
@@ -547,19 +547,19 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
                   ) : generated ? (
                     <>
                       {f.key === 'synopsis' && synopsisRecoveryFailed ? (
-                        <span className="text-[0.7rem] px-1.5 py-0.5 rounded font-medium bg-yellow-500/15 text-[var(--color-warning-text)]">
+                        <span className="text-[0.7rem] px-1.5 py-0.5 rounded font-medium bg-[color-mix(in_srgb,var(--color-warning)_15%,transparent)] text-[var(--color-warning-text)]">
                           {text('不完整 · 检查点不可恢复', 'Incomplete · checkpoint unavailable')}
                         </span>
                       ) : f.key === 'synopsis' && synopsisIncomplete ? (
-                        <span className="text-[0.7rem] px-1.5 py-0.5 rounded font-medium bg-yellow-500/15 text-[var(--color-warning-text)]">
+                        <span className="text-[0.7rem] px-1.5 py-0.5 rounded font-medium bg-[color-mix(in_srgb,var(--color-warning)_15%,transparent)] text-[var(--color-warning-text)]">
                           {text('不完整 · 已存部分', 'Incomplete · partial saved')}
                         </span>
                       ) : f.key === 'synopsis' && synopsisCoveredTo > 0 && synopsisCoveredTo < synopsisTotalChapters ? (
-                        <span className="text-[0.7rem] px-1.5 py-0.5 rounded font-medium bg-yellow-500/15 text-[var(--color-warning-text)]">
+                        <span className="text-[0.7rem] px-1.5 py-0.5 rounded font-medium bg-[color-mix(in_srgb,var(--color-warning)_15%,transparent)] text-[var(--color-warning-text)]">
                           {text(`已覆盖至第 ${synopsisCoveredTo} 章 · 待续批`, `Covered to ch. ${synopsisCoveredTo} · pending`)}
                         </span>
                       ) : (
-                        <span className="text-[0.7rem] px-1.5 py-0.5 rounded font-medium bg-green-500/10 text-[var(--color-success-text)]">
+                        <span className="text-[0.7rem] px-1.5 py-0.5 rounded font-medium bg-[color-mix(in_srgb,var(--color-success)_10%,transparent)] text-[var(--color-success-text)]">
                           {text('已生成', 'Generated')}
                         </span>
                       )}
@@ -570,7 +570,7 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
                         <Button
                           size="sm"
                           disabled={synopsisBusy}
-                          className="gap-1.5 mt-0.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-sm hover:from-amber-600 hover:to-orange-600 border-none hover:shadow hover:-translate-y-[0.5px] transition-all"
+                          className="gap-1.5 mt-0.5 bg-[var(--color-accent)] text-[var(--color-accent-foreground)] shadow-sm hover:bg-[var(--color-accent-hover)] border-none hover:shadow hover:-translate-y-[0.5px] transition-all"
                           onClick={(e) => {
                             e.stopPropagation()
                             void handleResumeSynopsis()
@@ -594,7 +594,7 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
                         <Button
                           size="sm"
                           disabled={synopsisBusy}
-                          className="gap-1.5 mt-0.5 bg-gradient-to-r from-indigo-500 to-blue-500 text-white shadow-sm hover:from-indigo-600 hover:to-blue-600 border-none hover:shadow hover:-translate-y-[0.5px] transition-all"
+                          className="gap-1.5 mt-0.5 bg-[var(--color-accent)] text-[var(--color-accent-foreground)] shadow-sm hover:bg-[var(--color-accent-hover)] border-none hover:shadow hover:-translate-y-[0.5px] transition-all"
                           onClick={(e) => {
                             e.stopPropagation()
                             void handleContinueOutlineBatch()

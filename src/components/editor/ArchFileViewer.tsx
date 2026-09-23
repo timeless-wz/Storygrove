@@ -509,7 +509,7 @@ function ArchFileViewerSession({
               size="sm"
               disabled={extracting || !projectMatches}
               onClick={() => { void handleRepairCharacterRoster() }}
-              className="gap-1.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-sm hover:from-amber-600 hover:to-orange-600 border-none hover:shadow hover:-translate-y-[0.5px] transition-all"
+              className="gap-1.5 bg-[var(--color-accent)] text-[var(--color-accent-foreground)] shadow-sm hover:bg-[var(--color-accent-hover)] border-none hover:shadow hover:-translate-y-[0.5px] transition-all"
               title={rosterPresentation.actionTitle}
             >
               {extracting

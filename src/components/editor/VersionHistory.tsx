@@ -195,10 +195,10 @@ export default function VersionHistory({ projectKey }: { projectKey: string }) {
   }
 
   const TYPE_COLORS: Record<string, string> = {
-    draft: 'bg-blue-500/20 text-[var(--color-category-progress-text)]',
-    refined: 'bg-yellow-500/20 text-[var(--color-warning-text)]',
-    reviewed: 'bg-purple-500/20 text-[var(--color-category-review-text)]',
-    final: 'bg-green-500/20 text-[var(--color-success-text)]',
+    draft: 'bg-[color-mix(in_srgb,var(--color-category-progress-text)_20%,transparent)] text-[var(--color-category-progress-text)]',
+    refined: 'bg-[color-mix(in_srgb,var(--color-warning-text)_20%,transparent)] text-[var(--color-warning-text)]',
+    reviewed: 'bg-[color-mix(in_srgb,var(--color-category-review-text)_20%,transparent)] text-[var(--color-category-review-text)]',
+    final: 'bg-[color-mix(in_srgb,var(--color-success-text)_20%,transparent)] text-[var(--color-success-text)]',
   }
 
   if (loading) {
@@ -276,7 +276,7 @@ export default function VersionHistory({ projectKey }: { projectKey: string }) {
                       </span>
                       {ver.dependencies_stale && (
                         <span
-                          className="text-[0.7rem] px-1.5 py-0.5 rounded bg-amber-500/20 text-[var(--color-warning-text)]"
+                          className="text-[0.7rem] px-1.5 py-0.5 rounded bg-[color-mix(in_srgb,var(--color-warning)_20%,transparent)] text-[var(--color-warning-text)]"
                           title={text(
                             '此草稿生成时使用的前文来源已变化或不再是当前定稿；草稿会保留，但连续性需要复核。',
                             'A prior source used to generate this draft changed or is no longer the current final. The draft is preserved, but its continuity needs review.',

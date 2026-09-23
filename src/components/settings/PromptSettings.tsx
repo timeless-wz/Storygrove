@@ -143,7 +143,7 @@ export default function PromptSettings() {
   return (
     <div className="space-y-2" key={refreshKey}>
       {globalLoadError && (
-        <div className="px-3 py-2 rounded-lg text-xs bg-red-500/10 text-[var(--color-error-text)] border border-red-500/20">
+        <div className="px-3 py-2 rounded-lg text-xs bg-[color-mix(in_srgb,var(--color-error)_10%,transparent)] text-[var(--color-error-text)] border border-[color-mix(in_srgb,var(--color-error)_20%,transparent)]">
           <AlertTriangle size={13} className="inline mr-1" />
           {globalLoadError}
         </div>
@@ -151,7 +151,7 @@ export default function PromptSettings() {
       {projectLoadError
         && projectLoadError.projectId === projectSession?.projectId
         && projectLoadError.leaseId === projectSession.leaseId && (
-        <div className="px-3 py-2 rounded-lg text-xs bg-red-500/10 text-[var(--color-error-text)] border border-red-500/20">
+        <div className="px-3 py-2 rounded-lg text-xs bg-[color-mix(in_srgb,var(--color-error)_10%,transparent)] text-[var(--color-error-text)] border border-[color-mix(in_srgb,var(--color-error)_20%,transparent)]">
           <AlertTriangle size={13} className="inline mr-1" />
           {projectLoadError.message}
         </div>
@@ -505,8 +505,8 @@ function TemplateItem({
               className={cn(
                 'text-xs px-3 py-1.5 rounded-lg',
                 saveResult.type === 'success'
-                  ? 'bg-green-500/10 text-[var(--color-success-text)] border border-green-500/20'
-                  : 'bg-red-500/10 text-[var(--color-error-text)] border border-red-500/20'
+                  ? 'bg-[color-mix(in_srgb,var(--color-success)_10%,transparent)] text-[var(--color-success-text)] border border-[color-mix(in_srgb,var(--color-success)_20%,transparent)]'
+                  : 'bg-[color-mix(in_srgb,var(--color-error)_10%,transparent)] text-[var(--color-error-text)] border border-[color-mix(in_srgb,var(--color-error)_20%,transparent)]'
               )}
             >
               {saveResult.type === 'success'

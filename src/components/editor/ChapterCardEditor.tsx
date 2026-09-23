@@ -68,11 +68,11 @@ function createBlueprintVolumeId(): string {
 }
 
 const ROLE_COLORS: Record<string, string> = {
-  高潮: 'bg-red-500/20 text-[var(--color-error-text)]',
-  冲突: 'bg-orange-500/20 text-[var(--color-warning-text)]',
-  转折: 'bg-purple-500/20 text-[var(--color-category-review-text)]',
-  建置: 'bg-blue-500/20 text-[var(--color-category-progress-text)]',
-  收尾: 'bg-green-500/20 text-[var(--color-success-text)]',
+  高潮: 'bg-[color-mix(in_srgb,var(--color-error-text)_20%,transparent)] text-[var(--color-error-text)]',
+  冲突: 'bg-[color-mix(in_srgb,var(--color-warning-text)_20%,transparent)] text-[var(--color-warning-text)]',
+  转折: 'bg-[color-mix(in_srgb,var(--color-category-review-text)_20%,transparent)] text-[var(--color-category-review-text)]',
+  建置: 'bg-[color-mix(in_srgb,var(--color-category-progress-text)_20%,transparent)] text-[var(--color-category-progress-text)]',
+  收尾: 'bg-[color-mix(in_srgb,var(--color-success-text)_20%,transparent)] text-[var(--color-success-text)]',
 }
 
 function readDraftLedgerFromFixedTab() {

@@ -371,7 +371,7 @@ export default function KnowledgeOverview() {
         </div>
 
         {loadError && (
-          <div className="mb-6 flex items-start gap-2 rounded-xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-xs text-[var(--color-error-text)]">
+          <div className="mb-6 flex items-start gap-2 rounded-xl border border-[color-mix(in_srgb,var(--color-error)_25%,transparent)] bg-[color-mix(in_srgb,var(--color-error)_10%,transparent)] px-4 py-3 text-xs text-[var(--color-error-text)]">
             <AlertTriangle size={15} className="mt-0.5 flex-shrink-0" />
             <span>{loadError}</span>
           </div>
@@ -402,8 +402,8 @@ export default function KnowledgeOverview() {
             className={cn(
               'rounded-xl border mb-6 overflow-hidden',
               rebuildPresentation.kind === 'missing-vectors'
-                ? 'border-amber-500/20'
-                : 'border-blue-500/20',
+                ? 'border-[color-mix(in_srgb,var(--color-warning)_20%,transparent)]'
+                : 'border-[color-mix(in_srgb,var(--color-info)_20%,transparent)]',
             )}
             style={{
               backgroundColor: rebuildPresentation.kind === 'missing-vectors'
@@ -415,7 +415,7 @@ export default function KnowledgeOverview() {
               <div className="flex items-center gap-2">
                 <div className={cn(
                   'w-8 h-8 rounded-lg flex items-center justify-center',
-                  rebuildPresentation.kind === 'missing-vectors' ? 'bg-amber-500/15' : 'bg-blue-500/15',
+                  rebuildPresentation.kind === 'missing-vectors' ? 'bg-[color-mix(in_srgb,var(--color-warning)_15%,transparent)]' : 'bg-[color-mix(in_srgb,var(--color-info)_15%,transparent)]',
                 )}>
                   <Zap size={16} className={rebuildPresentation.kind === 'missing-vectors' ? 'text-[var(--color-warning)]' : 'text-[var(--color-info)]'} />
                 </div>
@@ -447,8 +447,8 @@ export default function KnowledgeOverview() {
                 className={cn(
                   'text-xs',
                   rebuildPresentation.kind === 'missing-vectors'
-                    ? 'border-amber-500/30 text-[var(--color-warning-text)] hover:bg-amber-500/20'
-                    : 'border-blue-500/30 text-[var(--color-category-progress-text)] hover:bg-blue-500/20',
+                    ? 'border-[color-mix(in_srgb,var(--color-warning)_30%,transparent)] text-[var(--color-warning-text)] hover:bg-[color-mix(in_srgb,var(--color-warning)_20%,transparent)]'
+                    : 'border-[color-mix(in_srgb,var(--color-info)_30%,transparent)] text-[var(--color-category-progress-text)] hover:bg-[color-mix(in_srgb,var(--color-info)_20%,transparent)]',
                 )}
                 onClick={handleBackfill}
                 disabled={backfilling}
@@ -462,12 +462,12 @@ export default function KnowledgeOverview() {
             </div>
             {/* 进度条（回填时显示） */}
             {backfilling && (
-              <div className={cn('h-1 w-full', rebuildPresentation.kind === 'missing-vectors' ? 'bg-amber-500/10' : 'bg-blue-500/10')}>
+              <div className={cn('h-1 w-full', rebuildPresentation.kind === 'missing-vectors' ? 'bg-[color-mix(in_srgb,var(--color-warning)_10%,transparent)]' : 'bg-[color-mix(in_srgb,var(--color-info)_10%,transparent)]')}>
                 <div className={cn(
                   'h-full animate-pulse rounded-full w-full',
                   rebuildPresentation.kind === 'missing-vectors'
-                    ? 'bg-gradient-to-r from-amber-500 to-amber-300'
-                    : 'bg-gradient-to-r from-blue-500 to-blue-300',
+                    ? 'bg-[var(--color-warning)]'
+                    : 'bg-[var(--color-info)]',
                 )} />
               </div>
             )}
@@ -486,8 +486,8 @@ export default function KnowledgeOverview() {
             <span className={cn(
               'text-[0.65rem] px-1.5 py-0.5 rounded-full font-medium',
               hasVectors
-                ? 'bg-emerald-500/15 text-[var(--color-success-text)]'
-                : 'bg-blue-500/15 text-[var(--color-category-progress-text)]'
+                ? 'bg-[color-mix(in_srgb,var(--color-success)_15%,transparent)] text-[var(--color-success-text)]'
+                : 'bg-[color-mix(in_srgb,var(--color-info)_15%,transparent)] text-[var(--color-category-progress-text)]'
             )}>
               {searchMode}
             </span>
@@ -553,8 +553,8 @@ export default function KnowledgeOverview() {
                       </span>
                       <span className={cn(
                         'text-[0.7rem] px-1.5 py-0.5 rounded font-mono',
-                        r.score > 0.8 ? 'bg-green-500/20 text-[var(--color-success-text)]' :
-                        r.score > 0.6 ? 'bg-yellow-500/20 text-[var(--color-warning-text)]' :
+                        r.score > 0.8 ? 'bg-[color-mix(in_srgb,var(--color-success)_20%,transparent)] text-[var(--color-success-text)]' :
+                        r.score > 0.6 ? 'bg-[color-mix(in_srgb,var(--color-warning)_20%,transparent)] text-[var(--color-warning-text)]' :
                         'bg-[var(--color-hover)] text-[var(--color-text-muted)]'
                       )}>
                         {r.score === 0.5 ? text('全文匹配', 'Text match') : text(`相似度 ${(r.score * 100).toFixed(1)}%`, `${(r.score * 100).toFixed(1)}% similarity`)}

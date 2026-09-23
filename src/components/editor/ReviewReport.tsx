@@ -220,18 +220,18 @@ const SEVERITY_META: Record<ReviewIssue['severity'], {
   },
   error: {
     colorClass: 'text-[var(--color-error-text)]',
-    bgClass: 'bg-red-500/10',
-    borderClass: 'border-red-500/30',
+    bgClass: 'bg-[color-mix(in_srgb,var(--color-error)_10%,transparent)]',
+    borderClass: 'border-[color-mix(in_srgb,var(--color-error)_30%,transparent)]',
   },
   warning: {
     colorClass: 'text-[var(--color-warning-text)]',
-    bgClass: 'bg-yellow-500/10',
-    borderClass: 'border-yellow-500/30',
+    bgClass: 'bg-[color-mix(in_srgb,var(--color-warning)_10%,transparent)]',
+    borderClass: 'border-[color-mix(in_srgb,var(--color-warning)_30%,transparent)]',
   },
   pass: {
     colorClass: 'text-[var(--color-success-text)]',
-    bgClass: 'bg-green-500/10',
-    borderClass: 'border-green-500/30',
+    bgClass: 'bg-[color-mix(in_srgb,var(--color-success)_10%,transparent)]',
+    borderClass: 'border-[color-mix(in_srgb,var(--color-success)_30%,transparent)]',
   },
 }
 
@@ -652,12 +652,12 @@ function ReviewReportSession({
           <h3 className="text-base font-bold text-[var(--color-text)]">{text('审稿报告', 'Review report')}</h3>
           <div className="flex items-center gap-3 text-xs ml-auto">
             {errorCount > 0 && (
-              <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-red-500/20 text-[var(--color-error-text)]">
+              <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-[color-mix(in_srgb,var(--color-error)_20%,transparent)] text-[var(--color-error-text)]">
                 <SeverityIcon severity="error" /> {errorCount} {errorCopy.countLabel}
               </span>
             )}
             {warningCount > 0 && (
-              <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-yellow-500/20 text-[var(--color-warning-text)]">
+              <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-[color-mix(in_srgb,var(--color-warning)_20%,transparent)] text-[var(--color-warning-text)]">
                 <SeverityIcon severity="warning" /> {warningCount} {warningCopy.countLabel}
               </span>
             )}
@@ -666,7 +666,7 @@ function ReviewReportSession({
                 <SeverityIcon severity="unknown" /> {unknownCount} {text('待核实', 'unverified')}
               </span>
             )}
-            <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-green-500/20 text-[var(--color-success-text)]">
+            <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-[color-mix(in_srgb,var(--color-success)_20%,transparent)] text-[var(--color-success-text)]">
               <SeverityIcon severity="pass" /> {passCount} {passCopy.countLabel}
             </span>
             {/* 图例帮助按钮 */}

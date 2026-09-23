@@ -184,8 +184,8 @@ export default function WorkspaceRulesTab() {
                     <span
                       className={`text-[10px] px-2 py-0.5 rounded font-medium ${
                         r.constraintType === 'hard'
-                          ? 'bg-red-500/15 text-[var(--color-error-text)]'
-                          : 'bg-blue-500/15 text-[var(--color-info)]'
+                          ? 'bg-[color-mix(in_srgb,var(--color-error)_15%,transparent)] text-[var(--color-error-text)]'
+                          : 'bg-[color-mix(in_srgb,var(--color-info)_15%,transparent)] text-[var(--color-info)]'
                       }`}
                     >
                       {r.constraintType === 'hard' ? text('硬约束', 'Hard') : text('软约束', 'Soft')}
@@ -225,7 +225,7 @@ export default function WorkspaceRulesTab() {
                     <button
                       onClick={() => void handleDelete(r)}
                       title={text('删除规则', 'Delete rule')}
-                      className="p-1 rounded hover:bg-red-500/10 transition-colors"
+                      className="p-1 rounded hover:bg-[color-mix(in_srgb,var(--color-error)_10%,transparent)] transition-colors"
                       style={{ color: 'var(--color-error)' }}
                     >
                       <Trash2 size={13} />
@@ -262,7 +262,7 @@ export default function WorkspaceRulesTab() {
                       </>
                     )}
                     {r.sourceSnapshotId && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-blue-500/10 text-[var(--color-info)]">
+                      <span className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-[color-mix(in_srgb,var(--color-info)_10%,transparent)] text-[var(--color-info)]">
                         快照 {r.sourceSnapshotId.slice(0, 8)}
                       </span>
                     )}

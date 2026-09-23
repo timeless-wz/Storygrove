@@ -267,7 +267,7 @@ export default function WorkspaceSourcesTab() {
                               }
                             }}
                             className={`border rounded p-2.5 text-xs space-y-1.5 transition-all ${
-                              isTarget ? 'ring-2 ring-blue-500/40' : ''
+                              isTarget ? 'ring-2 ring-[color-mix(in_srgb,var(--color-info)_40%,transparent)]' : ''
                             }`}
                             style={{
                               borderColor: isTarget ? 'var(--color-accent)' : 'var(--color-border)',

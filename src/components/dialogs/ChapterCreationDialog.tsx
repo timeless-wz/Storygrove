@@ -418,7 +418,7 @@ function ChapterCreationDialogSession({ isOpen, onClose, prefill }: Props) {
           <DialogDescription>
             {text('配置章节参数后启动 AI 创作流水线', 'Configure the chapter, then start the AI writing pipeline.')}
             {loadedFromBlueprint && (
-              <span className="ml-2 text-[0.7rem] px-1.5 py-0.5 rounded-full bg-green-500/15 text-[var(--color-success-text)]">
+              <span className="ml-2 text-[0.7rem] px-1.5 py-0.5 rounded-full bg-[color-mix(in_srgb,var(--color-success)_15%,transparent)] text-[var(--color-success-text)]">
                 {text('已从章节蓝图预填', 'Filled from chapter blueprint')}
               </span>
             )}
@@ -589,7 +589,7 @@ function ChapterCreationDialogSession({ isOpen, onClose, prefill }: Props) {
             </DialogFooter>
             {/* 前置校验失败提示（呈现在 Footer 下方） */}
             {(authorityError ?? guardError) && (
-              <div className="mx-5 mb-4 flex items-start gap-2 px-3 py-2.5 rounded-lg text-xs bg-yellow-500/10 border border-yellow-500/30 text-[var(--color-warning-text)]">
+              <div className="mx-5 mb-4 flex items-start gap-2 px-3 py-2.5 rounded-lg text-xs bg-[color-mix(in_srgb,var(--color-warning)_10%,transparent)] border border-[color-mix(in_srgb,var(--color-warning)_30%,transparent)] text-[var(--color-warning-text)]">
                 <AlertCircle size={13} className="flex-shrink-0 mt-0.5 text-[var(--color-warning)]" />
                 <span className="whitespace-pre-line">{authorityError ?? guardError}</span>
               </div>

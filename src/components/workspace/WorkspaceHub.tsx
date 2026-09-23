@@ -191,7 +191,7 @@ export default function WorkspaceHub() {
                   size="sm"
                   variant="ghost"
                   onClick={handleUnbind}
-                  className="text-xs gap-1.5 h-8 hover:bg-red-500/10"
+                  className="text-xs gap-1.5 h-8 hover:bg-[color-mix(in_srgb,var(--color-error)_10%,transparent)]"
                   style={{ color: 'var(--color-error)' }}
                 >
                   <Unlink size={13} />

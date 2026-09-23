@@ -159,11 +159,11 @@ export default function WorkspaceSidebarPanel() {
                   {s.relativePath}
                 </span>
                 {s.isMissing ? (
-                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" title={text('文件缺失', 'Missing')} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-error)] shrink-0" title={text('文件缺失', 'Missing')} />
                 ) : isStale ? (
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" title={text('内容已变化', 'Changed')} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-warning)] shrink-0" title={text('内容已变化', 'Changed')} />
                 ) : (
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" title={text('正常', 'Synced')} />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-success)] shrink-0" title={text('正常', 'Synced')} />
                 )}
               </button>
             )
