@@ -17,6 +17,7 @@
     "prepare:native-node": "node scripts/prepare-native-for-node.mjs",
     "typecheck": "tsc --noEmit",
     "check:i18n": "node scripts/check-i18n-coverage.mjs",
+    "pretest": "node scripts/prepare-native-for-node.mjs",
     "test": "vitest run",
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "mcp:server": "node scripts/story-mcp-server.mjs",
