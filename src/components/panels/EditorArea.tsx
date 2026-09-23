@@ -6,7 +6,7 @@ import {
 } from '../ui/Dialog'
 import { Button } from '../ui/Button'
 import { IconTooltip } from '../ui/Tooltip'
-import CodeMirrorEditor from '../editor/CodeMirrorEditor'
+import VditorProseEditor from '../editor/VditorProseEditor'
 import NovelConfigEditor from '../editor/NovelConfigEditor'
 import CharacterEditor from '../editor/CharacterEditor'
 import ChapterCardEditor from '../editor/ChapterCardEditor'
@@ -17,6 +17,7 @@ import DraftEditor from '../editor/DraftEditor'
 import VersionHistory from '../editor/VersionHistory'
 import ReviewReport from '../editor/ReviewReport'
 import NarrativeThreadEditor from '../editor/NarrativeThreadEditor'
+import ForeshadowingManagementView from '../editor/ForeshadowingManagementView'
 import ThreeWayMerge from '../editor/ThreeWayMerge'  // 保留引用以防其他入口使用
 import WelcomePage from '../pages/WelcomePage'
 import KnowledgeOverview from '../pages/KnowledgeOverview'
@@ -138,12 +139,10 @@ function ProseEditorWrapper({
 
       {/* 编辑器主体 */}
       <div className="flex-1 overflow-hidden">
-        <CodeMirrorEditor
+        <VditorProseEditor
           key={tab.id}
-          mode="prose"
           content={tab.content ?? ''}
-          filePath={tab.filePath}
-          hideStatusBar
+          editable={true}
           onCharCountChange={setWordCount}
           onChange={(text) => {
             // 同步 ref，供保存按钮使用
@@ -152,6 +151,7 @@ function ProseEditorWrapper({
             useEditorStore.getState().updateTabContent(tab.id, text)
           }}
           onSave={onSave ? (text) => handleSave(text) : undefined}
+          placeholder={text('开始写这一章…', 'Start writing this chapter…')}
         />
       </div>
     </div>
@@ -756,6 +756,9 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
             content={activeTab.content ?? ''}
             savedContent={activeTab.savedContent ?? activeTab.content ?? ''}
           />
+        )}
+        {activeTab?.type === 'foreshadowing' && activeTab.projectKey === currentProject.path && (
+          <ForeshadowingManagementView key={activeTab.id} projectKey={activeTab.projectKey} />
         )}
         {/* AI 建议预览 — 只读对比，统一使用弹出式 Dialog（与 DraftEditor 一致） */}
         <Dialog

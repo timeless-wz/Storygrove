@@ -147,12 +147,12 @@ export default function ProjectOverviewPage() {
 
   return (
     <div
-      className="h-full overflow-y-auto p-6 md:p-8"
-      style={{ backgroundColor: 'var(--color-editor-bg)', color: 'var(--color-text)' }}
+      className="literary-overview h-full overflow-y-auto p-6 md:p-8"
+      style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}
     >
       <div className="max-w-6xl mx-auto space-y-6">
         {/* 顶部 Hero 欢迎与状态栏 */}
-        <Card className="p-6">
+        <Card className="literary-overview-hero">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <div className="flex items-center gap-2 mb-1">
@@ -163,13 +163,13 @@ export default function ProjectOverviewPage() {
                     color: 'var(--color-accent)',
                   }}
                 >
-                  {text('Codex 创作工作台', 'Codex Creative Workbench')}
+                  {text('小说创作工作台', 'Fiction Workbench')}
                 </span>
                 <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                   {currentProject?.novelConfig?.genre || text('长篇小说', 'Fiction')}
                 </span>
               </div>
-              <h1 className="text-2xl font-bold tracking-tight text-[var(--color-text)]">
+              <h1 className="font-semibold tracking-tight text-[var(--color-text)]">
                 {currentProject?.name || text('未命名小说项目', 'Untitled Novel')}
               </h1>
               <p className="text-xs mt-1 text-[var(--color-text-secondary)]">

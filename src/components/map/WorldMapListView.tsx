@@ -63,14 +63,14 @@ export default function WorldMapListView({
         <div className="flex items-center gap-1 bg-[var(--color-panel)] border border-[var(--color-border)] rounded-md p-0.5 text-xs">
           <button
             type="button"
-            className={`px-3 py-1 rounded transition-colors ${tab === 'nodes' ? 'bg-[var(--color-accent)] text-white' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
+            className={`px-3 py-1 rounded transition-colors ${tab === 'nodes' ? 'bg-[var(--color-accent)] text-[var(--color-accent-foreground)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
             onClick={() => setTab('nodes')}
           >
             {text(`地图节点 (${nodes.length})`, `Nodes (${nodes.length})`)}
           </button>
           <button
             type="button"
-            className={`px-3 py-1 rounded transition-colors ${tab === 'edges' ? 'bg-[var(--color-accent)] text-white' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
+            className={`px-3 py-1 rounded transition-colors ${tab === 'edges' ? 'bg-[var(--color-accent)] text-[var(--color-accent-foreground)]' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}
             onClick={() => setTab('edges')}
           >
             {text(`连线与航路 (${edges.length})`, `Edges & Routes (${edges.length})`)}

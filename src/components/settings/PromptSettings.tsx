@@ -361,7 +361,7 @@ function TemplateItem({
     >
       {/* 折叠头部 */}
       <button
-        className="w-full flex items-center gap-2.5 px-4 py-3 text-left transition-colors hover:bg-[var(--color-hover)] outline-none focus:outline-none"
+        className="w-full flex items-center gap-2.5 px-4 py-3 text-left transition-colors hover:bg-[var(--color-hover)] outline-none focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]"
         onClick={onToggle}
       >
         {isExpanded ? (
@@ -403,7 +403,7 @@ function TemplateItem({
                     key={varName}
                     onClick={() => insertVariable(varName)}
                     title={text(desc, englishDescription)}
-                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[0.68rem] transition-colors hover:bg-[var(--color-accent)] hover:text-white outline-none focus:outline-none"
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[0.68rem] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-accent-foreground)] outline-none focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--color-bg)]"
                     style={{
                       backgroundColor: 'var(--color-hover)',
                       color: 'var(--color-text-secondary)',
@@ -448,7 +448,7 @@ function TemplateItem({
               value={editGuidance}
               onChange={(e) => setEditGuidance(e.target.value)}
               placeholder={text('例如：优先通过角色行动体现冲突，避免概括式说明。', 'For example: reveal conflict through character action instead of summary.')}
-              className="w-full rounded-lg px-3 py-2.5 text-xs font-mono resize-y outline-none focus:outline-none"
+                className="w-full rounded-lg px-3 py-2.5 text-xs font-mono resize-y outline-none focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--color-bg)]"
               style={{
                 backgroundColor: 'var(--color-editor-bg)',
                 color: 'var(--color-text)',

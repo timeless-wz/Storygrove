@@ -251,8 +251,8 @@ export default function WorldMapView({ projectKey }: { projectKey: string }) {
             <Layers size={13} />{text('管理地图', 'Manage maps')}
           </Button>
           <div className="flex rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] p-0.5">
-            <button type="button" className={`rounded p-1 ${viewMode === 'canvas' ? 'bg-[var(--color-accent)] text-white' : ''}`} onClick={() => setViewMode('canvas')} title={text('画布视图', 'Canvas view')}><MapIcon size={13} /></button>
-            <button type="button" className={`rounded p-1 ${viewMode === 'list' ? 'bg-[var(--color-accent)] text-white' : ''}`} onClick={() => setViewMode('list')} title={text('地点列表', 'Location list')}><List size={13} /></button>
+            <button type="button" className={`rounded p-1 ${viewMode === 'canvas' ? 'bg-[var(--color-accent)] text-[var(--color-accent-foreground)]' : ''}`} onClick={() => setViewMode('canvas')} title={text('画布视图', 'Canvas view')}><MapIcon size={13} /></button>
+            <button type="button" className={`rounded p-1 ${viewMode === 'list' ? 'bg-[var(--color-accent)] text-[var(--color-accent-foreground)]' : ''}`} onClick={() => setViewMode('list')} title={text('地点列表', 'Location list')}><List size={13} /></button>
           </div>
           <Button size="sm" variant="outline" disabled={!selectedMap} onClick={() => void importMapImage()} title={text('为当前地图导入或替换图片', 'Import or replace this map’s image')}>
             <ImagePlus size={13} />{mapImage ? text('替换图片', 'Replace image') : text('导入图片', 'Import image')}

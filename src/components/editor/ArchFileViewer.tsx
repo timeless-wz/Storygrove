@@ -11,7 +11,7 @@ import { CORE_FIELD_MAP, parseCoreField } from '../../services/vela-protocol'
 import { appErrorMessage } from '../../i18n/app-errors'
 import { toast } from '../ui/Toast'
 import { CharacterCardImportButton } from '../characters/CharacterCardImportButton'
-import CodeMirrorEditor from './CodeMirrorEditor'
+import VditorProseEditor from './VditorProseEditor'
 import { useProjectStore } from '../../stores/project-store'
 import { useLocaleStore } from '../../stores/locale-store'
 import { launchCreativeWorkflow } from '../../services/workflows/creative-workflow-launcher'
@@ -73,7 +73,7 @@ interface Props {
 
 /**
  * 架构文件编辑器（Markdown 文件 WYSIWYG 编辑）
- * - 使用 CodeMirrorEditor（document 模式）+ hideStatusBar，底部栏信息整合到本组件工具栏
+ * - 使用 VditorProseEditor，底部栏信息整合到本组件工具栏
  * - 脏状态通过比较内容字符串判断，不依赖 onChange 时机
  */
 export default function ArchFileViewer(props: Props) {
@@ -106,7 +106,7 @@ function ArchFileViewerSession({
   const savedContentRef = useRef(initialSavedContent)
   // 编辑器当前内容（用 ref 而非 state，避免每次键入都重渲染导致光标跳末尾）
   const currentContentRef = useRef(initialContent)
-  // 传给 CodeMirrorEditor 的初始内容（只有『外部重载』时才更新，不随用户键入变化）
+  // 传给 VditorProseEditor 的初始内容（只有『外部重载』时才更新，不随用户键入变化）
   const [editorContent, setEditorContent] = useState(initialContent)
 
   const [saving, setSaving] = useState(false)
@@ -127,7 +127,7 @@ function ArchFileViewerSession({
     migrate: handleRepairCharacterRoster,
   } = useCharacterRosterRepair({ projectKey, enabled: isCharacterProjection })
 
-  // 中文字数（由 CodeMirrorEditor 回调更新）
+  // 中文字数（由 VditorProseEditor 回调更新）
   const [charCount, setCharCount] = useState(0)
 
   // 脚状态（独立 state，不跟着 content 走）
@@ -599,17 +599,14 @@ function ArchFileViewerSession({
         </div>
       )}
 
-      {/* CodeMirrorEditor document 模式，隐藏底部栏（信息已整合到上方工具栏） */}
+      {/* Vditor 编辑器，隐藏底部栏（信息已整合到上方工具栏） */}
       <div className="flex-1 overflow-hidden">
-        <CodeMirrorEditor
-          mode="document"
+        <VditorProseEditor
           content={editorContent}
-          filePath={filePath}
           editable={!isCharacterProjection}
           onChange={isCharacterProjection ? undefined : handleChange}
           onSave={isCharacterProjection ? undefined : handleSave}
           onCharCountChange={setCharCount}
-          hideStatusBar
           placeholder={text(
             '尚未生成内容，点击右上角「AI 生成」或直接在此编辑...',
             'No content yet. Click “AI Generate” in the top-right or start editing here...',

@@ -1,5 +1,4 @@
 import { act } from 'react'
-import { EditorView } from '@codemirror/view'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -163,26 +162,36 @@ describe('AI output recovery candidates', () => {
     await act(async () => useEditorStore.getState().setActiveTab(recoveryTab.id))
 
     expect(container?.textContent).toContain('项目恢复候选')
-    expect(container?.textContent).toContain('林岚推开驾驶室的门。')
-    await act(async () => {
-      const editor = EditorView.findFromDOM(container!.querySelector<HTMLElement>('.cm-editor')!)!
-      editor.dispatch({
-        changes: { from: 0, to: editor.state.doc.length, insert: '林岚停下列车，保存现场。' },
-      })
+    await vi.waitFor(() => {
+      expect(container?.querySelector('[data-vditor-ready="true"]')).not.toBeNull()
     })
-    expect(container?.querySelector('button[title^="保存"]')).not.toBeNull()
+    const prose = container!.querySelector('.vditor-ir pre.vditor-reset') as HTMLElement
+    expect(prose).not.toBeNull()
+    await act(async () => {
+      prose.focus()
+      const target = prose.querySelector('p') ?? prose.firstElementChild ?? prose
+      const range = document.createRange()
+      range.selectNodeContents(target)
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+      document.execCommand('insertText', false, '林岚停下列车，保存现场。')
+    })
+    await vi.waitFor(() => {
+      expect(container?.querySelector('button[title^="保存"]')).not.toBeNull()
+    })
     await act(async () => saveDirtyEditorChangesForExit(projectPath))
     expect(useEditorStore.getState().tabs.find(tab => tab.id === recoveryTab.id)).toEqual(
       expect.objectContaining({
-        content: '林岚停下列车，保存现场。',
+        content: expect.stringMatching(/^林岚停下列车，保存现场。/),
         dirty: false,
-        savedContent: '林岚停下列车，保存现场。',
+        savedContent: expect.stringMatching(/^林岚停下列车，保存现场。/),
       }),
     )
     expect(invoke).toHaveBeenCalledWith(
       'db:recovery-candidate-update',
       'candidate-1',
-      '林岚停下列车，保存现场。',
+      expect.stringMatching(/^林岚停下列车，保存现场。/),
       projectPath,
       session,
     )

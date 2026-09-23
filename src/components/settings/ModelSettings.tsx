@@ -112,7 +112,7 @@ export default function ModelSettings() {
             <div className="text-xs text-[var(--color-text-muted)]">
               {model.provider} · {model.modelName}
               {defaultModelId === model.id && (
-                <span className="ml-2 px-1.5 py-0.5 rounded text-[0.7rem] bg-[var(--color-accent)] text-white">
+                <span className="ml-2 px-1.5 py-0.5 rounded text-[0.7rem] bg-[var(--color-accent)] text-[var(--color-accent-foreground)]">
                   {text('默认', 'Default')}
                 </span>
               )}

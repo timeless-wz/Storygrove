@@ -47,6 +47,17 @@ let invoke: ReturnType<typeof vi.fn>
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
+const READY_TIMEOUT = 20000
+
+async function waitForReady(): Promise<void> {
+  await act(async () => {
+    await vi.waitFor(
+      () => expect(container.querySelector('[data-vditor-ready="true"]')).not.toBeNull(),
+      { timeout: READY_TIMEOUT },
+    )
+  })
+}
+
 async function renderDraft(): Promise<void> {
   await act(async () => {
     root.render(
@@ -59,6 +70,7 @@ async function renderDraft(): Promise<void> {
       />,
     )
   })
+  await waitForReady()
 }
 
 function buttonWithLabel(label: string): HTMLElement | undefined {
@@ -125,30 +137,17 @@ afterEach(async () => {
 })
 
 describe('ProjectDocumentEditor', () => {
-  it('offers edit, preview and split modes with a live preview', async () => {
+  it('renders with unified Vditor editor in instant rendering (IR) mode by default', async () => {
     await renderDraft()
 
-    expect(container.textContent).toContain('编辑')
-    expect(container.textContent).toContain('预览')
-    expect(container.textContent).toContain('分屏')
+    // 默认即时渲染：Vditor 宿主与 IR 编辑区域存在
+    expect(container.querySelector('[data-vditor-prose-editor="true"]')).not.toBeNull()
+    const irPre = container.querySelector('.vditor-ir pre.vditor-reset')
+    expect(irPre).not.toBeNull()
+    expect(irPre?.textContent).toContain('第一卷')
 
-    // 默认分屏：左侧编辑器与右侧预览同时存在。
-    expect(container.querySelector('.cm-content')).not.toBeNull()
-    const preview = container.querySelector('[data-project-document-preview]')
-    expect(preview).not.toBeNull()
-    expect(preview?.querySelector('table')).not.toBeNull()
-    expect(preview?.querySelectorAll('input[type="checkbox"]').length).toBeGreaterThan(0)
-
-    await act(async () => {
-      buttonWithLabel('预览')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
+    // 旧的 CodeMirror 和旧项目文档双栏预览已彻底移除
     expect(container.querySelector('.cm-content')).toBeNull()
-    expect(container.querySelector('[data-project-document-preview]')).not.toBeNull()
-
-    await act(async () => {
-      buttonWithLabel('编辑')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
-    expect(container.querySelector('.cm-content')).not.toBeNull()
     expect(container.querySelector('[data-project-document-preview]')).toBeNull()
   })
 
@@ -163,8 +162,8 @@ describe('ProjectDocumentEditor', () => {
     await act(async () => {
       entries[1]?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
-    // 跳转不应破坏文档或抛出错误。
-    expect(container.querySelector('[data-project-document-preview]')).not.toBeNull()
+    // 跳转不应破坏文档或抛出错误，Vditor 宿主保持正常。
+    expect(container.querySelector('[data-vditor-prose-editor="true"]')).not.toBeNull()
   })
 
   it('shows the unsaved state and saves the raw markdown on demand', async () => {
@@ -247,8 +246,9 @@ describe('ProjectDocumentEditor', () => {
         />,
       )
     })
+    await waitForReady()
 
     expect(container.textContent).toContain('未闭合')
-    expect(container.querySelector('.cm-content')).not.toBeNull()
+    expect(container.querySelector('[data-vditor-prose-editor="true"]')).not.toBeNull()
   })
 })

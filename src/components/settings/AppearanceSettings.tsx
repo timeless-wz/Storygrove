@@ -3,7 +3,6 @@ import {
   Check,
   Image,
   Moon,
-  Palette,
   ScrollText,
   Sparkles,
   Sun,
@@ -16,6 +15,7 @@ import { useLocaleStore } from '../../stores/locale-store'
 import { useSkinStore } from '../../stores/skin-store'
 import { useThemeStore, type Theme } from '../../stores/theme-store'
 import type { SkinId } from '../../shared/skin-types'
+import { ThemeGallery } from './ThemeGallery'
 
 /**
  * Vite's base is deliberately relative for BrowserWindow.loadFile().  This
@@ -96,12 +96,19 @@ export default function AppearanceSettings() {
 
   return (
     <section className="appearance-settings max-w-3xl space-y-7" aria-label={t('appearance.section')}>
-      <div className="space-y-1.5">
-        <div className="flex items-center gap-2">
-          <Palette size={16} aria-hidden="true" style={{ color: 'var(--color-accent)' }} />
-          <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{t('appearance.theme')}</h3>
+      {/* 14 套文学主题画廊 */}
+      <ThemeGallery />
+
+      {/* 经典基础主题快速切换 */}
+      <div className="space-y-1.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+            {text('经典基础主题', 'Classic Base Themes')}
+          </span>
+          <span className="text-2xs" style={{ color: 'var(--color-text-muted)' }}>
+            {text('纯色基底', 'Monochrome bases')}
+          </span>
         </div>
-        <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{t('appearance.themeDescription')}</p>
         <div className="appearance-theme-grid" role="group" aria-label={t('appearance.theme')}>
           {THEME_OPTIONS.map(({ id, labelKey, Icon }) => (
             <button

@@ -1,8 +1,10 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { ipc } from '../services/ipc-client'
+import { type LiteraryThemeId, isDarkLiteraryTheme } from '../shared/literary-themes'
 
-export type Theme = 'light' | 'galaxy' | 'paper' | 'dark'
+export type LegacyTheme = 'light' | 'galaxy' | 'paper' | 'dark'
+export type Theme = LegacyTheme | LiteraryThemeId
 
 // ─── 共享字体库 ─────────────────────────────────────────────────────────────
 
@@ -96,7 +98,7 @@ interface ThemeState {
   /** 用户选择的主题 */
   theme: Theme
   /** 实际应用的主题（解析 system 后） */
-  resolvedTheme: 'light' | 'galaxy' | 'paper' | 'dark'
+  resolvedTheme: Theme
   /** 当前缩放级别（1.0 = 100%） */
   zoom: number
   /** 当前写作字体（正文编辑区 → --font-writing） */
@@ -224,22 +226,25 @@ export const useThemeStore = create<ThemeState>()(
 // ─── 内部工具函数 ─────────────────────────────────────────────────────────
 
 /** 解析主题：直接返回实际值，保留对 localStorage 旧版 system 设定的向下兼容 */
-function resolveTheme(theme: Theme): 'light' | 'galaxy' | 'paper' | 'dark' {
+function resolveTheme(theme: Theme): Theme {
   if ((theme as string) === 'system') {
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
   }
   return theme
 }
 
-/** 应用主题到 DOM — 支持互斥的主题 */
-function applyTheme(theme: 'light' | 'galaxy' | 'paper' | 'dark') {
+/** 应用主题到 DOM — 支持互斥的主题并同步 data-theme 与暗色模式 */
+function applyTheme(theme: Theme) {
   const root = document.documentElement
+  if (typeof root.setAttribute === 'function') {
+    root.setAttribute('data-theme', theme)
+  }
   root.classList.remove('galaxy', 'paper', 'dark')
   if (theme === 'galaxy') {
     root.classList.add('galaxy')
   } else if (theme === 'paper') {
     root.classList.add('paper')
-  } else if (theme === 'dark') {
+  } else if (theme === 'dark' || isDarkLiteraryTheme(theme)) {
     root.classList.add('dark')
   }
 }

@@ -5,7 +5,7 @@
  * Fast Refresh can preserve this component's state during development.
  */
 
-import type { MouseEvent } from 'react'
+import type { KeyboardEvent, MouseEvent } from 'react'
 
 import { renderIcon } from './sidebar-icons'
 
@@ -31,11 +31,21 @@ export function LeafItem({
   onClick,
   onContextMenu,
 }: LeafItemProps) {
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      onClick?.()
+    }
+  }
+
   return (
     <div
-      className="tree-item gap-1.5 cursor-pointer select-none"
+      role="button"
+      tabIndex={0}
+      className="tree-item gap-1.5 cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
       style={{ paddingLeft: 10 }}
       onClick={onClick}
+      onKeyDown={handleKeyDown}
       onContextMenu={onContextMenu}
       title={desc}
     >

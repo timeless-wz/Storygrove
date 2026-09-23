@@ -112,13 +112,18 @@ describe('StoryTimelineRepository', () => {
     }))
 
     const snapshot = StoryTimelineRepository.getAll()
-    expect(snapshot.branches).toHaveLength(1)
-    expect(snapshot.branches[0].name).toBe('暗河秘辛')
+    expect(snapshot.branches).toHaveLength(2)
+    expect(snapshot.branches).toMatchObject([
+      { id: 'main', name: '主时间轴' },
+      { id: 'branch-1', name: '暗河秘辛' },
+    ])
     expect(snapshot.events).toHaveLength(2)
 
     StoryTimelineRepository.deleteBranch('branch-1')
     const afterDelete = StoryTimelineRepository.getAll()
-    expect(afterDelete.branches).toHaveLength(0)
+    expect(afterDelete.branches).toEqual([
+      expect.objectContaining({ id: 'main', name: '主时间轴' }),
+    ])
     expect(afterDelete.events).toHaveLength(1)
     expect(afterDelete.events[0].id).toBe('main-1')
   })

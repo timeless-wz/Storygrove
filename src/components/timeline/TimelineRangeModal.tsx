@@ -138,7 +138,7 @@ export function TimelineRangeModal({
         <div className="writer-timeline-modal-header">
           <div>
             <div className="writer-timeline-modal-subtitle flex items-center gap-1.5">
-              <Compass size={13} className="text-blue-600" />
+              <Compass size={13} className="text-[var(--color-accent-text)]" />
               <span>{text('主干范围锚点 · 故事界限', 'Trunk Range Anchors')}</span>
             </div>
             <h2>{text('设置故事范围与刻度', 'Configure Story Range & Ruler')}</h2>
@@ -188,7 +188,7 @@ export function TimelineRangeModal({
 
             {/* 故事开端锚点配置 */}
             <div className="p-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] flex flex-col gap-2">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-600">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--color-accent-text)]">
                 <Milestone size={14} />
                 <span>{text('左侧锚点：故事开端', 'Left Anchor: Story Start')}</span>
               </div>
@@ -223,7 +223,7 @@ export function TimelineRangeModal({
 
             {/* 故事结束锚点配置 */}
             <div className="p-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] flex flex-col gap-2">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-600">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--color-success-text)]">
                 <Flag size={14} />
                 <span>{text('右侧锚点：故事结束', 'Right Anchor: Story End')}</span>
               </div>

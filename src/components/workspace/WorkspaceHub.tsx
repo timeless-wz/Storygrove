@@ -230,7 +230,7 @@ export default function WorkspaceHub() {
                   className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold"
                   style={{
                     backgroundColor: 'rgba(234, 179, 8, 0.15)',
-                    color: '#ca8a04',
+                    color: 'var(--color-warning-text)',
                     border: '1px solid rgba(234, 179, 8, 0.3)',
                   }}
                   title={

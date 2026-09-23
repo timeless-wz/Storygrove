@@ -210,9 +210,9 @@ export default function WorkspaceRulesTab() {
                           r.status === 'confirmed'
                             ? 'var(--color-accent)'
                             : r.status === 'deprecated'
-                            ? '#ef4444'
+                            ? 'var(--color-error-text)'
                             : r.status === 'candidate'
-                            ? '#f59e0b'
+                            ? 'var(--color-warning-text)'
                             : 'var(--color-text)',
                       }}
                     >

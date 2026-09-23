@@ -1,0 +1,37 @@
+/* CSS Custom Highlights for Foreshadowings (伏笔正文高亮) */
+::highlight(foreshadowing-blue) {
+  background-color: rgba(59, 130, 246, 0.22);
+  text-decoration: underline wavy #3b82f6;
+  text-underline-offset: 3px;
+}
+
+::highlight(foreshadowing-red) {
+  background-color: rgba(239, 68, 68, 0.22);
+  text-decoration: underline wavy #ef4444;
+  text-underline-offset: 3px;
+}
+
+::highlight(foreshadowing-yellow) {
+  background-color: rgba(234, 179, 8, 0.22);
+  text-decoration: underline wavy #eab308;
+  text-underline-offset: 3px;
+}
+
+::highlight(foreshadowing-green) {
+  background-color: rgba(34, 197, 94, 0.22);
+  text-decoration: underline wavy #22c55e;
+  text-underline-offset: 3px;
+}
+
+::highlight(foreshadowing-purple) {
+  background-color: rgba(168, 85, 247, 0.22);
+  text-decoration: underline wavy #a855f7;
+  text-underline-offset: 3px;
+}
+
+::highlight(foreshadowing-completed) {
+  background-color: rgba(156, 163, 175, 0.15);
+  text-decoration: underline dashed #9ca3af;
+  text-underline-offset: 3px;
+  opacity: 0.75;
+}

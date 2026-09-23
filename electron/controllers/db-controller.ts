@@ -23,6 +23,11 @@ import { CharacterRosterRepository } from '../repositories/character-roster-repo
 import type { CharacterRosterCommitRequest } from '../../src/shared/character-roster'
 import { DraftRepository } from '../repositories/draft-repository'
 import type { DraftSourceDependency } from '../../src/shared/draft-source-dependency'
+import { ForeshadowingRepository } from '../repositories/foreshadowing-repository'
+import type {
+  CreateForeshadowingInput,
+  UpdateForeshadowingInput,
+} from '../../src/shared/ipc-channels'
 import { FinalizedDraftImportRepository } from '../repositories/finalized-draft-import-repository'
 import { FinalizationRepository } from '../repositories/finalization-repository'
 import type { FinalizedDraftImportRequest } from '../../src/shared/finalized-draft-import'
@@ -107,6 +112,10 @@ const MUTATING_DATABASE_CHANNELS = new Set([
   'db:draft-update-content',
   'db:draft-set-blueprint',
   'db:draft-delete',
+  'db:foreshadowing-create',
+  'db:foreshadowing-update',
+  'db:foreshadowing-toggle-completed',
+  'db:foreshadowing-delete',
   'db:recovery-candidate-record',
   'db:recovery-candidate-update',
   'db:recovery-candidate-resolve',
@@ -811,6 +820,85 @@ export function registerDatabaseController() {
   ipcMain.handle('db:draft-export-authority-current', async (_event, receipt, expectedProjectPath: string) => {
     assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
     return FinalizationRepository.matchesAuthoritativeExportReceipt(receipt)
+  })
+
+  // ============================================================
+  // Foreshadowings — 伏笔管理
+  // ============================================================
+  ipcMain.handle('db:foreshadowing-list', async (
+    _event,
+    filter: 'all' | 'pending' | 'completed' | undefined,
+    expectedProjectPath: string,
+  ) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return ForeshadowingRepository.listAll(filter)
+  })
+
+  ipcMain.handle('db:foreshadowing-list-by-draft', async (
+    _event,
+    draftId: number,
+    expectedProjectPath: string,
+  ) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return ForeshadowingRepository.listByDraft(draftId)
+  })
+
+  ipcMain.handle('db:foreshadowing-create', async (
+    _event,
+    input: CreateForeshadowingInput,
+    expectedProjectPath: string,
+  ) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      const id = ForeshadowingRepository.create(input)
+      return { success: true, id }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('db:foreshadowing-update', async (
+    _event,
+    id: string,
+    updates: UpdateForeshadowingInput,
+    expectedProjectPath: string,
+  ) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      ForeshadowingRepository.update(id, updates)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('db:foreshadowing-toggle-completed', async (
+    _event,
+    id: string,
+    completed: boolean,
+    expectedProjectPath: string,
+  ) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      ForeshadowingRepository.toggleCompleted(id, completed)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('db:foreshadowing-delete', async (
+    _event,
+    id: string,
+    expectedProjectPath: string,
+  ) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      ForeshadowingRepository.delete(id)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
   })
 
   ipcMain.handle('db:continuity-save-finalized', async (_event, request, expectedProjectPath: string) => {

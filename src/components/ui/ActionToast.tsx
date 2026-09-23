@@ -262,7 +262,7 @@ function ActionToastCard({ item, onRemove }: { item: ActionToastItem; onRemove: 
                   : 'var(--color-accent)',
                 color: action.variant === 'ghost'
                   ? 'var(--color-text-secondary)'
-                  : '#fff',
+                  : 'var(--color-accent-foreground)',
               }}
               onMouseEnter={e => {
                 if (action.variant === 'ghost') {

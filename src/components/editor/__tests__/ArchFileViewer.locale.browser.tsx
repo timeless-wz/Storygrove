@@ -1,5 +1,4 @@
 import { act } from 'react'
-import { EditorView } from '@codemirror/view'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -86,22 +85,14 @@ describe('ArchFileViewer locale', () => {
     expect(container.querySelector(`[title="AI 生成「${label}」"]`)).not.toBeNull()
     if (key === 'characters') {
       expect(container.textContent).toContain('角色图谱由角色名单自动生成，只读展示')
-      expect(container.querySelector('.cm-content')?.getAttribute('contenteditable')).toBe('false')
-      const editor = container.querySelector('.cm-editor') as HTMLElement
-      const view = EditorView.findFromDOM(editor)!
-      expect(view.state.readOnly).toBe(true)
-      await act(async () => view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', {
-        key: 'Tab', code: 'Tab', bubbles: true, cancelable: true,
-      })))
-      expect(view.state.doc.toString()).toBe('')
+      await vi.waitFor(() => {
+        expect(container.querySelector('.vditor-ir pre.vditor-reset')?.getAttribute('contenteditable')).toBe('false')
+      })
       expect(container.querySelector('[title="保存（Cmd+S）"]')).toBeNull()
     } else if (key === 'premise') {
-      const view = EditorView.findFromDOM(container.querySelector('.cm-editor') as HTMLElement)!
-      expect(view.state.readOnly).toBe(false)
-      await act(async () => view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', {
-        key: 'Tab', code: 'Tab', bubbles: true, cancelable: true,
-      })))
-      expect(view.state.doc.toString()).toBe('  ')
+      await vi.waitFor(() => {
+        expect(container.querySelector('.vditor-ir pre.vditor-reset')?.getAttribute('contenteditable')).toBe('true')
+      })
     }
   })
 
@@ -187,7 +178,9 @@ describe('ArchFileViewer locale', () => {
 
     await vi.waitFor(() => expect(container.textContent).toContain('AI Generate'))
     expect(container.querySelector('[title="AI Generate “Premise”"]')).not.toBeNull()
-    expect(container.textContent).toContain('No content yet. Click “AI Generate” in the top-right or start editing here...')
+    expect(
+      container.querySelector('.vditor-ir pre.vditor-reset')?.getAttribute('placeholder'),
+    ).toBe('No content yet. Click “AI Generate” in the top-right or start editing here...')
     expect(container.textContent).not.toMatch(/尚未生成内容|AI 生成/)
   })
 })

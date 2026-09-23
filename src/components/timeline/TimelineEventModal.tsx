@@ -260,12 +260,12 @@ export function TimelineEventModal({
           <div>
             <div className="writer-timeline-modal-subtitle flex items-center gap-1.5">
               {mode === 'create-branch' ? (
-                <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
+                <span className="inline-flex items-center gap-1 text-[var(--color-success-text)] font-medium">
                   <GitBranch size={13} />
                   {text('分叉自事件：', 'Branched from: ')} {sourceEvent?.title}
                 </span>
               ) : currentBranchName ? (
-                <span className="inline-flex items-center gap-1 text-sky-600 dark:text-sky-400 font-medium">
+                <span className="inline-flex items-center gap-1 text-[var(--color-accent-text)] font-medium">
                   <GitBranch size={13} />
                   {currentBranchName}
                 </span>
@@ -330,7 +330,7 @@ export function TimelineEventModal({
                 }}
               />
               {orderError && (
-                <div className="writer-timeline-field-error text-xs text-rose-500 mt-1" role="alert">
+                <div className="writer-timeline-field-error text-xs text-[var(--color-error-text)] mt-1" role="alert">
                   {orderError}
                 </div>
               )}
@@ -462,7 +462,7 @@ export function TimelineEventModal({
             <Button
               variant="ghost"
               size="sm"
-              className="text-red-600 dark:text-red-400 mr-auto"
+              className="text-[var(--color-error-text)] mr-auto"
               onClick={async () => {
                 await onDelete(initialEvent.id)
                 onClose()

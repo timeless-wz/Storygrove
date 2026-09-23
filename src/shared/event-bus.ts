@@ -24,12 +24,19 @@ export type GlobalEventType =
   | 'FINALIZE_COMPLETE'
   // --- 章节删除收据变化（包括待人工确认和部分清理失败） ---
   | 'CHAPTER_DELETION_UPDATED'
+  // --- 伏笔数据变化 ---
+  | 'FORESHADOWING_UPDATED'
   // --- 项目级事件 ---
   | 'PROJECT_CHANGED'
   // --- 系统通知 ---
   | 'SYSTEM_NOTICE'
 
 export interface EventPayloadMap {
+  'FORESHADOWING_UPDATED': {
+    projectPath: string
+    projectSession?: ProjectSessionContext
+    draftId?: number
+  }
   'REFRESH_RESOURCE': {
     resources: Array<'fileTree' | 'characterCards' | 'drafts' | 'blueprints' | 'all'>
     /** 事件生产者开始操作时冻结的项目路径（只作显示/定位，不是身份）。 */

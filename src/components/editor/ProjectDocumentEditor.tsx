@@ -8,9 +8,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Save,
-  Eye,
-  Columns2,
-  Pencil,
   List,
   ImagePlus,
   Database,
@@ -31,8 +28,7 @@ import { useProjectStore } from '../../stores/project-store'
 import { useProjectDocumentsStore } from '../../stores/project-documents-store'
 import { Button } from '../ui/Button'
 import { toast } from '../ui/Toast'
-import CodeMirrorEditor from './CodeMirrorEditor'
-import ProjectDocumentPreview from './ProjectDocumentPreview'
+import VditorProseEditor from './VditorProseEditor'
 import {
   captureProjectSession,
   isProjectSessionCurrent,
@@ -43,8 +39,6 @@ import {
   selectExternalMarkdownImage,
   writeProjectDocument,
 } from '../../services/project-documents-service'
-
-type EditorMode = 'edit' | 'preview' | 'split'
 
 interface Props {
   tabId: string
@@ -82,22 +76,20 @@ function ProjectDocumentEditorSession({
   const addToKnowledge = useProjectDocumentsStore(s => s.addToKnowledge)
   const removeFromKnowledge = useProjectDocumentsStore(s => s.removeFromKnowledge)
 
-  const [mode, setMode] = useState<EditorMode>('split')
   const [showToc, setShowToc] = useState(true)
   const [saving, setSaving] = useState(false)
   const [isDirty, setIsDirty] = useState(initialContent !== initialSavedContent)
 
   const savedContentRef = useRef(initialSavedContent)
   const currentContentRef = useRef(initialContent)
-  // 传给 CodeMirrorEditor 的初始内容只在“外部重载”时更新，避免光标跳末尾。
+  // 传给 VditorProseEditor 的初始内容只在“外部重载”时更新，避免光标跳末尾。
   const [editorContent, setEditorContent] = useState(initialContent)
-  // 预览需要实时文本，与编辑器内部状态解耦。
+  // 目录与字数分析基于实时文本。
   const [liveContent, setLiveContent] = useState(initialContent)
-  const [jumpTarget, setJumpTarget] = useState<{ line: number; requestId: number } | null>(null)
+  const [jumpTarget, setJumpTarget] = useState<{ line: number; index: number; text: string; requestId: number } | null>(null)
   const [insertRequest, setInsertRequest] = useState<{ text: string; requestId: number } | null>(null)
   const [assetBusy, setAssetBusy] = useState(false)
   const requestSequenceRef = useRef(0)
-  const previewRef = useRef<HTMLDivElement>(null)
 
   // 外部内容更新（保存后刷新、AI 写入）时的热重载。
   useEffect(() => {
@@ -169,14 +161,13 @@ function ProjectDocumentEditorSession({
 
   const jumpToHeading = useCallback((heading: MarkdownHeading, index: number) => {
     requestSequenceRef.current += 1
-    const requestId = requestSequenceRef.current
-    if (mode !== 'preview') setJumpTarget({ line: heading.line, requestId })
-    const container = previewRef.current
-    if (container && mode !== 'edit') {
-      const rendered = container.querySelectorAll('h1, h2, h3, h4, h5, h6')
-      rendered[index]?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-    }
-  }, [mode])
+    setJumpTarget({
+      line: heading.line,
+      index,
+      text: heading.text,
+      requestId: requestSequenceRef.current,
+    })
+  }, [])
 
   const handleInsertImage = useCallback(async () => {
     if (assetBusy) return
@@ -235,23 +226,6 @@ function ProjectDocumentEditorSession({
     }
   }, [addToKnowledge, documentPath, indexedEntry, projectKey, removeFromKnowledge, text])
 
-  const modeButton = (value: EditorMode, label: string, icon: React.ReactNode) => (
-    <button
-      type="button"
-      key={value}
-      onClick={() => setMode(value)}
-      aria-pressed={mode === value}
-      className="flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors"
-      style={{
-        backgroundColor: mode === value ? 'var(--color-active)' : 'transparent',
-        color: mode === value ? 'var(--color-text)' : 'var(--color-text-muted)',
-      }}
-    >
-      {icon}
-      {label}
-    </button>
-  )
-
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* 工具栏（背景与编辑区一致） */}
@@ -270,16 +244,6 @@ function ProjectDocumentEditorSession({
           <span className="hidden md:inline text-[11px] truncate" style={{ color: 'var(--color-text-muted)' }}>
             {documentPath}
           </span>
-          <div
-            className="flex items-center gap-0.5 rounded-md p-0.5"
-            style={{ backgroundColor: 'var(--color-hover)' }}
-            role="group"
-            aria-label={text('视图模式', 'View mode')}
-          >
-            {modeButton('edit', text('编辑', 'Edit'), <Pencil size={11} />)}
-            {modeButton('preview', text('预览', 'Preview'), <Eye size={11} />)}
-            {modeButton('split', text('分屏', 'Split'), <Columns2 size={11} />)}
-          </div>
         </div>
 
         <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -427,53 +391,17 @@ function ProjectDocumentEditorSession({
           </nav>
         )}
 
-        {(mode === 'edit' || mode === 'split') && (
-          <div className="flex-1 min-w-0 overflow-hidden">
-            <CodeMirrorEditor
-              mode="document"
-              content={editorContent}
-              filePath={documentPath}
-              editable={projectMatches}
-              onChange={handleChange}
-              onSave={handleSave}
-              jumpTarget={jumpTarget}
-              insertRequest={insertRequest}
-              hideStatusBar
-              placeholder={text('开始写你的设定笔记…', 'Start writing your notes…')}
-            />
-          </div>
-        )}
-
-        {mode === 'split' && (
-          <div
-            className="w-px flex-shrink-0"
-            style={{ backgroundColor: 'var(--color-border)' }}
-            aria-hidden="true"
+        <div className="flex-1 min-w-0 overflow-hidden">
+          <VditorProseEditor
+            content={editorContent}
+            editable={projectMatches}
+            onChange={handleChange}
+            onSave={handleSave}
+            jumpTarget={jumpTarget}
+            insertRequest={insertRequest}
+            placeholder={text('开始写你的设定笔记…', 'Start writing your notes…')}
           />
-        )}
-
-        {(mode === 'preview' || mode === 'split') && (
-          <div
-            ref={previewRef}
-            data-testid="project-document-preview-scroll"
-            className="flex-1 min-w-0 overflow-y-auto px-4 py-3"
-            style={{ backgroundColor: 'var(--color-editor-bg)' }}
-          >
-            {liveContent.trim()
-              ? (
-                <ProjectDocumentPreview
-                  markdown={liveContent}
-                  documentPath={documentPath}
-                  projectKey={projectKey}
-                />
-              )
-              : (
-                <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                  {text('这份文档还是空的，左侧编辑后这里会实时预览。', 'This document is empty; the preview updates as you write.')}
-                </div>
-              )}
-          </div>
-        )}
+        </div>
       </div>
     </div>
   )

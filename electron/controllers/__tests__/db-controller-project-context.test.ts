@@ -993,7 +993,7 @@ describe('database controller project context guard', () => {
     expect(mocks.draftListAll).toHaveBeenCalledOnce()
   })
 
-  it('rejects content updates for finalized database drafts', async () => {
+  it('keeps finalized database drafts editable within the active project session', async () => {
     mocks.draftGetMeta.mockReturnValueOnce({
       id: 1,
       chapterNumber: 1,
@@ -1007,11 +1007,8 @@ describe('database controller project context guard', () => {
       'attempted overwrite',
       19,
       'C:/projects/A',
-    )).resolves.toMatchObject({
-      success: false,
-      error: expect.stringContaining('已定稿正文为只读内容'),
-    })
-    expect(mocks.draftUpdateContent).not.toHaveBeenCalled()
+    )).resolves.toEqual({ success: true })
+    expect(mocks.draftUpdateContent).toHaveBeenCalledWith(1, 'attempted overwrite', 19)
   })
 
   it('returns a stable redirect code when generic deletion races with finalization', async () => {

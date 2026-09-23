@@ -874,6 +874,16 @@ import type {
   ImportGlobalFactsReceipt,
   ImportGlobalFactsRequest,
 } from './import-global-facts'
+import type {
+  ForeshadowingRecord,
+  CreateForeshadowingInput,
+  UpdateForeshadowingInput,
+} from './foreshadowing'
+export type {
+  ForeshadowingRecord,
+  CreateForeshadowingInput,
+  UpdateForeshadowingInput,
+} from './foreshadowing'
 
 // ===== 数据库操作 =====
 export interface DatabaseChannels {
@@ -1046,6 +1056,30 @@ export interface DatabaseChannels {
   'db:draft-export-authority-current': {
     args: [receipt: FinalizedDraftExportAuthorityReceipt, expectedProjectPath: string]
     return: boolean
+  }
+  'db:foreshadowing-list': {
+    args: [filter: 'all' | 'pending' | 'completed' | undefined, expectedProjectPath: string]
+    return: ForeshadowingRecord[]
+  }
+  'db:foreshadowing-list-by-draft': {
+    args: [draftId: number, expectedProjectPath: string]
+    return: ForeshadowingRecord[]
+  }
+  'db:foreshadowing-create': {
+    args: [input: CreateForeshadowingInput, expectedProjectPath: string]
+    return: { success: boolean; id?: string; error?: string }
+  }
+  'db:foreshadowing-update': {
+    args: [id: string, updates: UpdateForeshadowingInput, expectedProjectPath: string]
+    return: { success: boolean; error?: string }
+  }
+  'db:foreshadowing-toggle-completed': {
+    args: [id: string, completed: boolean, expectedProjectPath: string]
+    return: { success: boolean; error?: string }
+  }
+  'db:foreshadowing-delete': {
+    args: [id: string, expectedProjectPath: string]
+    return: { success: boolean; error?: string }
   }
   'db:continuity-save-finalized': {
     args: [request: SaveFinalizedContinuityRequest, expectedProjectPath: string]

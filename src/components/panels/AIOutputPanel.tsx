@@ -497,7 +497,7 @@ function ActiveRunView({
               border: '1px solid var(--color-border)'
             }}
             onMouseEnter={e => {
-              e.currentTarget.style.color = '#fff'
+              e.currentTarget.style.color = 'var(--color-error-foreground)'
               e.currentTarget.style.backgroundColor = 'var(--color-error)'
               e.currentTarget.style.borderColor = 'var(--color-error)'
             }}
@@ -749,7 +749,7 @@ function WorkflowFailureNotice({
               disabled={!matchesCurrentProject || resumingSynopsis}
               className="inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-medium shadow-sm transition-colors"
               style={{
-                color: '#fff',
+                color: 'var(--color-accent-foreground)',
                 backgroundColor: 'var(--color-accent)',
                 border: '1px solid var(--color-accent)',
                 opacity: matchesCurrentProject ? 1 : 0.5,

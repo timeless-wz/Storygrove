@@ -2,12 +2,21 @@ import { act, StrictMode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import VditorProseEditor, { type VditorProseEditorProps } from '../VditorProseEditor'
+import VditorProseEditor, { type VditorProseEditorProps, type VditorProseEditorRef } from '../VditorProseEditor'
 import { useLocaleStore } from '../../../stores/locale-store'
+import { useEditorStore } from '../../../stores/editor-store'
+import { useProjectStore } from '../../../stores/project-store'
+import { setActiveProjectSessionContext } from '../../../shared/project-session-context'
+import { openBuiltinEditor } from '../../panels/sidebar/sidebar-file-openers'
+import ForeshadowingManagementView from '../ForeshadowingManagementView'
+import type { ForeshadowingRecord } from '../../../shared/foreshadowing'
+import { toast } from '../../ui/Toast'
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 const originalLocaleState = useLocaleStore.getState()
+const originalEditorState = useEditorStore.getState()
+const originalProjectState = useProjectStore.getState()
 
 let root: Root
 let container: HTMLDivElement
@@ -102,6 +111,8 @@ afterEach(async () => {
   container.remove()
   document.getElementById('vditorIconScript')?.remove()
   useLocaleStore.setState(originalLocaleState)
+  useEditorStore.setState(originalEditorState)
+  useProjectStore.setState(originalProjectState)
   vi.restoreAllMocks()
 })
 
@@ -308,4 +319,607 @@ describe('Vditor prose editor', () => {
 
     expect(proseElement().textContent).toContain('StrictMode 草稿。')
   })
+
+  it('supports Ctrl/Cmd+1~6 to set heading level and Ctrl/Cmd+0 to revert to body across all modes', async () => {
+    const onChange = vi.fn()
+    await render({ content: '林岚坐在椅子上。', editable: true, onChange })
+
+    const host = hostElement()
+
+    // 1. IR 模式下 Ctrl+1 设置为一级标题
+    const prose = proseElement()
+    await act(async () => {
+      prose.focus()
+      const range = document.createRange()
+      range.selectNodeContents(prose.firstElementChild ?? prose)
+      const sel = window.getSelection()
+      sel?.removeAllRanges()
+      sel?.addRange(range)
+      host.dispatchEvent(new KeyboardEvent('keydown', { key: '1', ctrlKey: true, bubbles: true, cancelable: true }))
+    })
+    await vi.waitFor(() => {
+      expect(container.querySelector('.vditor-ir h1')).not.toBeNull()
+    })
+
+    // IR 模式下 Ctrl+0 恢复正文
+    await act(async () => {
+      host.dispatchEvent(new KeyboardEvent('keydown', { key: '0', ctrlKey: true, bubbles: true, cancelable: true }))
+    })
+    await vi.waitFor(() => {
+      expect(container.querySelector('.vditor-ir h1')).toBeNull()
+    })
+
+    // 2. SV 模式下测试 Ctrl+2 与 Ctrl+0
+    await switchMode('sv')
+    const textarea = container.querySelector('textarea.vditor-sv') as HTMLTextAreaElement
+    expect(textarea).not.toBeNull()
+    await act(async () => {
+      textarea.focus()
+      textarea.setSelectionRange(0, 0)
+      host.dispatchEvent(new KeyboardEvent('keydown', { key: '2', ctrlKey: true, bubbles: true, cancelable: true }))
+    })
+    await vi.waitFor(() => {
+      expect(textarea.value).toMatch(/^## /)
+    })
+
+    await act(async () => {
+      textarea.focus()
+      textarea.setSelectionRange(0, 0)
+      host.dispatchEvent(new KeyboardEvent('keydown', { key: '0', ctrlKey: true, bubbles: true, cancelable: true }))
+    })
+    await vi.waitFor(() => {
+      expect(textarea.value).not.toMatch(/^## /)
+    })
+  })
+
+  it('displays selection AI bubble menu when text is selected', async () => {
+    await render({ content: '林岚推开窗户看着夜色。', editable: true, onChange: vi.fn() })
+
+    const prose = proseElement()
+    await act(async () => {
+      prose.focus()
+      const range = document.createRange()
+      range.selectNodeContents(prose.firstElementChild ?? prose)
+      const sel = window.getSelection()
+      sel?.removeAllRanges()
+      sel?.addRange(range)
+      document.dispatchEvent(new Event('selectionchange'))
+    })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('润色')
+      expect(container.textContent).toContain('扩写')
+      expect(container.textContent).toContain('续写')
+      expect(container.textContent).toContain('对话')
+    })
+  })
+
+  it('supports insertRequest to insert content at cursor position', async () => {
+    const onChange = vi.fn()
+    await render({ content: '段落开头。', editable: true, onChange })
+
+    const prose = proseElement()
+    await act(async () => {
+      prose.focus()
+      const range = document.createRange()
+      range.selectNodeContents(prose.firstElementChild ?? prose)
+      range.collapse(false)
+      const sel = window.getSelection()
+      sel?.removeAllRanges()
+      sel?.addRange(range)
+      document.dispatchEvent(new Event('selectionchange'))
+    })
+
+    await act(async () => {
+      root.render(
+        <VditorProseEditor
+          content="段落开头。"
+          editable
+          onChange={onChange}
+          insertRequest={{ text: '![插图](assets/pic.png)', requestId: 1 }}
+        />,
+      )
+    })
+
+    await vi.waitFor(() => {
+      expect(onChange).toHaveBeenCalled()
+      expect(String(onChange.mock.calls.at(-1)?.[0])).toContain('![插图](assets/pic.png)')
+    })
+  })
+
+  it('supports jumpTarget to scroll to target heading', async () => {
+    const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {})
+    try {
+      await render({
+        content: '# 序幕\n\n正文...\n\n## 终局\n\n最终段落...',
+        editable: true,
+        onChange: vi.fn(),
+      })
+
+      await act(async () => {
+        root.render(
+          <VditorProseEditor
+            content="# 序幕\n\n正文...\n\n## 终局\n\n最终段落..."
+            editable
+            jumpTarget={{ index: 1, text: '终局', requestId: 1 }}
+          />,
+        )
+      })
+
+      await vi.waitFor(() => {
+        expect(scrollSpy).toHaveBeenCalledWith({ block: 'start', behavior: 'smooth' })
+      })
+    } finally {
+      scrollSpy.mockRestore()
+    }
+  })
+
+  it('registers CSS.highlights for foreshadowing colors and updates dynamically when status toggles', async () => {
+    const fsh: ForeshadowingRecord = {
+      id: 'f-1',
+      draftId: 10,
+      chapterNumber: 1,
+      selectedText: '林岚',
+      startOffset: 0,
+      endOffset: 2,
+      contextBefore: '',
+      contextAfter: '走进了房间。',
+      note: '主角登场',
+      markerType: '伏笔',
+      color: 'blue',
+      completed: false,
+      createdAt: '2026-09-22T00:00:00.000Z',
+      updatedAt: '2026-09-22T00:00:00.000Z',
+      completedAt: null,
+    }
+
+    await render({
+      content: '林岚走进了房间。',
+      editable: true,
+      foreshadowings: [fsh],
+    })
+
+    await vi.waitFor(() => {
+      expect(CSS.highlights.has('foreshadowing-blue')).toBe(true)
+    })
+
+    // 切换为已完成
+    await act(async () => {
+      root.render(
+        <VditorProseEditor
+          content="林岚走进了房间。"
+          editable
+          foreshadowings={[{ ...fsh, completed: true }]}
+        />,
+      )
+    })
+
+    await vi.waitFor(() => {
+      expect(CSS.highlights.has('foreshadowing-blue')).toBe(false)
+      expect(CSS.highlights.has('foreshadowing-completed')).toBe(true)
+    })
+  })
+
+  it('does NOT destroy or rebuild Vditor instance when foreshadowings change or status toggles, preserving uncommitted input', async () => {
+    const fshInitial: ForeshadowingRecord = {
+      id: 'f-stab-1',
+      draftId: 10,
+      chapterNumber: 1,
+      selectedText: '林岚',
+      startOffset: 0,
+      endOffset: 2,
+      contextBefore: '',
+      contextAfter: '走进了房间。',
+      note: '主角',
+      markerType: '伏笔',
+      color: 'blue',
+      completed: false,
+      createdAt: '2026-09-22T00:00:00.000Z',
+      updatedAt: '2026-09-22T00:00:00.000Z',
+      completedAt: null,
+    }
+
+    await render({
+      content: '林岚走进了房间。',
+      editable: true,
+      foreshadowings: [fshInitial],
+    })
+
+    await vi.waitFor(() => {
+      expect(CSS.highlights.has('foreshadowing-blue')).toBe(true)
+    })
+
+    // 在当前 Vditor 元素上设置标记，用于验证 DOM 实例未被重建
+    const initialVditorEl = container.querySelector('.vditor') as HTMLElement
+    expect(initialVditorEl).not.toBeNull()
+    ;(initialVditorEl as unknown as { __stableMarker: string }).__stableMarker = 'instance-persisted'
+
+    // 输入未保存的内容
+    await typeAtEndOfProse('并点亮了一盏油灯。')
+    expect(proseElement().textContent).toContain('并点亮了一盏油灯。')
+
+    // 触发伏笔列表更新：切换完成状态
+    const fshUpdated: ForeshadowingRecord = {
+      ...fshInitial,
+      completed: true,
+      completedAt: '2026-09-22T01:00:00.000Z',
+    }
+
+    await act(async () => {
+      root.render(
+        <VditorProseEditor
+          content="林岚走进了房间。"
+          editable
+          foreshadowings={[fshUpdated]}
+        />,
+      )
+    })
+
+    // 验证高亮层已刷新到 completed
+    await vi.waitFor(() => {
+      expect(CSS.highlights.has('foreshadowing-completed')).toBe(true)
+      expect(CSS.highlights.has('foreshadowing-blue')).toBe(false)
+    })
+
+    // 验证 Vditor 实例没有被销毁重建：
+    // 1. 宿主内部的 .vditor DOM 节点仍是同一个对象，保留了标记属性
+    const currentVditorEl = container.querySelector('.vditor') as HTMLElement
+    expect(currentVditorEl).toBe(initialVditorEl)
+    expect((currentVditorEl as unknown as { __stableMarker: string }).__stableMarker).toBe('instance-persisted')
+
+    // 2. 作者未保存的即时输入内容完整保留，未被重置
+    expect(proseElement().textContent).toContain('并点亮了一盏油灯。')
+  })
+
+  it('blocks marking foreshadowing and gives toast warning on empty selection', async () => {
+    const editorRef = { current: null } as React.MutableRefObject<VditorProseEditorRef | null>
+    const warningSpy = vi.spyOn(toast, 'warning').mockImplementation(() => {})
+
+    await render({
+      content: '空选中的段落文本。',
+      editable: true,
+      editorRef,
+    })
+
+    await act(async () => {
+      window.getSelection()?.removeAllRanges()
+    })
+
+    const res = editorRef.current?.getSelectionInfo()
+    expect(res?.success).toBe(false)
+    if (!res || !res.success) {
+      toast.warning('请先在正文中选中要标记为伏笔的文字')
+    }
+    expect(warningSpy).toHaveBeenCalledWith('请先在正文中选中要标记为伏笔的文字')
+  })
+
+  it('displays selection bubble menu with [伏笔] button and triggers onMarkForeshadowing with pure markdown offsets without injecting HTML', async () => {
+    const onMarkForeshadowing = vi.fn()
+    await render({
+      content: '# 第一章\n\n那把古旧的锈剑静静躺在神龛角落。',
+      editable: true,
+      onMarkForeshadowing,
+    })
+
+    const prose = proseElement()
+    const walker = document.createTreeWalker(prose, NodeFilter.SHOW_TEXT)
+    let node: Text | null
+    let targetRange: Range | null = null
+    while ((node = walker.nextNode() as Text | null)) {
+      const idx = node.nodeValue?.indexOf('古旧的锈剑') ?? -1
+      if (idx !== -1) {
+        targetRange = document.createRange()
+        targetRange.setStart(node, idx)
+        targetRange.setEnd(node, idx + '古旧的锈剑'.length)
+        break
+      }
+    }
+    expect(targetRange).not.toBeNull()
+
+    await act(async () => {
+      prose.focus()
+      const sel = window.getSelection()
+      sel?.removeAllRanges()
+      sel?.addRange(targetRange!)
+      document.dispatchEvent(new Event('selectionchange'))
+    })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('伏笔')
+    })
+
+    const fshBtn = Array.from(container.querySelectorAll('button')).find(b => b.textContent?.includes('伏笔'))
+    expect(fshBtn).toBeDefined()
+
+    await act(async () => {
+      fshBtn!.click()
+    })
+
+    expect(onMarkForeshadowing).toHaveBeenCalledTimes(1)
+    const info = onMarkForeshadowing.mock.calls[0]?.[0]
+    expect(info.selectedText).toBe('古旧的锈剑')
+    expect(info.startOffset).toBeGreaterThanOrEqual(0)
+    expect(info.endOffset).toBe(info.startOffset + '古旧的锈剑'.length)
+
+    // 确认正文 Markdown 不包含任何 <mark>、<span> 或 HTML 标签
+    const currentDoc = proseElement().textContent ?? ''
+    expect(currentDoc).not.toContain('<mark')
+    expect(currentDoc).not.toContain('<span')
+    expect(currentDoc).not.toContain('style=')
+  })
+
+  it('opens popover card when clicking highlighted foreshadowing text and allows toggling completed', async () => {
+    const onToggleForeshadowingCompleted = vi.fn()
+    const onOpenForeshadowingManager = vi.fn()
+    const fsh: ForeshadowingRecord = {
+      id: 'f-item-1',
+      draftId: 10,
+      chapterNumber: 1,
+      selectedText: '神剑',
+      startOffset: 8,
+      endOffset: 10,
+      contextBefore: '深处藏着一把',
+      contextAfter: '。',
+      note: '斩魔关键道具',
+      markerType: '关键道具',
+      color: 'blue',
+      completed: false,
+      createdAt: '2026-09-22T00:00:00.000Z',
+      updatedAt: '2026-09-22T00:00:00.000Z',
+      completedAt: null,
+    }
+
+    await render({
+      content: '# 序章\n\n深处藏着一把神剑。',
+      editable: true,
+      foreshadowings: [fsh],
+      onToggleForeshadowingCompleted,
+      onOpenForeshadowingManager,
+    })
+
+    await vi.waitFor(() => {
+      expect(CSS.highlights.has('foreshadowing-blue')).toBe(true)
+    })
+
+    const prose = proseElement()
+    const walker = document.createTreeWalker(prose, NodeFilter.SHOW_TEXT)
+    let node: Text | null
+    let targetRange: Range | null = null
+    while ((node = walker.nextNode() as Text | null)) {
+      const idx = node.nodeValue?.indexOf('神剑') ?? -1
+      if (idx !== -1) {
+        targetRange = document.createRange()
+        targetRange.setStart(node, idx)
+        targetRange.setEnd(node, idx + 2)
+        break
+      }
+    }
+    expect(targetRange).not.toBeNull()
+    const rect = targetRange!.getBoundingClientRect()
+
+    await act(async () => {
+      hostElement().dispatchEvent(new MouseEvent('click', {
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2,
+        bubbles: true,
+        cancelable: true,
+      }))
+    })
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('.foreshadowing-popover-card')).not.toBeNull()
+    })
+
+    const popover = container.querySelector('.foreshadowing-popover-card') as HTMLElement
+    expect(popover.textContent).toContain('关键道具')
+    expect(popover.textContent).toContain('待回收')
+    expect(popover.textContent).toContain('斩魔关键道具')
+    expect(popover.textContent).toContain('神剑')
+
+    // 点击标记为已完成
+    const toggleBtn = Array.from(popover.querySelectorAll('button')).find(b => b.textContent?.includes('标记为已完成'))
+    expect(toggleBtn).toBeDefined()
+    await act(async () => {
+      toggleBtn!.click()
+    })
+
+    expect(onToggleForeshadowingCompleted).toHaveBeenCalledWith('f-item-1', true)
+
+    // 点击管理伏笔
+    const manageBtn = Array.from(popover.querySelectorAll('button')).find(b => b.textContent?.includes('管理伏笔'))
+    expect(manageBtn).toBeDefined()
+    await act(async () => {
+      manageBtn!.click()
+    })
+
+    expect(onOpenForeshadowingManager).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves foreshadowings across draft publication retaining identical draft_id', async () => {
+    // 草稿记录初始状态为 draft，id 为 42
+    const draft = {
+      id: 42,
+      chapterNumber: 3,
+      status: 'draft',
+      content: '第三章草稿正文，埋下神秘线索。',
+    }
+    const fsh: ForeshadowingRecord = {
+      id: 'f-draft-pub',
+      draftId: draft.id,
+      chapterNumber: draft.chapterNumber,
+      selectedText: '神秘线索',
+      startOffset: 11,
+      endOffset: 15,
+      contextBefore: '第三章草稿正文，埋下',
+      contextAfter: '。',
+      note: '核心暗线',
+      markerType: '伏笔',
+      color: 'blue',
+      completed: false,
+      createdAt: '2026-09-22T00:00:00.000Z',
+      updatedAt: '2026-09-22T00:00:00.000Z',
+      completedAt: null,
+    }
+
+    // 模拟发布为正文 (finalized)，草稿 ID 保持 42
+    const publishedDraft = {
+      ...draft,
+      status: 'finalized',
+    }
+    expect(publishedDraft.id).toBe(draft.id)
+    expect(fsh.draftId).toBe(publishedDraft.id)
+
+    // 在编辑器中渲染发布后的正文和伏笔
+    await render({
+      content: publishedDraft.content,
+      editable: false,
+      foreshadowings: [fsh],
+    })
+
+    await vi.waitFor(() => {
+      expect(CSS.highlights.has('foreshadowing-blue')).toBe(true)
+    })
+    expect(proseElement().textContent).toContain('神秘线索')
+  })
+
+  it('opens foreshadowing management from sidebar and supports filtering, status toggling, and context preview in ForeshadowingManagementView', async () => {
+    const PROJECT_PATH = 'C:\\novels\\foreshadowing-project'
+    const PROJECT_SESSION = Object.freeze({
+      projectId: 'proj-fsh-1',
+      leaseId: 'lease-fsh-1',
+      projectPath: PROJECT_PATH,
+    })
+    setActiveProjectSessionContext(PROJECT_SESSION)
+    useProjectStore.setState({
+      currentProject: {
+        id: PROJECT_SESSION.projectId,
+        path: PROJECT_PATH,
+        sessionLease: PROJECT_SESSION.leaseId,
+        name: 'Foreshadowing Novel',
+      } as any,
+    })
+
+    // 1. 验证侧边栏文件打开器
+    openBuiltinEditor('foreshadowing-manager', '伏笔管理', 'foreshadowing')
+    const tabs = useEditorStore.getState().tabs
+    const fshTab = tabs.find(t => t.type === 'foreshadowing')
+    expect(fshTab).toBeDefined()
+    expect(fshTab?.id).toContain('foreshadowing-manager')
+    expect(fshTab?.type).toBe('foreshadowing')
+
+    // 2. 验证管理视图加载与操作
+    const mockItems: ForeshadowingRecord[] = [
+      {
+        id: 'f-mgmt-1',
+        draftId: 1,
+        chapterNumber: 1,
+        selectedText: '生锈的钥匙',
+        startOffset: 5,
+        endOffset: 10,
+        contextBefore: '石缝中有一把',
+        contextAfter: '，隐隐发烫。',
+        note: '开门道具',
+        markerType: '伏笔',
+        color: 'blue',
+        completed: false,
+        createdAt: '2026-09-22T00:00:00.000Z',
+        updatedAt: '2026-09-22T00:00:00.000Z',
+        completedAt: null,
+      },
+      {
+        id: 'f-mgmt-2',
+        draftId: 1,
+        chapterNumber: 1,
+        selectedText: '羊皮纸卷轴',
+        startOffset: 15,
+        endOffset: 20,
+        contextBefore: '旁边放着一卷',
+        contextAfter: '。',
+        note: '已查阅',
+        markerType: '加深',
+        color: 'purple',
+        completed: true,
+        createdAt: '2026-09-22T00:00:00.000Z',
+        updatedAt: '2026-09-22T00:00:00.000Z',
+        completedAt: '2026-09-22T01:00:00.000Z',
+      },
+    ]
+
+    const mockDrafts = [
+      { id: 1, chapterNumber: 1, version: 1, status: 'draft', chapterTitle: '第一章 探索' },
+    ]
+
+    const invokeMock = vi.fn(async (channel: string, ..._args: unknown[]) => {
+      if (channel === 'db:foreshadowing-list') return mockItems
+      if (channel === 'db:draft-list-all') return mockDrafts
+      if (channel === 'db:draft-get-full') return { id: 1, content: '石缝中有一把生锈的钥匙，隐隐发烫。旁边放着一卷羊皮纸卷轴。' }
+      if (channel === 'db:foreshadowing-toggle-completed') return { success: true }
+      return null
+    })
+
+    Object.defineProperty(window, 'velaAPI', {
+      configurable: true,
+      value: {
+        invoke: invokeMock,
+        on: () => () => {},
+        once: () => {},
+        send: () => {},
+        setZoomLevel: () => {},
+        setZoomFactor: () => {},
+        getZoomLevel: () => 0,
+      },
+    })
+
+    await act(async () => {
+      root.render(<ForeshadowingManagementView projectKey={PROJECT_PATH} />)
+    })
+
+    // 等待数据加载完成
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('生锈的钥匙')
+      expect(container.textContent).toContain('羊皮纸卷轴')
+      expect(container.textContent).toContain('开门道具')
+    })
+
+    // 验证筛选：点击“待回收 / 未完成”
+    const pendingFilterBtn = Array.from(container.querySelectorAll('button')).find(b => b.textContent?.includes('待回收') && !b.closest('.foreshadowing-card'))
+    expect(pendingFilterBtn).toBeDefined()
+    await act(async () => {
+      pendingFilterBtn!.click()
+    })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('生锈的钥匙')
+      expect(container.textContent).not.toContain('羊皮纸卷轴')
+    })
+
+    // 验证筛选：点击“已回收 / 已完成”
+    const completedFilterBtn = Array.from(container.querySelectorAll('button')).find(b => b.textContent?.includes('已回收') && !b.closest('.foreshadowing-card'))
+    expect(completedFilterBtn).toBeDefined()
+    await act(async () => {
+      completedFilterBtn!.click()
+    })
+
+    await vi.waitFor(() => {
+      expect(container.textContent).not.toContain('生锈的钥匙')
+      expect(container.textContent).toContain('羊皮纸卷轴')
+    })
+
+    // 验证状态切换：点击切换按钮
+    const toggleCompletedBtn = container.querySelector('button[title*="标记为未完成"], button[title*="标记为已完成"]') as HTMLElement
+    expect(toggleCompletedBtn).not.toBeNull()
+    await act(async () => {
+      toggleCompletedBtn.click()
+    })
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      'db:foreshadowing-toggle-completed',
+      'f-mgmt-2',
+      false,
+      PROJECT_PATH,
+      expect.objectContaining({ projectPath: PROJECT_PATH }),
+    )
+  })
 })
+
+

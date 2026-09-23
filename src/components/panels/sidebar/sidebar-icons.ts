@@ -3,7 +3,7 @@ import {
   Target, Users, Globe, Map, BookOpen, FolderTree, LayoutList,
   FilePen, PenTool, BrainCircuit, Sparkles, FolderOpen, Zap,
   FileText, MessageCircle, RefreshCw, GitCompare, GitBranch, Archive, RotateCcw,
-  Compass, LayoutDashboard, Clock3,
+  Compass, LayoutDashboard, Clock3, Bookmark,
 } from 'lucide-react'
 
 type SidebarIcon = ComponentType<{ size?: number; className?: string; style?: CSSProperties }>
@@ -16,6 +16,7 @@ const ICON_MAP: Record<string, SidebarIcon> = {
   compass: Compass,
   'layout-dashboard': LayoutDashboard,
   'clock-3': Clock3,
+  bookmark: Bookmark,
   'book-open': BookOpen,
   'folder-tree': FolderTree,
   'layout-list': LayoutList,

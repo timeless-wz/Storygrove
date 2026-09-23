@@ -67,7 +67,7 @@ beforeEach(() => {
   setActiveProjectSessionContext(PROJECT_SESSION)
 
   invoke = vi.fn(async (channel: string) => {
-    if (channel === 'fs:list-dir' || channel === 'db:draft-list-all') return []
+    if (channel === 'fs:list-dir' || channel === 'db:draft-list-all' || channel === 'db:map-get-all') return []
     if (channel === 'db:blueprint-get-all') {
       return Array.from({ length: blueprintCount }, (_, index) => ({ chapterNumber: index + 1 }))
     }

@@ -15,6 +15,8 @@
 
 /* ===== TailwindCSS v4 核心导入 ===== */
 @import "tailwindcss";
+@import "./styles/literary-workbench.css";
+@import "./styles/literary-themes.css";
 @plugin "tailwindcss-animate";
 @plugin "@tailwindcss/typography";
 
@@ -256,6 +258,23 @@
     --color-badge-bg: rgba(37, 99, 235, 0.10);
     --color-badge-text: #1D4ED8;
 
+    /* 表面/边框/输入别名 — 组件按这些名字引用，此前从未定义，
+       var() 无 fallback 时声明在计算值阶段失效，面板底色会退化为透明 */
+    --color-surface: var(--color-panel);
+    --color-surface-raised: var(--color-raised);
+    --color-surface-subtle: var(--color-hover);
+    --color-bg-elevated: var(--color-raised);
+    --color-border-subtle: var(--color-border);
+    --color-border-strong: var(--color-border);
+    --color-accent-subtle: var(--color-badge-bg);
+    --color-danger: var(--color-error);
+    --color-input: var(--color-bg);
+    --color-input-bg: var(--color-bg);
+    /* 供 rgba(var(--accent-rgb), α) 取分量 */
+    --accent-rgb: var(--color-accent-rgb);
+    /* 强调色填充上的前景文字（白字在 #2563EB 上为 5.17:1） */
+    --color-accent-foreground: #FFFFFF;
+
     /* ===== 尺寸规范（顶部仅保留系统壳，状态栏承接上下文） ===== */
     --height-titlebar: 32px;
     --height-statusbar: 28px;
@@ -361,6 +380,21 @@
     --color-skeleton: rgba(126, 200, 227, 0.06);
     --color-badge-bg: rgba(126, 200, 227, 0.12);
     --color-badge-text: #7EC8E3;
+
+    /* 表面/边框/输入别名 — 见浅色块同名注释 */
+    --color-surface: var(--color-panel);
+    --color-surface-raised: var(--color-raised);
+    --color-surface-subtle: var(--color-hover);
+    --color-bg-elevated: var(--color-raised);
+    --color-border-subtle: var(--color-border);
+    --color-border-strong: var(--color-border);
+    --color-accent-subtle: var(--color-badge-bg);
+    --color-danger: var(--color-error);
+    --color-input: var(--color-bg);
+    --color-input-bg: var(--color-bg);
+    --accent-rgb: var(--color-accent-rgb);
+    /* 强调色填充上的前景文字：galaxy 强调色是浅冰蓝 #7EC8E3，白字仅 1.87:1，须用深墨 */
+    --color-accent-foreground: #0A1628;
 
     /* 阴影 — 深色下同样保持极弱，靠边框分层 */
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
@@ -515,6 +549,21 @@
     --color-skeleton: rgba(255, 255, 255, 0.05);
     --color-badge-bg: #4D4D4D;
     --color-badge-text: #FFFFFF;
+
+    /* 表面/边框/输入别名 — 见浅色块同名注释 */
+    --color-surface: var(--color-panel);
+    --color-surface-raised: var(--color-raised);
+    --color-surface-subtle: var(--color-hover);
+    --color-bg-elevated: var(--color-raised);
+    --color-border-subtle: var(--color-border);
+    --color-border-strong: var(--color-border);
+    --color-accent-subtle: var(--color-badge-bg);
+    --color-danger: var(--color-error);
+    --color-input: var(--color-bg);
+    --color-input-bg: var(--color-bg);
+    --accent-rgb: var(--color-accent-rgb);
+    /* 强调色填充上的前景文字（白字在 #0E639C 上为 6.40:1） */
+    --color-accent-foreground: #FFFFFF;
 
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 1px 3px rgba(0, 0, 0, 0.35);
@@ -2077,168 +2126,7 @@
   100% { opacity: 1; transform: translateY(0); }
 }
 
-/* =====================================================================
- * 无层样式 — CodeMirror 搜索面板覆盖（需要最高优先级）
- * 这些样式故意不放入任何 @layer，使其优先级高于所有层级样式
- * ===================================================================== */
 
-/* CodeMirror 搜索面板 IDEA 风格 — 扁平化嵌入式设计 */
-/* top: true 时面板在 cm-panels-top，否则在 cm-panels-bottom，统一覆盖 */
-.cm-editor .cm-panels-top:has(.cm-search),
-.cm-editor .cm-panels-bottom:has(.cm-search) {
-  position: static !important;
-  height: auto !important;
-  border: none !important;
-  border-bottom: 1px solid var(--color-border) !important;
-  border-top: none !important;
-  background-color: var(--color-sidebar) !important;
-  padding: 0 !important;
-  margin: 0 !important;
-  order: -1 !important;
-}
-
-/* panels 容器默认有上边框，强制移除 */
-.cm-editor .cm-panels {
-  border-color: var(--color-border) !important;
-}
-
-.cm-panel.cm-search {
-  position: relative !important;
-  display: flex !important;
-  flex-wrap: wrap !important;
-  align-items: center;
-  padding: 6px 12px 2px 12px !important;
-  background-color: var(--color-sidebar) !important;
-  border: none !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-  font-family: var(--font-sans);
-  font-size: 13px;
-  color: var(--color-text);
-  width: 100%;
-  max-width: none !important;
-}
-
-/* br 元素作为 flex 换行符，让查找行和替换行分两行显示 */
-.cm-search br {
-  display: block !important;
-  content: "" !important;
-  width: 0 !important;
-  flex-basis: 100% !important;
-  height: 2px !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  overflow: hidden !important;
-}
-
-.dark .cm-search {
-  background-color: var(--color-sidebar) !important;
-  box-shadow: none !important;
-}
-
-.cm-search input.cm-textfield {
-  background: var(--color-bg) !important;
-  border: 1px solid var(--color-border) !important;
-  color: var(--color-text) !important;
-  border-radius: var(--radius-sm);
-  padding: 2px 6px;
-  font-size: 12px;
-  outline: none;
-  min-width: 130px;
-  max-width: 180px;
-  margin-right: 6px;
-  margin-bottom: 4px;
-  vertical-align: middle;
-  height: 24px;
-}
-
-.cm-search input.cm-textfield:focus {
-  border-color: var(--color-accent) !important;
-}
-
-.cm-search button {
-  background: transparent !important;
-  border: 1px solid transparent !important;
-  color: var(--color-text-secondary) !important;
-  cursor: pointer;
-  padding: 2px 6px !important;
-  border-radius: var(--radius-md);
-  transition: all var(--transition-fast);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  text-transform: capitalize;
-  margin-right: 6px;
-  margin-bottom: 4px;
-  vertical-align: middle;
-  height: 24px;
-}
-
-.cm-search button:hover {
-  background: var(--color-hover) !important;
-  color: var(--color-text) !important;
-  border-color: var(--color-border) !important;
-}
-
-.cm-search label {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  margin-right: 10px;
-  margin-bottom: 4px;
-  cursor: pointer;
-  vertical-align: middle;
-}
-
-.cm-search label:last-of-type {
-  margin-right: 36px !important;
-}
-
-.cm-search input[type="checkbox"] {
-  cursor: pointer;
-  accent-color: var(--color-accent);
-  margin: 0;
-}
-
-.cm-search button[name="close"] {
-  position: absolute !important;
-  top: 6px !important;
-  right: 16px !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  background: transparent !important;
-  border: none !important;
-  border-radius: var(--radius-sm);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  color: var(--color-text-secondary) !important;
-  transition: background-color var(--transition-fast), color var(--transition-fast) !important;
-}
-
-.cm-search button[name="close"]:hover {
-  background: var(--color-hover) !important;
-  color: var(--color-text) !important;
-}
-
-/* 搜索结果高亮 IDEA 风格 */
-.cm-searchMatch {
-  background-color: rgba(var(--color-accent-rgb), 0.3) !important;
-  border-radius: 2px;
-}
-
-.dark .cm-searchMatch {
-  background-color: rgba(var(--color-accent-rgb), 0.4) !important;
-}
-
-.cm-searchMatch-selected {
-  background-color: var(--color-accent) !important;
-  color: white !important;
-}
 
 /* ===== View Transition API: 主题切换动画 ===== */
 /* JS 端始终对 ::view-transition-new(root) 执行 clip-path 圆形展开，

@@ -3,6 +3,7 @@ import {
   Bot,
   BookOpen,
   BookMarked,
+  Bookmark,
   ChevronDown,
   ChevronRight,
   ClipboardCheck,
@@ -17,6 +18,8 @@ import {
   ExternalLink,
   Info,
 } from 'lucide-react'
+import { globalEventBus } from '../../shared/event-bus'
+import type { ForeshadowingRecord } from '../../shared/foreshadowing'
 import { useCharacterStore } from '../../stores/character-store'
 import { useEditorStore } from '../../stores/editor-store'
 import { useLayoutStore } from '../../stores/layout-store'
@@ -91,9 +94,15 @@ export default function ProjectReferencePanel() {
   const worldMaps = useWorldMapStore(s => s.maps)
   const selectedNodeId = useWorldMapStore(s => s.selectedNodeId)
 
+  const isChapterEditing = activeTab?.type === 'chapter' && (
+    Boolean(activeTab.filePath?.startsWith('vela://draft/')) ||
+    Boolean(activeTab.filePath?.startsWith('vela://manuscript/'))
+  )
+
   // 正在写草稿时上下文感知的当前蓝图与审核状态
   const [currentBlueprint, setCurrentBlueprint] = useState<ChapterBlueprint | null>(null)
   const [currentReview, setCurrentReview] = useState<ReviewFull | null>(null)
+  const [chapterForeshadowings, setChapterForeshadowings] = useState<ForeshadowingRecord[]>([])
   const [blueprintLoading, setBlueprintLoading] = useState(false)
 
   useEffect(() => {
@@ -160,6 +169,60 @@ export default function ProjectReferencePanel() {
       cancelled = true
     }
   }, [activeTab?.type, activeTab?.draftId, chapterNumber, currentProject])
+
+  // 章节编辑时拉取该章节的伏笔与回收状态，并响应实时事件更新
+  useEffect(() => {
+    const draftId = activeTab?.draftId
+    if (!isChapterEditing || !draftId || !currentProject) {
+      setChapterForeshadowings([])
+      return
+    }
+
+    const projectSession = captureProjectSession(currentProject)
+    if (!projectSession) return
+
+    let cancelled = false
+    const fetchForeshadowings = () => {
+      ipc.invokeWithProjectSession(projectSession, 'db:foreshadowing-list-by-draft', draftId, projectSession.projectPath)
+        .then((list: unknown) => {
+          if (!cancelled && Array.isArray(list)) {
+            setChapterForeshadowings(list as ForeshadowingRecord[])
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setChapterForeshadowings([])
+        })
+    }
+
+    fetchForeshadowings()
+    const unsubscribe = globalEventBus.on('FORESHADOWING_UPDATED', () => {
+      fetchForeshadowings()
+    })
+
+    return () => {
+      cancelled = true
+      unsubscribe()
+    }
+  }, [isChapterEditing, activeTab?.draftId, currentProject])
+
+  // 当前章节相关角色（优先筛选蓝图或本章正文中出现的角色，若无明确匹配则显示全部）
+  const displayCharacters = useMemo(() => {
+    if (!isChapterEditing) return characters
+    const bpCharNames = new Set(currentBlueprint?.characters || [])
+    const searchTarget = [
+      currentBlueprint?.title || '',
+      currentBlueprint?.purpose || '',
+      currentBlueprint?.keyEvents || '',
+      currentBlueprint?.userGuidance || '',
+      activeTab?.name || '',
+      (activeTab?.content || '').slice(0, 3000),
+    ].join(' ')
+
+    const matched = characters.filter(
+      c => bpCharNames.has(c.name) || (c.name && searchTarget.includes(c.name))
+    )
+    return matched.length > 0 ? matched : characters
+  }, [isChapterEditing, currentBlueprint, activeTab?.name, activeTab?.content, characters])
 
   // 关联的地图节点（根据蓝图细纲、标题、叙事目的和正文匹配）
   const linkedMapNodes = useMemo(() => {
@@ -246,7 +309,7 @@ export default function ProjectReferencePanel() {
             <div className="flex items-center justify-between gap-2">
               <span className="writer-context-block-title">
                 <BookOpen size={13} />
-                {text(`第 ${chapterNumber ?? '?'} 章蓝图与上下文`, `Chapter ${chapterNumber ?? '?'} blueprint`)}
+                {text(`第 ${chapterNumber ?? '?'} 章蓝图与创作指导`, `Chapter ${chapterNumber ?? '?'} blueprint & guidance`)}
               </span>
               <button
                 type="button"
@@ -288,12 +351,12 @@ export default function ProjectReferencePanel() {
                   </div>
                 )}
 
-                {/* user_guidance 细纲全文 */}
+                {/* user_guidance 创作指导与细纲 */}
                 {currentBlueprint.userGuidance && (
                   <div className="writer-context-field" style={{ borderLeft: '2px solid var(--color-accent)' }}>
                     <div className="writer-context-field-label">
                       <Info size={11} />
-                      {text('细纲与创作指引 (user_guidance)', 'Detailed guidance (user_guidance)')}
+                      {text('创作指导与细纲 (user_guidance)', 'Creative guidance & outline (user_guidance)')}
                     </div>
                     <div className="writer-context-field-body">{currentBlueprint.userGuidance}</div>
                   </div>
@@ -396,6 +459,43 @@ export default function ProjectReferencePanel() {
                     </div>
                   )}
                 </div>
+
+                {/* 本章伏笔与回收状态 */}
+                <div className="pt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1 text-[11px] font-medium" style={{ color: 'var(--color-text)' }}>
+                      <Bookmark size={12} style={{ color: 'var(--writer-accent-text)' }} />
+                      {text('本章伏笔与回收状态', 'Chapter foreshadowings & payoff')}
+                    </span>
+                    <button
+                      type="button"
+                      className="text-[10px] hover:underline"
+                      style={{ color: 'var(--color-text-muted)' }}
+                      onClick={() => openBuiltinEditor('foreshadowing-manager', text('伏笔管理', 'Foreshadowing'), 'foreshadowing')}
+                    >
+                      {text('管理伏笔', 'Manage')}
+                    </button>
+                  </div>
+                  {chapterForeshadowings.length > 0 ? (
+                    <div className="space-y-1">
+                      {chapterForeshadowings.map(fsh => (
+                        <div key={fsh.id} className="writer-context-field flex items-center justify-between gap-1.5">
+                          <span className="truncate text-[11px]">“{fsh.selectedText}”</span>
+                          <span
+                            className="text-[10px] font-medium flex-shrink-0"
+                            style={{ color: fsh.completed ? 'var(--color-success-text)' : 'var(--color-warning-text)' }}
+                          >
+                            {fsh.completed ? text('已回收', 'Completed') : text('待回收', 'Pending')}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+                      {text('本章暂无伏笔标记', 'No foreshadowings for this chapter')}
+                    </div>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
@@ -449,24 +549,30 @@ export default function ProjectReferencePanel() {
           </div>
         )}
 
-        {/* 3. 基础项目参考导航组 */}
-        <ReferenceGroup icon={BookMarked} title={text('项目设定', 'Project setup')}>
-          <ReferenceLink
-            icon={BookOpen}
-            label={text('小说配置', 'Novel configuration')}
-            detail={text('题材、篇幅与写作要求', 'Genre, length, and writing guidance')}
-            onClick={showConfiguration}
-          />
-          <ReferenceLink
-            icon={Globe2}
-            label={text('故事架构与世界观', 'Story architecture & world')}
-            detail={text('前提、世界规则与地点', 'Premise, rules, and locations')}
-            onClick={showWorld}
-          />
-        </ReferenceGroup>
+        {/* 3. 基础项目参考导航组：在草稿与正文创作时隐藏全局设定与资料，避免重复左侧栏并腾出写作空间 */}
+        {!isChapterEditing && (
+          <ReferenceGroup icon={BookMarked} title={text('项目设定', 'Project setup')}>
+            <ReferenceLink
+              icon={BookOpen}
+              label={text('小说配置', 'Novel configuration')}
+              detail={text('题材、篇幅与写作要求', 'Genre, length, and writing guidance')}
+              onClick={showConfiguration}
+            />
+            <ReferenceLink
+              icon={Globe2}
+              label={text('故事架构与世界观', 'Story architecture & world')}
+              detail={text('前提、世界规则与地点', 'Premise, rules, and locations')}
+              onClick={showWorld}
+            />
+          </ReferenceGroup>
+        )}
 
-        <ReferenceGroup icon={Users} title={text('角色', 'Characters')} count={characters.length}>
-          {characters.slice(0, 3).map(character => (
+        <ReferenceGroup
+          icon={Users}
+          title={isChapterEditing ? text('当前章节相关角色', 'Chapter characters') : text('角色', 'Characters')}
+          count={displayCharacters.length}
+        >
+          {displayCharacters.slice(0, 3).map(character => (
             <button
               type="button"
               className="writer-reference-character"
@@ -482,7 +588,7 @@ export default function ProjectReferencePanel() {
               </span>
             </button>
           ))}
-          {characters.length === 0 && (
+          {displayCharacters.length === 0 && (
             <ReferenceLink
               icon={Users}
               label={text('管理角色资料', 'Manage character profiles')}
@@ -490,7 +596,7 @@ export default function ProjectReferencePanel() {
               onClick={() => showCharacters()}
             />
           )}
-          {characters.length > 0 && (
+          {displayCharacters.length > 0 && (
             <ReferenceLink
               icon={Users}
               label={text('查看全部角色', 'View all characters')}
@@ -514,20 +620,22 @@ export default function ProjectReferencePanel() {
           />
         </ReferenceGroup>
 
-        <ReferenceGroup icon={Compass} title={text('创作资料', 'Writing sources')}>
-          <ReferenceLink
-            icon={Compass}
-            label={text('创作资料中枢', 'Writing sources hub')}
-            detail={text('批准资料、规则与章节上下文', 'Approved sources, rules, and chapter context')}
-            onClick={() => setSidebarView('workspace')}
-          />
-          <ReferenceLink
-            icon={BookOpen}
-            label={text('本地知识库', 'Local knowledge base')}
-            detail={text('导入资料与语义检索', 'Imported materials and semantic search')}
-            onClick={() => setSidebarView('knowledge')}
-          />
-        </ReferenceGroup>
+        {!isChapterEditing && (
+          <ReferenceGroup icon={Compass} title={text('创作资料', 'Writing sources')}>
+            <ReferenceLink
+              icon={Compass}
+              label={text('创作资料中枢', 'Writing sources hub')}
+              detail={text('批准资料、规则与章节上下文', 'Approved sources, rules, and chapter context')}
+              onClick={() => setSidebarView('workspace')}
+            />
+            <ReferenceLink
+              icon={BookOpen}
+              label={text('本地知识库', 'Local knowledge base')}
+              detail={text('导入资料与语义检索', 'Imported materials and semantic search')}
+              onClick={() => setSidebarView('knowledge')}
+            />
+          </ReferenceGroup>
+        )}
 
         <ReferenceGroup icon={ClipboardCheck} title={text('任务', 'Tasks')} count={activeRuns.length} defaultOpen={false}>
           <ReferenceLink

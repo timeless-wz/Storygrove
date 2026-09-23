@@ -553,6 +553,7 @@ export class DraftRepository {
             db.prepare('DELETE FROM post_process_runs').run()
             db.prepare('DELETE FROM reviews').run()
             db.prepare('DELETE FROM revisions').run()
+            db.prepare('DELETE FROM foreshadowings').run()
             db.prepare('DELETE FROM drafts').run()
             db.prepare('DELETE FROM contents').run()
             db.prepare('DELETE FROM summary_snapshots').run()

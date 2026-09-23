@@ -33,6 +33,10 @@ interface LayoutState {
   sidebarView: SidebarView
   sidebarWidth: number
   activeRailItem: LeftRailItem
+  /** 项目树各一级分组折叠状态（本次应用运行期间保持） */
+  projectTreeGroupOpen: Record<string, boolean>
+  setProjectTreeGroupOpen: (groupId: string, open: boolean) => void
+  toggleProjectTreeGroup: (groupId: string) => void
 
   // ===== AI 对话面板 =====
   aiPanelOpen: boolean
@@ -112,6 +116,13 @@ export const useLayoutStore = create<LayoutState>()((set) => ({
   sidebarView: 'project',
   sidebarWidth: 260,
   activeRailItem: 'project',
+  projectTreeGroupOpen: {
+    plan: true,
+    setting: true,
+    library: true,
+    management: true,
+    manuscript: true,
+  },
 
   // 参考栏是默认右侧信息架；AI 对话在用户需要时由右侧栏或快捷按钮打开。
   aiPanelOpen: false,
@@ -149,6 +160,17 @@ export const useLayoutStore = create<LayoutState>()((set) => ({
       }
     }),
   setSidebarWidth: (width) => set({ sidebarWidth: Math.max(200, Math.min(500, width)) }),
+  setProjectTreeGroupOpen: (groupId, open) =>
+    set((s) => ({
+      projectTreeGroupOpen: { ...s.projectTreeGroupOpen, [groupId]: open },
+    })),
+  toggleProjectTreeGroup: (groupId) =>
+    set((s) => ({
+      projectTreeGroupOpen: {
+        ...s.projectTreeGroupOpen,
+        [groupId]: !(s.projectTreeGroupOpen[groupId] ?? true),
+      },
+    })),
 
   toggleAIPanel: () => set((s) => ({ aiPanelOpen: !s.aiPanelOpen })),
   setAIPanelOpen: (open) => set({ aiPanelOpen: open }),

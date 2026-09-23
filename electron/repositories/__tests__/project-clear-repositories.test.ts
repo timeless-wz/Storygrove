@@ -129,11 +129,12 @@ describe('project clear repositories', () => {
       'DELETE FROM post_process_runs',
       'DELETE FROM reviews',
       'DELETE FROM revisions',
+      'DELETE FROM foreshadowings',
       'DELETE FROM drafts',
       'DELETE FROM contents',
       'DELETE FROM summary_snapshots',
     ])
-    expect(db.run).toHaveBeenCalledTimes(8)
+    expect(db.run).toHaveBeenCalledTimes(9)
   })
 
   it('resets generated architecture fields without clearing project identity or sizing fields', () => {

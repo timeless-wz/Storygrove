@@ -7,7 +7,10 @@ import { setTimeout as delay } from 'node:timers/promises'
 
 const scriptPath = fileURLToPath(import.meta.url)
 
-const MAX_INSTALL_ATTEMPTS = 5
+// Electron Builder and Windows Defender can retain the just-packaged native
+// binary briefly after their child processes exit. Keep the restoration window
+// long enough for that transient file lock to clear before failing a release.
+const MAX_INSTALL_ATTEMPTS = 20
 const INSTALL_RETRY_DELAY_MS = 1_000
 
 // Windows keeps the native binding mapped for as long as any Node or Electron

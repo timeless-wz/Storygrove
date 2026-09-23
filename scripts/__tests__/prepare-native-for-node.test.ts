@@ -69,8 +69,8 @@ describe('prepare native dependencies for the ordinary Node runtime', () => {
     await expect(prepareNativeForNode({ probe, install, sleep })).rejects.toThrow(
       'Failed to prepare better-sqlite3 for Node',
     )
-    expect(install).toHaveBeenCalledTimes(5)
-    expect(sleep).toHaveBeenCalledTimes(4)
+    expect(install).toHaveBeenCalledTimes(20)
+    expect(sleep).toHaveBeenCalledTimes(19)
   })
 
   it('rejects an install that reports success without a loadable binding', async () => {

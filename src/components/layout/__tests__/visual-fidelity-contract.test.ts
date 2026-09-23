@@ -37,7 +37,7 @@ const editorFiles = [
   'src/components/editor/CharacterEditor.tsx',
   'src/components/editor/ReviewReport.tsx',
   'src/components/panels/sidebar/CharactersView.tsx',
-  'src/components/editor/CodeMirrorEditor.tsx',
+  'src/components/editor/ProjectDocumentEditor.tsx',
   'src/components/editor/MonacoDiffViewer.tsx',
   'src/components/editor/ThreeWayMerge.tsx',
 ]

@@ -281,7 +281,7 @@ export default function WorkspaceSourcesTab() {
                                 <Layers size={13} className="shrink-0 opacity-70" />
                                 <span className="truncate">{f.headingPath}</span>
                                 {isTarget && (
-                                  <span className="px-1.5 py-0.2 rounded text-[10px] font-semibold bg-[var(--color-accent)] text-white shrink-0">
+                                  <span className="px-1.5 py-0.2 rounded text-[10px] font-semibold bg-[var(--color-accent)] text-[var(--color-accent-foreground)] shrink-0">
                                     {text('当前引用片段', 'Current Citation')}
                                   </span>
                                 )}

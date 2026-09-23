@@ -5,7 +5,11 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { ChevronRight, ChevronDown, RefreshCw, CheckCircle2, Circle, FolderOpen, Copy, FolderTree, Sparkles, Trash2 } from 'lucide-react'
+import {
+  ChevronRight, ChevronDown, RefreshCw, CheckCircle2, Circle,
+  FolderOpen, Copy, FolderTree, Sparkles, Trash2,
+  Layers, BookOpen, Library, FolderCog, PenTool,
+} from 'lucide-react'
 import { useProjectStore } from '../../../stores/project-store'
 import { useWorkflowStore } from '../../../stores/workflow-store'
 import { useDraftStore } from '../../../stores/draft-store'
@@ -19,8 +23,8 @@ import { EmptyState } from '../../ui/EmptyState'
 import { confirm } from '../../ui/Confirm'
 import { toast } from '../../ui/Toast'
 import ClearProjectDataDialog from '../../dialogs/ClearProjectDataDialog'
-
-
+import { SidebarGroup, SidebarGroupLabel, SidebarGroupContent, SidebarMenu, SidebarMenuItem } from '../../ui/sidebar'
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '../../ui/collapsible'
 
 import { LeafItem } from './SidebarShared'
 import { ARCH_FILES } from './sidebar-arch-files'
@@ -71,6 +75,8 @@ export default function ProjectTree() {
   const refreshRequestGate = useRef(new LatestRequestGate())
   const mapNodes = useWorldMapStore(s => s.nodes)
   const setSidebarView = useLayoutStore(s => s.setSidebarView)
+  const projectTreeGroupOpen = useLayoutStore(s => s.projectTreeGroupOpen)
+  const setProjectTreeGroupOpen = useLayoutStore(s => s.setProjectTreeGroupOpen)
 
   /** 统一刷新：文件树 + 架构状态 + 草稿列表 + 蓝图数量 */
   // 用 getState() 获取最新的 action，不作为依赖项，避免重建导致 useEffect 循环
@@ -245,6 +251,7 @@ export default function ProjectTree() {
   const openOverview = () => openBuiltinEditor('project-overview', text('项目总览', 'Project overview'), 'overview')
   const openWorldMap = () => openBuiltinEditor('world-map-editor', text('多地图地图册', 'Map atlas'), 'world-map')
   const openStoryTimeline = () => openBuiltinEditor('story-timeline-editor', text('故事时间线', 'Story timeline'), 'story-timeline')
+  const openForeshadowing = () => openBuiltinEditor('foreshadowing-manager', text('伏笔管理', 'Foreshadowing'), 'foreshadowing')
   const openConfigEditor = () => useEditorStore.getState().openFile({
     id: 'config',
     name: text('创作参数', 'Creative parameters'),
@@ -340,183 +347,275 @@ export default function ProjectTree() {
       />
 
       {/* 顶层导航 */}
-      <LeafItem
-        iconName="layout-dashboard"
-        label={text('项目总览', 'Project overview')}
-        desc={text('小说创作进度与核心看板', 'Novel creative dashboard and progress')}
-        onClick={openOverview}
-      />
+      <SidebarGroup className="py-0.5 px-1">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <LeafItem
+              iconName="layout-dashboard"
+              label={text('项目总览', 'Project overview')}
+              desc={text('小说创作进度与核心看板', 'Novel creative dashboard and progress')}
+              onClick={openOverview}
+            />
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarGroup>
 
-      <ProjectTreeSection
+      {/* 1. 创作规划 */}
+      <ProjectTreeCollapsibleGroup
+        id="plan"
         title={text('创作规划', 'Writing plan')}
         detail={text('章节蓝图与叙事线索', 'Chapter blueprints and narrative threads')}
-      />
+        icon={Layers}
+        isOpen={projectTreeGroupOpen.plan ?? true}
+        onOpenChange={(nextOpen) => setProjectTreeGroupOpen('plan', nextOpen)}
+      >
+        <SidebarMenuItem>
+          <LeafItem
+            iconName="compass"
+            label={text('多地图地图册', 'Map atlas')}
+            desc={text('地点、势力与空间拓扑网络', 'Locations, factions, and spatial network')}
+            badge={mapNodes.length > 0 ? text(`${mapNodes.length} 处地点`, `${mapNodes.length} locations`) : text('待创建', 'Empty')}
+            badgeColor={mapNodes.length > 0 ? 'var(--color-accent)' : undefined}
+            badgeDone={mapNodes.length > 0}
+            onClick={openWorldMap}
+          />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <LeafItem
+            iconName="layout-list"
+            label={text('章节蓝图', 'Chapter blueprints')}
+            desc={text('1~58 章细纲与关键事件，可直接写正文', 'Chapters 1-58 detailed outlines, direct prose drafting')}
+            badge={blueprintCount > 0 ? text(`${blueprintCount}/${nc.totalChapters} 章`, `${blueprintCount}/${nc.totalChapters} chapters`) : text('待生成', 'Pending')}
+            badgeColor={
+              blueprintCount >= nc.totalChapters
+                ? 'var(--color-success-text)'
+                : blueprintCount > 0
+                  ? 'var(--color-warning-text, #7A5414)'
+                  : undefined
+            }
+            badgeDone={blueprintCount >= nc.totalChapters}
+            onClick={() => openBuiltinEditor('chapter-card-editor', text('章节蓝图', 'Chapter blueprints'), 'chapter-card')}
+            onContextMenu={e => showSidebarMenu([
+              {
+                key: 'open',
+                label: text('打开章节蓝图', 'Open chapter blueprints'),
+                icon: <FolderOpen size={13} />,
+                onClick: () => openBuiltinEditor('chapter-card-editor', text('章节蓝图', 'Chapter blueprints'), 'chapter-card'),
+              },
+            ], e)}
+          />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <LeafItem
+            iconName="git-branch"
+            label={text('章节脉络', 'Chapter thread')}
+            desc={text('由章节蓝图确定性投影的章节事件与伏笔脉络，零模型依赖', 'Deterministic projection of blueprints into chapter events and setups')}
+            onClick={() => openBuiltinEditor('narrative-thread-editor', text('章节脉络', 'Chapter thread'), 'narrative-thread')}
+          />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <LeafItem
+            iconName="clock-3"
+            label={text('故事时间线', 'Story timeline')}
+            desc={text('手动刻度、自定义时间与故事事件', 'Manual ruler, custom time labels, and story events')}
+            onClick={openStoryTimeline}
+          />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <LeafItem
+            iconName="bookmark"
+            label={text('伏笔管理', 'Foreshadowing')}
+            desc={text('章节伏笔、原文标注与回收追踪', 'Chapter foreshadowings, text annotations, and tracking')}
+            onClick={openForeshadowing}
+          />
+        </SidebarMenuItem>
+      </ProjectTreeCollapsibleGroup>
 
-      <LeafItem
-        iconName="compass"
-        label={text('多地图地图册', 'Map atlas')}
-        desc={text('地点、势力与空间拓扑网络', 'Locations, factions, and spatial network')}
-        badge={mapNodes.length > 0 ? text(`${mapNodes.length} 处地点`, `${mapNodes.length} locations`) : text('待创建', 'Empty')}
-        badgeColor={mapNodes.length > 0 ? 'var(--color-accent)' : undefined}
-        badgeDone={mapNodes.length > 0}
-        onClick={openWorldMap}
-      />
-
-      {/* 章节蓝图 */}
-      <LeafItem
-        iconName="layout-list"
-        label={text('章节蓝图', 'Chapter blueprints')}
-        desc={text('1~58 章细纲与关键事件，可直接写正文', 'Chapters 1-58 detailed outlines, direct prose drafting')}
-        badge={blueprintCount > 0 ? text(`${blueprintCount}/${nc.totalChapters} 章`, `${blueprintCount}/${nc.totalChapters} chapters`) : text('待生成', 'Pending')}
-        badgeColor={
-          blueprintCount >= nc.totalChapters
-            ? 'var(--color-success-text)'
-            : blueprintCount > 0
-              ? 'var(--color-warning-text, #7A5414)'
-              : undefined
-        }
-        badgeDone={blueprintCount >= nc.totalChapters}
-        onClick={() => openBuiltinEditor('chapter-card-editor', text('章节蓝图', 'Chapter blueprints'), 'chapter-card')}
-        onContextMenu={e => showSidebarMenu([
-          {
-            key: 'open',
-            label: text('打开章节蓝图', 'Open chapter blueprints'),
-            icon: <FolderOpen size={13} />,
-            onClick: () => openBuiltinEditor('chapter-card-editor', text('章节蓝图', 'Chapter blueprints'), 'chapter-card'),
-          },
-        ], e)}
-      />
-
-      {/* 章节脉络：章节蓝图的确定性投影 */}
-      <LeafItem
-        iconName="git-branch"
-        label={text('章节脉络', 'Chapter thread')}
-        desc={text('由章节蓝图确定性投影的章节事件与伏笔脉络，零模型依赖', 'Deterministic projection of blueprints into chapter events and setups')}
-        onClick={() => openBuiltinEditor('narrative-thread-editor', text('章节脉络', 'Chapter thread'), 'narrative-thread')}
-      />
-
-      <LeafItem
-        iconName="clock-3"
-        label={text('故事时间线', 'Story timeline')}
-        desc={text('手动刻度、自定义时间与故事事件', 'Manual ruler, custom time labels, and story events')}
-        onClick={openStoryTimeline}
-      />
-
-      <ProjectTreeSection
+      {/* 2. 故事设定 */}
+      <ProjectTreeCollapsibleGroup
+        id="setting"
         title={text('故事设定', 'Story setup')}
         detail={text('创作参数、架构文档与角色档案', 'Creative parameters, architecture documents, and characters')}
-      />
+        icon={BookOpen}
+        isOpen={projectTreeGroupOpen.setting ?? true}
+        onOpenChange={(nextOpen) => setProjectTreeGroupOpen('setting', nextOpen)}
+      >
+        <SidebarMenuItem>
+          <LeafItem
+            iconName="book-open"
+            label={text('创作参数', 'Creative parameters')}
+            desc={text('书名、题材、受众、章数与叙事视角', 'Title metadata, genre, audience, chapters, and point of view')}
+            badge={configDone ? text('已完成', 'Complete') : text('待配置', 'Pending')}
+            badgeDone={configDone}
+            onClick={openConfigEditor}
+            onContextMenu={e => showSidebarMenu([
+              {
+                key: 'open',
+                label: text('打开创作参数', 'Open creative parameters'),
+                icon: <FolderOpen size={13} />,
+                onClick: openConfigEditor,
+              },
+            ], e)}
+          />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <WorldBuildingGroup archStatus={archStatus} archDone={archDone} onCleared={refreshAll} />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <LeafItem
+            iconName="users"
+            label={text('角色档案', 'Character profile')}
+            desc={text('角色事实来源：档案、关系、动机、弧光与当前状态', 'Single source of truth: profiles, relationships, motivations, arcs, and state')}
+            onClick={() => useLayoutStore.getState().openCharacterProfile('overview')}
+          />
+        </SidebarMenuItem>
+      </ProjectTreeCollapsibleGroup>
 
-      {/* 创作参数：作品元数据与创作约束 */}
-      <LeafItem
-        iconName="book-open"
-        label={text('创作参数', 'Creative parameters')}
-        desc={text('书名、题材、受众、章数与叙事视角', 'Title metadata, genre, audience, chapters, and point of view')}
-        badge={configDone ? text('已完成', 'Complete') : text('待配置', 'Pending')}
-        badgeDone={configDone}
-        onClick={openConfigEditor}
-        onContextMenu={e => showSidebarMenu([
-          {
-            key: 'open',
-            label: text('打开创作参数', 'Open creative parameters'),
-            icon: <FolderOpen size={13} />,
-            onClick: openConfigEditor,
-          },
-        ], e)}
-      />
-
-      {/* 故事架构：分组标题不再直接打开编辑器，下面只有三个可编辑的架构文档 */}
-      <WorldBuildingGroup archStatus={archStatus} archDone={archDone} onCleared={refreshAll} />
-
-      {/* 角色档案：唯一的角色入口，关系图谱是它内部的只读视图 */}
-      <LeafItem
-        iconName="users"
-        label={text('角色档案', 'Character profile')}
-        desc={text('角色事实来源：档案、关系、动机、弧光与当前状态', 'Single source of truth: profiles, relationships, motivations, arcs, and state')}
-        onClick={() => useLayoutStore.getState().openCharacterProfile('overview')}
-      />
-
-      <ProjectTreeSection
+      {/* 3. 资料库 */}
+      <ProjectTreeCollapsibleGroup
+        id="library"
         title={text('资料库', 'Library')}
         detail={text('自由文档、资料来源审核与知识检索', 'Free documents, source review, and knowledge retrieval')}
-      />
+        icon={Library}
+        isOpen={projectTreeGroupOpen.library ?? true}
+        onOpenChange={(nextOpen) => setProjectTreeGroupOpen('library', nextOpen)}
+      >
+        <SidebarMenuItem>
+          <LeafItem
+            iconName="file-pen"
+            label={text('项目文档', 'Project documents')}
+            desc={text('设定笔记、卷纲、灵感与资料摘录的自由 Markdown 文档', 'Free Markdown notes, outlines, ideas, and excerpts')}
+            onClick={() => setSidebarView('documents')}
+          />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <LeafItem
+            iconName="target"
+            label={text('资料来源与审核', 'Sources & review')}
+            desc={text('原始资料、文件来源、审核、批准快照与章节上下文', 'Raw sources, file provenance, review, approved snapshots, and chapter context')}
+            onClick={() => setSidebarView('workspace')}
+          />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <LeafItem
+            iconName="brain-circuit"
+            label={text('知识检索', 'Knowledge retrieval')}
+            desc={text('检索作者已明确加入的内容；不会自动收录资料或项目文档', 'Search only what the author explicitly added; nothing is indexed automatically')}
+            onClick={() => setSidebarView('knowledge')}
+          />
+        </SidebarMenuItem>
+      </ProjectTreeCollapsibleGroup>
 
-      {/* 项目文档：作者自由创建的 Markdown 资料 */}
-      <LeafItem
-        iconName="file-pen"
-        label={text('项目文档', 'Project documents')}
-        desc={text('设定笔记、卷纲、灵感与资料摘录的自由 Markdown 文档', 'Free Markdown notes, outlines, ideas, and excerpts')}
-        onClick={() => setSidebarView('documents')}
-      />
-
-      {/* 资料来源与审核：原始资料、快照、批准与版本 */}
-      <LeafItem
-        iconName="target"
-        label={text('资料来源与审核', 'Sources & review')}
-        desc={text('原始资料、文件来源、审核、批准快照与章节上下文', 'Raw sources, file provenance, review, approved snapshots, and chapter context')}
-        onClick={() => setSidebarView('workspace')}
-      />
-
-      {/* 知识检索：只检索作者已明确加入的内容 */}
-      <LeafItem
-        iconName="brain-circuit"
-        label={text('知识检索', 'Knowledge retrieval')}
-        desc={text('检索作者已明确加入的内容；不会自动收录资料或项目文档', 'Search only what the author explicitly added; nothing is indexed automatically')}
-        onClick={() => setSidebarView('knowledge')}
-      />
-
-      <ProjectTreeSection
+      {/* 4. 项目管理 */}
+      <ProjectTreeCollapsibleGroup
+        id="management"
         title={text('项目管理', 'Project management')}
         detail={text('本项目的导入、导出与配置', 'Import, export, and configuration for this project')}
-      />
+        icon={FolderCog}
+        isOpen={projectTreeGroupOpen.management ?? true}
+        onOpenChange={(nextOpen) => setProjectTreeGroupOpen('management', nextOpen)}
+      >
+        <SidebarMenuItem>
+          <LeafItem
+            iconName="folder-open"
+            label={text('导入创作资料', 'Import writing material')}
+            desc={text('导入内容前会显示项目范围与确认步骤', 'Import content with project scope and confirmation')}
+            onClick={() => useLayoutStore.getState().openImportNovel()}
+          />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <LeafItem
+            iconName="file-text"
+            label={text('导出项目', 'Export project')}
+            desc={text('导出当前项目的创作成果', 'Export this project’s work')}
+            onClick={() => useLayoutStore.getState().openExport()}
+          />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <LeafItem
+            iconName="archive"
+            label={text('备份项目', 'Back up project')}
+            desc={text('将当前项目状态备份到你选择的目录', 'Back up the current project state to a directory you choose')}
+            badge={backupBusy ? text('处理中', 'Working') : undefined}
+            onClick={() => void handleBackup()}
+          />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <LeafItem
+            iconName="rotate-ccw"
+            label={text('恢复项目备份', 'Restore project backup')}
+            desc={text('恢复到新项目目录，不覆盖已有项目', 'Restore to a new project directory without overwriting an existing project')}
+            badge={backupBusy ? text('处理中', 'Working') : undefined}
+            onClick={() => void handleRestoreBackup()}
+          />
+        </SidebarMenuItem>
+      </ProjectTreeCollapsibleGroup>
 
-      <LeafItem
-        iconName="folder-open"
-        label={text('导入创作资料', 'Import writing material')}
-        desc={text('导入内容前会显示项目范围与确认步骤', 'Import content with project scope and confirmation')}
-        onClick={() => useLayoutStore.getState().openImportNovel()}
-      />
-      <LeafItem
-        iconName="file-text"
-        label={text('导出项目', 'Export project')}
-        desc={text('导出当前项目的创作成果', 'Export this project’s work')}
-        onClick={() => useLayoutStore.getState().openExport()}
-      />
-      <LeafItem
-        iconName="archive"
-        label={text('备份项目', 'Back up project')}
-        desc={text('将当前项目状态备份到你选择的目录', 'Back up the current project state to a directory you choose')}
-        badge={backupBusy ? text('处理中', 'Working') : undefined}
-        onClick={() => void handleBackup()}
-      />
-      <LeafItem
-        iconName="rotate-ccw"
-        label={text('恢复项目备份', 'Restore project backup')}
-        desc={text('恢复到新项目目录，不覆盖已有项目', 'Restore to a new project directory without overwriting an existing project')}
-        badge={backupBusy ? text('处理中', 'Working') : undefined}
-        onClick={() => void handleRestoreBackup()}
-      />
-
-      <ProjectTreeSection
+      {/* 5. 正文创作 */}
+      <ProjectTreeCollapsibleGroup
+        id="manuscript"
         title={text('正文创作', 'Manuscript')}
         detail={text('草稿与正文章节', 'Drafts and manuscript chapters')}
-      />
-
-      {/* 草稿箱 */}
-      <DraftBoxGroup draftsByChapter={draftsByChapter} />
-
-      {/* 正文章节 — 仅显示已发布稿 */}
-      <ManuscriptGroup files={manuscriptFiles} projectPath={p} />
+        icon={PenTool}
+        isOpen={projectTreeGroupOpen.manuscript ?? true}
+        onOpenChange={(nextOpen) => setProjectTreeGroupOpen('manuscript', nextOpen)}
+      >
+        <SidebarMenuItem>
+          <DraftBoxGroup draftsByChapter={draftsByChapter} />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <ManuscriptGroup files={manuscriptFiles} projectPath={p} />
+        </SidebarMenuItem>
+      </ProjectTreeCollapsibleGroup>
     </div>
   )
 }
 
-function ProjectTreeSection({ title, detail }: { title: string; detail: string }) {
+function ProjectTreeCollapsibleGroup({
+  id,
+  title,
+  detail,
+  icon: Icon,
+  isOpen,
+  onOpenChange,
+  children,
+}: {
+  id: string
+  title: string
+  detail?: string
+  icon: React.ComponentType<{ size?: number; className?: string; style?: React.CSSProperties }>
+  isOpen: boolean
+  onOpenChange: (nextOpen: boolean) => void
+  children: React.ReactNode
+}) {
   return (
-    <div className="writer-project-section-title" title={detail}>
-      <span>{title}</span>
-      <span>{detail}</span>
-    </div>
+    <SidebarGroup className="py-0.5 px-1" data-group-id={id}>
+      <Collapsible open={isOpen} onOpenChange={onOpenChange}>
+        <SidebarGroupLabel asChild className="p-0 h-auto">
+          <CollapsibleTrigger
+            aria-label={title}
+            aria-expanded={isOpen}
+            title={detail ?? title}
+            className="group/trigger flex items-center justify-between w-full px-2.5 py-1.5 rounded-md text-xs font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] transition-colors cursor-pointer select-none border-0 bg-transparent text-left"
+          >
+            <span className="flex items-center gap-2 min-w-0 flex-1">
+              <Icon size={14} className="flex-shrink-0 text-[var(--color-text-muted)] group-hover/trigger:text-[var(--color-text)] transition-colors" />
+              <span className="truncate tracking-wide font-medium">{title}</span>
+            </span>
+            <span className="flex-shrink-0 ml-1 text-[var(--color-text-muted)] group-hover/trigger:text-[var(--color-text)] transition-colors">
+              {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+            </span>
+          </CollapsibleTrigger>
+        </SidebarGroupLabel>
+        <CollapsibleContent>
+          <SidebarGroupContent className="pt-0.5">
+            <SidebarMenu>
+              {children}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </CollapsibleContent>
+      </Collapsible>
+    </SidebarGroup>
   )
 }
 

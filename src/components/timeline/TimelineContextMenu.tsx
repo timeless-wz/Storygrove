@@ -94,7 +94,7 @@ export function TimelineContextMenu({
               onClose()
             }}
           >
-            <Milestone size={14} className="text-blue-600" />
+            <Milestone size={14} className="text-[var(--color-accent-text)]" />
             <span>{text('编辑故事开端', 'Edit Story Start')}</span>
           </button>
           <button
@@ -122,7 +122,7 @@ export function TimelineContextMenu({
               onClose()
             }}
           >
-            <Flag size={14} className="text-emerald-600" />
+            <Flag size={14} className="text-[var(--color-success-text)]" />
             <span>{text('编辑故事结束', 'Edit Story End')}</span>
           </button>
           <button
@@ -197,7 +197,7 @@ export function TimelineContextMenu({
             <button
               type="button"
               role="menuitem"
-              className="writer-timeline-context-item text-emerald-600 dark:text-emerald-400"
+              className="writer-timeline-context-item text-[var(--color-success-text)]"
               onClick={() => {
                 onCreateBranch()
                 onClose()
@@ -248,7 +248,7 @@ export function TimelineContextMenu({
             <button
               type="button"
               role="menuitem"
-              className="writer-timeline-context-item text-red-600 dark:text-red-400"
+              className="writer-timeline-context-item text-[var(--color-error-text)]"
               onClick={() => {
                 onDeleteEvent()
                 onClose()

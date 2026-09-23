@@ -209,6 +209,7 @@ export function initProjectDatabase(projectPath: string, importSourceSecret?: Bu
 
   // 创建表结构
   createTables(projectDb, importSourceSecret)
+  ensureForeshadowingSchema(projectDb)
 
   // 旧项目只有「一张项目底图 + 图层筛选」的结构。一次性把旧图层转换成同名地图，
   // 并把旧底图迁入其中一张地图的受控目录；迁移不删除任何既有地点、图层或连接。
@@ -2057,6 +2058,35 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
   }
 
   ensureCharacterRelationshipSchema(db)
+  ensureForeshadowingSchema(db)
 
   migrateDraftUnitCounts(db)
 }
+
+/** 确保伏笔管理数据表存在（支持新旧项目热迁移） */
+export function ensureForeshadowingSchema(db: BetterSqlite3.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS foreshadowings (
+      id TEXT PRIMARY KEY,
+      draft_id INTEGER NOT NULL,
+      chapter_number INTEGER NOT NULL,
+      selected_text TEXT NOT NULL,
+      start_offset INTEGER NOT NULL DEFAULT 0,
+      end_offset INTEGER NOT NULL DEFAULT 0,
+      context_before TEXT NOT NULL DEFAULT '',
+      context_after TEXT NOT NULL DEFAULT '',
+      note TEXT NOT NULL DEFAULT '',
+      marker_type TEXT NOT NULL DEFAULT 'foreshadowing',
+      color TEXT NOT NULL DEFAULT 'blue',
+      completed INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      completed_at TEXT DEFAULT NULL,
+      FOREIGN KEY (draft_id) REFERENCES drafts(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_foreshadowings_draft ON foreshadowings(draft_id);
+    CREATE INDEX IF NOT EXISTS idx_foreshadowings_chapter ON foreshadowings(chapter_number);
+    CREATE INDEX IF NOT EXISTS idx_foreshadowings_completed ON foreshadowings(completed);
+  `)
+}
+

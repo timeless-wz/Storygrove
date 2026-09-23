@@ -17,11 +17,9 @@ import ProjectTree from './sidebar/ProjectTree'
 import CharactersView from './sidebar/CharactersView'
 import ProjectDocumentsView from './sidebar/ProjectDocumentsView'
 import WorkspaceSidebarPanel from './sidebar/WorkspaceSidebarPanel'
-import {
-  registerMenuSetter, unregisterMenuSetter,
-  type SidebarMenuState,
-} from './sidebar/sidebar-menu'
+import { registerMenuSetter, unregisterMenuSetter, type SidebarMenuState } from './sidebar/sidebar-menu'
 import { useLocaleStore } from '../../stores/locale-store'
+import { Sidebar as ShadcnSidebar, SidebarHeader, SidebarContent } from '../ui/sidebar'
 
 /** 左侧面板 */
 export default function Sidebar() {
@@ -52,15 +50,11 @@ export default function Sidebar() {
   const effectiveView = currentProject ? sidebarView : 'home'
 
   return (
-    <div
-      className="skin-workspace-panel w-full h-full flex flex-col overflow-hidden"
-      style={{
-        backgroundColor: 'var(--color-sidebar)',
-        borderRight: '1px solid var(--color-border)',
-      }}
+    <ShadcnSidebar
+      className="literary-sidebar skin-workspace-panel w-full h-full border-r border-[var(--color-border)]"
     >
       {effectiveView === 'project' ? (
-        <div className="writer-project-sidebar-header writer-project-sidebar-header--compact">
+        <SidebarHeader className="writer-project-sidebar-header writer-project-sidebar-header--compact">
           <div className="flex items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-1">
               <button
@@ -98,38 +92,51 @@ export default function Sidebar() {
               </button>
             </div>
           </div>
-        </div>
+        </SidebarHeader>
       ) : effectiveView !== 'home' ? (
-        <div className="panel-header flex items-center gap-1">
+        <SidebarHeader className="panel-header flex items-center gap-1">
           <button type="button" className="writer-command-button" title={text('返回项目资源树', 'Back to project resources')} onClick={() => setSidebarView('project')}>
             <ArrowLeft size={14} />
           </button>
           <span>{viewTitles[effectiveView]}</span>
-        </div>
+        </SidebarHeader>
       ) : (
-        <div className="panel-header flex items-center justify-between gap-2">
-          <span className="flex items-center gap-1.5"><Home size={14} />{text('首页', 'Home')}</span>
-          {currentProject && (
-            <button
-              type="button"
-              className="writer-command-button max-w-[170px]"
-              title={text(`返回「${currentProject.name}」工作台`, `Return to ${currentProject.name}`)}
-              onClick={() => setSidebarView('project')}
-            >
-              <FolderOpen size={14} />
-              <span className="truncate">{text('返回创作', 'Return to project')}</span>
-            </button>
-          )}
-        </div>
+        <SidebarHeader className="writer-project-sidebar-header writer-project-sidebar-header--compact">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <span
+                className="flex items-center justify-center w-5 h-5 rounded-md flex-shrink-0"
+                style={{ backgroundColor: 'var(--color-badge-bg)', color: 'var(--color-accent)' }}
+              >
+                <Home size={13} />
+              </span>
+              <span className="text-xs font-semibold tracking-wide truncate" style={{ color: 'var(--color-text)' }}>
+                {text('工作台首页', 'Home')}
+              </span>
+            </div>
+            {currentProject && (
+              <button
+                type="button"
+                className="writer-command-button flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium"
+                style={{ color: 'var(--color-accent)' }}
+                title={text(`返回「${currentProject.name}」创作`, `Return to ${currentProject.name}`)}
+                onClick={() => setSidebarView('project')}
+              >
+                <FolderOpen size={13} />
+                <span className="truncate">{text('返回创作', 'Return to project')}</span>
+              </button>
+            )}
+          </div>
+        </SidebarHeader>
       )}
-      <div className="flex-1 overflow-y-auto py-1">
+      <SidebarContent className="flex-1 py-1">
         {effectiveView === 'home'       && <HomeSidebarPanel />}
         {effectiveView === 'project'    && <ProjectTree />}
         {effectiveView === 'workspace'  && <WorkspaceSidebarPanel />}
         {effectiveView === 'knowledge'  && <KnowledgePanel />}
         {effectiveView === 'characters' && <CharactersView />}
         {effectiveView === 'documents'  && <ProjectDocumentsView />}
-      </div>
+      </SidebarContent>
 
       {/* 动态右键菜单 */}
       {sidebarMenu && (
@@ -139,6 +146,6 @@ export default function Sidebar() {
           onClose={() => setSidebarMenu(null)}
         />
       )}
-    </div>
+    </ShadcnSidebar>
   )
 }

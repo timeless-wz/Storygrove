@@ -394,7 +394,7 @@ function ActiveRunPanel({
                   data-testid="workflow-confirmation-confirm"
                   onClick={onConfirm}
                   className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium flex-shrink-0"
-                  style={{ backgroundColor: 'var(--color-accent)', color: '#fff' }}
+                  style={{ backgroundColor: 'var(--color-accent)', color: 'var(--color-accent-foreground)' }}
                 >
                   <Play size={10} /> {nextStepName}
                 </button>
@@ -420,7 +420,7 @@ function ActiveRunPanel({
           <button
             onClick={(e) => { e.stopPropagation(); onConfirm() }}
             className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-medium flex-shrink-0"
-            style={{ backgroundColor: 'var(--color-accent)', color: '#fff' }}
+            style={{ backgroundColor: 'var(--color-accent)', color: 'var(--color-accent-foreground)' }}
           >
             <Play size={10} /> {text('继续', 'Continue')}
           </button>

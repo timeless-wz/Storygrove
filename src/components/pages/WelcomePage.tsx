@@ -1,10 +1,9 @@
-import { Sparkles, FolderOpen, Clock, BookOpen, FileUp, Compass } from 'lucide-react'
+import { ArrowRight, BookOpen, Compass, Feather, FileUp, FolderOpen, Plus } from 'lucide-react'
 import { useProjectStore } from '../../stores/project-store'
 import { useWorkspaceHubStore } from '../../stores/workspace-hub-store'
 import { useLayoutStore } from '../../stores/layout-store'
 import { APP_BRAND } from '../../shared/brand'
 import { useLocaleStore } from '../../stores/locale-store'
-import { Button } from '../ui/Button'
 
 interface WelcomePageProps {
   onNewProject: () => void
@@ -12,7 +11,7 @@ interface WelcomePageProps {
   onImportNovel?: () => void
 }
 
-/** 欢迎页面 — 无项目打开时显示 */
+/** Bookshelf connected to the existing project actions and local recent-project list. */
 export default function WelcomePage({ onNewProject, onOpenProject, onImportNovel }: WelcomePageProps) {
   const recentProjects = useProjectStore(s => s.recentProjects)
   const openProject = useProjectStore(s => s.openProject)
@@ -21,196 +20,81 @@ export default function WelcomePage({ onNewProject, onOpenProject, onImportNovel
   const text = useLocaleStore(s => s.text)
 
   return (
-    <div
-      className="writer-shell-surface skin-workspace-page w-full h-full overflow-y-auto"
-    >
-      <div className="max-w-lg w-full mx-auto px-8 py-16">
-        {/* Logo 区域 — 品牌极光光环 */}
-        <div className="text-center mb-8">
-          <img
-            className="writer-welcome-brand-image mb-5"
-            src="/brand-icon.png"
-            alt=""
-          />
-          <h1 className="text-2xl font-bold mb-2" style={{ color: 'var(--color-text)' }}>
-            {currentProject ? currentProject.name : text(`欢迎使用 ${APP_BRAND.zhName}`, `Welcome to ${APP_BRAND.enName}`)}
-          </h1>
-          <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-            {currentProject ? currentProject.path : text(APP_BRAND.tagline, APP_BRAND.taglineEn)}
-          </p>
-        </div>
-
-        {/* 创作中枢状态摘要卡片 */}
-        {currentProject && (
-          <div
-            onClick={() => useLayoutStore.getState().setSidebarView('workspace')}
-            className="writer-panel-card p-4 mb-8 rounded-xl border flex items-center justify-between cursor-pointer hover:border-accent transition-all text-xs"
-            style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}
-          >
-            <div className="flex items-center gap-3 min-w-0 flex-1 mr-2">
-              <div
-                className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0"
-                style={{ backgroundColor: 'var(--color-accent-subtle, rgba(59, 130, 246, 0.15))', color: 'var(--color-accent)' }}
-              >
-                <Compass size={18} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="font-medium text-xs flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                  <span>{text('长篇创作中枢', 'Long-form Fiction Workspace')}</span>
-                  {workspaceStatus?.externalWorkspacePath ? (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-[var(--color-success-text)] font-medium">
-                      {text('已关联母稿', 'Folder Bound')}
-                    </span>
-                  ) : (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-black/10 dark:bg-white/10 opacity-70">
-                      {text('未关联外部目录', 'Not Bound')}
-                    </span>
-                  )}
-                </div>
-                <div className="text-[11px] opacity-70 mt-0.5 truncate" style={{ color: 'var(--color-text-muted)' }}>
-                  {workspaceStatus?.externalWorkspacePath
-                    ? text(
-                        `已索引 ${workspaceStatus.recognizedFiles} / ${workspaceStatus.totalFiles} 个文件 · ${workspaceStatus.confirmedRulesCount} 条已确认规则`,
-                        `Indexed ${workspaceStatus.recognizedFiles} / ${workspaceStatus.totalFiles} files · ${workspaceStatus.confirmedRulesCount} rules`,
-                      )
-                    : text('点击关联外部 Markdown 创作工作区，自动提取事实与装配上下文', 'Click to bind external Markdown workspace and assemble chapter context')}
-                </div>
-              </div>
-            </div>
-            <Button size="sm" variant="ghost" className="text-xs shrink-0">
-              {text('进入中枢', 'Open Hub')}
-            </Button>
+    <div className="writer-shell-surface skin-workspace-page literary-home w-full h-full overflow-y-auto">
+      <div className="literary-home-inner">
+        <header className="literary-home-heading">
+          <div className="literary-eyebrow"><Feather size={15} />{text('我的创作空间', 'MY WRITING SPACE')}</div>
+          <span>{text('让灵感落在纸上', 'Make room for your next story')}</span>
+        </header>
+        <section className="literary-hero" aria-labelledby="welcome-title">
+          <div className="literary-hero-copy">
+            <span className="literary-eyebrow">{text(APP_BRAND.zhName, APP_BRAND.enName)}</span>
+            <h1 id="welcome-title">{text('每个故事，都从一页开始。', 'Every story begins with a page.')}</h1>
+            <p>{text('构筑一个世界，遇见笔下的人。让今天的灵感，成为下一章的开头。', 'Build a world. Meet your characters. Let today’s inspiration become your next chapter.')}</p>
+            <button type="button" className="literary-hero-action" onClick={currentProject ? () => useLayoutStore.getState().setSidebarView('project') : onNewProject}>
+              {currentProject ? <BookOpen size={16} /> : <Plus size={16} />}
+              {currentProject ? text('继续创作', 'Continue writing') : text('开始新的故事', 'Start a new story')}
+              <ArrowRight size={15} />
+            </button>
+            {currentProject && <span className="literary-current-title" title={currentProject.path}>{currentProject.name}</span>}
           </div>
-        )}
-
-        {/* 操作按钮 */}
-        <div className="grid grid-cols-3 gap-3 mb-10">
-          <button
-            onClick={onNewProject}
-            className="writer-panel-card group flex flex-col items-center gap-2.5 p-5 transition-all hover:scale-[1.02]"
-            onMouseEnter={e => {
-              e.currentTarget.style.borderColor = 'color-mix(in srgb, var(--color-accent) 42%, transparent)'
-              e.currentTarget.style.boxShadow = '0 4px 20px color-mix(in srgb, var(--color-accent) 10%, transparent)'
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.borderColor = 'var(--color-border)'
-              e.currentTarget.style.boxShadow = 'none'
-            }}
-          >
-            <div
-              className="writer-primary-button flex items-center justify-center w-10 h-10 rounded-xl transition-transform group-hover:scale-105"
-            >
-              <Sparkles size={20} />
-            </div>
-            <span className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
-              {text('新建项目', 'New project')}
-            </span>
-            <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-              {text('创建一部新的小说', 'Start a new novel')}
-            </span>
+          <div className="literary-hero-art" aria-hidden="true">
+            <div className="literary-orbit" />
+            <div className="literary-display-book"><Feather size={28} strokeWidth={1} /><span>{text('故事\n未完待续', 'A STORY\nUNFOLDING')}</span><small>{text('写下你的世界', 'YOUR WORLD IN WORDS')}</small></div>
+            <div className="literary-book-shadow" />
+          </div>
+        </section>
+        <section className="literary-quick-actions" aria-label={text('项目操作', 'Project actions')}>
+          <button type="button" className="literary-action-card" onClick={onNewProject}>
+            <span className="literary-action-icon"><Plus size={20} /></span>
+            <span><strong>{text('新建项目', 'New project')}</strong><small>{text('从一个灵感，开始一部小说', 'Turn an idea into a novel')}</small></span><ArrowRight size={16} />
           </button>
-
-          <button
-            onClick={onOpenProject}
-            className="writer-panel-card group flex flex-col items-center gap-2.5 p-5 transition-all hover:scale-[1.02]"
-            onMouseEnter={e => {
-              e.currentTarget.style.borderColor = 'color-mix(in srgb, var(--color-info) 40%, transparent)'
-              e.currentTarget.style.boxShadow = '0 4px 20px color-mix(in srgb, var(--color-info) 8%, transparent)'
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.borderColor = 'var(--color-border)'
-              e.currentTarget.style.boxShadow = 'none'
-            }}
-          >
-            <div
-              className="flex items-center justify-center w-10 h-10 rounded-xl transition-transform group-hover:scale-105"
-              style={{ backgroundColor: 'color-mix(in srgb, var(--color-info) 12%, transparent)', color: 'var(--color-info)' }}
-            >
-              <FolderOpen size={20} />
-            </div>
-            <span className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
-              {text('打开项目', 'Open project')}
-            </span>
-            <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-              {text('打开已有小说项目', 'Open an existing novel')}
-            </span>
+          <button type="button" className="literary-action-card" onClick={onOpenProject}>
+            <span className="literary-action-icon"><FolderOpen size={20} /></span>
+            <span><strong>{text('打开项目', 'Open project')}</strong><small>{text('回到熟悉的故事与人物', 'Return to a familiar world')}</small></span><ArrowRight size={16} />
           </button>
-
-          <button
-            onClick={onImportNovel}
-            className="writer-panel-card group flex flex-col items-center gap-2.5 p-5 transition-all hover:scale-[1.02]"
-            onMouseEnter={e => {
-              e.currentTarget.style.borderColor = 'color-mix(in srgb, var(--color-success) 40%, transparent)'
-              e.currentTarget.style.boxShadow = '0 4px 20px color-mix(in srgb, var(--color-success) 10%, transparent)'
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.borderColor = 'var(--color-border)'
-              e.currentTarget.style.boxShadow = 'none'
-            }}
-          >
-            <div
-              className="flex items-center justify-center w-10 h-10 rounded-xl transition-transform group-hover:scale-105"
-              style={{ backgroundColor: 'color-mix(in srgb, var(--color-success) 12%, transparent)', color: 'var(--color-success)' }}
-            >
-              <FileUp size={20} />
-            </div>
-            <span className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
-              {text('拆解仿写', 'Style study')}
-            </span>
-            <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-              {text('上传参考小说生成风格约束', 'Analyze a reference novel')}
-            </span>
-          </button>
-        </div>
-
-        {/* 最近项目 */}
-        {recentProjects.length > 0 && (
-          <div>
-            <div className="flex items-center gap-1.5 mb-3">
-              <Clock size={14} style={{ color: 'var(--color-text-muted)' }} />
-              <span className="text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}>
-                {text('最近项目', 'Recent projects')}
-              </span>
-            </div>
-            <div className="space-y-1">
-              {recentProjects.map((p, i) => (
-                <div
-                  key={i}
-                  className="group flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-all"
-                  style={{ backgroundColor: 'transparent', borderLeft: '2px solid transparent' }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = 'var(--color-hover)'
-                    e.currentTarget.style.borderLeftColor = 'var(--color-accent)'
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'transparent'
-                    e.currentTarget.style.borderLeftColor = 'transparent'
-                  }}
-                  onClick={() => openProject(p.path)}
-                >
-                  <BookOpen size={14} style={{ color: 'var(--color-accent)', opacity: 0.6 }} />
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm block truncate" style={{ color: 'var(--color-text)' }}>
-                      {p.name}
-                    </span>
-                    <span className="text-xs block truncate" style={{ color: 'var(--color-text-muted)' }}>
-                      {p.path}
-                    </span>
-                  </div>
-                </div>
+          {onImportNovel && <button type="button" className="literary-action-card" onClick={onImportNovel}>
+            <span className="literary-action-icon"><FileUp size={20} /></span>
+            <span><strong>{text('拆解仿写', 'Style study')}</strong><small>{text('从参考作品中汲取写作灵感', 'Learn from a reference novel')}</small></span><ArrowRight size={16} />
+          </button>}
+        </section>
+        <section aria-labelledby="bookshelf-title">
+          <div className="literary-section-heading">
+            <div><span className="literary-eyebrow">{text('故事在这里生长', 'A PLACE FOR YOUR STORIES')}</span><h2 id="bookshelf-title">{text('我的书架', 'My bookshelf')}</h2></div>
+            <span>{text(`${recentProjects.length} 部最近作品`, `${recentProjects.length} recent projects`)}</span>
+          </div>
+          {recentProjects.length > 0 ? (
+            <div className="literary-bookshelf">
+              {recentProjects.map((project) => (
+                <button key={project.path} type="button" className="literary-project-card" onClick={() => void openProject(project.path)} title={project.path}>
+                  <span className="literary-book-cover" aria-hidden="true"><Feather size={19} strokeWidth={1} /><strong>{project.name}</strong><span>{text('长篇创作', 'FICTION')}</span></span>
+                  <span className="literary-project-info">
+                    <small>{project.path === currentProject?.path ? text('当前正在创作', 'CURRENT PROJECT') : text('最近项目', 'RECENT PROJECT')}</small>
+                    <strong>{project.name}</strong><span className="literary-project-path">{project.path}</span>
+                    <span className="literary-project-open">{text('翻开故事', 'Open story')}<ArrowRight size={14} /></span>
+                  </span>
+                </button>
               ))}
             </div>
-          </div>
+          ) : (
+            <div className="literary-empty-shelf">
+              <BookOpen size={32} strokeWidth={1.2} />
+              <h3>{text('书架的第一格，留给你的故事', 'A place for your first story')}</h3>
+              <p>{text('新建一部小说，或打开已有项目，就能在这里继续创作。', 'Create a novel or open an existing project to begin filling your bookshelf.')}</p>
+              <button type="button" className="literary-text-action" onClick={onNewProject}>{text('创建第一部作品', 'Create your first project')}<ArrowRight size={14} /></button>
+            </div>
+          )}
+        </section>
+        {currentProject && (
+          <button type="button" className="literary-hub-card" onClick={() => useLayoutStore.getState().setSidebarView('workspace')}>
+            <span className="literary-action-icon"><Compass size={22} /></span>
+            <span><strong>{text('长篇创作中枢', 'Long-form Fiction Workspace')}</strong><small>{workspaceStatus?.externalWorkspacePath
+              ? text(`已索引 ${workspaceStatus.recognizedFiles} / ${workspaceStatus.totalFiles} 个文件 · ${workspaceStatus.confirmedRulesCount} 条已确认规则`, `Indexed ${workspaceStatus.recognizedFiles} / ${workspaceStatus.totalFiles} files · ${workspaceStatus.confirmedRulesCount} confirmed rules`)
+              : text('关联创作资料，让设定与章节彼此呼应', 'Connect your source materials with your chapters')}</small></span>
+            <span className="literary-project-open">{text('进入中枢', 'Open Hub')}<ArrowRight size={16} /></span>
+          </button>
         )}
-
-        <div className="text-center mt-12">
-          <p className="text-xs" style={{ color: 'var(--color-text-muted)', opacity: 0.7 }}>
-            {text(
-              `${APP_BRAND.zhName} · 七阶段 AI 驱动创作流水线 · 本地数据安全`,
-              `${APP_BRAND.enName} · Seven-stage AI writing pipeline · Local data control`,
-            )}
-          </p>
-        </div>
+        <footer className="literary-home-footer"><Feather size={13} />{text(`${APP_BRAND.zhName} · 故事由你执笔，数据保存在本地`, `${APP_BRAND.enName} · Your stories, stored locally`)}</footer>
       </div>
     </div>
   )

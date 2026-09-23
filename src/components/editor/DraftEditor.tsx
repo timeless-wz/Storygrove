@@ -1,13 +1,17 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import {
-  Search, Upload, Save, FileText, Wrench, Check, Link2,
+  Search, Upload, Save, FileText, Wrench, Check, Link2, Bookmark,
 } from 'lucide-react'
 
 import { useProjectStore } from '../../stores/project-store'
 import { registerEditorExitSaveHandler, useEditorStore } from '../../stores/editor-store'
 import { useWorkflowStore } from '../../stores/workflow-store'
 import { useLocaleStore } from '../../stores/locale-store'
-import VditorProseEditor from './VditorProseEditor'
+import VditorProseEditor, {
+  type ForeshadowingSelectionInfo,
+  type VditorProseEditorRef,
+} from './VditorProseEditor'
+import type { ForeshadowingRecord } from '../../shared/foreshadowing'
 import { Button } from '../ui/Button'
 import { toast } from '../ui/Toast'
 import { confirm } from '../ui/Confirm'
@@ -45,6 +49,15 @@ const DRAFT_STATUS_EN: Record<string, string> = {
   archived: 'Archived',
 }
 
+const FORESHADOWING_PRESET_TYPES = ['埋伏', '呼应', '线索', '收尾', '悬念']
+const FORESHADOWING_COLOR_OPTIONS = [
+  { value: 'blue', label: ['浅蓝', 'Blue'], bg: 'rgba(59, 130, 246, 0.25)', border: '#3b82f6' },
+  { value: 'red', label: ['浅红', 'Red'], bg: 'rgba(239, 68, 68, 0.25)', border: '#ef4444' },
+  { value: 'yellow', label: ['浅黄', 'Yellow'], bg: 'rgba(234, 179, 8, 0.25)', border: '#eab308' },
+  { value: 'green', label: ['浅绿', 'Green'], bg: 'rgba(34, 197, 94, 0.25)', border: '#22c55e' },
+  { value: 'purple', label: ['浅紫', 'Purple'], bg: 'rgba(168, 85, 247, 0.25)', border: '#a855f7' },
+]
+
 interface Props {
   tabId: string
   filePath: string
@@ -81,6 +94,155 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
   const tabDraftStatus = editorTab?.draftStatus
   const [reviewCount, setReviewCount] = useState(0)
   const [bindingDialogOpen, setBindingDialogOpen] = useState(false)
+
+  // ===== 伏笔管理与正文标注状态 =====
+  const proseEditorRef = useRef<VditorProseEditorRef | null>(null)
+  const [foreshadowings, setForeshadowings] = useState<ForeshadowingRecord[]>([])
+  const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [createCandidate, setCreateCandidate] = useState<ForeshadowingSelectionInfo | null>(null)
+  const [createNote, setCreateNote] = useState('')
+  const [createMarkerType, setCreateMarkerType] = useState('埋伏')
+  const [createColor, setCreateColor] = useState('blue')
+  const [createSubmitting, setCreateSubmitting] = useState(false)
+
+  const loadForeshadowings = useCallback(async () => {
+    const projectSession = captureProjectSession(currentProject)
+    if (!projectSession || !isProjectSessionPath(projectSession, projectKey) || !meta?.id) return
+    try {
+      const list = await ipc.invokeWithProjectSession(
+        projectSession,
+        'db:foreshadowing-list-by-draft',
+        meta.id,
+        projectSession.projectPath,
+      )
+      if (Array.isArray(list)) {
+        setForeshadowings(list)
+      }
+    } catch (err) {
+      console.error('Failed to load foreshadowings for draft', err)
+    }
+  }, [currentProject, meta?.id, projectKey])
+
+  useEffect(() => {
+    loadForeshadowings()
+  }, [loadForeshadowings])
+
+  useEffect(() => {
+    return globalEventBus.on('FORESHADOWING_UPDATED', () => {
+      loadForeshadowings()
+    })
+  }, [loadForeshadowings])
+
+  const handleToolbarMarkForeshadowing = () => {
+    const res = proseEditorRef.current?.getSelectionInfo()
+    if (!res || !res.success) {
+      if (res?.reason === 'ambiguous') {
+        toast.warning(res.message || text('所选文字存在多个位置，请缩短选择范围或重新选择', 'The selected text appears in multiple locations. Please narrow your selection or reselect.'))
+      } else if (res?.reason === 'not_found') {
+        toast.warning(res.message || text('未在正文中找到所选文字，请重新选择', 'The selected text was not found in the prose. Please reselect.'))
+      } else {
+        toast.warning(text('请先在正文中选中要标记为伏笔的文字', 'Please select text in the prose to mark as foreshadowing first'))
+      }
+      return
+    }
+    setCreateCandidate(res.info)
+    setCreateNote('')
+    setCreateMarkerType('埋伏')
+    setCreateColor('blue')
+    setCreateDialogOpen(true)
+  }
+
+  const handleBubbleMarkForeshadowing = (info: ForeshadowingSelectionInfo) => {
+    if (!info || !info.selectedText.trim()) {
+      toast.warning(text('请先在正文中选中要标记为伏笔的文字', 'Please select text in the prose to mark as foreshadowing first'))
+      return
+    }
+    setCreateCandidate(info)
+    setCreateNote('')
+    setCreateMarkerType('埋伏')
+    setCreateColor('blue')
+    setCreateDialogOpen(true)
+  }
+
+  const handleToggleForeshadowingCompleted = async (id: string, completed: boolean) => {
+    const projectSession = captureProjectSession(currentProject)
+    if (!projectSession || !isProjectSessionPath(projectSession, projectKey)) return
+    try {
+      const res = await ipc.invokeWithProjectSession(
+        projectSession,
+        'db:foreshadowing-toggle-completed',
+        id,
+        completed,
+        projectSession.projectPath,
+      )
+      if (res.success) {
+        toast.success(completed ? text('伏笔已标记为完成', 'Foreshadowing marked completed') : text('伏笔已恢复为未完成', 'Foreshadowing reopened'))
+        globalEventBus.emit('FORESHADOWING_UPDATED', { projectPath: projectKey, projectSession, draftId: meta?.id })
+        loadForeshadowings()
+      } else {
+        toast.error(res.error || text('操作失败', 'Action failed'))
+      }
+    } catch (e) {
+      toast.error(String(e))
+    }
+  }
+
+  const handleOpenForeshadowingManager = () => {
+    useEditorStore.getState().openFile({
+      id: 'foreshadowing-manager',
+      name: text('伏笔管理', 'Foreshadowings'),
+      type: 'foreshadowing',
+      filePath: 'builtin://foreshadowing',
+      projectKey,
+    })
+  }
+
+  const handleConfirmCreateForeshadowing = async () => {
+    const projectSession = captureProjectSession(currentProject)
+    if (!projectMatches || !currentProject || !meta || !projectSession || !isProjectSessionPath(projectSession, projectKey) || !createCandidate) return
+
+    if (!createNote.trim()) {
+      toast.warning(text('请填写伏笔说明', 'Please enter a note'))
+      return
+    }
+
+    setCreateSubmitting(true)
+    try {
+      const result = await ipc.invokeWithProjectSession(
+        projectSession,
+        'db:foreshadowing-create',
+        {
+          draftId: meta.id,
+          chapterNumber: meta.chapterNumber,
+          selectedText: createCandidate.selectedText,
+          startOffset: createCandidate.startOffset,
+          endOffset: createCandidate.endOffset,
+          contextBefore: createCandidate.contextBefore,
+          contextAfter: createCandidate.contextAfter,
+          note: createNote.trim(),
+          markerType: createMarkerType.trim() || '埋伏',
+          color: createColor,
+        },
+        projectSession.projectPath,
+      )
+
+      if (!result.success) {
+        toast.error(result.error || text('创建伏笔失败', 'Failed to create foreshadowing'))
+      } else {
+        toast.success(text('已标记为伏笔', 'Foreshadowing marked'))
+        setCreateDialogOpen(false)
+        setCreateCandidate(null)
+        globalEventBus.emit('FORESHADOWING_UPDATED', {
+          projectPath: projectKey,
+          projectSession,
+          draftId: meta.id,
+        })
+        loadForeshadowings()
+      }
+    } finally {
+      setCreateSubmitting(false)
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -543,6 +705,18 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
               <Button
                 variant="outline"
                 size="sm"
+                onClick={handleToolbarMarkForeshadowing}
+                title={text('将选中文本标记为伏笔', 'Mark selected text as foreshadowing')}
+              >
+                <Bookmark size={12} />
+                {text('标记为伏笔', 'Mark as Foreshadowing')}
+              </Button>
+            )}
+
+            {meta && (
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => setBindingDialogOpen(true)}
                 title={text('绑定或更换章节蓝图', 'Link or change the chapter blueprint')}
               >
@@ -620,6 +794,7 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <div className="min-w-0 flex-1 overflow-hidden">
           <VditorProseEditor
+            editorRef={proseEditorRef}
             content={editorTab?.content ?? content}
             editable={!isReadonly && !isChapterBusy}
             placeholder={text('开始写这一章…', 'Start writing this chapter…')}
@@ -629,6 +804,10 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
               useEditorStore.getState().updateTabContent(tabId, nextContent)
             }}
             onSave={(nextContent) => doSave(nextContent)}
+            foreshadowings={foreshadowings}
+            onToggleForeshadowingCompleted={handleToggleForeshadowingCompleted}
+            onOpenForeshadowingManager={handleOpenForeshadowingManager}
+            onMarkForeshadowing={handleBubbleMarkForeshadowing}
           />
         </div>
       </div>
@@ -707,6 +886,142 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
           label: text(`第${meta.chapterNumber}章`, `Chapter ${meta.chapterNumber}`),
         } : null}
       />
+
+      {/* 标记为伏笔轻量对话框 */}
+      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+        <DialogContent className="max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Bookmark size={16} className="text-[var(--color-accent)]" />
+              {text('标记为伏笔', 'Mark as Foreshadowing')}
+            </DialogTitle>
+            <DialogDescription>
+              {meta ? text(`归属：第 ${meta.chapterNumber} 章 ${meta.chapterTitle || ''}`, `Chapter ${meta.chapterNumber} ${meta.chapterTitle || ''}`) : ''}
+            </DialogDescription>
+          </DialogHeader>
+
+          {createCandidate && (
+            <div className="px-5 py-2 space-y-4 text-xs">
+              <div>
+                <label className="block text-[var(--color-text-muted)] mb-1 font-medium">
+                  {text('选中原文：', 'Selected Text:')}
+                </label>
+                <div
+                  className="p-2.5 rounded-md border italic line-clamp-3 leading-relaxed"
+                  style={{
+                    backgroundColor: 'var(--color-hover)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text-secondary)',
+                  }}
+                >
+                  "{createCandidate.selectedText}"
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[var(--color-text)] mb-1 font-medium">
+                  {text('伏笔说明 / 备注 *', 'Foreshadowing Note *')}
+                </label>
+                <textarea
+                  value={createNote}
+                  onChange={e => setCreateNote(e.target.value)}
+                  placeholder={text('记录此处的暗线意图、角色伏笔或后续预计呼应的情节…', 'Record clue intent, character setup, or planned callbacks...')}
+                  rows={3}
+                  className="w-full p-2.5 rounded-md border text-xs leading-relaxed focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
+                  style={{
+                    backgroundColor: 'var(--color-surface, var(--color-bg))',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)',
+                  }}
+                />
+              </div>
+
+              <div>
+                <label className="block text-[var(--color-text-muted)] mb-1.5 font-medium">
+                  {text('标记类型：', 'Marker Type:')}
+                </label>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {FORESHADOWING_PRESET_TYPES.map(preset => (
+                    <button
+                      key={preset}
+                      type="button"
+                      className={`px-2.5 py-1 rounded text-xs border transition-colors ${
+                        createMarkerType === preset
+                          ? 'bg-[var(--color-accent)] text-[var(--color-accent-foreground)] border-transparent'
+                          : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]'
+                      }`}
+                      onClick={() => setCreateMarkerType(preset)}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="text"
+                  value={createMarkerType}
+                  onChange={e => setCreateMarkerType(e.target.value)}
+                  placeholder={text('自定义类型…', 'Custom type...')}
+                  className="w-full px-2.5 py-1.5 rounded-md border text-xs focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
+                  style={{
+                    backgroundColor: 'var(--color-surface, var(--color-bg))',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)',
+                  }}
+                />
+              </div>
+
+              <div>
+                <label className="block text-[var(--color-text-muted)] mb-1.5 font-medium">
+                  {text('标记颜色：', 'Highlight Color:')}
+                </label>
+                <div className="flex items-center gap-2.5">
+                  {FORESHADOWING_COLOR_OPTIONS.map(c => (
+                    <button
+                      key={c.value}
+                      type="button"
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border transition-all ${
+                        createColor === c.value
+                          ? 'ring-2 ring-offset-1 ring-[var(--color-accent)] font-semibold'
+                          : 'opacity-85 hover:opacity-100'
+                      }`}
+                      style={{
+                        backgroundColor: c.bg,
+                        borderColor: c.border,
+                        color: 'var(--color-text)',
+                      }}
+                      onClick={() => setCreateColor(c.value)}
+                    >
+                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: c.border }} />
+                      <span>{text(c.label[0], c.label[1])}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCreateDialogOpen(false)
+                setCreateCandidate(null)
+              }}
+              disabled={createSubmitting}
+            >
+              {text('取消', 'Cancel')}
+            </Button>
+            <Button
+              variant="default"
+              onClick={handleConfirmCreateForeshadowing}
+              disabled={createSubmitting || !createNote.trim()}
+            >
+              <Bookmark size={13} />
+              {createSubmitting ? text('保存中...', 'Saving...') : text('保存伏笔', 'Save Foreshadowing')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

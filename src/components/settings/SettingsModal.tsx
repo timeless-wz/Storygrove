@@ -122,7 +122,7 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
               className={cn(
                 'flex items-center gap-2.5 mx-2 px-3 py-2.5 rounded-lg text-left text-sm transition-colors',
                 section === s.id
-                  ? 'bg-[var(--color-accent)] text-white'
+                  ? 'bg-[var(--color-accent)] text-[var(--color-accent-foreground)]'
                   : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)] hover:text-[var(--color-text)]',
               )}
             >
@@ -413,7 +413,7 @@ function ModelCard({
             {model.name || model.modelName}
           </span>
           {isDefault && (
-            <span className="text-[0.7rem] px-1.5 py-0.5 rounded-full bg-[var(--color-accent)] text-white flex-shrink-0">
+            <span className="text-[0.7rem] px-1.5 py-0.5 rounded-full bg-[var(--color-accent)] text-[var(--color-accent-foreground)] flex-shrink-0">
               {text('默认', 'Default')}
             </span>
           )}

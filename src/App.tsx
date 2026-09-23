@@ -272,7 +272,7 @@ export default function App() {
               {/* 左侧边栏 */}
               {sidebarOpen && !focusMode && (
                 <>
-                  <Panel id="sidebar" defaultSize={20} minSize={10}>
+                  <Panel id="sidebar" defaultSize="260px" minSize="200px" maxSize="380px">
                     <ErrorBoundary fallbackLabel={text('侧边栏渲染失败', 'Sidebar failed to render')}>
                       <Sidebar />
                     </ErrorBoundary>
@@ -282,7 +282,7 @@ export default function App() {
               )}
 
               {/* 编辑区 */}
-              <Panel id="editor" defaultSize={60} minSize={10}>
+              <Panel id="editor" minSize={10}>
                 <ErrorBoundary fallbackLabel={text('编辑区渲染失败', 'Editor failed to render')}>
                   <EditorArea onNewProject={() => useLayoutStore.getState().openNewProject()} />
                 </ErrorBoundary>

@@ -344,7 +344,7 @@ export default function WorkspaceChapterContextTab() {
             <textarea
               readOnly
               value={bundle.fullAssembledText}
-              className="flex-1 w-full p-4 font-mono text-xs leading-relaxed resize-none focus:outline-none overflow-y-auto"
+              className="flex-1 w-full p-4 font-mono text-xs leading-relaxed resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] overflow-y-auto"
               style={{
                 backgroundColor: 'var(--color-editor-bg)',
                 color: 'var(--color-text)',
