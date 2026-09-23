@@ -8,12 +8,18 @@ import {
   Sun,
   Trash2,
   Upload,
+  Waves,
 } from 'lucide-react'
 
 import { cn } from '../../lib/utils'
 import { useLocaleStore } from '../../stores/locale-store'
 import { useSkinStore } from '../../stores/skin-store'
-import { useThemeStore, type Theme } from '../../stores/theme-store'
+import {
+  useThemeStore,
+  type BackdropBlurLevel,
+  type PageWallpaperMode,
+  type Theme,
+} from '../../stores/theme-store'
 import type { SkinId } from '../../shared/skin-types'
 import { ThemeGallery } from './ThemeGallery'
 
@@ -47,6 +53,22 @@ const THEME_OPTIONS: ThemeOption[] = [
 
 type WorkingAction = 'classic' | 'anime' | 'choose' | 'change' | 'remove' | null
 
+/**
+ * 外壳磨砂档位。「标准」复用样式表原始取值，所以它是接入本设置前的观感。
+ */
+const BACKDROP_BLUR_OPTIONS: Array<{ id: BackdropBlurLevel; zh: string; en: string }> = [
+  { id: 'off', zh: '关闭', en: 'Off' },
+  { id: 'light', zh: '轻', en: 'Light' },
+  { id: 'standard', zh: '标准', en: 'Standard' },
+  { id: 'strong', zh: '强', en: 'Strong' },
+]
+
+/** 壁纸显隐独立于雾化档位，便于「无薄纱但保留背景图」这类组合。 */
+const PAGE_WALLPAPER_OPTIONS: Array<{ id: PageWallpaperMode; zh: string; en: string }> = [
+  { id: 'visible', zh: '显示', en: 'Shown' },
+  { id: 'hidden', zh: '隐藏', en: 'Hidden' },
+]
+
 // eslint-disable-next-line react-refresh/only-export-components
 export function getCustomSkinActionIds(customAvailable: boolean): Array<'choose' | 'change' | 'remove'> {
   return customAvailable ? ['change', 'remove'] : ['choose']
@@ -55,6 +77,10 @@ export function getCustomSkinActionIds(customAvailable: boolean): Array<'choose'
 /** Theme selection and image-skin selection intentionally remain independent. */
 export default function AppearanceSettings() {
   const { theme, setTheme } = useThemeStore()
+  const backdropBlur = useThemeStore((state) => state.backdropBlur)
+  const setBackdropBlur = useThemeStore((state) => state.setBackdropBlur)
+  const pageWallpaper = useThemeStore((state) => state.pageWallpaper)
+  const setPageWallpaper = useThemeStore((state) => state.setPageWallpaper)
   const { text, t } = useLocaleStore()
   const skinState = useSkinStore((state) => state.skinState)
   const backgroundUrl = useSkinStore((state) => state.backgroundUrl)
@@ -122,6 +148,65 @@ export default function AppearanceSettings() {
               <Icon size={15} aria-hidden="true" />
               <span>{t(labelKey)}</span>
               {theme === id && <Check size={14} aria-hidden="true" />}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 背景雾化：外壳磨砂 + 页面薄纱强度；壁纸显隐是独立开关 */}
+      <div className="space-y-1.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+            {text('背景雾化', 'Background Frost')}
+          </span>
+          <span className="text-2xs" style={{ color: 'var(--color-text-muted)' }}>
+            {text('外壳磨砂与页面薄纱强度；不影响背景壁纸', 'Chrome frost and page veil strength; the wallpaper is separate')}
+          </span>
+        </div>
+        <div
+          className="appearance-theme-grid"
+          role="group"
+          aria-label={text('背景雾化', 'Background Frost')}
+        >
+          {BACKDROP_BLUR_OPTIONS.map(({ id, zh, en }) => (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={backdropBlur === id}
+              onClick={() => setBackdropBlur(id)}
+              className={cn('appearance-theme-option', backdropBlur === id && 'appearance-theme-option--active')}
+            >
+              <Waves size={15} aria-hidden="true" />
+              <span>{text(zh, en)}</span>
+              {backdropBlur === id && <Check size={14} aria-hidden="true" />}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center justify-between pt-2">
+          <span className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+            {text('背景壁纸', 'Background Wallpaper')}
+          </span>
+          <span className="text-2xs" style={{ color: 'var(--color-text-muted)' }}>
+            {text('主题自带的整窗背景图', 'The theme-wide background image')}
+          </span>
+        </div>
+        <div
+          className="appearance-theme-grid"
+          role="group"
+          aria-label={text('背景壁纸', 'Background Wallpaper')}
+        >
+          {PAGE_WALLPAPER_OPTIONS.map(({ id, zh, en }) => (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={pageWallpaper === id}
+              onClick={() => setPageWallpaper(id)}
+              className={cn('appearance-theme-option', pageWallpaper === id && 'appearance-theme-option--active')}
+            >
+              <Image size={15} aria-hidden="true" />
+              <span>{text(zh, en)}</span>
+              {pageWallpaper === id && <Check size={14} aria-hidden="true" />}
             </button>
           ))}
         </div>

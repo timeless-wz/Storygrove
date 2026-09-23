@@ -64,9 +64,13 @@ export default defineConfig({
     // Running files concurrently lets one fixture close or replace another
     // fixture's database, so keep the default suite isolated by file.
     fileParallelism: false,
-    // 本地历史 worktree 和 pnpm 缓存可能包含旧版本测试；它们不是当前项目源码。
+    // 本地历史 worktree、pnpm 缓存与打包产物可能包含旧版本测试或另一套 ABI 的原生模块；
+    // 它们不是当前项目源码。electron-builder 的 release/ 里带着整份 app.asar.unpacked
+    // node_modules（better-sqlite3 为 Electron ABI），一旦被解析到，测试就会报
+    // NODE_MODULE_VERSION 不匹配。
     exclude: [
       ...configDefaults.exclude,
+      '**/release/**',
       '**/.worktrees/**',
       '**/.pnpm-store/**',
       '**/.workbuddy/**',

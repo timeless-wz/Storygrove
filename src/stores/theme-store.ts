@@ -92,6 +92,43 @@ const ZOOM_MAX = 1.5
 /** 基准 font-size（未缩放时 html 的字号，px） */
 const BASE_FONT_SIZE = 14 as const
 
+// ─── 背景雾化（外壳磨砂强度） ─────────────────────────────────────────────
+//
+// 经典皮肤的外壳用「半透明背景 + backdrop-filter」做磨砂：顶栏与状态栏读
+// --navigation-blur，左右边栏读 --surface-blur，半透明度读 --chrome-surface-opacity
+// （见 literary-themes.css）。三个令牌在样式表里都保留了原始值作回退，
+// 因此 standard 档不写任何变量，观感与接入本设置前完全一致。
+export type BackdropBlurLevel = 'off' | 'light' | 'standard' | 'strong'
+
+export const BACKDROP_BLUR_LEVELS: readonly BackdropBlurLevel[] = ['off', 'light', 'standard', 'strong']
+
+interface BackdropBlurTokens {
+  readonly navigationBlur: string
+  readonly surfaceBlur: string
+  readonly surfaceOpacity: string
+  /** 洗色缩放：null 表示不覆盖，沿用该主题的原始洗色 */
+  readonly washScale: string | null
+}
+
+/**
+ * standard 记为 null：移除覆盖，回到样式表的原始取值。
+ *
+ * 档位只控制「雾感」——外壳磨砂 + 页面背景的洗色薄纱，**不动壁纸图本身**。
+ * 壁纸的取舍由独立的 PageWallpaperMode 决定，两者可自由组合
+ * （例如「关闭雾化 + 保留壁纸」= 背景图清晰可见且没有薄纱）。
+ */
+export const BACKDROP_BLUR_TOKENS: Record<BackdropBlurLevel, BackdropBlurTokens | null> = {
+  off: { navigationBlur: 'none', surfaceBlur: 'none', surfaceOpacity: '100%', washScale: '0%' },
+  light: { navigationBlur: 'blur(6px)', surfaceBlur: 'blur(8px)', surfaceOpacity: '92%', washScale: '50%' },
+  standard: null,
+  strong: { navigationBlur: 'blur(20px)', surfaceBlur: 'blur(26px)', surfaceOpacity: '74%', washScale: null },
+}
+
+/** 页面背景壁纸。与雾化档位解耦，单独控制 --shell-background。 */
+export type PageWallpaperMode = 'visible' | 'hidden'
+
+export const PAGE_WALLPAPER_MODES: readonly PageWallpaperMode[] = ['visible', 'hidden']
+
 // ─── Store 类型 ──────────────────────────────────────────────────────────
 
 interface ThemeState {
@@ -105,6 +142,10 @@ interface ThemeState {
   writingFont: FontId
   /** 当前界面字体（UI 全局 → --font-sans） */
   uiFont: FontId
+  /** 外壳磨砂（背景雾化）强度 */
+  backdropBlur: BackdropBlurLevel
+  /** 页面背景壁纸是否显示 */
+  pageWallpaper: PageWallpaperMode
   /** 设置主题 */
   setTheme: (theme: Theme) => void
   /** 初始化主题监听 */
@@ -121,11 +162,15 @@ interface ThemeState {
   setWritingFont: (font: FontId) => void
   /** 设置界面字体 */
   setUiFont: (font: FontId) => void
+  /** 设置外壳磨砂强度 */
+  setBackdropBlur: (level: BackdropBlurLevel) => void
+  /** 设置页面背景壁纸显隐 */
+  setPageWallpaper: (mode: PageWallpaperMode) => void
 }
 
 type PersistedThemeState = Pick<
   ThemeState,
-  'theme' | 'zoom' | 'writingFont' | 'uiFont'
+  'theme' | 'zoom' | 'writingFont' | 'uiFont' | 'backdropBlur' | 'pageWallpaper'
 >
 
 // ─── Store ───────────────────────────────────────────────────────────────
@@ -138,6 +183,8 @@ export const useThemeStore = create<ThemeState>()(
       zoom: 1.0,
       writingFont: 'lxgw-wenkai',
       uiFont: 'noto-sans-sc',
+      backdropBlur: 'standard',
+      pageWallpaper: 'visible',
 
       setTheme: (theme: Theme) => {
         const resolved = resolveTheme(theme)
@@ -146,7 +193,7 @@ export const useThemeStore = create<ThemeState>()(
       },
 
       initTheme: () => {
-        const { zoom, writingFont, uiFont } = get()
+        const { zoom, writingFont, uiFont, backdropBlur, pageWallpaper } = get()
         let { theme } = get()
 
         // --- 迁移并兼容历史数据版本 ---
@@ -167,6 +214,8 @@ export const useThemeStore = create<ThemeState>()(
         applyZoom(zoom)
         applyWritingFont(writingFont)
         applyUiFont(uiFont)
+        applyBackdropBlur(backdropBlur)
+        applyPageWallpaper(pageWallpaper)
       },
 
       zoomIn: () => {
@@ -201,6 +250,16 @@ export const useThemeStore = create<ThemeState>()(
         set({ uiFont: font })
         applyUiFont(font)
       },
+
+      setBackdropBlur: (level: BackdropBlurLevel) => {
+        set({ backdropBlur: level })
+        applyBackdropBlur(level)
+      },
+
+      setPageWallpaper: (mode: PageWallpaperMode) => {
+        set({ pageWallpaper: mode })
+        applyPageWallpaper(mode)
+      },
     }),
     {
       name: 'ai-novel-writer-theme',
@@ -210,6 +269,8 @@ export const useThemeStore = create<ThemeState>()(
         zoom: state.zoom,
         writingFont: state.writingFont,
         uiFont: state.uiFont,
+        backdropBlur: state.backdropBlur,
+        pageWallpaper: state.pageWallpaper,
       }),
       version: 1,
       migrate: (persistedState, version) => {
@@ -275,4 +336,46 @@ function applyUiFont(font: FontId) {
   if (opt) {
     document.documentElement.style.setProperty('--font-sans', opt.family)
   }
+}
+
+const BACKDROP_BLUR_TOKEN_NAMES = [
+  '--navigation-blur',
+  '--surface-blur',
+  '--chrome-surface-opacity',
+  '--shell-wash-scale',
+] as const
+
+/**
+ * 将雾化档位写入 CSS 令牌：外壳磨砂（模糊 + 不透明度）与页面洗色。
+ * 不涉及壁纸图——壁纸由 applyPageWallpaper 单独控制。
+ * standard 档移除覆盖而非写入固定值，这样样式表里的原始取值继续生效。
+ */
+function applyBackdropBlur(level: BackdropBlurLevel) {
+  const root = document.documentElement
+  const style = root?.style
+  // 与 applyTheme 一致：逐个方法判可用性，避免非浏览器环境（测试桩）缺少某个方法时抛出。
+  if (typeof style?.setProperty !== 'function' || typeof style?.removeProperty !== 'function') return
+
+  const tokens = BACKDROP_BLUR_TOKENS[level]
+  if (tokens === null) {
+    for (const name of BACKDROP_BLUR_TOKEN_NAMES) style.removeProperty(name)
+    return
+  }
+  style.setProperty('--navigation-blur', tokens.navigationBlur)
+  style.setProperty('--surface-blur', tokens.surfaceBlur)
+  style.setProperty('--chrome-surface-opacity', tokens.surfaceOpacity)
+  if (tokens.washScale === null) style.removeProperty('--shell-wash-scale')
+  else style.setProperty('--shell-wash-scale', tokens.washScale)
+}
+
+/**
+ * 页面背景壁纸显隐。隐藏时把整窗与页面两处的 --shell-background 压平为纯主题色底；
+ * 显示时移除覆盖，回到各主题原始的壁纸定义。
+ */
+function applyPageWallpaper(mode: PageWallpaperMode) {
+  const style = document.documentElement?.style
+  if (typeof style?.setProperty !== 'function' || typeof style?.removeProperty !== 'function') return
+
+  if (mode === 'hidden') style.setProperty('--shell-background', 'var(--color-bg)')
+  else style.removeProperty('--shell-background')
 }

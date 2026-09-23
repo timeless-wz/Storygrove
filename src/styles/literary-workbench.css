@@ -19,14 +19,14 @@
 
 @layer components {
   .literary-home {
-    background: linear-gradient(var(--shell-wash, transparent), var(--shell-wash, transparent)), var(--shell-background, var(--color-bg));
+    background: linear-gradient(var(--shell-wash-effective, var(--shell-wash, transparent)), var(--shell-wash-effective, var(--shell-wash, transparent))), var(--shell-background, var(--color-bg));
     background-attachment: fixed;
     background-size: cover;
     background-position: center top;
     container-type: inline-size;
   }
   .literary-overview {
-    background: linear-gradient(var(--shell-wash, transparent), var(--shell-wash, transparent)), var(--shell-background, var(--color-bg));
+    background: linear-gradient(var(--shell-wash-effective, var(--shell-wash, transparent)), var(--shell-wash-effective, var(--shell-wash, transparent))), var(--shell-background, var(--color-bg));
     background-attachment: fixed;
     background-size: cover;
     background-position: center top;

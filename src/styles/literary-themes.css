@@ -12,9 +12,9 @@
   --surface-blur: none;
   --navigation-blur: none;
   --bg-base: #e4eee7;
-  --bg-surface: #faf8f1;
-  --bg-elevated: #fffef9;
-  --bg-hover: #e5ecde;
+  --bg-surface: #f1faf4;
+  --bg-elevated: #f9fffb;
+  --bg-hover: #deece2;
   --text-primary: #244842;
   --text-secondary: #566e62;
   --text-muted: #5d6d5d;
@@ -88,9 +88,9 @@
   --sample-ink: #234b4c;
   --accent-foreground: #ffffff;
   --bg-base: #e8f2ef;
-  --bg-surface: #fffdf6;
-  --bg-elevated: #fffdf6;
-  --bg-hover: #f7e6d7;
+  --bg-surface: #f6fffc;
+  --bg-elevated: #f6fffc;
+  --bg-hover: #d7f7ed;
   --text-primary: #28494a;
   --text-secondary: #576c6c;
   --text-muted: #576c6c;
@@ -375,9 +375,9 @@
   --sample-ink: #f1e9f6;
   --accent-foreground: #ffffff;
   --bg-base: #ece8f0;
-  --bg-surface: #fdf9fc;
-  --bg-elevated: #fdf9fc;
-  --bg-hover: #e9deeb;
+  --bg-surface: #fbf9fd;
+  --bg-elevated: #fbf9fd;
+  --bg-hover: #e4deeb;
   --text-primary: #493c54;
   --text-secondary: #6e5e78;
   --text-muted: #6e5e78;
@@ -640,6 +640,9 @@
   --color-danger: var(--color-error);
   --color-input: var(--color-bg);
   --color-input-bg: var(--color-bg);
+  /* 页面背景的洗色（壁纸上那层薄纱）。经 --shell-wash-scale 缩放，
+     使「背景雾化」设置能减弱或去除它；未设置时等于该主题原始洗色。 */
+  --shell-wash-effective: color-mix(in srgb, var(--shell-wash, transparent) var(--shell-wash-scale, 100%), transparent);
   --literary-hero-bg: var(--hero-background);
   --literary-hero-ink: var(--accent-foreground, #ffffff);
   --literary-hero-muted: var(--text-secondary);
@@ -819,9 +822,10 @@
   [data-theme='starlight-dark'],
   [data-theme='cosmic-glass']
 ) .writer-topbar {
-  background: color-mix(in srgb, var(--color-titlebar) 80%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  /* 不透明度与模糊由「背景雾化」设置驱动；未设置时回退到各元素的原有取值。 */
+  background: color-mix(in srgb, var(--color-titlebar) var(--chrome-surface-opacity, 80%), transparent);
+  backdrop-filter: var(--navigation-blur, blur(12px));
+  -webkit-backdrop-filter: var(--navigation-blur, blur(12px));
 }
 
 .app-skin-root[data-skin='classic']:is(
@@ -840,9 +844,9 @@
   [data-theme='starlight-dark'],
   [data-theme='cosmic-glass']
 ) .writer-statusbar {
-  background: color-mix(in srgb, var(--color-statusbar) 85%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: color-mix(in srgb, var(--color-statusbar) var(--chrome-surface-opacity, 85%), transparent);
+  backdrop-filter: var(--navigation-blur, blur(12px));
+  -webkit-backdrop-filter: var(--navigation-blur, blur(12px));
 }
 
 .app-skin-root[data-skin='classic']:is(
@@ -861,9 +865,9 @@
   [data-theme='starlight-dark'],
   [data-theme='cosmic-glass']
 ) :is(.literary-sidebar, .writer-project-tree) {
-  background: color-mix(in srgb, var(--color-sidebar) 82%, transparent);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: color-mix(in srgb, var(--color-sidebar) var(--chrome-surface-opacity, 82%), transparent);
+  backdrop-filter: var(--surface-blur, blur(16px));
+  -webkit-backdrop-filter: var(--surface-blur, blur(16px));
 }
 
 .app-skin-root[data-skin='classic']:is(
@@ -882,7 +886,7 @@
   [data-theme='starlight-dark'],
   [data-theme='cosmic-glass']
 ) .writer-project-sidebar-header {
-  background: color-mix(in srgb, var(--color-sidebar) 85%, transparent);
+  background: color-mix(in srgb, var(--color-sidebar) var(--chrome-surface-opacity, 85%), transparent);
 }
 
 /* ========================================================================
