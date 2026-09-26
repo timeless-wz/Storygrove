@@ -57,10 +57,10 @@ function assertRepairRequired(snapshot: CharacterRosterSnapshot): asserts snapsh
 }
 
 function assertExistingCardsAdoptionRequired(snapshot: CharacterRosterSnapshot): void {
-  if (snapshot.migrationState !== 'legacy_cards_preserved' || snapshot.entries.length === 0) {
+  if (snapshot.entries.length === 0) {
     throw new Error('当前项目没有可安全采用的既有角色卡，未改动任何角色数据。')
   }
-  // legacy_cards_preserved 在 #82 中刻意显示为 inconsistent，提醒作者先由
+  // legacy_cards_preserved 或已就绪项目哈希偏差时刻意显示为 inconsistent，提醒作者先由
   // 结构化卡片重建一次只读图谱；它不是“从 Markdown 重新提取角色”。
   if (snapshot.status !== 'inconsistent') {
     throw new Error('既有角色卡的采用状态异常，未改动任何角色数据。')
@@ -79,7 +79,7 @@ function assertCommittedRosterReadable(
     || snapshot.migrationState !== 'ready'
     || snapshot.entries.length === 0
     || !snapshot.renderedMarkdown.trim()
-    || snapshot.legacyMarkdown !== expectedLegacyMarkdown
+    || ((snapshot.legacyMarkdown ?? '') !== expectedLegacyMarkdown)
   ) {
     throw new Error('旧角色图谱修复提交后未能回读角色卡和角色图谱，未将本步骤标记为成功')
   }
@@ -164,7 +164,7 @@ export class RepairLegacyCharacterRosterCommand extends BaseWorkflowCommand<stri
     this.assertNotCancelled(context)
     assertLegacyRepairSessionCurrent(projectSession)
     assertExistingCardsAdoptionRequired(currentSnapshot)
-    if (currentSnapshot.legacyMarkdown !== sourceSnapshot.legacyMarkdown) {
+    if ((currentSnapshot.legacyMarkdown ?? '') !== (sourceSnapshot.legacyMarkdown ?? '')) {
       throw new Error('旧角色图谱已变更，未使用过期快照重建图谱')
     }
 

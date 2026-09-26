@@ -1017,6 +1017,35 @@ describe('CharacterRosterRepository public read/commit seam', () => {
     expect(CharacterRepository.getByName('手工主角')).toEqual(cardBefore)
   })
 
+  it('calibrates an inconsistent ready roster from existing cards without overwriting cards', () => {
+    const initial = CharacterRosterRepository.commit(commitRequest())
+    expect(initial.snapshot.status).toBe('ready')
+
+    // Simulate external/legacy direct card change or drifted projection causing inconsistent status
+    db.prepare("UPDATE character_roster_meta SET projection_hash = 'stale_hash' WHERE id = 'main'").run()
+    const inconsistentSnapshot = CharacterRosterRepository.read()
+    expect(inconsistentSnapshot.status).toBe('inconsistent')
+    expect(inconsistentSnapshot.migrationState).toBe('ready')
+
+    const cardBefore = CharacterRepository.getByName(inconsistentSnapshot.entries[0].name)
+    const receipt = CharacterRosterRepository.commit({
+      operationId: 'calibrate-existing-cards',
+      expectedRevision: inconsistentSnapshot.revision,
+      schemaVersion: 1,
+      entries: inconsistentSnapshot.entries.map((entry) => {
+        const structuredEntry = { ...entry }
+        delete structuredEntry.legacyRelationshipNotes
+        return structuredEntry
+      }),
+      intent: 'legacy_cards_adoption',
+      expectedLegacyMarkdown: '',
+    })
+
+    expect(receipt.snapshot.status).toBe('ready')
+    expect(receipt.snapshot.migrationState).toBe('ready')
+    expect(CharacterRepository.getByName(inconsistentSnapshot.entries[0].name)).toEqual(cardBefore)
+  })
+
   it('rejects chapter-progress additions and canonical duplicate names at the repository boundary', () => {
     const initial = CharacterRosterRepository.commit(commitRequest())
     insertDraft(2, 2, 'finalized')

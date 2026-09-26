@@ -63,13 +63,28 @@ export function getCharacterRosterRepairPresentation(
         actionTitle: text('从保留的旧图谱证据建立角色卡；失败时不覆盖任何数据', 'Build cards from preserved legacy evidence; failures overwrite no data'),
       }
     case 'inconsistent':
-      if (snapshot.migrationState === 'legacy_cards_preserved' && snapshot.entries.length > 0) {
+      if (snapshot.entries.length > 0) {
+        if (snapshot.migrationState === 'legacy_cards_preserved') {
+          return {
+            kind: 'adoption_required',
+            label: text('既有角色卡待验证', 'Existing character cards need validation'),
+            description: text('已有角色卡受到保护。请显式重建只读角色图谱，不会从旧 Markdown 覆盖角色卡。', 'Existing cards are protected. Explicitly rebuild the read-only graph; legacy Markdown will not overwrite cards.'),
+            actionLabel: text('重建只读图谱', 'Rebuild read-only graph'),
+            actionTitle: text('只校验并采用现有角色卡；不会调用模型或改写角色卡', 'Validate and adopt existing cards only; no model call or card overwrite'),
+          }
+        }
         return {
           kind: 'adoption_required',
-          label: text('既有角色卡待验证', 'Existing character cards need validation'),
-          description: text('已有角色卡受到保护。请显式重建只读角色图谱，不会从旧 Markdown 覆盖角色卡。', 'Existing cards are protected. Explicitly rebuild the read-only graph; legacy Markdown will not overwrite cards.'),
-          actionLabel: text('重建只读图谱', 'Rebuild read-only graph'),
-          actionTitle: text('只校验并采用现有角色卡；不会调用模型或改写角色卡', 'Validate and adopt existing cards only; no model call or card overwrite'),
+          label: text('角色名单待校准', 'Character roster needs calibration'),
+          description: text(
+            '已有角色卡完好。图谱校验哈希存在偏差，可一键以现有角色卡重新校准同步。',
+            'Existing cards are intact. Calibration hash differs; click to re-align safely from current cards.',
+          ),
+          actionLabel: text('校准角色名单', 'Calibrate roster'),
+          actionTitle: text(
+            '以现有角色卡为准重新生成只读图谱并同步校验哈希',
+            'Re-align read-only graph and verification hash from current character cards',
+          ),
         }
       }
       return {

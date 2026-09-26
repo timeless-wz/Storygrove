@@ -953,10 +953,10 @@ export class CharacterRosterRepository {
           throw new Error('旧角色图谱已变更，已拒绝将过期修复结果写入项目')
         }
       } else if (isLegacyCardsAdoption) {
-        if (meta.migration_state !== 'legacy_cards_preserved' || existingEntries.length === 0) {
+        if (existingEntries.length === 0) {
           throw new Error('当前项目没有可安全采用的既有角色卡，已拒绝重建图谱')
         }
-        if (request.expectedLegacyMarkdown !== meta.legacy_markdown) {
+        if ((request.expectedLegacyMarkdown ?? '') !== (meta.legacy_markdown ?? '')) {
           throw new Error('旧角色图谱已变更，已拒绝使用过期快照重建图谱')
         }
         const candidateNames = new Set(request.entries.map(entry => entry.name))

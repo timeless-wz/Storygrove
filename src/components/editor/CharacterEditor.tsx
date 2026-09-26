@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Save, Trash2, Users, Network, PencilLine, Check, AlertTriangle, RefreshCw } from 'lucide-react'
 import { useProjectStore } from '../../stores/project-store'
-import { registerEditorExitSaveHandler } from '../../stores/editor-store'
+import { registerEditorExitSaveHandler, useEditorStore } from '../../stores/editor-store'
+import { CHARACTER_DRAFT_TAB, parseProjectEditorDraftLedger } from '../../stores/project-editor-draft-ledger'
 import { useLayoutStore, type CharacterProfileView } from '../../stores/layout-store'
 import { useWorkflowStore } from '../../stores/workflow-store'
 import { confirm } from '../ui/Confirm'
+import { toast } from '../ui/Toast'
 import {
   useCharacterStore,
   type CharacterCard,
@@ -148,19 +150,29 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
     }
   }
 
+  const isDirty = useEditorStore((s) => {
+    const isTabDirty = s.tabs.some(t => t.type === 'character' && t.projectKey === projectKey && t.dirty)
+    if (isTabDirty) return true
+    const ledger = parseProjectEditorDraftLedger<unknown>(s.draftLedgers[CHARACTER_DRAFT_TAB.id])
+    return ledger.projects.some(p => p.projectKey === projectKey)
+  })
+
   const handleSave = async ({ returnToOverview = false }: { returnToOverview?: boolean } = {}) => {
     const projectSession = captureProjectSession(currentProject)
     if (!projectMatches || !projectSession || !isProjectSessionPath(projectSession, projectKey)) return
     try {
       await saveAll(projectKey)
       if (!isProjectSessionCurrent(projectSession)) return
+      toast.success(text(`已保存 ${characters.length} 个角色卡`, `Saved ${characters.length} character cards`))
       addLog('info', text(`已保存 ${characters.length} 个角色卡`, `Saved ${characters.length} character cards`))
       // “保存”保持编辑上下文；“完成”则在保存成功后才回到概览。
       // 这样不会发生点了完成却丢掉本次编辑的情况。
       if (returnToOverview) setViewMode('overview')
     } catch (error) {
       if (!isProjectSessionCurrent(projectSession)) return
-      addLog('error', text(`角色卡保存失败：${error}`, 'Could not save character cards.'))
+      const errorMsg = String(error)
+      toast.error(text(`角色卡保存失败：${errorMsg}`, `Could not save character cards: ${errorMsg}`))
+      addLog('error', text(`角色卡保存失败：${errorMsg}`, 'Could not save character cards.'))
     }
   }
 
@@ -175,6 +187,18 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
       save: () => exitSaveRef.current(),
     })
   }, [projectKey])
+
+  // Ctrl+S / Cmd+S 快捷保存
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        void exitSaveRef.current()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   const handleDeleteAllCharacters = async () => {
     const projectSession = captureProjectSession(currentProject)
@@ -256,10 +280,19 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
           backgroundColor: 'var(--color-editor-bg)',
         }}
       >
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-xs font-medium truncate text-[var(--color-text-secondary)]">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-xs font-semibold truncate text-[var(--color-text)]">
             {viewTitle}
           </span>
+          {isDirty && (
+            <span
+              className="inline-flex items-center gap-1 text-[10px] text-[var(--color-warning-text)] font-normal flex-shrink-0"
+              title={text('有未保存的修改 (Ctrl+S 保存)', 'Unsaved changes (Ctrl+S to save)')}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-warning)] animate-pulse" />
+              {text('未保存', 'Unsaved')}
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -279,13 +312,42 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
               </Button>
             </>
           ) : selectedCard ? (
-            <>
-              <Button variant="outline" size="sm" onClick={() => setViewMode('graph')} title={text('查看全员关系网', 'View all character relationships')}>
-                <Network size={12} /> {text('关系图谱', 'Relationship graph')}
-              </Button>
-              {viewMode === 'edit' ? (
+            viewMode === 'edit' ? (
+              <>
+                <Button variant="ghost" size="sm" onClick={() => setViewMode('overview')} title={text('返回人物概览', 'Back to character overview')}>
+                  <Users size={12} /> {text('返回概览', 'Back to overview')}
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setViewMode('graph')} title={text('查看全员关系网', 'View all character relationships')}>
+                  <Network size={12} /> {text('关系图谱', 'Relationship graph')}
+                </Button>
+                <div className="h-3.5 w-px bg-[var(--color-border)] mx-0.5" />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-[var(--color-destructive)] hover:bg-[var(--color-destructive)]/10"
+                  onClick={handleDelete}
+                  disabled={identityBusy || !dataReady}
+                  title={text('删除角色', 'Delete character')}
+                >
+                  <Trash2 size={12} /> {text('删除', 'Delete')}
+                </Button>
+                <div className="h-3.5 w-px bg-[var(--color-border)] mx-0.5" />
                 <Button
                   variant="outline"
+                  size="sm"
+                  onClick={() => { void handleSave() }}
+                  disabled={identityBusy || !dataReady}
+                  title={text('保存并继续编辑 (Ctrl+S)', 'Save and keep editing (Ctrl+S)')}
+                  className="relative"
+                >
+                  <Save size={12} />
+                  <span>{saving ? text('保存中...', 'Saving...') : text('保存', 'Save')}</span>
+                  {isDirty && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-primary)] ml-0.5" />
+                  )}
+                </Button>
+                <Button
+                  variant="default"
                   size="sm"
                   onClick={() => { void handleSave({ returnToOverview: true }) }}
                   disabled={identityBusy || !dataReady}
@@ -293,24 +355,28 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
                 >
                   <Check size={12} /> {text('完成', 'Done')}
                 </Button>
-              ) : (
+              </>
+            ) : (
+              <>
+                <Button variant="outline" size="sm" onClick={() => setViewMode('graph')} title={text('查看全员关系网', 'View all character relationships')}>
+                  <Network size={12} /> {text('关系图谱', 'Relationship graph')}
+                </Button>
+                <div className="h-3.5 w-px bg-[var(--color-border)] mx-0.5" />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-[var(--color-destructive)] hover:bg-[var(--color-destructive)]/10"
+                  onClick={handleDelete}
+                  disabled={identityBusy || !dataReady}
+                  title={text('删除角色', 'Delete character')}
+                >
+                  <Trash2 size={12} /> {text('删除', 'Delete')}
+                </Button>
                 <Button variant="default" size="sm" onClick={() => setViewMode('edit')} title={text('编辑全部角色字段', 'Edit every character field')}>
                   <PencilLine size={12} /> {text('编辑档案', 'Edit profile')}
                 </Button>
-              )}
-              <Button variant="destructive" size="sm" onClick={handleDelete} disabled={identityBusy || !dataReady}>
-                <Trash2 size={12} /> {text('删除', 'Delete')}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => { void handleSave() }}
-                disabled={identityBusy || !dataReady}
-                title={text('保存并继续编辑', 'Save and keep editing')}
-              >
-                <Save size={12} /> {saving ? text('保存中...', 'Saving...') : text('保存', 'Save')}
-              </Button>
-            </>
+              </>
+            )
           ) : (
             <Button variant="outline" size="sm" onClick={() => setViewMode('graph')} title={text('查看全员关系网', 'View all character relationships')}>
               <Network size={12} /> {text('关系图谱', 'Relationship graph')}

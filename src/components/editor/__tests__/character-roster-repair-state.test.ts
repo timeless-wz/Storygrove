@@ -45,6 +45,14 @@ describe('character roster repair UI state', () => {
     }), text)
     expect(adoption).toMatchObject({ kind: 'adoption_required', actionLabel: '重建只读图谱' })
     expect(canExplicitlyRepairCharacterRoster(adoption)).toBe(true)
+
+    const calibration = getCharacterRosterRepairPresentation(snapshot({
+      status: 'inconsistent',
+      migrationState: 'ready',
+      entries: [{ name: '林凡' } as never],
+    }), text)
+    expect(calibration).toMatchObject({ kind: 'adoption_required', actionLabel: '校准角色名单' })
+    expect(canExplicitlyRepairCharacterRoster(calibration)).toBe(true)
   })
 
   it('explains a failed repair without implying that any data was overwritten', () => {
