@@ -133,6 +133,26 @@ async function clickLabel(eventId: string): Promise<void> {
   })
 }
 
+/**
+ * 画布右键必须按画布自身的矩形定位。
+ *
+ * 页面左侧现在是事件与支线清单，画布原点不再贴着窗口左边；写死的 clientX
+ * 会落到清单上，触发不了画布上下文菜单。用矩形中心既与清单宽度无关，
+ * 又始终落在故事起止锚点之间的主干区域内。
+ */
+async function rightClickCanvas(): Promise<void> {
+  const flow = container.querySelector<HTMLElement>('[data-testid="timeline-flow"]')
+  if (!flow) throw new Error('timeline flow is missing')
+  const rect = flow.getBoundingClientRect()
+  await act(async () => {
+    flow.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true,
+      clientX: Math.round(rect.left + rect.width / 2),
+      clientY: Math.round(rect.top + rect.height / 2),
+    }))
+  })
+}
+
 async function rightClickLabel(eventId: string): Promise<void> {
   const element = labelFor(eventId)
   const node = (element.closest('.react-flow__node') as HTMLElement | null) ?? element
@@ -554,12 +574,7 @@ describe('story timeline horizontal axis', () => {
   it('supports right clicking blank canvas to create event with prefilled sortOrder', async () => {
     await renderTimeline()
 
-    const pane = container.querySelector('.react-flow__pane') ?? container.querySelector('.writer-timeline-flow')
-    expect(pane).not.toBeNull()
-
-    await act(async () => {
-      pane!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 300, clientY: 200 }))
-    })
+    await rightClickCanvas()
 
     const menu = container.querySelector('.writer-timeline-context-menu')
     expect(menu).not.toBeNull()
@@ -612,10 +627,7 @@ describe('story timeline horizontal axis', () => {
       await vi.waitFor(() => expect(container.querySelector('[data-testid="timeline-anchor-start"]')).not.toBeNull())
     })
 
-    const pane = container.querySelector('.react-flow__pane') ?? container.querySelector('.writer-timeline-flow')
-    await act(async () => {
-      pane?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 300, clientY: 200 }))
-    })
+    await rightClickCanvas()
     const createItem = Array.from(container.querySelectorAll('.writer-timeline-context-item'))
       .find(element => element.textContent?.includes('在此创建事件'))
     await act(async () => {

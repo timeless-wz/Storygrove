@@ -1,11 +1,7 @@
-import { useState, type ComponentType, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import {
   Check,
   Image,
-  Moon,
-  ScrollText,
-  Sparkles,
-  Sun,
   Trash2,
   Upload,
   Waves,
@@ -18,7 +14,6 @@ import {
   useThemeStore,
   type BackdropBlurLevel,
   type PageWallpaperMode,
-  type Theme,
 } from '../../stores/theme-store'
 import type { SkinId } from '../../shared/skin-types'
 import { ThemeGallery } from './ThemeGallery'
@@ -37,19 +32,6 @@ export const CUSTOM_SKIN_REQUIREMENTS = {
   maxBytes: 20 * 1024 * 1024,
   recommendedAspectRatio: '16:10',
 } as const
-
-interface ThemeOption {
-  id: Theme
-  labelKey: 'theme.light' | 'theme.galaxy' | 'theme.paper' | 'theme.dark'
-  Icon: ComponentType<{ size?: number; strokeWidth?: number }>
-}
-
-const THEME_OPTIONS: ThemeOption[] = [
-  { id: 'light', labelKey: 'theme.light', Icon: Sun },
-  { id: 'galaxy', labelKey: 'theme.galaxy', Icon: Sparkles },
-  { id: 'paper', labelKey: 'theme.paper', Icon: ScrollText },
-  { id: 'dark', labelKey: 'theme.dark', Icon: Moon },
-]
 
 type WorkingAction = 'classic' | 'anime' | 'choose' | 'change' | 'remove' | null
 
@@ -76,7 +58,6 @@ export function getCustomSkinActionIds(customAvailable: boolean): Array<'choose'
 
 /** Theme selection and image-skin selection intentionally remain independent. */
 export default function AppearanceSettings() {
-  const { theme, setTheme } = useThemeStore()
   const backdropBlur = useThemeStore((state) => state.backdropBlur)
   const setBackdropBlur = useThemeStore((state) => state.setBackdropBlur)
   const pageWallpaper = useThemeStore((state) => state.pageWallpaper)
@@ -122,36 +103,8 @@ export default function AppearanceSettings() {
 
   return (
     <section className="appearance-settings max-w-3xl space-y-7" aria-label={t('appearance.section')}>
-      {/* 14 套文学主题画廊 */}
+      {/* 主题画廊（统一包含 14 套文学主题与 4 套经典基础主题） */}
       <ThemeGallery />
-
-      {/* 经典基础主题快速切换 */}
-      <div className="space-y-1.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-            {text('经典基础主题', 'Classic Base Themes')}
-          </span>
-          <span className="text-2xs" style={{ color: 'var(--color-text-muted)' }}>
-            {text('纯色基底', 'Monochrome bases')}
-          </span>
-        </div>
-        <div className="appearance-theme-grid" role="group" aria-label={t('appearance.theme')}>
-          {THEME_OPTIONS.map(({ id, labelKey, Icon }) => (
-            <button
-              key={id}
-              type="button"
-              data-theme={id}
-              aria-pressed={theme === id}
-              onClick={() => setTheme(id)}
-              className={cn('appearance-theme-option', theme === id && 'appearance-theme-option--active')}
-            >
-              <Icon size={15} aria-hidden="true" />
-              <span>{t(labelKey)}</span>
-              {theme === id && <Check size={14} aria-hidden="true" />}
-            </button>
-          ))}
-        </div>
-      </div>
 
       {/* 背景雾化：外壳磨砂 + 页面薄纱强度；壁纸显隐是独立开关 */}
       <div className="space-y-1.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>

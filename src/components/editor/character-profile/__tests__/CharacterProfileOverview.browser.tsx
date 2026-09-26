@@ -116,7 +116,10 @@ describe('character profile detail sections', () => {
       // 正文不在可见区域……
       expect(bodyOf(id).checkVisibility()).toBe(false)
       // ……并且折叠后的卡片高度就等于标题行高度，没有预留出内容区。
-      expect(section(id).getBoundingClientRect().height)
+      const details = section(id)
+      const border = getComputedStyle(details)
+      const borderHeight = Number.parseFloat(border.borderTopWidth) + Number.parseFloat(border.borderBottomWidth)
+      expect(details.getBoundingClientRect().height - borderHeight)
         .toBeCloseTo(summaryOf(id).getBoundingClientRect().height, 0)
     }
     await expect.element(page.getByTestId('profile-detail-body').nth(0)).not.toBeVisible()
@@ -157,7 +160,10 @@ describe('character profile detail sections', () => {
     expect(section('appearance').hasAttribute('open')).toBe(false)
     expect(bodyOf('appearance').checkVisibility()).toBe(false)
     await expect.element(page.getByTestId('profile-detail-body').nth(0)).not.toBeVisible()
-    expect(section('appearance').getBoundingClientRect().height)
+    const details = section('appearance')
+    const border = getComputedStyle(details)
+    const borderHeight = Number.parseFloat(border.borderTopWidth) + Number.parseFloat(border.borderBottomWidth)
+    expect(details.getBoundingClientRect().height - borderHeight)
       .toBeCloseTo(summaryOf('appearance').getBoundingClientRect().height, 0)
     expect(summaryOf('appearance').textContent).toBe('外貌描写')
   })

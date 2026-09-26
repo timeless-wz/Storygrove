@@ -282,17 +282,17 @@ export default function App() {
               )}
 
               {/* 编辑区 */}
-              <Panel id="editor" minSize={10}>
+              <Panel id="editor" minSize="300px">
                 <ErrorBoundary fallbackLabel={text('编辑区渲染失败', 'Editor failed to render')}>
                   <EditorArea onNewProject={() => useLayoutStore.getState().openNewProject()} />
                 </ErrorBoundary>
               </Panel>
 
               {/* 项目参考栏：真实入口指向角色、蓝图、世界、剧情、任务和工作区中枢。 */}
-              {currentProject && sidebarView !== 'home' && referencePanelOpen && !focusMode && (
+              {currentProject && sidebarView !== 'home' && referencePanelOpen && !aiPanelOpen && !focusMode && (
                 <>
                   <PanelResizeHandle />
-                  <Panel id="project-reference" defaultSize={22} minSize={16}>
+                  <Panel id="project-reference" defaultSize="280px" minSize="220px" maxSize="420px">
                     <ErrorBoundary fallbackLabel={text('项目参考栏渲染失败', 'Project reference panel failed to render')}>
                       <ProjectReferencePanel />
                     </ErrorBoundary>
@@ -304,7 +304,7 @@ export default function App() {
               {currentProject && sidebarView !== 'home' && aiPanelOpen && !focusMode && (
                 <>
                   <PanelResizeHandle />
-                  <Panel id="ai-panel" defaultSize={20} minSize={10}>
+                  <Panel id="ai-panel" defaultSize="340px" minSize="260px" maxSize="600px">
                     <ErrorBoundary fallbackLabel={text('AI 面板渲染失败', 'AI panel failed to render')}>
                       {rightView === 'ai-output' ? <AIOutputPanel /> : <AIPanel />}
                     </ErrorBoundary>

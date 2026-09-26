@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Search, Upload, Save, FileText, Wrench, Check, Link2, Bookmark,
+  ChevronLeft, ChevronRight, BookOpen,
 } from 'lucide-react'
 
 import { useProjectStore } from '../../stores/project-store'
 import { registerEditorExitSaveHandler, useEditorStore } from '../../stores/editor-store'
+import { useLayoutStore } from '../../stores/layout-store'
 import { useWorkflowStore } from '../../stores/workflow-store'
 import { useLocaleStore } from '../../stores/locale-store'
 import VditorProseEditor, {
@@ -40,6 +42,7 @@ import {
 } from '../project-session-gate'
 import { readDraftBody } from '../../stores/draft-store'
 import { BlueprintBindingDialog } from '../panels/sidebar/BlueprintBindingDialog'
+import { openChapterFile } from '../panels/sidebar/sidebar-file-openers'
 
 const DRAFT_STATUS_EN: Record<string, string> = {
   draft: 'Draft',
@@ -51,11 +54,11 @@ const DRAFT_STATUS_EN: Record<string, string> = {
 
 const FORESHADOWING_PRESET_TYPES = ['埋伏', '呼应', '线索', '收尾', '悬念']
 const FORESHADOWING_COLOR_OPTIONS = [
-  { value: 'blue', label: ['浅蓝', 'Blue'], bg: 'rgba(59, 130, 246, 0.25)', border: '#3b82f6' },
-  { value: 'red', label: ['浅红', 'Red'], bg: 'rgba(239, 68, 68, 0.25)', border: '#ef4444' },
-  { value: 'yellow', label: ['浅黄', 'Yellow'], bg: 'rgba(234, 179, 8, 0.25)', border: '#eab308' },
-  { value: 'green', label: ['浅绿', 'Green'], bg: 'rgba(34, 197, 94, 0.25)', border: '#22c55e' },
-  { value: 'purple', label: ['浅紫', 'Purple'], bg: 'rgba(168, 85, 247, 0.25)', border: '#a855f7' },
+  { value: 'blue', names: ['浅蓝', 'Blue'], bg: 'rgba(59, 130, 246, 0.25)', border: '#3b82f6' },
+  { value: 'red', names: ['浅红', 'Red'], bg: 'rgba(239, 68, 68, 0.25)', border: '#ef4444' },
+  { value: 'yellow', names: ['浅黄', 'Yellow'], bg: 'rgba(234, 179, 8, 0.25)', border: '#eab308' },
+  { value: 'green', names: ['浅绿', 'Green'], bg: 'rgba(34, 197, 94, 0.25)', border: '#22c55e' },
+  { value: 'purple', names: ['浅紫', 'Purple'], bg: 'rgba(168, 85, 247, 0.25)', border: '#a855f7' },
 ]
 
 interface Props {
@@ -104,27 +107,29 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
   const [createMarkerType, setCreateMarkerType] = useState('埋伏')
   const [createColor, setCreateColor] = useState('blue')
   const [createSubmitting, setCreateSubmitting] = useState(false)
+  const foreshadowingDraftId = meta?.id
 
   const loadForeshadowings = useCallback(async () => {
     const projectSession = captureProjectSession(currentProject)
-    if (!projectSession || !isProjectSessionPath(projectSession, projectKey) || !meta?.id) return
+    if (!projectSession || !isProjectSessionPath(projectSession, projectKey) || !foreshadowingDraftId) return
     try {
       const list = await ipc.invokeWithProjectSession(
         projectSession,
         'db:foreshadowing-list-by-draft',
-        meta.id,
+        foreshadowingDraftId,
         projectSession.projectPath,
       )
-      if (Array.isArray(list)) {
+      if (isProjectSessionCurrent(projectSession) && Array.isArray(list)) {
         setForeshadowings(list)
       }
     } catch (err) {
       console.error('Failed to load foreshadowings for draft', err)
     }
-  }, [currentProject, meta?.id, projectKey])
+  }, [currentProject, foreshadowingDraftId, projectKey])
 
   useEffect(() => {
-    loadForeshadowings()
+    const timer = window.setTimeout(() => { void loadForeshadowings() }, 0)
+    return () => window.clearTimeout(timer)
   }, [loadForeshadowings])
 
   useEffect(() => {
@@ -327,6 +332,9 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
   const finalizationPending = editorTab?.finalizationPublication === 'pending'
   const finalizationConflict = editorTab?.finalizationConflict
   const currentBodyRef = useRef(content)
+  const referencePanelOpen = useLayoutStore((s) => s.referencePanelOpen)
+  const toggleReferencePanel = useLayoutStore((s) => s.toggleReferencePanel)
+  const chapterJumpPending = useRef(false)
 
   /** 保存（vela://draft/ 走 DB，其他走 FS） */
   const doSave = async (draftContent: string) => {
@@ -403,6 +411,42 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
       save: () => exitSaveRef.current(currentBodyRef.current),
     })
   }, [projectKey, tabId])
+
+  /** 卷章快速切换：保存当前草稿并跳转至目标章节草稿 */
+  const handleJumpChapter = async (targetChapterNumber: number) => {
+    if (targetChapterNumber < 1 || chapterJumpPending.current) return
+    const projectSession = captureProjectSession(currentProject)
+    if (!projectSession || !isProjectSessionPath(projectSession, projectKey)) return
+
+    chapterJumpPending.current = true
+    try {
+      if (useEditorStore.getState().tabs.find(tab => tab.id === tabId)?.dirty) {
+        await doSave(currentBodyRef.current)
+      }
+      if (!isProjectSessionCurrent(projectSession)) return
+      // 保存期间继续输入时留在当前章，不把新输入误认为已保存。
+      if (useEditorStore.getState().tabs.find(tab => tab.id === tabId)?.dirty) return
+      const targetDraft = await ipc.invokeWithProjectSession(
+        projectSession,
+        'db:draft-get-latest',
+        targetChapterNumber,
+        projectSession.projectPath,
+      )
+      if (!isProjectSessionCurrent(projectSession)) return
+      if (targetDraft) {
+        await openChapterFile(
+          `vela://${targetDraft.status === 'finalized' ? 'manuscript' : 'draft'}/${targetDraft.id}`,
+          text(`第${targetChapterNumber}章 v${targetDraft.version}`, `Chapter ${targetChapterNumber} v${targetDraft.version}`),
+        )
+      } else {
+        toast.info(text(`未找到第 ${targetChapterNumber} 章的草稿`, `Draft for chapter ${targetChapterNumber} not found`))
+      }
+    } catch (e) {
+      if (isProjectSessionCurrent(projectSession)) toast.error(String(e))
+    } finally {
+      chapterJumpPending.current = false
+    }
+  }
 
   const freezeDraftSourceForAI = async (projectSession: NonNullable<ReturnType<typeof captureProjectSession>>) => {
     if (!meta) return null
@@ -609,43 +653,102 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
   }
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      {/* 顶部工具栏 */}
+    <div className="w-full h-full flex flex-col overflow-hidden">
+      {/* 顶部工具栏：文学工坊元数据看板与动作控制台 */}
       <div
-        className="flex items-center justify-between gap-2 px-3 h-9 flex-shrink-0"
+        className="draft-workbench-toolbar flex flex-wrap items-center justify-between gap-2 px-3.5 py-1 min-h-10 flex-shrink-0 border-b select-none transition-colors"
         style={{
-          borderBottom: '1px solid var(--color-border)',
+          borderColor: 'var(--editor-ruled-line, var(--color-border))',
           backgroundColor: 'var(--color-editor-bg)',
         }}
       >
-        {/* 左侧：章节标题 + 版本 */}
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-xs font-medium truncate" style={{ color: 'var(--color-text-secondary)' }}>
-              {meta
-                ? text(`第 ${meta.chapterNumber} 章 — ${meta.chapterTitle || '未知标题'}`, `Chapter ${meta.chapterNumber} — ${meta.chapterTitle || 'Untitled'}`)
-                : text('草稿', 'Draft')}
+        {/* 左侧：章节标牌 + 卷章导航 + 标题 + 版本 + 状态胶囊 + 伏笔 */}
+        <div className="flex items-center gap-2 min-w-0">
+          {meta ? (
+            <div className="flex items-center gap-1.5 min-w-0">
+              {/* 卷章快速切换器 */}
+              <div className="inline-flex items-center rounded border border-[var(--editor-ruled-line,var(--color-border))] bg-[var(--editor-selection-bg,var(--color-hover))] p-0.5 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleJumpChapter(meta.chapterNumber - 1)}
+                  disabled={meta.chapterNumber <= 1}
+                  className="p-0.5 rounded hover:bg-[var(--color-hover)] text-[var(--editor-ink-muted,var(--color-text-muted))] hover:text-[var(--editor-ink-primary,var(--color-text))] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  title={text('上一章', 'Previous chapter')}
+                >
+                  <ChevronLeft size={12} />
+                </button>
+                <span className="px-1 text-[10px] font-semibold font-mono tracking-wider text-[var(--editor-ink-primary,var(--color-text-secondary))]">
+                  CH.{meta.chapterNumber}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleJumpChapter(meta.chapterNumber + 1)}
+                  className="p-0.5 rounded hover:bg-[var(--color-hover)] text-[var(--editor-ink-muted,var(--color-text-muted))] hover:text-[var(--editor-ink-primary,var(--color-text))] transition-colors"
+                  title={text('下一章', 'Next chapter')}
+                >
+                  <ChevronRight size={12} />
+                </button>
+              </div>
+
+              <span
+                className="text-xs font-semibold text-[var(--editor-ink-primary,var(--color-text))] truncate max-w-[240px] tracking-wide"
+                title={meta.chapterTitle || text('未知标题', 'Untitled')}
+              >
+                {meta.chapterTitle || text('未知标题', 'Untitled')}
+              </span>
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--editor-selection-bg,var(--color-hover))] text-[var(--editor-ink-muted,var(--color-text-muted))] border border-[var(--editor-ruled-line,var(--color-border))] flex-shrink-0">
+                v{meta.version}
+              </span>
+            </div>
+          ) : (
+            <span className="text-xs font-semibold text-[var(--editor-ink-primary,var(--color-text-secondary))]">
+              {text('草稿', 'Draft')}
+            </span>
+          )}
+
+          {/* 状态徽章胶囊 */}
+          <span
+            className="inline-flex items-center gap-1.5 text-[11px] px-2 py-0.5 rounded-full flex-shrink-0 font-medium transition-colors border"
+            style={{
+              backgroundColor: 'var(--editor-selection-bg, var(--color-hover))',
+              color: DRAFT_STATUS_COLOR[status] ?? 'var(--editor-ink-primary, var(--color-text-muted))',
+              borderColor: 'var(--editor-ruled-line, var(--color-border))',
+            }}
+          >
+            <span
+              className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+              style={{ backgroundColor: DRAFT_STATUS_COLOR[status] ?? 'var(--editor-ink-primary, var(--color-text-muted))' }}
+            />
+            {text(DRAFT_STATUS_LABEL[status] ?? status, DRAFT_STATUS_EN[status] ?? status)}
           </span>
-          {meta && (
-            <span className="text-[0.7rem] flex-shrink-0" style={{ color: 'var(--color-text-muted)' }}>
-              v{meta.version}
+
+          {/* 关联伏笔指示 */}
+          {foreshadowings.length > 0 && (
+            <span
+              className="hidden md:inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded text-[var(--editor-ink-muted,var(--color-text-muted))] hover:text-[var(--color-accent)] cursor-pointer transition-colors"
+              onClick={handleOpenForeshadowingManager}
+              title={text(`本章已标记 ${foreshadowings.length} 处伏笔，点击查看管理`, `${foreshadowings.length} foreshadowing marks, click to manage`)}
+            >
+              <Bookmark size={11} className="text-[var(--color-accent)] opacity-80" />
+              <span className="tabular-nums font-mono text-[10px]">{foreshadowings.length}</span>
             </span>
           )}
         </div>
 
-        {/* 右侧：字数 + 状态 + AI 操作 + 发布 */}
+        {/* 右侧：字数 + 状态 + AI 操作 + 发布 + 辅助上下文开关 */}
         {!isReadonly && (
           <div className="flex items-center gap-1.5 flex-shrink-0">
             {/* 字数 */}
             {charCount > 0 && (
-              <span className="text-xs tabular-nums mr-1" style={{ color: 'var(--color-text-muted)' }}>
+              <span className="text-xs font-mono tabular-nums text-[var(--editor-ink-muted,var(--color-text-muted))] px-1" title={text(`当前字数：${charCount.toLocaleString(locale)}`, `Word count: ${charCount.toLocaleString(locale)}`)}>
                 {text(`${charCount.toLocaleString(locale)} 字`, `${charCount.toLocaleString(locale)} words`)}
               </span>
             )}
 
-            {/* 未保存指示灯 */}
+            {/* 未保存指示呼吸灯 */}
             {isDirty && (
               <span
-                className="w-1.5 h-1.5 rounded-full flex-shrink-0 mr-0.5"
+                className="w-2 h-2 rounded-full flex-shrink-0 animate-pulse"
                 style={{ backgroundColor: 'var(--color-warning)' }}
                 title={text('有未保存的修改', 'There are unsaved changes')}
               />
@@ -658,28 +761,18 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
                 size="sm"
                 onClick={() => doSave(currentBodyRef.current)}
                 disabled={saving}
+                className="h-6 px-2 text-xs border-[var(--color-warning)]/40 text-[var(--color-warning-text)] hover:bg-[var(--color-warning)]/10 transition-all"
                 title={text('保存（⌘S）', 'Save (Ctrl+S)')}
               >
-                <Save size={12} />
+                <Save size={11} />
                 {saving ? text('保存中...', 'Saving...') : text('保存', 'Save')}
               </Button>
             )}
 
-            {/* 状态标签 */}
-            <span
-              className="text-[0.7rem] px-1.5 py-0.5 rounded flex-shrink-0"
-              style={{
-                backgroundColor: 'var(--color-hover)',
-                color: DRAFT_STATUS_COLOR[status] ?? 'var(--color-text-muted)',
-              }}
-            >
-              {text(DRAFT_STATUS_LABEL[status] ?? status, DRAFT_STATUS_EN[status] ?? status)}
-            </span>
-
             {finalizationConflict && (
               <span
-                className="text-[0.7rem] px-1.5 py-0.5 rounded flex-shrink-0"
-                style={{ color: 'var(--color-warning-text)', backgroundColor: 'var(--color-hover)' }}
+                className="text-[11px] px-2 py-0.5 rounded flex-shrink-0 border"
+                style={{ color: 'var(--color-warning-text)', backgroundColor: 'var(--editor-selection-bg, var(--color-hover))', borderColor: 'color-mix(in srgb, var(--color-warning) 30%, transparent)' }}
                 title={text(
                   '发布完成事件没有覆盖这次编辑；请保存后重新同步正文。',
                   'Publication did not overwrite this edit. Save it and sync the manuscript again.',
@@ -694,34 +787,40 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
                 variant="outline"
                 size="sm"
                 onClick={doRetryManuscriptPublication}
+                className="h-6 px-2 text-xs"
                 title={text('正文已保存、实体文件待同步；重试当前发布记录', 'The manuscript is saved and its file is pending sync. Retry the current publication.')}
               >
-                <Wrench size={12} />
+                <Wrench size={11} />
                 {text('重试同步', 'Retry sync')}
               </Button>
             )}
 
+            <div className="h-3 w-px bg-[var(--editor-ruled-line,var(--color-border))] mx-0.5 opacity-60" />
+
+            {/* 次级操作：伏笔 / 蓝图 */}
             {meta && (
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
                 onClick={handleToolbarMarkForeshadowing}
+                className="h-6 px-2 text-xs text-[var(--editor-ink-muted,var(--color-text-secondary))] hover:bg-[var(--editor-selection-bg,var(--color-hover))] hover:text-[var(--editor-ink-primary,var(--color-accent))] border border-transparent hover:border-[var(--editor-ruled-line,var(--color-border))]"
                 title={text('将选中文本标记为伏笔', 'Mark selected text as foreshadowing')}
               >
-                <Bookmark size={12} />
-                {text('标记为伏笔', 'Mark as Foreshadowing')}
+                <Bookmark size={11} className="opacity-70" />
+                <span>{text('标记为伏笔', 'Mark as Foreshadowing')}</span>
               </Button>
             )}
 
             {meta && (
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
                 onClick={() => setBindingDialogOpen(true)}
+                className="h-6 px-2 text-xs text-[var(--editor-ink-muted,var(--color-text-secondary))] hover:bg-[var(--editor-selection-bg,var(--color-hover))] hover:text-[var(--editor-ink-primary,var(--color-accent))] border border-transparent hover:border-[var(--editor-ruled-line,var(--color-border))]"
                 title={text('绑定或更换章节蓝图', 'Link or change the chapter blueprint')}
               >
-                <Link2 size={12} />
-                {text('绑定蓝图', 'Link blueprint')}
+                <Link2 size={11} className="opacity-70" />
+                <span>{text('绑定蓝图', 'Link blueprint')}</span>
               </Button>
             )}
 
@@ -731,36 +830,63 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
                 variant="outline"
                 size="sm"
                 onClick={openLatestReview}
+                className="h-6 px-2 text-xs text-[var(--color-category-review-text)] border-[var(--editor-ruled-line,var(--color-border))]"
                 title={text('查看最新审稿报告', 'View the latest review report')}
               >
-                <FileText size={12} />
+                <FileText size={11} />
                 {text(`审稿报告(${reviewCount})`, `Review report (${reviewCount})`)}
               </Button>
             )}
 
-            {/* AI 审稿 */}
+            {/* 核心操作：AI 审稿 */}
             <Button
               variant="ai"
               size="sm"
               onClick={() => setConfirmAction('review')}
               disabled={isChapterBusy}
+              className="h-6 px-2.5 text-xs shadow-xs hover:shadow-sm font-medium tracking-wide active:scale-[0.97]"
               title={text('AI 审稿 — 一致性检查（蓝图兑现/未授权事件/设定冲突/证据链）', 'AI review — Consistency check (blueprint/events/setting conflict/evidence)')}
             >
-              <Search size={12} />
+              <Search size={11} />
               {text('AI 审稿', 'AI review')}
             </Button>
 
-            {/* 发布 */}
-            {status !== 'finalized' && <Button
-              variant="success"
+            {/* 核心操作：发布到正文 */}
+            {status !== 'finalized' && (
+              <Button
+                variant="success"
+                size="sm"
+                onClick={doPublish}
+                disabled={isChapterBusy || !!finalizationConflict || finalizationPending}
+                className="h-6 px-2.5 text-xs shadow-xs hover:shadow-sm font-medium tracking-wide active:scale-[0.97]"
+                title={text('发布到正文（定稿） — 移到正文章节，之后仍可编辑', 'Publish / finalize — move to manuscript and keep editing')}
+              >
+                <Upload size={11} />
+                <span>{text('发布到正文', 'Publish')}</span>
+                <span className="sr-only">{text('定稿', 'Finalize')}</span>
+              </Button>
+            )}
+
+            <div className="h-3 w-px bg-[var(--editor-ruled-line,var(--color-border))] mx-0.5 opacity-60" />
+
+            {/* 辅助上下文面板切换按钮 */}
+            <Button
+              variant="ghost"
               size="sm"
-              onClick={doPublish}
-              disabled={isChapterBusy || !!finalizationConflict || finalizationPending}
-                title={text('发布到正文 — 移到正文章节，之后仍可编辑', 'Publish — move to manuscript and keep editing')}
+              onClick={toggleReferencePanel}
+              className={`h-6 px-2 text-xs transition-colors border ${
+                referencePanelOpen
+                  ? 'bg-[var(--editor-selection-bg,var(--color-hover))] text-[var(--color-accent)] border-[var(--editor-ruled-line,var(--color-border))]'
+                  : 'border-transparent text-[var(--editor-ink-muted,var(--color-text-secondary))] hover:bg-[var(--editor-selection-bg,var(--color-hover))] hover:text-[var(--editor-ink-primary,var(--color-text))]'
+              }`}
+              title={text(
+                referencePanelOpen ? '收起参考上下文' : '展开参考上下文（蓝图/角色/世界设定）',
+                referencePanelOpen ? 'Collapse reference context' : 'Expand reference context (blueprint/characters/worldbuilding)',
+              )}
             >
-              <Upload size={12} />
-                {text('发布到正文', 'Publish')}
-            </Button>}
+              <BookOpen size={11} className="opacity-80" />
+              <span>{text('参考上下文', 'Context')}</span>
+            </Button>
           </div>
         )}
 
@@ -768,11 +894,11 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
         {isReadonly && (
           <div className="flex items-center gap-2 flex-shrink-0">
             {charCount > 0 && (
-              <span className="text-xs tabular-nums" style={{ color: 'var(--color-text-muted)' }}>
+              <span className="text-xs font-mono tabular-nums text-[var(--editor-ink-muted,var(--color-text-muted))]">
                 {text(`${charCount.toLocaleString(locale)} 字`, `${charCount.toLocaleString(locale)} words`)}
               </span>
             )}
-            <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+            <span className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-[var(--editor-selection-bg,var(--color-hover))] text-[var(--editor-ink-muted,var(--color-text-muted))] border border-[var(--editor-ruled-line,var(--color-border))]">
               {text('已归档（只读）', 'Archived (read-only)')}
             </span>
             {finalizationPending && (
@@ -780,12 +906,32 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
                 variant="outline"
                 size="sm"
                 onClick={doRetryManuscriptPublication}
+                className="h-6 px-2 text-xs"
                 title={text('正文实体文件待同步；重试当前发布记录', 'The manuscript file is pending sync. Retry the current publication.')}
               >
                 <Wrench size={11} />
                 {text('重试同步', 'Retry sync')}
               </Button>
             )}
+
+            {/* 辅助上下文面板切换按钮（只读模式） */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={toggleReferencePanel}
+              className={`h-6 px-2 text-xs transition-colors border ${
+                referencePanelOpen
+                  ? 'bg-[var(--editor-selection-bg,var(--color-hover))] text-[var(--color-accent)] border-[var(--editor-ruled-line,var(--color-border))]'
+                  : 'border-transparent text-[var(--editor-ink-muted,var(--color-text-secondary))] hover:bg-[var(--editor-selection-bg,var(--color-hover))] hover:text-[var(--editor-ink-primary,var(--color-text))]'
+              }`}
+              title={text(
+                referencePanelOpen ? '收起参考上下文' : '展开参考上下文（蓝图/角色/世界设定）',
+                referencePanelOpen ? 'Collapse reference context' : 'Expand reference context (blueprint/characters/worldbuilding)',
+              )}
+            >
+              <BookOpen size={11} className="opacity-80" />
+              <span>{text('参考上下文', 'Context')}</span>
+            </Button>
           </div>
         )}
       </div>
@@ -992,7 +1138,7 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
                       onClick={() => setCreateColor(c.value)}
                     >
                       <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: c.border }} />
-                      <span>{text(c.label[0], c.label[1])}</span>
+                      <span>{text(c.names[0], c.names[1])}</span>
                     </button>
                   ))}
                 </div>

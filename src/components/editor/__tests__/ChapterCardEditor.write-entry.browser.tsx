@@ -70,6 +70,9 @@ function installIpc(options: {
 } = {}) {
   const invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
     if (channel === 'db:blueprint-get-all') return options.blueprints ?? [blueprint(1)]
+    if (channel === 'db:blueprint-volume-list') return [{ id: 'volume-1', name: '第1卷', sortOrder: 1 }]
+    if (channel === 'db:draft-list') return []
+    if (channel === 'db:draft-create') return { success: true, id: 101 }
     if (channel === 'db:draft-authority-sequence') return typeof options.authoritySequence === 'function'
       ? options.authoritySequence()
       : options.authoritySequence ?? {
@@ -148,8 +151,7 @@ describe('ChapterCardEditor writing entry', () => {
     await renderEditor()
 
     await vi.waitFor(() => {
-      expect(container?.textContent).toContain('写作第10章')
-      expect(container?.textContent).toContain('批量创作')
+      expect(container?.textContent).toContain('新建第10章正文')
     })
   })
 
@@ -189,14 +191,14 @@ describe('ChapterCardEditor writing entry', () => {
     })
 
     await renderEditor()
-    await vi.waitFor(() => expect(container?.textContent).toContain('写作第10章'))
+    await vi.waitFor(() => expect(container?.textContent).toContain('新建第10章正文'))
     const addButton = Array.from(container?.querySelectorAll<HTMLButtonElement>('button') ?? [])
       .find(button => button.title === '新建章节')
     expect(addButton).toBeDefined()
     await act(async () => addButton?.click())
 
     expect(container?.textContent).toContain('第 12 章：')
-    expect(container?.textContent).toContain('写作第10章')
+    expect(container?.textContent).not.toContain('新建第12章正文')
     expect(info).toHaveBeenCalledWith(expect.stringContaining('写作入口仍为第 10 章'))
   })
 
@@ -216,26 +218,25 @@ describe('ChapterCardEditor writing entry', () => {
     await vi.waitFor(() => {
       expect(container?.textContent).toMatch(/第 3 章存在重复记录/u)
     })
-    expect(container?.textContent).not.toContain('写作第3章')
-    expect(container?.textContent).not.toContain('批量创作')
+    expect(container?.textContent).not.toContain('新建第3章正文')
   })
 
-  it('shows Write Chapter 1 after blueprints are available and opens the chapter-creation workbench', async () => {
+  it('creates and opens the authoritative Chapter 1 draft directly from its blueprint', async () => {
     await renderEditor()
 
     await vi.waitFor(() => {
-      expect(container?.textContent).toContain('写作第1章')
+      expect(container?.textContent).toContain('新建第1章正文')
     })
     const writeButton = Array.from(container?.querySelectorAll('button') ?? [])
-      .find((button) => button.textContent?.includes('写作第1章'))
+      .find((button) => button.textContent?.includes('新建第1章正文'))
 
     expect(writeButton).toBeDefined()
     await act(async () => writeButton?.click())
 
-    expect(useLayoutStore.getState()).toMatchObject({
-      chapterCreationOpen: true,
-      chapterCreationPrefill: expect.objectContaining({ chapterNumber: 1, title: '雨夜启程' }),
+    await vi.waitFor(() => {
+      expect(useEditorStore.getState().tabs.some(tab => tab.filePath === 'vela://draft/101')).toBe(true)
     })
+    expect(useLayoutStore.getState().chapterCreationOpen).toBe(false)
   })
 
   it('requires explicit recovery before writing Chapter 1 when legacy-imported finalized text exists for Chapters 2 through 5', async () => {
@@ -268,7 +269,7 @@ describe('ChapterCardEditor writing entry', () => {
     await vi.waitFor(() => {
       expect(container?.textContent).toContain('检测到后续正文但第 1 章尚未写作')
     })
-    expect(container?.textContent).not.toContain('写作第1章')
+    expect(container?.textContent).not.toContain('新建第1章正文')
     expect(invoke).not.toHaveBeenCalledWith(
       'db:project-clear-generated-data',
       expect.anything(),
@@ -299,7 +300,7 @@ describe('ChapterCardEditor writing entry', () => {
         PROJECT_PATH,
         expect.objectContaining({ projectPath: PROJECT_PATH }),
       )
-      expect(container?.textContent).toContain('写作第1章')
+      expect(container?.textContent).toContain('新建第1章正文')
     })
 
     expect(container?.textContent).not.toContain('检测到后续正文但第 1 章尚未写作')

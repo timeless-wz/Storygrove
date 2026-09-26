@@ -4,15 +4,9 @@ import {
   FolderOpen,
   RefreshCw,
   Unlink,
-  Layers,
-  BookMarked,
-  FileText,
   Clock,
   ShieldCheck,
   XCircle,
-  Database,
-  Gauge,
-  FileCheck2,
   AlertTriangle,
 } from 'lucide-react'
 import { Button } from '../ui/Button'
@@ -29,11 +23,17 @@ import LongFormControlPanel from './LongFormControlPanel'
 import PhaseAuditPanel from './PhaseAuditPanel'
 import BookRevisionPanel from './BookRevisionPanel'
 import ChapterWorkflowPanel from './ChapterWorkflowPanel'
+import {
+  SummaryMetric,
+  WorkspaceAuthorityLegend,
+  WorkspaceTabNav,
+} from './WorkspaceHubNavigation'
 
 export default function WorkspaceHub() {
   const text = useLocaleStore(s => s.text)
   const currentProject = useProjectStore(s => s.currentProject)
   const status = useWorkspaceHubStore(s => s.status)
+  const sources = useWorkspaceHubStore(s => s.sources)
   const lastScanResult = useWorkspaceHubStore(s => s.lastScanResult)
   const activeTab = useWorkspaceHubStore(s => s.activeTab)
   const setActiveTab = useWorkspaceHubStore(s => s.setActiveTab)
@@ -124,6 +124,23 @@ export default function WorkspaceHub() {
     }
   }
 
+  const coverageIncomplete = Boolean(
+    lastScanResult?.truncated
+    || lastScanResult?.enumerationComplete === false
+    || (lastScanResult?.success && lastScanResult.enumerationComplete === undefined),
+  )
+  const truncationLabel = lastScanResult?.truncationReason === 'max_files_limit'
+    ? text('已达单次最大文件数量上限 (1000)', 'Reached maximum files limit (1000)')
+    : lastScanResult?.truncationReason === 'max_total_bytes_limit'
+      ? text('已达正文解析总字节预算上限', 'Reached maximum total bytes budget')
+      : lastScanResult?.truncationReason === 'max_depth_limit'
+        ? text('超过最大目录遍历深度', 'Exceeded maximum directory depth')
+        : lastScanResult?.truncationReason === 'access_error'
+          ? text('部分子目录或文件访问受限', 'Some subdirectories or files were unreadable')
+          : text('扫描未完整覆盖', 'Scan coverage incomplete')
+
+  const pendingCandidatesCount = status?.pendingCandidates ?? 0
+
   return (
     <div
       className="skin-workspace-page w-full h-full flex flex-col overflow-hidden text-xs"
@@ -211,74 +228,75 @@ export default function WorkspaceHub() {
           </div>
         </div>
 
-        {/* 目录与状态摘要条 */}
+        {/* 目录与状态摘要：路径 → 覆盖告警 → 计数指标 */}
         {status?.externalWorkspacePath ? (
           <div
-            className="flex flex-wrap items-center justify-between p-2.5 rounded border text-[11px] gap-2"
+            className="p-2.5 rounded border text-[11px] space-y-2"
             style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-editor-bg)' }}
           >
-            <div className="flex items-center gap-2 truncate flex-1 min-w-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <FolderOpen size={12} className="shrink-0 opacity-70" />
               <span className="font-medium opacity-70 shrink-0">{text('已关联目录: ', 'Bound Directory: ')}</span>
               <span className="font-mono truncate" title={status.externalWorkspacePath}>
                 {status.externalWorkspacePath}
               </span>
-            </div>
-
-            <div className="flex items-center gap-4 shrink-0 font-medium">
-              {(lastScanResult?.truncated || lastScanResult?.enumerationComplete === false || (lastScanResult?.success && lastScanResult.enumerationComplete === undefined)) && (
-                <div
-                  className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold"
-                  style={{
-                    backgroundColor: 'rgba(234, 179, 8, 0.15)',
-                    color: 'var(--color-warning-text)',
-                    border: '1px solid rgba(234, 179, 8, 0.3)',
-                  }}
-                  title={
-                    lastScanResult?.truncationReason === 'max_files_limit'
-                      ? text('已达单次最大文件数量上限 (1000)', 'Reached maximum files limit (1000)')
-                      : lastScanResult?.truncationReason === 'max_total_bytes_limit'
-                        ? text('已达正文解析总字节预算上限', 'Reached maximum total bytes budget')
-                        : lastScanResult?.truncationReason === 'max_depth_limit'
-                          ? text('超过最大目录遍历深度', 'Exceeded maximum directory depth')
-                          : lastScanResult?.truncationReason === 'access_error'
-                            ? text('部分子目录或文件访问受限', 'Some subdirectories or files were unreadable')
-                            : text('扫描未完整覆盖', 'Scan coverage incomplete')
-                  }
-                >
-                  <AlertTriangle size={11} />
-                  <span>{text('扫描未完整覆盖', 'Scan coverage incomplete')}</span>
-                </div>
-              )}
-
-              <div>
-                <span className="opacity-70">{text('文件: ', 'Files: ')}</span>
-                <span>{status.recognizedFiles} / {status.totalFiles}</span>
-              </div>
-
-              {status.changedFiles > 0 && (
-                <div className="text-[var(--color-warning-text)]">
-                  <span>{status.changedFiles} {text('已变化', 'changed')}</span>
-                </div>
-              )}
-
-              {status.missingFiles > 0 && (
-                <div className="text-[var(--color-error-text)]">
-                  <span>{status.missingFiles} {text('缺失', 'missing')}</span>
-                </div>
-              )}
-
-              <div>
-                <span className="opacity-70">{text('已确认规则: ', 'Confirmed Rules: ')}</span>
-                <span className="font-semibold text-accent">{status.confirmedRulesCount}</span>
-              </div>
-
               {status.lastScannedAt && (
-                <div className="flex items-center gap-1 opacity-60">
+                <span className="flex items-center gap-1 opacity-60 shrink-0 ml-auto">
                   <Clock size={11} />
                   <span>{new Date(status.lastScannedAt).toLocaleTimeString()}</span>
-                </div>
+                </span>
               )}
             </div>
+
+            {coverageIncomplete && (
+              <div
+                className="flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold w-fit"
+                style={{
+                  backgroundColor: 'color-mix(in srgb, var(--color-warning) 15%, transparent)',
+                  color: 'var(--color-warning-text)',
+                  border: '1px solid color-mix(in srgb, var(--color-warning) 30%, transparent)',
+                }}
+                title={truncationLabel}
+              >
+                <AlertTriangle size={11} />
+                <span>{text('扫描未完整覆盖', 'Scan coverage incomplete')}</span>
+                <span className="font-normal opacity-80">{truncationLabel}</span>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
+              <SummaryMetric
+                label={text('识别文件', 'Recognized files')}
+                value={`${status.recognizedFiles} / ${status.totalFiles}`}
+                hint={text('已识别为创作资料的文件数 / 扫描到的文件总数', 'Files recognized as writing material / total files scanned')}
+              />
+              <SummaryMetric
+                label={text('已变化', 'Changed')}
+                value={status.changedFiles}
+                hint={text('母稿内容相对已批准快照发生变化', 'Manuscript content differs from the approved snapshot')}
+                tone={status.changedFiles > 0 ? 'warning' : undefined}
+              />
+              <SummaryMetric
+                label={text('缺失', 'Missing')}
+                value={status.missingFiles}
+                hint={text('已关联但当前扫描不到的文件', 'Linked files that the current scan could not find')}
+                tone={status.missingFiles > 0 ? 'error' : undefined}
+              />
+              <SummaryMetric
+                label={text('待确认候选', 'Pending candidates')}
+                value={pendingCandidatesCount}
+                hint={text('扫描与模型提交的导入候选，等待作者审核', 'Import candidates from scans and models awaiting author review')}
+                tone={pendingCandidatesCount > 0 ? 'warning' : undefined}
+              />
+              <SummaryMetric
+                label={text('已确认规则', 'Confirmed rules')}
+                value={status.confirmedRulesCount}
+                hint={text('具备事实权威的结构化设定规则', 'Structured setting rules with fact authority')}
+                tone="accent"
+              />
+            </div>
+
+            <WorkspaceAuthorityLegend sources={sources} text={text} />
           </div>
         ) : (
           <div
@@ -300,107 +318,14 @@ export default function WorkspaceHub() {
           </div>
         )}
 
-        {/* 顶部主选项卡切换 */}
-        <div className="flex items-center gap-2 pt-1 border-t" style={{ borderColor: 'var(--color-border)' }}>
-          <button
-            onClick={() => setActiveTab('sources')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-              activeTab === 'sources'
-                ? 'bg-accent/20 text-accent font-semibold'
-                : 'hover:bg-black/5 dark:hover:bg-white/5 opacity-80'
-            }`}
-          >
-            <FileText size={13} />
-            <span>{text('资料清单与片段', 'Sources & Fragments')}</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('rules')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-              activeTab === 'rules'
-                ? 'bg-accent/20 text-accent font-semibold'
-                : 'hover:bg-black/5 dark:hover:bg-white/5 opacity-80'
-            }`}
-          >
-            <BookMarked size={13} />
-            <span>{text('结构化设定规则', 'Structured Setting Rules')}</span>
-            {status && status.confirmedRulesCount > 0 && (
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-accent/25">
-                {status.confirmedRulesCount}
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setActiveTab('context')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-              activeTab === 'context'
-                ? 'bg-accent/20 text-accent font-semibold'
-                : 'hover:bg-black/5 dark:hover:bg-white/5 opacity-80'
-            }`}
-          >
-            <Layers size={13} />
-            <span>{text('章节上下文装配包', 'Chapter Context Package')}</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('story-data')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-              activeTab === 'story-data'
-                ? 'bg-accent/20 text-accent font-semibold'
-                : 'hover:bg-black/5 dark:hover:bg-white/5 opacity-80'
-            }`}
-          >
-            <Database size={13} />
-            <span>{text('故事资料中心', 'Story Data Center')}</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('control')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-              activeTab === 'control'
-                ? 'bg-accent/20 text-accent font-semibold'
-                : 'hover:bg-black/5 dark:hover:bg-white/5 opacity-80'
-            }`}
-          >
-            <Gauge size={13} />
-            <span>{text('长篇控制台', 'Long-form Console')}</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('workbench')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-              activeTab === 'workbench'
-                ? 'bg-accent/20 text-accent font-semibold'
-                : 'hover:bg-black/5 dark:hover:bg-white/5 opacity-80'
-            }`}
-          >
-            <FileText size={13} />
-            <span>{text('章节创作工作台', 'Chapter Workbench')}</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('audit')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-              activeTab === 'audit'
-                ? 'bg-accent/20 text-accent font-semibold'
-                : 'hover:bg-black/5 dark:hover:bg-white/5 opacity-80'
-            }`}
-          >
-            <ShieldCheck size={13} />
-            <span>{text('审核与检索', 'Audit & Search')}</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('revision')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-              activeTab === 'revision'
-                ? 'bg-accent/20 text-accent font-semibold'
-                : 'hover:bg-black/5 dark:hover:bg-white/5 opacity-80'
-            }`}
-          >
-            <FileCheck2 size={13} />
-            <span>{text('全书修订', 'Book Revision')}</span>
-          </button>
-        </div>
+        {/* 顶部主选项卡切换：按资料与来源 / 事实与检索 / 长篇控制与修订分组 */}
+        <WorkspaceTabNav
+          activeTab={activeTab}
+          onSelect={setActiveTab}
+          confirmedRulesCount={status?.confirmedRulesCount ?? 0}
+          pendingCandidatesCount={pendingCandidatesCount}
+          text={text}
+        />
       </div>
 
       {/* 主工作区内容区 */}

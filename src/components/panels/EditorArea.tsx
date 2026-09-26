@@ -86,22 +86,22 @@ function ProseEditorWrapper({
   }, [handleSave, onSave, tab.id, tab.projectKey, tab.type])
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className="w-full h-full flex flex-col overflow-hidden">
       {/* 顶部信息栏（背景与编辑区一致） */}
       <div
-        className="flex items-center justify-between px-3 h-9 flex-shrink-0"
+        className="flex items-center justify-between px-3.5 h-10 flex-shrink-0 transition-colors border-b select-none"
         style={{
-          borderBottom: '1px solid var(--color-border)',
+          borderColor: 'var(--editor-ruled-line, var(--color-border))',
           backgroundColor: 'var(--color-editor-bg)',
         }}
       >
         {/* 左侧：文件名 */}
-        <div className="min-w-0">
-          <span className="block text-xs truncate" style={{ color: 'var(--color-text-muted)' }}>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="block text-xs font-semibold truncate" style={{ color: 'var(--editor-ink-primary, var(--color-text))' }}>
             {fileName}
           </span>
           {unsavedOnly && (
-            <span className="block text-[10px]" style={{ color: 'var(--color-warning)' }}>
+            <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-[var(--editor-selection-bg,var(--color-hover))]" style={{ color: 'var(--color-warning-text)', border: '1px solid var(--color-warning)' }}>
               {text('项目恢复候选；不会自动写入正式草稿', 'Project recovery candidate; it is not written to the formal draft automatically')}
             </span>
           )}
@@ -110,14 +110,14 @@ function ProseEditorWrapper({
         {/* 右侧：字数 + dirty 指示灯 + 保存按钮 */}
         <div className="flex items-center gap-1.5 flex-shrink-0">
           {wordCount > 0 && (
-            <span className="text-xs tabular-nums" style={{ color: 'var(--color-text-muted)' }}>
+            <span className="text-xs font-mono tabular-nums" style={{ color: 'var(--editor-ink-muted, var(--color-text-muted))' }}>
               {text(`${wordCount.toLocaleString()} 字`, `${wordCount.toLocaleString()} words`)}
             </span>
           )}
           {/* 未保存圆点指示灯 */}
           {tab.dirty && (
             <span
-              className="w-1.5 h-1.5 rounded-full"
+              className="w-2 h-2 rounded-full flex-shrink-0 animate-pulse"
               style={{ backgroundColor: 'var(--color-warning)' }}
               title={text('有未保存的修改', 'Unsaved changes')}
             />
@@ -174,6 +174,8 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
   const sidebarView = useLayoutStore((s) => s.sidebarView)
   const focusMode = useLayoutStore((s) => s.focusMode)
   const toggleFocusMode = useLayoutStore((s) => s.toggleFocusMode)
+  const referencePanelOpen = useLayoutStore((s) => s.referencePanelOpen)
+  const toggleReferencePanel = useLayoutStore((s) => s.toggleReferencePanel)
 
 
 
@@ -576,11 +578,20 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
           })}
         </div>
 
-        {/* 右侧操作区：专注模式 + 上一个/下一个 + 已打开编辑器列表 */}
+        {/* 右侧操作区：参考上下文 + 专注模式 + 上一个/下一个 + 已打开编辑器列表 */}
         <div
           className="flex items-center flex-shrink-0 h-full gap-0.5 px-1"
           style={{ borderLeft: '1px solid var(--color-border)' }}
         >
+          <IconTooltip label={referencePanelOpen ? text('收起参考上下文', 'Collapse reference context') : text('展开参考上下文', 'Expand reference context')}>
+            <button
+              className={`icon-btn flex-shrink-0 ${referencePanelOpen ? 'text-[var(--color-accent)]' : ''}`}
+              onClick={toggleReferencePanel}
+              title={text(referencePanelOpen ? '收起参考上下文' : '展开参考上下文', referencePanelOpen ? 'Collapse reference context' : 'Expand reference context')}
+            >
+              <BookOpen size={14} />
+            </button>
+          </IconTooltip>
           <IconTooltip label={focusMode ? text('退出专注模式', 'Exit focus mode') : text('专注模式', 'Focus mode')}>
             <button
               className="icon-btn flex-shrink-0"

@@ -55,6 +55,36 @@ afterEach(() => {
 })
 
 describe('sidebar file openers keep the original project session', () => {
+  it('hydrates a draft tab from the authoritative body before opening it', async () => {
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'db:draft-get-full') return { content: '已保存的正文，不可空白覆盖' }
+      if (channel === 'db:draft-get-meta') return {
+        id: 7, chapterNumber: 3, version: 1, status: 'draft',
+      }
+      return null
+    })
+    vi.stubGlobal('window', {
+      velaAPI: {
+        invoke,
+        on: vi.fn(), once: vi.fn(), send: vi.fn(),
+        setZoomLevel: vi.fn(), setZoomFactor: vi.fn(), getZoomLevel: vi.fn(),
+      },
+    })
+
+    await openChapterFile('vela://draft/7', '第 3 章草稿')
+
+    expect(invoke).toHaveBeenCalledWith('db:draft-get-full', 7, projectPath, expect.objectContaining({ leaseId: 'lease-A' }))
+    expect(useEditorStore.getState().tabs).toEqual([
+      expect.objectContaining({
+        filePath: 'vela://draft/7',
+        content: '已保存的正文，不可空白覆盖',
+        savedContent: '已保存的正文，不可空白覆盖',
+        draftId: 7,
+        projectKey: projectPath,
+      }),
+    ])
+  })
+
   it('does not create a saved blank chapter tab when fs reports success:false', async () => {
     const invoke = vi.fn(async () => ({
       success: false,

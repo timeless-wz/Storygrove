@@ -72,11 +72,12 @@ beforeEach(async () => {
   document.body.append(container)
   root = createRoot(container)
 
-  invoke = vi.fn(async (channel: string) => {
+  invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
     if (channel === 'db:draft-get-meta') {
+      const draftId = args[0] === 11 ? 11 : 10
       return {
-        id: 10,
-        chapterNumber: 2,
+        id: draftId,
+        chapterNumber: draftId === 11 ? 3 : 2,
         version: 1,
         status: 'draft',
         source: 'write',
@@ -88,6 +89,13 @@ beforeEach(async () => {
     }
     if (channel === 'db:blueprint-get-all') return [{ chapterNumber: 2, title: '风暴降临' }]
     if (channel === 'db:draft-list') return [{ id: 10, version: 1 }]
+    if (channel === 'db:foreshadowing-list-by-draft') return []
+    if (channel === 'db:draft-get-latest') return args[0] === 3
+      ? { id: 11, chapterNumber: 3, version: 1, status: 'draft' }
+      : null
+    if (channel === 'db:draft-get-full') return args[0] === 11
+      ? { content: '# 第三章 雨夜' }
+      : { content: INITIAL_CONTENT }
     if (channel === 'db:revision-get-pending' || channel === 'db:review-list') return []
     if (channel === 'db:draft-update-content') return { success: true }
     if (channel === 'publication:publish') {
@@ -295,6 +303,33 @@ describe('DraftEditor Vditor integration', () => {
     await act(async () => {
       await vi.waitFor(() => expect(invoke.mock.calls.some(([channel]) => channel === 'publication:publish')).toBe(true))
     })
+  })
+
+  it('saves dirty prose before opening the next chapter', async () => {
+    await act(async () => root.render(
+      <DraftEditor
+        tabId={TAB_ID}
+        filePath={FILE_PATH}
+        content={INITIAL_CONTENT}
+        projectKey={PROJECT_PATH}
+      />,
+    ))
+    await typeIntoProse('\n\n新的结尾。')
+    await act(async () => {
+      await vi.waitFor(() => expect(useEditorStore.getState().tabs[0].dirty).toBe(true))
+    })
+
+    await act(async () => page.getByRole('button', { name: '下一章' }).click())
+    await act(async () => {
+      await vi.waitFor(() => {
+        const state = useEditorStore.getState()
+        expect(state.tabs.find(tab => tab.id === state.activeTabId)?.filePath).toBe('vela://draft/11')
+      })
+    })
+    const channels = invoke.mock.calls.map(([channel]) => channel)
+    expect(channels.indexOf('db:draft-update-content')).toBeGreaterThanOrEqual(0)
+    expect(channels.indexOf('db:draft-get-latest')).toBeGreaterThan(channels.indexOf('db:draft-update-content'))
+    expect(useEditorStore.getState().tabs.find(tab => tab.id === TAB_ID)?.dirty).toBe(false)
   })
 
   it('publishes a draft directly to the manuscript without starting the finalization workflow', async () => {

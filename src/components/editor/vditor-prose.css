@@ -7,46 +7,84 @@
  */
 
 .vditor-prose-host {
+  width: 100%;
   height: 100%;
   min-height: 0;
   overflow: hidden;
+  background-color: var(--color-editor-bg);
 }
 
 .vditor-prose-host .vditor {
-  /* 设计令牌映射：工具栏、正文面板、边框与图标色跟随皮肤。 */
-  --border-color: var(--color-border);
+  /* 设计令牌映射：工具栏、正文面板、边框与图标色跟随皮肤与墨色。 */
+  --border-color: var(--editor-ruled-line, var(--color-border));
   --panel-background-color: var(--color-editor-bg);
   --textarea-background-color: var(--color-editor-bg);
-  --textarea-text-color: var(--color-text);
+  --textarea-text-color: var(--editor-ink-primary, var(--color-text));
   --toolbar-background-color: var(--color-editor-bg);
-  --toolbar-icon-color: var(--color-text-secondary);
-  --toolbar-icon-hover-color: var(--color-accent);
-  --second-color: var(--color-text-muted);
+  --toolbar-icon-color: var(--editor-ink-muted, var(--color-text-secondary));
+  --toolbar-icon-hover-color: var(--editor-ink-primary, var(--color-accent));
+  --second-color: var(--editor-ink-muted, var(--color-text-muted));
 
+  width: 100%;
   height: 100%;
   border: none;
   border-radius: 0;
-  background-color: var(--color-editor-bg);
+  background-color: var(--bg-base, var(--color-editor-bg));
+  display: flex;
+  flex-direction: column;
 }
 
-/* 工具栏融入写作页顶部，不再有第二层边框。 */
+/* 工具栏融入写作页顶部，扁平轻量、精细微距 */
 .vditor-prose-host .vditor-toolbar {
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--editor-ruled-line, var(--color-border));
   background-color: var(--color-editor-bg);
+  padding: 3px 14px;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex-shrink: 0;
+}
+
+.vditor-prose-host .vditor-toolbar__item {
+  margin: 0;
+}
+
+.vditor-prose-host .vditor-toolbar__item button {
+  border-radius: var(--radius-sm, 4px);
+  padding: 4px 6px;
+  color: var(--editor-ink-muted, var(--color-text-secondary));
+  transition: background-color var(--transition-fast, 0.15s ease), color var(--transition-fast, 0.15s ease);
+}
+
+.vditor-prose-host .vditor-toolbar__item button:hover {
+  background-color: var(--editor-selection-bg, var(--color-hover));
+  color: var(--editor-ink-primary, var(--color-accent));
+}
+
+.vditor-prose-host .vditor-toolbar__item .vditor-tooltipped {
+  color: var(--editor-ink-muted, var(--color-text-secondary));
 }
 
 .vditor-prose-host .vditor-toolbar__item .vditor-tooltipped:hover {
-  color: var(--color-accent);
+  color: var(--editor-ink-primary, var(--color-accent));
 }
 
-/* 正文排版：写作字体、舒适行高、无横向溢出。 */
-.vditor-prose-host .vditor-reset {
-  font-family: var(--font-writing);
-  font-size: 16px;
-  line-height: 1.9;
-  color: var(--color-text);
-  overflow-wrap: break-word;
-  word-break: break-word;
+.vditor-prose-host .vditor-toolbar__divider {
+  height: 14px;
+  margin: 0 4px;
+  border-left: 1px solid var(--editor-ruled-line, var(--color-border));
+  opacity: 0.6;
+}
+
+/* 编辑内容视口容器：居中承托与纵向滚动 */
+.vditor-prose-host .vditor-content {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-base, var(--color-editor-bg));
 }
 
 .vditor-prose-host .vditor-ir,
@@ -54,12 +92,151 @@
 .vditor-prose-host .vditor-sv {
   overflow-y: auto;
   overflow-x: hidden;
+  width: 100%;
+  box-sizing: border-box;
+  background-color: var(--bg-base, var(--color-editor-bg));
+  cursor: text;
+  padding: 24px 16px 40px 16px;
 }
 
+/* 正文排版：860px 黄金阅读宽度居中、2.0 舒适行距、长篇小说呼吸感 */
+.vditor-prose-host .vditor-reset {
+  font-family: var(--font-writing);
+  font-size: 16.5px;
+  line-height: 2.0;
+  letter-spacing: 0.015em;
+  color: var(--editor-ink-primary, var(--color-text));
+  overflow-wrap: break-word;
+  word-break: break-word;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 居中纸面实体：纸张轻微浮动阴影与边框，还原真实文稿纸质感 */
 .vditor-prose-host .vditor-ir pre.vditor-reset,
 .vditor-prose-host .vditor-wysiwyg pre.vditor-reset {
   overflow-x: hidden;
-  caret-color: var(--color-editor-caret, var(--color-text));
+  caret-color: var(--editor-ink-primary, var(--color-editor-caret, var(--color-text)));
+  max-width: 860px;
+  min-height: calc(100% - 32px);
+  margin: 0 auto !important;
+  padding: 40px 48px 35vh 48px !important;
+  box-sizing: border-box;
+  background-color: var(--editor-solid-bg, var(--editor-page-bg, var(--color-editor-bg)));
+  border: 1px solid var(--editor-ruled-line, var(--color-border));
+  border-radius: var(--radius-md, 6px);
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 2px 6px -1px rgba(0, 0, 0, 0.03);
+}
+
+.vditor-prose-host textarea.vditor-sv {
+  max-width: 860px;
+  margin: 0 auto !important;
+  padding: 40px 48px !important;
+  box-sizing: border-box;
+  background-color: var(--editor-solid-bg, var(--editor-page-bg, var(--color-editor-bg))) !important;
+  color: var(--editor-ink-primary, var(--color-text)) !important;
+  caret-color: var(--editor-ink-primary, var(--color-editor-caret, var(--color-text)));
+  border: 1px solid var(--editor-ruled-line, var(--color-border));
+  border-radius: var(--radius-md, 6px);
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 2px 6px -1px rgba(0, 0, 0, 0.03);
+}
+
+/* 占位文字：确保在各类纸面墨色下具备舒适辨识度 */
+.vditor-prose-host .vditor-ir pre.vditor-reset:empty::before,
+.vditor-prose-host .vditor-wysiwyg pre.vditor-reset:empty::before,
+.vditor-prose-host .vditor-sv::placeholder {
+  color: var(--editor-ink-muted, var(--color-text-muted)) !important;
+  font-style: italic;
+  letter-spacing: 0.02em;
+  opacity: 0.72;
+}
+
+/* 窄窗口与小屏自适应：渐进收缩内边距，保持正文最大可读列宽不被挤压 */
+@media (max-width: 920px) {
+  .vditor-prose-host .vditor-ir,
+  .vditor-prose-host .vditor-wysiwyg,
+  .vditor-prose-host .vditor-sv {
+    padding: 12px 10px 30vh 10px;
+  }
+  .vditor-prose-host .vditor-ir pre.vditor-reset,
+  .vditor-prose-host .vditor-wysiwyg pre.vditor-reset,
+  .vditor-prose-host textarea.vditor-sv {
+    padding: 30px 24px 30vh 24px !important;
+    border-radius: var(--radius-sm, 4px);
+  }
+}
+
+@media (max-width: 640px) {
+  .vditor-prose-host .vditor-ir,
+  .vditor-prose-host .vditor-wysiwyg,
+  .vditor-prose-host .vditor-sv {
+    padding: 0;
+  }
+  .vditor-prose-host .vditor-ir pre.vditor-reset,
+  .vditor-prose-host .vditor-wysiwyg pre.vditor-reset,
+  .vditor-prose-host textarea.vditor-sv {
+    padding: 24px 16px 25vh 16px !important;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    box-shadow: none;
+  }
+}
+
+/* 中文长篇小说自然段落韵律 */
+.vditor-prose-host .vditor-reset p {
+  margin-top: 0;
+  margin-bottom: 0.85em;
+  text-align: justify;
+}
+
+/* 标题视觉阶梯：增加层次感与文学气质 */
+.vditor-prose-host .vditor-reset h1 {
+  font-size: 1.75em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-top: 1.8em;
+  margin-bottom: 0.8em;
+  color: var(--editor-ink-strong, var(--editor-ink-primary, var(--color-text)));
+  border-bottom: 1px solid var(--editor-ruled-line, var(--color-border));
+  padding-bottom: 0.35em;
+}
+
+.vditor-prose-host .vditor-reset h2 {
+  font-size: 1.4em;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  margin-top: 1.5em;
+  margin-bottom: 0.6em;
+  color: var(--editor-ink-strong, var(--editor-ink-primary, var(--color-text)));
+}
+
+.vditor-prose-host .vditor-reset h3 {
+  font-size: 1.2em;
+  font-weight: 600;
+  margin-top: 1.3em;
+  margin-bottom: 0.5em;
+  color: var(--editor-ink-strong, var(--editor-ink-primary, var(--color-text)));
+}
+
+/* 优雅引用块 */
+.vditor-prose-host .vditor-reset blockquote {
+  border-left: 3px solid var(--color-accent);
+  padding: 10px 18px;
+  margin: 1.2em 0;
+  color: var(--editor-ink-muted, var(--color-text-secondary));
+  background-color: var(--editor-selection-bg, var(--color-hover));
+  border-radius: 0 6px 6px 0;
+  max-width: 100%;
+}
+
+/* 分割线 */
+.vditor-prose-host .vditor-reset hr {
+  border: none;
+  border-top: 1px solid var(--editor-ruled-line, var(--color-border));
+  margin: 2.2em 0;
+  max-width: 100%;
+  opacity: 0.7;
 }
 
 /* 代码块与表格在窄窗口内自身横向滚动，正文列不被撑开。 */
@@ -74,8 +251,13 @@
   overflow-x: auto;
 }
 
-.vditor-prose-host ::selection {
-  background-color: var(--color-editor-selection, rgba(99, 102, 241, 0.2));
+.vditor-prose-host ::selection,
+.vditor-prose-host .vditor-reset ::selection,
+.vditor-prose-host .vditor-ir pre.vditor-reset ::selection,
+.vditor-prose-host .vditor-wysiwyg pre.vditor-reset ::selection,
+.vditor-prose-host textarea.vditor-sv::selection {
+  background-color: var(--color-editor-selection, var(--editor-selection-bg, rgba(99, 102, 241, 0.2)));
+  color: var(--editor-selection-text, var(--editor-ink-primary, inherit));
 }
 
 .vditor-prose-host .vditor-reset:focus {
@@ -89,10 +271,4 @@
 .vditor-prose-host textarea.vditor-sv[readonly] {
   opacity: 1;
   cursor: default;
-}
-
-/* 分割线、引用块等粗线元素在窄窗口里不产生横向滚动。 */
-.vditor-prose-host .vditor-reset hr,
-.vditor-prose-host .vditor-reset blockquote {
-  max-width: 100%;
 }

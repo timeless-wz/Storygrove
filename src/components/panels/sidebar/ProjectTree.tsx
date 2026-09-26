@@ -239,6 +239,10 @@ export default function ProjectTree() {
       chapterTitle: draft!.chapterTitle,
       blueprintChapterNumber: draft!.blueprintChapterNumber,
     }))
+  // 尚未定稿的章节数：草稿箱里还有稿子的章节，正文入口的进度提示。
+  const draftChapterCount = Object.values(draftsByChapter)
+    .filter(drafts => drafts.some(d => d.status !== 'archived' && d.status !== 'finalized'))
+    .length
 
   // 小说配置是否已完成（核心大纲非空视为已完成）
   const nc = currentProject.novelConfig
@@ -346,7 +350,7 @@ export default function ProjectTree() {
         onCleared={refreshAll}
       />
 
-      {/* 顶层导航 */}
+      {/* 顶层导航：项目总览固定在项目树最上方，其余五个分组按作者任务自上而下排列 */}
       <SidebarGroup className="py-0.5 px-1">
         <SidebarMenu>
           <SidebarMenuItem>
@@ -359,32 +363,33 @@ export default function ProjectTree() {
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarGroup>
+      <div
+        className="mx-3 my-1 border-t"
+        style={{ borderColor: 'var(--color-border)' }}
+        aria-hidden="true"
+      />
 
       {/* 1. 创作规划 */}
       <ProjectTreeCollapsibleGroup
         id="plan"
         title={text('创作规划', 'Writing plan')}
-        detail={text('章节蓝图与叙事线索', 'Chapter blueprints and narrative threads')}
+        detail={text(
+          '章节蓝图、章节脉络、故事时间线、伏笔管理与空间地图册',
+          'Chapter blueprints, chapter thread, story timeline, foreshadowing, and the spatial map atlas',
+        )}
         icon={Layers}
+        badge={blueprintCount > 0 ? text(`${blueprintCount} 章蓝图`, `${blueprintCount} blueprints`) : undefined}
         isOpen={projectTreeGroupOpen.plan ?? true}
         onOpenChange={(nextOpen) => setProjectTreeGroupOpen('plan', nextOpen)}
       >
         <SidebarMenuItem>
           <LeafItem
-            iconName="compass"
-            label={text('多地图地图册', 'Map atlas')}
-            desc={text('地点、势力与空间拓扑网络', 'Locations, factions, and spatial network')}
-            badge={mapNodes.length > 0 ? text(`${mapNodes.length} 处地点`, `${mapNodes.length} locations`) : text('待创建', 'Empty')}
-            badgeColor={mapNodes.length > 0 ? 'var(--color-accent)' : undefined}
-            badgeDone={mapNodes.length > 0}
-            onClick={openWorldMap}
-          />
-        </SidebarMenuItem>
-        <SidebarMenuItem>
-          <LeafItem
             iconName="layout-list"
             label={text('章节蓝图', 'Chapter blueprints')}
-            desc={text('1~58 章细纲与关键事件，可直接写正文', 'Chapters 1-58 detailed outlines, direct prose drafting')}
+            desc={text(
+              `逐章细纲、关键事件与作者微操指导；共 ${nc.totalChapters} 章，可直接从这里写正文`,
+              `Per-chapter outline, key events, and author guidance; ${nc.totalChapters} chapters, with direct drafting`,
+            )}
             badge={blueprintCount > 0 ? text(`${blueprintCount}/${nc.totalChapters} 章`, `${blueprintCount}/${nc.totalChapters} chapters`) : text('待生成', 'Pending')}
             badgeColor={
               blueprintCount >= nc.totalChapters
@@ -409,7 +414,10 @@ export default function ProjectTree() {
           <LeafItem
             iconName="git-branch"
             label={text('章节脉络', 'Chapter thread')}
-            desc={text('由章节蓝图确定性投影的章节事件与伏笔脉络，零模型依赖', 'Deterministic projection of blueprints into chapter events and setups')}
+            desc={text(
+              '由章节蓝图与定稿确定性投影出的章节事件、主线与伏笔脉络，零模型依赖',
+              'Deterministic projection of blueprints and finalized chapters into chapter events, main line, and setups',
+            )}
             onClick={() => openBuiltinEditor('narrative-thread-editor', text('章节脉络', 'Chapter thread'), 'narrative-thread')}
           />
         </SidebarMenuItem>
@@ -417,7 +425,10 @@ export default function ProjectTree() {
           <LeafItem
             iconName="clock-3"
             label={text('故事时间线', 'Story timeline')}
-            desc={text('手动刻度、自定义时间与故事事件', 'Manual ruler, custom time labels, and story events')}
+            desc={text(
+              '手动刻度、自定义时间与故事事件；作者自己排布的时间轴',
+              'Manual ruler, custom time labels, and story events arranged by the author',
+            )}
             onClick={openStoryTimeline}
           />
         </SidebarMenuItem>
@@ -425,13 +436,53 @@ export default function ProjectTree() {
           <LeafItem
             iconName="bookmark"
             label={text('伏笔管理', 'Foreshadowing')}
-            desc={text('章节伏笔、原文标注与回收追踪', 'Chapter foreshadowings, text annotations, and tracking')}
+            desc={text(
+              '正文原文锚定的伏笔标记：埋设、加深与回收追踪',
+              'Prose-anchored foreshadowing markers with setup, deepening, and payoff tracking',
+            )}
             onClick={openForeshadowing}
+          />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <LeafItem
+            iconName="compass"
+            label={text('多地图地图册', 'Map atlas')}
+            desc={text('地点、势力与空间拓扑网络', 'Locations, factions, and spatial network')}
+            badge={mapNodes.length > 0 ? text(`${mapNodes.length} 处地点`, `${mapNodes.length} locations`) : text('待创建', 'Empty')}
+            badgeColor={mapNodes.length > 0 ? 'var(--color-accent)' : undefined}
+            badgeDone={mapNodes.length > 0}
+            onClick={openWorldMap}
           />
         </SidebarMenuItem>
       </ProjectTreeCollapsibleGroup>
 
-      {/* 2. 故事设定 */}
+      {/* 2. 正文创作：紧跟创作规划，让写正文的入口在项目树上半部分就能看到 */}
+      <ProjectTreeCollapsibleGroup
+        id="manuscript"
+        title={text('正文创作', 'Manuscript')}
+        detail={text(
+          '草稿箱与正文章节；章节蓝图页的「写作第 N 章」也直达这里',
+          'Draft box and published chapters; the “Write Chapter N” action on the blueprint page lands here too',
+        )}
+        icon={PenTool}
+        badge={manuscriptFiles.length > 0 || draftChapterCount > 0
+          ? text(
+              `${draftChapterCount} 章草稿 · ${manuscriptFiles.length} 章正文`,
+              `${draftChapterCount} draft chapters · ${manuscriptFiles.length} published`,
+            )
+          : undefined}
+        isOpen={projectTreeGroupOpen.manuscript ?? true}
+        onOpenChange={(nextOpen) => setProjectTreeGroupOpen('manuscript', nextOpen)}
+      >
+        <SidebarMenuItem>
+          <DraftBoxGroup draftsByChapter={draftsByChapter} />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <ManuscriptGroup files={manuscriptFiles} projectPath={p} />
+        </SidebarMenuItem>
+      </ProjectTreeCollapsibleGroup>
+
+      {/* 3. 故事设定 */}
       <ProjectTreeCollapsibleGroup
         id="setting"
         title={text('故事设定', 'Story setup')}
@@ -550,23 +601,6 @@ export default function ProjectTree() {
           />
         </SidebarMenuItem>
       </ProjectTreeCollapsibleGroup>
-
-      {/* 5. 正文创作 */}
-      <ProjectTreeCollapsibleGroup
-        id="manuscript"
-        title={text('正文创作', 'Manuscript')}
-        detail={text('草稿与正文章节', 'Drafts and manuscript chapters')}
-        icon={PenTool}
-        isOpen={projectTreeGroupOpen.manuscript ?? true}
-        onOpenChange={(nextOpen) => setProjectTreeGroupOpen('manuscript', nextOpen)}
-      >
-        <SidebarMenuItem>
-          <DraftBoxGroup draftsByChapter={draftsByChapter} />
-        </SidebarMenuItem>
-        <SidebarMenuItem>
-          <ManuscriptGroup files={manuscriptFiles} projectPath={p} />
-        </SidebarMenuItem>
-      </ProjectTreeCollapsibleGroup>
     </div>
   )
 }
@@ -576,6 +610,7 @@ function ProjectTreeCollapsibleGroup({
   title,
   detail,
   icon: Icon,
+  badge,
   isOpen,
   onOpenChange,
   children,
@@ -584,6 +619,8 @@ function ProjectTreeCollapsibleGroup({
   title: string
   detail?: string
   icon: React.ComponentType<{ size?: number; className?: string; style?: React.CSSProperties }>
+  /** 纯文本进度摘要；分组标题栏内不放任何按钮。 */
+  badge?: string
   isOpen: boolean
   onOpenChange: (nextOpen: boolean) => void
   children: React.ReactNode
@@ -602,8 +639,18 @@ function ProjectTreeCollapsibleGroup({
               <Icon size={14} className="flex-shrink-0 text-[var(--color-text-muted)] group-hover/trigger:text-[var(--color-text)] transition-colors" />
               <span className="truncate tracking-wide font-medium">{title}</span>
             </span>
-            <span className="flex-shrink-0 ml-1 text-[var(--color-text-muted)] group-hover/trigger:text-[var(--color-text)] transition-colors">
-              {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+            <span className="flex flex-shrink-0 items-center gap-1.5 ml-1">
+              {badge && (
+                <span
+                  className="truncate max-w-[9rem] text-[0.7rem] font-normal tabular-nums text-[var(--color-text-muted)] group-hover/trigger:text-[var(--color-text-secondary)] transition-colors"
+                  data-group-badge={id}
+                >
+                  {badge}
+                </span>
+              )}
+              <span className="text-[var(--color-text-muted)] group-hover/trigger:text-[var(--color-text)] transition-colors">
+                {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+              </span>
             </span>
           </CollapsibleTrigger>
         </SidebarGroupLabel>

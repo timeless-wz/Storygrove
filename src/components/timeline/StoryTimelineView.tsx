@@ -22,14 +22,17 @@ import {
   Clock3,
   GitBranch,
   Maximize2,
+  Pencil,
+  Plus,
   Settings2,
+  Trash2,
 } from 'lucide-react'
 import type {
   StoryTimelineEvent,
   StoryTimelineEventStatus,
   StoryTimelineMention,
 } from '../../shared/story-timeline'
-import { STORY_TIMELINE_MAIN_BRANCH_ID } from '../../shared/story-timeline'
+import { STORY_TIMELINE_MAIN_BRANCH_ID, STORY_TIMELINE_STATUS_LABELS } from '../../shared/story-timeline'
 import { useStoryTimelineStore } from '../../stores/story-timeline-store'
 import { useWorldMapStore } from '../../stores/world-map-store'
 import { useCharacterStore } from '../../stores/character-store'
@@ -38,6 +41,15 @@ import { useProjectStore } from '../../stores/project-store'
 import { useLocaleStore } from '../../stores/locale-store'
 import { Button } from '../ui/Button'
 import { toast } from '../ui/Toast'
+import {
+  PlanningPageShell,
+  PlanningPane,
+  PlanningSearch,
+  PlanningChipGroup,
+  PlanningListRow,
+  PlanningEmptyState,
+} from '../planning/PlanningPageShell'
+import { usePlanningBackPath } from '../planning/planning-navigation'
 import {
   buildStoryTimelineLayout,
   sortTimelineEvents,
@@ -312,6 +324,7 @@ export default function StoryTimelineView({
   onNavigateMention?: (mention: StoryTimelineMention) => void
 }) {
   const text = useLocaleStore(s => s.text)
+  const backPath = usePlanningBackPath()
   const currentProject = useProjectStore(s => s.currentProject)
   const settings = useStoryTimelineStore(s => s.settings)
   const branches = useStoryTimelineStore(s => s.branches)
@@ -326,15 +339,23 @@ export default function StoryTimelineView({
   const upsertBranch = useStoryTimelineStore(s => s.upsertBranch)
   const setBranchExpanded = useStoryTimelineStore(s => s.setBranchExpanded)
   const loadWorldMap = useWorldMapStore(s => s.loadAll)
+  const worldMapNodes = useWorldMapStore(s => s.nodes)
 
   const flowInstanceRef = useRef<ReactFlowInstance<TimelineNode, TimelineEdge> | null>(null)
   const [rangeModalOpen, setRangeModalOpen] = useState(false)
   const [rangeModalFocus, setRangeModalFocus] = useState<'start' | 'end' | 'general'>('general')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  /** 清单请求把画布视线移到某个事件；nonce 让同一事件被重复点击时也会再次定位。 */
+  const [centerRequest, setCenterRequest] = useState<{ eventId: string | null; nonce: number }>({ eventId: null, nonce: 0 })
 
   // 浮层上下文菜单与编辑弹窗状态
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [modalState, setModalState] = useState<ModalState>({ open: false, mode: 'create-main' })
+
+  // 左侧事件清单：搜索与按状态 / 主线支线筛选
+  const [searchQuery, setSearchQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | StoryTimelineEventStatus>('all')
+  const [branchFilter, setBranchFilter] = useState<string>('all')
 
   /**
    * 提及只是一条导航入口，不能凭空创建人物或写入人物事实。若调用者没有
@@ -395,6 +416,86 @@ export default function StoryTimelineView({
   const layout = useMemo(() => {
     return buildStoryTimelineLayout(events, branches, expandedBranchIds, settings)
   }, [events, branches, expandedBranchIds, settings])
+
+  const branchNameById = useMemo(() => {
+    const names = new Map<string, string>()
+    for (const branch of branches) names.set(branch.id, branch.name)
+    return names
+  }, [branches])
+
+  const statusLabel = useCallback((status: StoryTimelineEventStatus) => {
+    const label = STORY_TIMELINE_STATUS_LABELS[status]
+    return text(label.zh, label.en)
+  }, [text])
+
+  /** 左侧清单：搜索 + 状态筛选 + 主线/支线筛选，三者都作用在自己的数据上。 */
+  const listedEvents = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    return orderedEvents.filter(event => {
+      const branchId = event.branchId || STORY_TIMELINE_MAIN_BRANCH_ID
+      if (branchFilter !== 'all' && branchId !== branchFilter) return false
+      if (statusFilter !== 'all' && event.status !== statusFilter) return false
+      if (query && !(
+        event.title.toLowerCase().includes(query)
+        || event.timeLabel.toLowerCase().includes(query)
+      )) return false
+      return true
+    })
+  }, [orderedEvents, branchFilter, statusFilter, searchQuery])
+
+  /** 按主线 / 支线分组，只保留筛选后仍有事件的分组。 */
+  const listedEventGroups = useMemo(() => {
+    const groups: Array<{ id: string; name: string; events: StoryTimelineEvent[] }> = []
+    const mainEvents = listedEvents.filter(
+      event => (event.branchId || STORY_TIMELINE_MAIN_BRANCH_ID) === STORY_TIMELINE_MAIN_BRANCH_ID,
+    )
+    if (mainEvents.length > 0) {
+      groups.push({ id: STORY_TIMELINE_MAIN_BRANCH_ID, name: text('主轴事件', 'Main axis'), events: mainEvents })
+    }
+    for (const branch of branches) {
+      if (branch.id === STORY_TIMELINE_MAIN_BRANCH_ID) continue
+      const branchEvents = listedEvents.filter(event => event.branchId === branch.id)
+      if (branchEvents.length === 0) continue
+      groups.push({ id: branch.id, name: branch.name, events: branchEvents })
+    }
+    return groups
+  }, [listedEvents, branches, text])
+
+  const selectedEvent = useMemo(
+    () => events.find(event => event.id === selectedId) ?? null,
+    [events, selectedId],
+  )
+
+  const listFilterActive = statusFilter !== 'all' || branchFilter !== 'all' || searchQuery.trim() !== ''
+
+  /**
+   * 在清单里选中事件：同时展开它所在的支线，并请求画布把视线移到它上面。
+   *
+   * 这里只记录「本次要定位的事件 id」；真正的视口移动放在 effect 里、拿到
+   * React Flow 实例之后再执行，事件回调本身不读取 ref。
+   */
+  const focusEventFromList = useCallback((eventId: string) => {
+    setSelectedId(eventId)
+    const event = events.find(item => item.id === eventId)
+    if (!event) return
+    const branchId = event.branchId || STORY_TIMELINE_MAIN_BRANCH_ID
+    if (branchId !== STORY_TIMELINE_MAIN_BRANCH_ID && !expandedBranchIds.includes(branchId)) {
+      setBranchExpanded(branchId, true)
+    }
+    setCenterRequest(current => ({ eventId, nonce: current.nonce + 1 }))
+  }, [events, expandedBranchIds, setBranchExpanded])
+
+  useEffect(() => {
+    if (!centerRequest.eventId) return
+    const placed = layout.events.find(item => item.id === centerRequest.eventId)
+    const instance = flowInstanceRef.current
+    if (!placed || !instance) return
+    instance.setCenter(
+      placed.x + placed.width / 2,
+      placed.y + placed.height / 2,
+      { zoom: instance.getZoom(), duration: 250 },
+    )
+  }, [centerRequest, layout])
 
   const flowNodes = useMemo<TimelineNode[]>(() => {
     const startAnchorNode: TimelineNode = {
@@ -599,20 +700,21 @@ export default function StoryTimelineView({
   }
 
   // 节点右键：弹出节点上下文菜单
-  const handleNodeContextMenu = (e: React.MouseEvent, node: Node) => {
+  const handleNodeContextMenu = (e: React.MouseEvent, node: TimelineNode) => {
     e.preventDefault()
     e.stopPropagation()
     if (node.type === 'timeline-event') {
       setContextMenu({
         x: e.clientX,
         y: e.clientY,
-        targetEventId: (node.data as any).eventId,
+        targetEventId: node.data.eventId ?? null,
         targetAnchor: null,
         suggestedOrder: null,
         canCreateEventAtPosition: false,
       })
     } else if (node.type === 'timeline-anchor') {
-      const anchorType = (node.data as any).anchorType as 'start' | 'end'
+      const anchorType = node.data.anchorType
+      if (!anchorType) return
       setContextMenu({
         x: e.clientX,
         y: e.clientY,
@@ -636,25 +738,25 @@ export default function StoryTimelineView({
   const isDataReady = dataProjectKey === projectKey
 
   return (
-    <div
-      className="writer-timeline h-full overflow-hidden flex flex-col"
-      style={{ backgroundColor: 'var(--color-editor-bg)', color: 'var(--color-text)' }}
-    >
-      <div className="writer-timeline-shell flex-1 flex flex-col min-h-0">
-        <header className="writer-timeline-header">
-          <div>
-            <div className="writer-timeline-eyebrow">
-              <Clock3 size={14} /> {text('创作规划 / 故事时间树', 'Story Timeline Tree')}
-            </div>
-            <h1>{settings.title}</h1>
-            <p>
-              {text(
-                '记录小说重大事件与多重分支。主轴向右推进，锚点界定故事范围；右键空白处或事件可快捷新增。',
-                'Track major events and branches. Anchors define story range; right-click to add.',
-              )}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
+    <>
+      <PlanningPageShell
+        breadcrumb={[
+          { label: backPath.overviewLabel, onClick: backPath.openOverview },
+          { label: backPath.planLabel, onClick: backPath.revealWritingPlan },
+          { label: text('故事时间线', 'Story timeline') },
+        ]}
+        icon={<Clock3 size={15} />}
+        title={settings.title}
+        description={text(
+          '作者手动排布的故事时间轴：刻度、自定义时间与事件都由你填写，不依赖蓝图或 AI。主轴向右推进，锚点界定故事范围。',
+          'A story timeline arranged by the author: ruler, custom time labels, and events are all entered by hand, independent of blueprints or AI. The axis advances rightwards while anchors bound the story range.',
+        )}
+        meta={text(
+          `${events.length} 个事件 · ${branches.length} 条支线`,
+          `${events.length} events · ${branches.length} branches`,
+        )}
+        actions={
+          <>
             <Button
               variant="outline"
               size="sm"
@@ -674,10 +776,129 @@ export default function StoryTimelineView({
             >
               <Maximize2 size={13} /> {text('适应视图', 'Fit view')}
             </Button>
-          </div>
-        </header>
+          </>
+        }
+      >
+        <PlanningPane
+          title={text('事件与支线', 'Events & branches')}
+          icon={<GitBranch size={12} />}
+          width={250}
+          actions={
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={() => {
+                setSelectedId(null)
+                setModalState({ open: true, mode: 'create-main', initialSortOrder: nextMainOrder })
+              }}
+              title={text('新建主轴事件', 'New main-axis event')}
+              aria-label={text('新建主轴事件', 'New main-axis event')}
+            >
+              <Plus size={13} />
+            </Button>
+          }
+          filters={
+            <>
+              <PlanningSearch
+                value={searchQuery}
+                onChange={setSearchQuery}
+                placeholder={text('搜索标题或时间…', 'Search title or time…')}
+              />
+              <PlanningChipGroup
+                value={statusFilter}
+                onChange={setStatusFilter}
+                ariaLabel={text('事件状态筛选', 'Event status filter')}
+                options={[
+                  { value: 'all', label: text('全部', 'All') },
+                  { value: 'planned', label: statusLabel('planned') },
+                  { value: 'drafted', label: statusLabel('drafted') },
+                  { value: 'finalized', label: statusLabel('finalized') },
+                ]}
+              />
+              {branches.length > 0 && (
+                <PlanningChipGroup
+                  value={branchFilter}
+                  onChange={setBranchFilter}
+                  ariaLabel={text('主线与支线筛选', 'Main line and branch filter')}
+                  options={[
+                    { value: 'all', label: text('全部线路', 'All lines') },
+                    { value: STORY_TIMELINE_MAIN_BRANCH_ID, label: text('仅主轴', 'Main axis') },
+                    ...branches
+                      .filter(branch => branch.id !== STORY_TIMELINE_MAIN_BRANCH_ID)
+                      .map(branch => ({ value: branch.id, label: branch.name })),
+                  ]}
+                />
+              )}
+            </>
+          }
+          footer={text(
+            `显示 ${listedEvents.length} / ${events.length} 个事件`,
+            `Showing ${listedEvents.length} of ${events.length} events`,
+          )}
+        >
+          {listedEventGroups.length === 0 ? (
+            <PlanningEmptyState
+              icon={<Clock3 size={20} />}
+              title={events.length === 0
+                ? text('时间线上还没有事件', 'No timeline events yet')
+                : text('没有符合筛选的事件', 'No events match the filters')}
+              description={events.length === 0
+                ? text(
+                    '时间线只记录你自己排布的剧情时间，画布上不会预置任何占位事件。',
+                    'The timeline only holds events you arrange; no placeholder events are pre-filled.',
+                  )
+                : text('可以调整搜索词，或切换状态与线路筛选。', 'Adjust the search term, or switch the status and line filters.')}
+              steps={events.length === 0 ? [
+                text('先在「刻度设置」里确定故事开端与结束，界定时间范围；', 'Set the story start and end in “Ruler settings” to bound the range.'),
+                text('再在画布右键主干选择「添加事件」，或点下方「新建事件」。', 'Right-click the trunk in the canvas to add an event, or use “New event” below.'),
+              ] : undefined}
+              actions={events.length === 0 ? (
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedId(null)
+                    setModalState({ open: true, mode: 'create-main', initialSortOrder: nextMainOrder })
+                  }}
+                >
+                  <Plus size={13} /> {text('新建事件', 'New event')}
+                </Button>
+              ) : listFilterActive ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setSearchQuery('')
+                    setStatusFilter('all')
+                    setBranchFilter('all')
+                  }}
+                >
+                  {text('清除筛选', 'Clear filters')}
+                </Button>
+              ) : undefined}
+            />
+          ) : listedEventGroups.map(group => (
+            <div key={group.id}>
+              <div className="planning-pane__group-label">{group.name}</div>
+              {group.events.map(event => (
+                <PlanningListRow
+                  key={event.id}
+                  selected={selectedId === event.id}
+                  onSelect={() => focusEventFromList(event.id)}
+                  onDoubleClick={() => setModalState({ open: true, mode: 'edit', initialEvent: event })}
+                  icon={<span className={`writer-timeline-status-dot is-${event.status}`} aria-hidden="true" />}
+                  title={event.title || text('未命名事件', 'Untitled event')}
+                  subtitle={event.timeLabel || text('未填写时间', 'No time label')}
+                  titleAttr={text('单击定位到画布，双击编辑事件', 'Click to locate on the canvas, double-click to edit')}
+                  trailing={<span className="planning-tag">{statusLabel(event.status)}</span>}
+                />
+              ))}
+            </div>
+          ))}
+        </PlanningPane>
 
-        <div className="writer-timeline-workspace flex-1 flex flex-col min-h-0">
+        <main className="planning-page__main">
           <section
             className="writer-timeline-canvas flex-1 flex flex-col min-h-0"
             aria-label={text('故事时间轴', 'Story timeline')}
@@ -716,21 +937,24 @@ export default function StoryTimelineView({
                   onNodeContextMenu={handleNodeContextMenu}
                   onNodeClick={(_event, node) => {
                     if (node.type === 'timeline-event') {
-                      setSelectedId((node.data as any).eventId)
+                      setSelectedId(node.data.eventId ?? null)
                     }
                   }}
                   onNodeDoubleClick={(_event, node) => {
                     if (node.type === 'timeline-event') {
-                      const target = events.find(e => e.id === (node.data as any).eventId)
+                      const target = events.find(e => e.id === node.data.eventId)
                       if (target) {
                         setModalState({ open: true, mode: 'edit', initialEvent: target })
                       }
                     } else if (node.type === 'timeline-anchor') {
-                      setRangeModalFocus((node.data as any).anchorType)
+                      if (!node.data.anchorType) return
+                      setRangeModalFocus(node.data.anchorType)
                       setRangeModalOpen(true)
                     }
                   }}
-                  minZoom={0.2}
+                  // 时间轴按刻度 160px 展开，故事范围大时总宽可达数千像素；
+                  // 允许缩到 0.05 才能把整条主轴框进视口。
+                  minZoom={0.05}
                   maxZoom={2.0}
                   panOnDrag={true}
                   zoomOnScroll={true}
@@ -744,15 +968,119 @@ export default function StoryTimelineView({
                     variant={BackgroundVariant.Dots}
                     gap={18}
                     size={1}
-                    color="var(--color-border-subtle, #d1d5db)"
+                    color="var(--color-border)"
                   />
                   <Controls showInteractive={false} position="bottom-right" />
                 </ReactFlow>
               </div>
             )}
           </section>
-        </div>
-      </div>
+
+          {selectedEvent && (
+            <aside className="planning-timeline-detail" data-testid="timeline-event-detail">
+              <div className="planning-pane__header">
+                <span className="planning-pane__title">
+                  <span className={`writer-timeline-status-dot is-${selectedEvent.status}`} aria-hidden="true" />
+                  {text('事件详情', 'Event detail')}
+                </span>
+                <span className="planning-pane__actions">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={() => setModalState({ open: true, mode: 'edit', initialEvent: selectedEvent })}
+                    title={text('编辑事件', 'Edit event')}
+                    aria-label={text('编辑事件', 'Edit event')}
+                  >
+                    <Pencil size={13} />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={() => { void deleteEvent(selectedEvent.id) }}
+                    title={text('删除事件', 'Delete event')}
+                    aria-label={text('删除事件', 'Delete event')}
+                  >
+                    <Trash2 size={13} />
+                  </Button>
+                </span>
+              </div>
+              <div className="planning-timeline-detail__body">
+                <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
+                  {selectedEvent.title || text('未命名事件', 'Untitled event')}
+                </h3>
+                <p className="mt-1 text-xs" style={{ color: 'var(--color-accent)' }}>
+                  {selectedEvent.timeLabel || text('未填写时间', 'No time label')}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <span className="planning-tag">{statusLabel(selectedEvent.status)}</span>
+                  <span className="planning-tag is-muted">
+                    {(selectedEvent.branchId || STORY_TIMELINE_MAIN_BRANCH_ID) === STORY_TIMELINE_MAIN_BRANCH_ID
+                      ? text('主轴', 'Main axis')
+                      : branchNameById.get(selectedEvent.branchId!) ?? text('支线', 'Branch')}
+                  </span>
+                </div>
+                {selectedEvent.description
+                  ? (
+                    <p className="mt-3 whitespace-pre-wrap text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                      {selectedEvent.description}
+                    </p>
+                  )
+                  : (
+                    <p className="mt-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                      {text('这条事件还没有描述。双击画布标注或点上方铅笔补充。', 'This event has no description yet. Double-click its label on the canvas, or use the pencil above.')}
+                    </p>
+                  )}
+                <dl className="mt-4 space-y-1.5 text-[11px]">
+                  <div className="flex gap-2">
+                    <dt style={{ color: 'var(--color-text-muted)' }}>{text('关联章节', 'Chapters')}</dt>
+                    <dd style={{ color: 'var(--color-text)' }}>
+                      {selectedEvent.chapterNumbers.length > 0
+                        ? selectedEvent.chapterNumbers.map(number => text(`第${number}章`, `Ch.${number}`)).join('、')
+                        : text('未关联', 'None')}
+                    </dd>
+                  </div>
+                  <div className="flex gap-2">
+                    <dt style={{ color: 'var(--color-text-muted)' }}>{text('涉及角色', 'Characters')}</dt>
+                    <dd style={{ color: 'var(--color-text)' }}>
+                      {selectedEvent.characterNames.length > 0
+                        ? selectedEvent.characterNames.join('、')
+                        : text('未关联', 'None')}
+                    </dd>
+                  </div>
+                  <div className="flex gap-2">
+                    <dt style={{ color: 'var(--color-text-muted)' }}>{text('涉及地点', 'Locations')}</dt>
+                    <dd style={{ color: 'var(--color-text)' }}>
+                      {selectedEvent.locationNodeIds.length > 0
+                        ? selectedEvent.locationNodeIds
+                            .map(id => worldMapNodes.find(node => node.id === id)?.name ?? id)
+                            .join('、')
+                        : text('未关联', 'None')}
+                    </dd>
+                  </div>
+                </dl>
+                <div className="mt-4 flex flex-wrap gap-1.5">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleCreateBranchFromEvent(selectedEvent.id)}
+                  >
+                    <GitBranch size={13} /> {text('创建支线', 'Create branch')}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setModalState({ open: true, mode: 'create-next', sourceEvent: selectedEvent })}
+                  >
+                    <Plus size={13} /> {text('在此后添加事件', 'Add event after')}
+                  </Button>
+                </div>
+              </div>
+            </aside>
+          )}
+        </main>
+      </PlanningPageShell>
 
       {/* 画布右键浮层菜单 */}
       {contextMenu && (
@@ -850,6 +1178,6 @@ export default function StoryTimelineView({
           await saveSettings(newSettings)
         }}
       />
-    </div>
+    </>
   )
 }

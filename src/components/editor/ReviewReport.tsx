@@ -349,6 +349,7 @@ function ReviewReportSession({
   initialSnapshot,
 }: ReviewReportSessionProps) {
   const text = useLocaleStore(s => s.text)
+  const intentionalMarker = text('【有意安排】', '[Intentional]')
   const parsedReport = parseReport(reportText, text('综合检查', 'General review'))
   const [items, setItems] = useState<EditableReviewItem[]>(() => (
     editableItemsFromReview(parsedReport.issues, initialSnapshot)
@@ -856,7 +857,9 @@ function ReviewReportSession({
                               </>
                             ) : (
                               <div>
-                                <span className="text-[var(--color-text-secondary)]">{item.description}</span>
+                                <span className="text-[var(--color-text-secondary)]">
+                                  {item.description.replace(/【有意安排】|\[Intentional\]/g, intentionalMarker)}
+                                </span>
                                 <span className={cn('ml-2 text-[0.65rem] opacity-70', meta.colorClass)}>
                                   [{copy.actionLabel}]
                                 </span>
@@ -917,9 +920,9 @@ function ReviewReportSession({
                                     onClick={() => {
                                       updateItem(item.id, {
                                         decision: 'ignore',
-                                        description: item.description.includes('【有意安排】')
+                                        description: /【有意安排】|\[Intentional\]/.test(item.description)
                                           ? item.description
-                                          : `${item.description} 【有意安排】`,
+                                          : `${item.description} ${intentionalMarker}`,
                                       })
                                       toast.success(text('已标记为有意安排', 'Marked as intentional'))
                                     }}

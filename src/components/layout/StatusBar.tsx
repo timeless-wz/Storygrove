@@ -32,6 +32,9 @@ export default function StatusBar() {
   const toggleSidebar = useLayoutStore(s => s.toggleSidebar)
   const toggleReferencePanel = useLayoutStore(s => s.toggleReferencePanel)
   const openRightPanel = useLayoutStore(s => s.openRightPanel)
+  const aiPanelOpen = useLayoutStore(s => s.aiPanelOpen)
+  const rightView = useLayoutStore(s => s.rightView)
+  const toggleAIPanel = useLayoutStore(s => s.toggleAIPanel)
   const bottomPanelOpen = useLayoutStore(s => s.bottomPanelOpen)
   const bottomTab = useLayoutStore(s => s.bottomTab)
   const totalWords = useMemo(
@@ -71,7 +74,16 @@ export default function StatusBar() {
         <StatusBarSegment title={text('显示或隐藏上下文检视', 'Show or hide context inspector')} onClick={toggleReferencePanel}>
           <PanelRight size={12} />
         </StatusBarSegment>
-        <StatusBarSegment title={text('打开 AI 助手', 'Open AI assistant')} onClick={() => openRightPanel('agent')}>
+        <StatusBarSegment
+          title={text(aiPanelOpen && rightView === 'agent' ? '收起 AI 助手' : '打开 AI 助手', aiPanelOpen && rightView === 'agent' ? 'Collapse AI assistant' : 'Open AI assistant')}
+          onClick={() => {
+            if (aiPanelOpen && rightView === 'agent') {
+              toggleAIPanel()
+            } else {
+              openRightPanel('agent')
+            }
+          }}
+        >
           <Bot size={12} />
         </StatusBarSegment>
         {activeTab?.type === 'chapter' && <StatusBarSegment title={text('当前章字数', 'Current chapter words')}>

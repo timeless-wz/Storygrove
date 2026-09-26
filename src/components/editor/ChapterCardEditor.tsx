@@ -52,6 +52,15 @@ import {
 } from './chapter-card-draft-ledger'
 import { LatestRequestGate } from './latest-request-gate'
 import {
+  PlanningPageShell,
+  PlanningPane,
+  PlanningSearch,
+  PlanningChipGroup,
+  PlanningListRow,
+  PlanningEmptyState,
+} from '../planning/PlanningPageShell'
+import { revealSidebarGroup, usePlanningBackPath } from '../planning/planning-navigation'
+import {
   AuthoritativeChapterSequenceError,
   readAuthoritativeNextChapter,
 } from '../../services/authoritative-chapter-sequence'
@@ -107,6 +116,7 @@ export default function ChapterCardEditor({
 }) {
   const text = useLocaleStore(s => s.text)
   const locale = useLocaleStore(s => s.locale)
+  const backPath = usePlanningBackPath()
   const currentProject = useProjectStore(s => s.currentProject)
   const draftsByChapter = useDraftStore(s => s.draftsByChapter)
   const worldMapNodes = useWorldMapStore(s => s.nodes)
@@ -118,6 +128,9 @@ export default function ChapterCardEditor({
   const [selectedVolumeId, setSelectedVolumeId] = useState(DEFAULT_VOLUME_ID)
   const [collapsedVolumeIds, setCollapsedVolumeIds] = useState<Set<string>>(() => new Set())
   const [selectedIdx, setSelectedIdx] = useState<number>(0)
+  // 卷 / 章节清单的搜索与写作状态筛选
+  const [searchQuery, setSearchQuery] = useState('')
+  const [draftFilter, setDraftFilter] = useState<'all' | 'no-draft' | 'has-draft'>('all')
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [dirtyChapterNumbers, setDirtyChapterNumbers] = useState<Set<number>>(() => new Set())
@@ -666,7 +679,10 @@ export default function ChapterCardEditor({
       if (!isCurrentProjectSession(projectSession)) return
       useEditorStore.getState().openFile({
         id: existingDraft.filePath,
-        name: `第${bp.chapterNumber}章 · ${bp.title || '未命名'} v${existingDraft.version}`,
+        name: text(
+          `第${bp.chapterNumber}章 · ${bp.title || '未命名'} v${existingDraft.version}`,
+          `Chapter ${bp.chapterNumber} · ${bp.title || 'Untitled'} v${existingDraft.version}`,
+        ),
         type: 'chapter',
         filePath: existingDraft.filePath,
         content,
@@ -679,6 +695,13 @@ export default function ChapterCardEditor({
       })
       toast.success(text(`已打开第 ${bp.chapterNumber} 章正文草稿`, `Opened draft for Chapter ${bp.chapterNumber}`))
     } else {
+      if (nextWriteChapter === null || bp.chapterNumber !== nextWriteChapter) {
+        toast.warning(authorityError || text(
+          `当前只可新建第 ${nextWriteChapter ?? '—'} 章正文，请先检查定稿章节顺序。`,
+          `Only Chapter ${nextWriteChapter ?? '—'} can be started now. Check the finalized chapter sequence first.`,
+        ))
+        return
+      }
       const result = await ipc.invokeWithProjectSession(
         projectSession,
         'db:draft-create',
@@ -705,7 +728,10 @@ export default function ChapterCardEditor({
       const draftPath = `vela://draft/${result.id}`
       useEditorStore.getState().openFile({
         id: draftPath,
-        name: `第${bp.chapterNumber}章 · ${bp.title || '未命名'} v1`,
+        name: text(
+          `第${bp.chapterNumber}章 · ${bp.title || '未命名'} v1`,
+          `Chapter ${bp.chapterNumber} · ${bp.title || 'Untitled'} v1`,
+        ),
         type: 'chapter',
         filePath: draftPath,
         content: '',
@@ -787,53 +813,72 @@ export default function ChapterCardEditor({
   const canRecoverLegacyImportedText = projectDataReady
     && legacyImportedTextRecoveryChapter !== null
 
+  const hasDraftFor = (blueprint: ChapterBlueprint) =>
+    (draftsByChapter[blueprint.chapterNumber]?.length ?? 0) > 0
+  const canOpenOrCreateDraft = (blueprint: ChapterBlueprint) =>
+    hasDraftFor(blueprint) || (nextWriteChapter !== null && blueprint.chapterNumber === nextWriteChapter)
+
+  const matchesListFilter = (blueprint: ChapterBlueprint) => {
+    if (draftFilter === 'no-draft' && hasDraftFor(blueprint)) return false
+    if (draftFilter === 'has-draft' && !hasDraftFor(blueprint)) return false
+    const query = searchQuery.trim().toLowerCase()
+    if (query && !(
+      String(blueprint.chapterNumber).includes(query)
+      || (blueprint.title || '').toLowerCase().includes(query)
+    )) return false
+    return true
+  }
+
+  const hasDraftCount = visibleBlueprints.filter(hasDraftFor).length
+  const noDraftCount = visibleBlueprints.length - hasDraftCount
+  const filteredBlueprintCount = visibleBlueprints.filter(matchesListFilter).length
+  const listFilterActive = draftFilter !== 'all' || searchQuery.trim() !== ''
+
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      {/* 顶部工具栏 */}
-      <div
-        className="flex items-center justify-between gap-2 px-3 h-10 flex-shrink-0 border-b"
-        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-sidebar)' }}
-      >
-        <div className="flex items-center gap-1.5">
-          <BookOpen size={13} style={{ color: 'var(--color-text-muted)' }} />
-          <span className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
-            {text('章节蓝图', 'Chapter blueprints')}
-            {visibleBlueprints.length > 0 && (
-              <span style={{ color: 'var(--color-text-muted)' }} className="ml-1 font-normal">
-                {text(`(${visibleBlueprints.length} 章)`, `(${visibleBlueprints.length} chapters)`)}
-              </span>
-            )}
-          </span>
-          {visibleDirty && (
-            <span className="inline-flex items-center gap-1 text-[0.7rem]" style={{ color: 'var(--color-accent)' }}>
-              <span
-                aria-hidden="true"
-                className="h-1.5 w-1.5 rounded-full"
-                style={{ backgroundColor: 'currentColor' }}
-              />
-              {text('未保存', 'Unsaved')}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-1">
-          {/* 正文写作入口 — 当前选中章节直接打开或新建正文 */}
-          {projectDataReady && selected && (
+    <PlanningPageShell
+      breadcrumb={[
+        { label: backPath.overviewLabel, onClick: backPath.openOverview },
+        { label: backPath.planLabel, onClick: backPath.revealWritingPlan },
+        { label: text('章节蓝图', 'Chapter blueprints') },
+      ]}
+      icon={<BookOpen size={15} />}
+      title={text('章节蓝图', 'Chapter blueprints')}
+      description={text(
+        '逐章细纲：作者先在这里写清每章的小目标、冲突转折、悬念钩子与微操指导，它同时是 AI 写正文和人工写正文的共同依据。章节号是稳定标识，不与正文草稿共用存储。',
+        'Per-chapter outlines: write each chapter’s goal, conflict, hook, and author guidance here. This is the shared basis for both AI and manual drafting. Chapter numbers are stable identifiers and are stored separately from prose drafts.',
+      )}
+      meta={text(
+        `${visibleBlueprints.length} 章蓝图 · ${hasDraftCount} 章已写正文`,
+        `${visibleBlueprints.length} blueprints · ${hasDraftCount} with drafts`,
+      )}
+      actions={
+        <>
+          {projectDataReady && selected && canOpenOrCreateDraft(selected) && (
             <Button
               variant="default"
               size="sm"
               onClick={() => handleOpenOrNewDraft(selected)}
               title={
-                (draftsByChapter[selected.chapterNumber]?.length ?? 0) > 0
+                hasDraftFor(selected)
                   ? text(`打开第 ${selected.chapterNumber} 章正文草稿`, `Open Chapter ${selected.chapterNumber} draft`)
                   : text(`为第 ${selected.chapterNumber} 章新建空白草稿并直接开始写作`, `Create blank draft and write Chapter ${selected.chapterNumber}`)
               }
             >
               <PenLine size={12} />
-              {(draftsByChapter[selected.chapterNumber]?.length ?? 0) > 0
+              {hasDraftFor(selected)
                 ? text(`打开第${selected.chapterNumber}章正文`, `Open Chapter ${selected.chapterNumber}`)
                 : text(`新建第${selected.chapterNumber}章正文`, `New Chapter ${selected.chapterNumber}`)}
             </Button>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => revealSidebarGroup('manuscript')}
+            title={text('在项目树中展开草稿箱与正文章节', 'Reveal the draft box and manuscript in the project tree')}
+          >
+            <PenLine size={12} />
+            {text('正文创作', 'Manuscript')}
+          </Button>
           <Button variant="ghost" size="icon" onClick={() => loadBlueprints()} title={text('重新加载', 'Reload')} disabled={loading}>
             <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
           </Button>
@@ -845,120 +890,160 @@ export default function ChapterCardEditor({
             title={text('清空全部章节蓝图', 'Clear all chapter blueprints')}
           >
             <Trash2 size={12} />
-            {text('清空全部蓝图', 'Clear all blueprints')}
+            {text('清空全部蓝图', 'Clear all')}
           </Button>
           {visibleDirty && (
             <Button variant="outline" size="sm" onClick={handleSaveAll} disabled={saving || !projectDataReady}>
             <Save size={12} /> {saving ? text('保存中...', 'Saving...') : text('保存全部', 'Save all')}
             </Button>
           )}
-        </div>
-      </div>
-
-      {canRecoverLegacyImportedText && (
-        <div
-          className="flex flex-wrap items-center justify-between gap-3 border-b px-3 py-2 text-xs"
-          style={{
-            borderColor: 'color-mix(in srgb, var(--color-warning) 42%, var(--color-border))',
-            backgroundColor: 'color-mix(in srgb, var(--color-warning) 8%, transparent)',
-          }}
-        >
-          <div className="flex min-w-0 items-start gap-2" style={{ color: 'var(--color-text-secondary)' }}>
-            <AlertTriangle size={15} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--color-warning)' }} />
-            <p className="max-w-3xl leading-5">
-              {text(
-                `检测到后续正文但第 ${legacyImportedTextRecoveryChapter} 章尚未写作，可能是旧版“小说拆解与仿写”误导入的参考原文。系统不会自动清除任何内容；确认“清除误导入正文”后会保留角色、故事架构、章节蓝图与知识库，并可从第 ${legacyImportedTextRecoveryChapter} 章开始写作。`,
-                `Later manuscript text exists while Chapter ${legacyImportedTextRecoveryChapter} has not been written. This may be reference text incorrectly imported by a legacy “Novel analysis and imitation” workflow. Nothing is cleared automatically; after you confirm “Clear incorrectly imported text”, characters, story architecture, chapter blueprints, and the knowledge base are kept, and you can start writing from Chapter ${legacyImportedTextRecoveryChapter}.`,
-              )}
-            </p>
-          </div>
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={handleClearLegacyImportedText}
-            disabled={recoveringLegacyImportedText}
-          >
-            <Trash2 size={12} />
-            {recoveringLegacyImportedText
-              ? text('清除中...', 'Clearing...')
-              : text('清除误导入正文', 'Clear incorrectly imported text')}
-          </Button>
-        </div>
-      )}
-
-      {projectDataReady && authorityError && !canRecoverLegacyImportedText && (
-        <div
-          className="flex items-start gap-2 border-b px-3 py-2 text-xs"
-          style={{
-            color: 'var(--color-warning-text)',
-            borderColor: 'color-mix(in srgb, var(--color-warning) 42%, var(--color-border))',
-            backgroundColor: 'color-mix(in srgb, var(--color-warning) 8%, transparent)',
-          }}
-        >
-          <AlertTriangle size={15} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--color-warning)' }} />
-          <p className="leading-5">{authorityError}</p>
-        </div>
-      )}
-
-      {/* 主区域：左侧列表 + 右侧编辑 */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* 左侧卷 / 章节目录 */}
-        <div
-          className="flex flex-col flex-shrink-0 w-[232px] border-r overflow-hidden"
-          style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-sidebar)' }}
-        >
-          <div className="flex items-center justify-between gap-2 border-b px-2.5 py-2" style={{ borderColor: 'var(--color-border)' }}>
-            <span className="text-xs font-semibold" style={{ color: 'var(--color-text)' }}>{text('卷与章节', 'Volumes & chapters')}</span>
-            <div className="flex items-center gap-1">
+        </>
+      }
+      banner={
+        <>
+          {canRecoverLegacyImportedText && (
+            <div
+              className="planning-page__banner flex-wrap items-center justify-between gap-3"
+              style={{
+                borderColor: 'color-mix(in srgb, var(--color-warning) 42%, var(--color-border))',
+                backgroundColor: 'color-mix(in srgb, var(--color-warning) 8%, transparent)',
+              }}
+            >
+              <div className="flex min-w-0 items-start gap-2" style={{ color: 'var(--color-text-secondary)' }}>
+                <AlertTriangle size={15} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--color-warning)' }} />
+                <p className="max-w-3xl leading-5">
+                  {text(
+                    `检测到后续正文但第 ${legacyImportedTextRecoveryChapter} 章尚未写作，可能是旧版“小说拆解与仿写”误导入的参考原文。系统不会自动清除任何内容；确认“清除误导入正文”后会保留角色、故事架构、章节蓝图与知识库，并可从第 ${legacyImportedTextRecoveryChapter} 章开始写作。`,
+                    `Later manuscript text exists while Chapter ${legacyImportedTextRecoveryChapter} has not been written. This may be reference text incorrectly imported by a legacy “Novel analysis and imitation” workflow. Nothing is cleared automatically; after you confirm “Clear incorrectly imported text”, characters, story architecture, chapter blueprints, and the knowledge base are kept, and you can start writing from Chapter ${legacyImportedTextRecoveryChapter}.`,
+                  )}
+                </p>
+              </div>
               <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={() => void handleAddVolume()}
-                disabled={!projectDataReady}
-                title={text('新增卷', 'Add volume')}
-                aria-label={text('新增卷', 'Add volume')}
+                variant="destructive"
+                size="sm"
+                onClick={handleClearLegacyImportedText}
+                disabled={recoveringLegacyImportedText}
               >
-                <FolderPlus size={14} />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={handleAddChapter}
-                disabled={!projectDataReady || nextWriteChapter === null || Boolean(authorityError)}
-                title={text('在当前卷新增章节', 'Add chapter to current volume')}
-                aria-label={text('在当前卷新增章节', 'Add chapter to current volume')}
-              >
-                <Plus size={14} />
+                <Trash2 size={12} />
+                {recoveringLegacyImportedText
+                  ? text('清除中...', 'Clearing...')
+                  : text('清除误导入正文', 'Clear incorrectly imported text')}
               </Button>
             </div>
-          </div>
-          {volumes.length === 0 ? (
-            <div className="flex flex-col items-center justify-center flex-1 gap-3 opacity-40 p-4">
-              <BookOpen size={28} />
-              <span className="text-xs text-center">{text(
-                '暂无章节。可先新增卷，再用上方「+」在该卷中添加章节；也可用「AI 生成蓝图」批量创建。',
-                'No chapters yet. Add a volume, then use “+” above to add chapters to it, or generate a batch with AI.',
-              )}</span>
+          )}
+
+          {projectDataReady && authorityError && !canRecoverLegacyImportedText && (
+            <div
+              className="planning-page__banner"
+              style={{
+                color: 'var(--color-warning-text)',
+                borderColor: 'color-mix(in srgb, var(--color-warning) 42%, var(--color-border))',
+                backgroundColor: 'color-mix(in srgb, var(--color-warning) 8%, transparent)',
+              }}
+            >
+              <AlertTriangle size={15} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--color-warning)' }} />
+              <p className="leading-5">{authorityError}</p>
             </div>
-          ) : (
-           <div className="flex-1 overflow-y-auto p-1">
+          )}
+        </>
+      }
+    >
+      <PlanningPane
+        title={text('卷与章节', 'Volumes & chapters')}
+        icon={<BookOpen size={12} />}
+        width={252}
+        actions={
+          <>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={() => void handleAddVolume()}
+              disabled={!projectDataReady}
+              title={text('新建卷', 'New volume')}
+              aria-label={text('新建卷', 'New volume')}
+            >
+              <FolderPlus size={13} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={handleAddChapter}
+              disabled={!projectDataReady || nextWriteChapter === null || Boolean(authorityError)}
+              title={text('新建章节', 'New chapter')}
+              aria-label={text('新建章节', 'New chapter')}
+            >
+              <Plus size={13} />
+            </Button>
+          </>
+        }
+        filters={
+          <>
+            <PlanningSearch
+              value={searchQuery}
+              onChange={setSearchQuery}
+              placeholder={text('搜索章节号或标题…', 'Search chapter number or title…')}
+            />
+            <PlanningChipGroup
+              value={draftFilter}
+              onChange={setDraftFilter}
+              ariaLabel={text('写作状态筛选', 'Writing status filter')}
+              options={[
+                { value: 'all', label: text('全部', 'All'), count: visibleBlueprints.length },
+                { value: 'no-draft', label: text('待写作', 'No draft'), count: noDraftCount },
+                { value: 'has-draft', label: text('有正文', 'Has draft'), count: hasDraftCount },
+              ]}
+            />
+          </>
+        }
+        footer={text(
+          `显示 ${filteredBlueprintCount} / ${visibleBlueprints.length} 章`,
+          `Showing ${filteredBlueprintCount} of ${visibleBlueprints.length} chapters`,
+        )}
+      >
+        {visibleBlueprints.length === 0 && !listFilterActive ? (
+          <PlanningEmptyState
+            icon={<BookOpen size={20} />}
+            title={text('暂无蓝图', 'No blueprints yet')}
+            description={text(
+              '章节蓝图按「卷」组织：先建卷，再往卷里加章节，然后逐章填写细纲。',
+              'Blueprints are organized by volume: create a volume, add chapters to it, then fill in each chapter’s outline.',
+            )}
+            steps={[
+              text('点上方文件夹图标新建一卷；', 'Use the folder icon above to create a volume.'),
+              text('点「+」在当前卷新增章节；', 'Use “+” to add a chapter to the current volume.'),
+              text('在右侧填写本章小目标、冲突与钩子。', 'Fill in the goal, conflict, and hook on the right.'),
+            ]}
+            actions={
+              <>
+                <Button variant="default" size="sm" onClick={() => void handleAddVolume()} disabled={!projectDataReady}>
+                  <FolderPlus size={13} /> {text('新建卷', 'New volume')}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAddChapter}
+                  disabled={!projectDataReady || nextWriteChapter === null || Boolean(authorityError)}
+                >
+                  <Plus size={13} /> {text('新建章节', 'New chapter')}
+                </Button>
+              </>
+            }
+          />
+        ) : (
+           <div>
              {volumes.map(volume => {
                const volumeBlueprints = visibleBlueprints
                  .map((blueprint, index) => ({ blueprint, index }))
                  .filter(({ blueprint }) => blueprintVolumeId(blueprint) === volume.id)
+                 .filter(({ blueprint }) => matchesListFilter(blueprint))
                const collapsed = collapsedVolumeIds.has(volume.id)
                return (
                  <div key={volume.id} className="mb-1">
                    <button
                      type="button"
-                     className={cn(
-                       'flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors',
-                       selectedVolumeId === volume.id
-                         ? 'bg-[var(--color-hover)] text-[var(--color-text)]'
-                         : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]',
-                     )}
+                     className={cn('planning-volume-row', selectedVolumeId === volume.id && 'is-selected')}
                      onClick={() => {
                        setSelectedVolumeId(volume.id)
                        setCollapsedVolumeIds(current => {
@@ -973,53 +1058,50 @@ export default function ChapterCardEditor({
                      {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
                      <BookOpen size={13} className="opacity-70" />
                      <span className="flex-1 truncate font-semibold">{volume.name}</span>
-                     <span className="text-[10px] opacity-50">{volumeBlueprints.length}</span>
+                     <span className="text-[10px] opacity-60">{volumeBlueprints.length}</span>
                    </button>
                    {!collapsed && (
-                     <div className="ml-2 border-l pl-1" style={{ borderColor: 'var(--color-border)' }}>
+                     <div className="planning-volume-body">
                        {volumeBlueprints.length === 0 ? (
-                         <p className="px-2 py-1.5 text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
-                           {text('暂无章节', 'No chapters')}
+                         <p className="px-2 py-1.5 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+                           {listFilterActive
+                             ? text('本卷没有符合筛选的章节', 'No chapters in this volume match the filters')
+                             : text('本卷暂无章节', 'No chapters in this volume')}
                          </p>
-                       ) : volumeBlueprints.map(({ blueprint: bp, index: idx }) => (
-                         <div
-                           key={bp.chapterNumber}
-                           className={cn(
-                             'group relative px-2 py-1.5 rounded-md text-xs cursor-pointer mb-0.5 transition-colors',
-                             selectedIdx === idx
-                               ? 'bg-[var(--color-active)] text-[var(--color-text)]'
-                               : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]',
-                           )}
-                           onClick={() => { setSelectedIdx(idx); setSelectedVolumeId(volume.id) }}
-                           onDoubleClick={() => void handleOpenOrNewDraft(bp)}
-                           title={text('单击查看/编辑蓝图，双击打开正文', 'Click to view/edit blueprint, double click to open draft')}
-                         >
-                           <div className="flex items-center gap-1.5">
-                             <span className="font-mono text-[0.7rem] opacity-40 flex-shrink-0">{bp.chapterNumber}</span>
-                             <span className="font-medium truncate flex-1">{bp.title || text('未命名', 'Untitled')}</span>
-                           </div>
-                           <div className="flex items-center gap-1 mt-0.5 flex-wrap">
-                             <span className={cn('text-[0.7rem] px-1 py-0.5 rounded', ROLE_COLORS[bp.role] || 'bg-[var(--color-hover)] text-[var(--color-text-muted)]')}>
-                               {roleLabel(bp.role)}
-                             </span>
-                             <span className="text-[0.7rem] px-1 py-0.5 rounded font-mono opacity-60" style={{ backgroundColor: 'var(--color-hover)', color: 'var(--color-text-muted)' }}>
-                               {(draftsByChapter[bp.chapterNumber]?.length ?? 0) > 0 ? text('有正文', 'Draft') : text('待写作', 'No draft')}
-                             </span>
-                             {bp.userGuidance && <span className="text-[0.7rem] px-1 py-0.5 rounded" style={{ backgroundColor: 'rgba(var(--accent-rgb), 0.15)', color: 'var(--color-accent)' }}>{text('有指导', 'Guidance')}</span>}
-                           </div>
-                         </div>
-                       ))}
+                       ) : volumeBlueprints.map(({ blueprint: bp, index: idx }) => {
+                         const hasDraft = hasDraftFor(bp)
+                         const subtitle = [
+                           hasDraft ? text('有正文', 'Has draft') : text('待写作', 'No draft'),
+                           bp.userGuidance ? text('有指导', 'Guidance') : '',
+                         ].filter(Boolean).join(' · ')
+                         return (
+                           <PlanningListRow
+                             key={bp.chapterNumber}
+                             selected={selectedIdx === idx}
+                             onSelect={() => { setSelectedIdx(idx); setSelectedVolumeId(volume.id) }}
+                             onDoubleClick={() => void handleOpenOrNewDraft(bp)}
+                             icon={<span className="planning-tag is-muted font-mono">{bp.chapterNumber}</span>}
+                             title={bp.title || text('未命名', 'Untitled')}
+                             subtitle={subtitle}
+                             titleAttr={text('单击查看/编辑蓝图，双击打开正文', 'Click to view/edit the blueprint, double-click to open the draft')}
+                             trailing={
+                               <span className={cn('text-[10px] px-1.5 py-0.5 rounded', ROLE_COLORS[bp.role] || 'planning-tag')}>
+                                 {roleLabel(bp.role)}
+                               </span>
+                             }
+                           />
+                         )
+                       })}
                      </div>
                    )}
                  </div>
                )
              })}
            </div>
-          )}
-        </div>
+        )}
+      </PlanningPane>
 
-        {/* 右侧编辑区 */}
-        <div className="flex-1 overflow-y-auto">
+      <main className="planning-page__main planning-page__scroll">
           {selected ? (
             <div className="max-w-2xl mx-auto px-5 py-4">
               {/* 编辑区头部 */}
@@ -1031,7 +1113,7 @@ export default function ChapterCardEditor({
                   )}
                 </h3>
                 <div className="flex items-center gap-1.5">
-                  <Button
+                  {canOpenOrCreateDraft(selected) && <Button
                     variant="default"
                     size="sm"
                     onClick={() => handleOpenOrNewDraft(selected)}
@@ -1045,7 +1127,7 @@ export default function ChapterCardEditor({
                     {(draftsByChapter[selected.chapterNumber]?.length ?? 0) > 0
                       ? text('打开正文草稿', 'Open draft')
                       : text('新建正文草稿', 'New draft')}
-                  </Button>
+                  </Button>}
                   <Button variant="destructive" size="sm" onClick={handleDeleteChapter} title={text('删除此章', 'Delete this chapter')}>
                     <Trash2 size={12} />
                     {text('删除此章', 'Delete chapter')}
@@ -1280,13 +1362,32 @@ export default function ChapterCardEditor({
               </div>
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center h-full gap-3 opacity-30">
-              <BookOpen size={36} />
-              <span className="text-sm">{text('在左侧选择一章开始编辑', 'Choose a chapter on the left to start editing')}</span>
-            </div>
+            <PlanningEmptyState
+              icon={<BookOpen size={20} />}
+              title={text('在左侧选择一章开始编辑', 'Choose a chapter on the left to start editing')}
+              description={text(
+                '右侧会显示这一章的细纲字段：小目标、冲突转折、悬念钩子、作者微操指导与关联地图节点。',
+                'The detail pane shows this chapter’s outline fields: goal, conflict, hook, author guidance, and linked map nodes.',
+              )}
+              steps={visibleBlueprints.length === 0 ? [
+                text('先在左侧新建一卷，再新增章节；', 'Create a volume on the left, then add chapters to it.'),
+                text('选中章节后填写细纲，保存后即可写正文。', 'Select a chapter, fill in the outline, save, then start drafting.'),
+              ] : [
+                text('在左侧点选章节（双击可直达正文草稿）；', 'Click a chapter on the left (double-click to open its draft).'),
+                text('修改后点「保存」或「保存全部」。', 'After editing, click “Save” or “Save all”.'),
+              ]}
+              actions={visibleBlueprints.length === 0 ? (
+                <Button variant="default" size="sm" onClick={() => void handleAddVolume()} disabled={!projectDataReady}>
+                  <FolderPlus size={13} /> {text('新建卷', 'New volume')}
+                </Button>
+              ) : (
+                <Button variant="outline" size="sm" onClick={() => revealSidebarGroup('manuscript')}>
+                  <PenLine size={13} /> {text('打开正文创作', 'Open manuscript')}
+                </Button>
+              )}
+            />
           )}
-        </div>
-      </div>
-    </div>
+      </main>
+    </PlanningPageShell>
   )
 }

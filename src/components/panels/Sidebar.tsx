@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect } from 'react'
-import { ArrowLeft, FolderOpen, Home, Search } from 'lucide-react'
+import { ArrowLeft, Compass, Database, FileText, FolderOpen, Home, Search, Users } from 'lucide-react'
 import { useLayoutStore } from '../../stores/layout-store'
 import { useProjectStore } from '../../stores/project-store'
 import { ipc } from '../../services/ipc-client'
@@ -94,11 +94,37 @@ export default function Sidebar() {
           </div>
         </SidebarHeader>
       ) : effectiveView !== 'home' ? (
-        <SidebarHeader className="panel-header flex items-center gap-1">
-          <button type="button" className="writer-command-button" title={text('返回项目资源树', 'Back to project resources')} onClick={() => setSidebarView('project')}>
-            <ArrowLeft size={14} />
-          </button>
-          <span>{viewTitles[effectiveView]}</span>
+        <SidebarHeader className="writer-project-sidebar-header writer-project-sidebar-header--compact">
+          <div className="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              className="writer-command-button group flex items-center gap-1.5 px-2 py-1 -ml-1 rounded-md text-xs font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text)] hover:bg-[var(--color-hover)] active:scale-[0.97] transition-all duration-150 cursor-pointer select-none"
+              title={text(currentProject ? `返回「${currentProject.name}」创作` : '返回项目资源树', currentProject ? `Return to ${currentProject.name}` : 'Back to project resources')}
+              aria-label={text('返回创作', 'Return to project')}
+              onClick={() => setSidebarView('project')}
+            >
+              <ArrowLeft
+                size={14}
+                className="transition-transform duration-150 group-hover:-translate-x-0.5 text-[var(--color-text-muted)] group-hover:text-[var(--color-text)] flex-shrink-0"
+              />
+              <span className="truncate">{text('返回创作', 'Return to project')}</span>
+            </button>
+            <div className="flex items-center gap-1.5 min-w-0 flex-shrink-0">
+              <span
+                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold tracking-wide"
+                style={{
+                  backgroundColor: 'var(--color-badge-bg)',
+                  color: 'var(--color-accent)',
+                }}
+              >
+                {effectiveView === 'characters' && <Users size={12} className="flex-shrink-0" />}
+                {effectiveView === 'documents' && <FileText size={12} className="flex-shrink-0" />}
+                {effectiveView === 'knowledge' && <Database size={12} className="flex-shrink-0" />}
+                {effectiveView === 'workspace' && <Compass size={12} className="flex-shrink-0" />}
+                <span className="truncate">{viewTitles[effectiveView]}</span>
+              </span>
+            </div>
+          </div>
         </SidebarHeader>
       ) : (
         <SidebarHeader className="writer-project-sidebar-header writer-project-sidebar-header--compact">
@@ -129,7 +155,7 @@ export default function Sidebar() {
           </div>
         </SidebarHeader>
       )}
-      <SidebarContent className="flex-1 py-1">
+      <SidebarContent className={`flex-1 ${effectiveView === 'project' || effectiveView === 'home' ? 'py-1' : 'py-0'}`}>
         {effectiveView === 'home'       && <HomeSidebarPanel />}
         {effectiveView === 'project'    && <ProjectTree />}
         {effectiveView === 'workspace'  && <WorkspaceSidebarPanel />}

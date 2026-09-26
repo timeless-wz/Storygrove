@@ -4,8 +4,11 @@ import { useLocaleStore } from '../../stores/locale-store'
 import { useThemeStore } from '../../stores/theme-store'
 import {
   LITERARY_THEMES,
+  BASE_THEMES,
+  ALL_THEMES,
   THEME_GROUPS,
   type ThemeGroup,
+  type ThemeItem,
 } from '../../shared/literary-themes'
 import { cn } from '../../lib/utils'
 
@@ -14,21 +17,111 @@ export function ThemeGallery() {
   const { text } = useLocaleStore()
   const [selectedGroup, setSelectedGroup] = useState<ThemeGroup>('全部')
 
-  const filteredThemes = useMemo(() => {
+  const filteredLiterary = useMemo(() => {
     if (selectedGroup === '全部') return LITERARY_THEMES
     return LITERARY_THEMES.filter((item) => item.group === selectedGroup)
   }, [selectedGroup])
 
+  const filteredBase = useMemo(() => {
+    if (selectedGroup === '全部') return BASE_THEMES
+    return BASE_THEMES.filter((item) => item.group === selectedGroup)
+  }, [selectedGroup])
+
   const activeThemeName = useMemo(() => {
-    const found = LITERARY_THEMES.find((item) => item.id === theme)
-    if (found) return found.name
-    // Fallback labels for legacy themes
+    const found = ALL_THEMES.find((item) => item.id === theme)
+    if (found) return text(found.name, found.nameEn)
     if (theme === 'light') return text('亮色白昼', 'Light')
     if (theme === 'paper') return text('温润纸面', 'Paper')
     if (theme === 'dark') return text('深沉黑夜', 'Dark')
     if (theme === 'galaxy') return text('星辰暗夜', 'Galaxy')
     return theme
   }, [theme, text])
+
+  const renderThemeCard = (item: ThemeItem) => {
+    const isCurrent = theme === item.id
+    const displayName = text(item.name, item.nameEn)
+    const displayDesc = text(item.description, item.descriptionEn)
+    return (
+      <button
+        key={item.id}
+        type="button"
+        data-theme={item.id}
+        data-theme-option={item.id}
+        aria-pressed={isCurrent}
+        onClick={() => setTheme(item.id)}
+        className={cn(
+          'group relative text-left rounded-xl p-2.5 border transition-all duration-150 flex flex-col gap-2',
+          isCurrent
+            ? 'ring-2 shadow-sm'
+            : 'hover:border-[var(--color-accent)] hover:shadow-xs'
+        )}
+        style={{
+          borderColor: isCurrent ? 'var(--color-accent)' : 'var(--color-border)',
+          background: 'var(--color-panel)',
+          ...(isCurrent ? { '--tw-ring-color': 'var(--color-accent)' } : {}),
+        }}
+      >
+        {/* 微型实时样本渲染：同时呈现外壳、纸面、文字和强调按钮 */}
+        <span
+          className="theme-sample w-full"
+          data-theme-swatch={item.id}
+          aria-hidden="true"
+        >
+          <span className="theme-sample-nav">
+            <i />
+            <i />
+            <i />
+          </span>
+          <span className="theme-sample-paper">
+            <b>{displayName}</b>
+            <i />
+            <i />
+            <i />
+            <em className="theme-sample-btn">
+              {item.isDark ? text('暗夜', 'Night') : text('试读', 'Read')}
+            </em>
+          </span>
+        </span>
+
+        {/* 标题与描述 */}
+        <div className="px-1 pb-0.5 min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 truncate">
+              <span
+                className="font-medium text-xs truncate"
+                style={{ color: 'var(--color-text)' }}
+              >
+                {displayName}
+              </span>
+              {'isBase' in item && item.isBase && (
+                <span
+                  className="text-[10px] px-1.5 py-0.5 rounded font-normal"
+                  style={{ background: 'var(--color-hover)', color: 'var(--color-text-muted)' }}
+                >
+                  {text('基础', 'Base')}
+                </span>
+              )}
+            </div>
+            {isCurrent && (
+              <span
+                className="inline-flex items-center justify-center w-4 h-4 rounded-full flex-shrink-0"
+                style={{ background: 'var(--color-accent)', color: 'var(--color-accent-foreground)' }}
+                aria-label={text('当前使用', 'Active')}
+              >
+                <Check size={11} strokeWidth={2.5} />
+              </span>
+            )}
+          </div>
+          <span
+            className="block text-2xs truncate mt-0.5"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            {displayDesc}
+          </span>
+        </div>
+      </button>
+    )
+  }
 
   return (
     <div className="space-y-4" aria-labelledby="theme-gallery-heading">
@@ -40,7 +133,7 @@ export function ThemeGallery() {
             {text('文学主题画廊', 'Literary Theme Gallery')}
           </h3>
           <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'var(--color-badge-bg)', color: 'var(--color-badge-text)' }}>
-            {text(`共 ${LITERARY_THEMES.length} 套`, `${LITERARY_THEMES.length} Themes`)}
+            {text('共 14 套文学 · 4 套基础', '14 Literary · 4 Base Themes')}
           </span>
         </div>
 
@@ -87,81 +180,44 @@ export function ThemeGallery() {
 
       {/* 主题卡片网格 */}
       <div
-        className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 max-h-[380px] overflow-y-auto pr-1 pb-1"
+        className="max-h-[460px] overflow-y-auto pr-1 pb-1 space-y-4"
         role="group"
         aria-label={text('主题选择', 'Theme Selection')}
         style={{ scrollbarWidth: 'thin' }}
       >
-        {filteredThemes.map((item) => {
-          const isCurrent = theme === item.id
-          return (
-            <button
-              key={item.id}
-              type="button"
-              data-theme-option={item.id}
-              aria-pressed={isCurrent}
-              onClick={() => setTheme(item.id)}
-              className={cn(
-                'group relative text-left rounded-xl p-2.5 border transition-all duration-150 flex flex-col gap-2',
-                isCurrent
-                  ? 'ring-2 shadow-sm'
-                  : 'hover:border-[var(--color-accent)] hover:shadow-xs'
-              )}
-              style={{
-                borderColor: isCurrent ? 'var(--color-accent)' : 'var(--color-border)',
-                background: 'var(--color-panel)',
-                ...(isCurrent ? { '--tw-ring-color': 'var(--color-accent)' } : {}),
-              }}
-            >
-              {/* 微型实时样本渲染 */}
-              <span
-                className="theme-sample w-full"
-                data-theme-swatch={item.id}
-                aria-hidden="true"
-              >
-                <span className="theme-sample-nav">
-                  <i />
-                  <i />
-                  <i />
-                </span>
-                <span className="theme-sample-paper">
-                  <b>{item.name}</b>
-                  <i />
-                  <i />
-                  <i />
-                  <em />
-                </span>
+        {/* 文学主题分组 */}
+        {filteredLiterary.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between px-1">
+              <span className="text-xs font-semibold" style={{ color: 'var(--color-text)' }}>
+                {text('文学典藏', 'Literary Collection')}
               </span>
+              <span className="text-2xs" style={{ color: 'var(--color-text-muted)' }}>
+                {text(`共 ${filteredLiterary.length} 套`, `${filteredLiterary.length} themes`)}
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              {filteredLiterary.map(renderThemeCard)}
+            </div>
+          </div>
+        )}
 
-              {/* 标题与描述 */}
-              <div className="px-1 pb-0.5 min-w-0">
-                <div className="flex items-center justify-between gap-2">
-                  <span
-                    className="font-medium text-xs truncate"
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    {item.name}
-                  </span>
-                  {isCurrent && (
-                    <span
-                      className="inline-flex items-center justify-center w-4 h-4 rounded-full flex-shrink-0"
-                      style={{ background: 'var(--color-accent)', color: 'var(--color-accent-foreground)' }}
-                      aria-label={text('当前使用', 'Active')}
-                    >
-                      <Check size={11} strokeWidth={2.5} />
-                    </span>
-                  )}
-                </div>
-                <span
-                  className="block text-2xs truncate mt-0.5"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                >
-                  {item.description}
-                </span>
-              </div>
-            </button>
-          )
-        })}
+        {/* 基础主题分组 */}
+        {filteredBase.length > 0 && (
+          <div className="space-y-2 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
+            <div className="flex items-center justify-between px-1">
+              <span className="text-xs font-semibold" style={{ color: 'var(--color-text)' }}>
+                {text('经典基础', 'Classic Base')}
+              </span>
+              <span className="text-2xs" style={{ color: 'var(--color-text-muted)' }}>
+                {text(`纯色基底 (${filteredBase.length} 套)`, `Monochrome (${filteredBase.length} themes)`)}
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              {filteredBase.map(renderThemeCard)}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 当前主题提示 */}

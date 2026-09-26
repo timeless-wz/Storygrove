@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { CheckCircle2, Clock3, Loader2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { CheckCircle2, Clock3, GitBranch, Loader2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
 
 import type { DatabaseChannels, ModelProfile } from '../../shared/ipc-channels'
 import {
@@ -47,6 +47,14 @@ import { NativeSelect } from '../ui/NativeSelect'
 import { Textarea } from '../ui/Textarea'
 import { toast } from '../ui/Toast'
 import { openBuiltinEditor, openChapterFile } from '../panels/sidebar/sidebar-file-openers'
+import {
+  PlanningPageShell,
+  PlanningPane,
+  PlanningChipGroup,
+  PlanningListRow,
+  PlanningEmptyState,
+} from '../planning/PlanningPageShell'
+import { usePlanningBackPath } from '../planning/planning-navigation'
 import PlotTreeView from './PlotTreeView'
 
 const EMPTY_PLAN: NarrativeThreadPlanInput = {
@@ -191,6 +199,7 @@ export default function NarrativeThreadEditor({
 }: NarrativeThreadEditorProps) {
   const currentProject = useProjectStore(s => s.currentProject)
   const text = useLocaleStore(s => s.text)
+  const backPath = usePlanningBackPath()
   const models = useLLMStore(s => s.models)
   const defaultModelId = useLLMStore(s => s.defaultModelId)
   const loadedModels = useLLMStore(s => s.loaded)
@@ -216,6 +225,8 @@ export default function NarrativeThreadEditor({
   const [aiBusy, setAiBusy] = useState(false)
   const [aiError, setAiError] = useState('')
   const [view, setView] = useState<'plot-tree' | 'plans'>(initialView)
+  // 左侧线索清单按状态筛选
+  const [statusFilter, setStatusFilter] = useState<'all' | NarrativeThreadView['status']>('all')
   const [plotSources, setPlotSources] = useState<PlotTreeSourceBundle | null>(null)
   const [plotBusy, setPlotBusy] = useState(false)
   const [plotError, setPlotError] = useState('')
@@ -626,126 +637,269 @@ export default function NarrativeThreadEditor({
     }
   }
 
+  const statusText = useCallback(
+    (status: NarrativeThreadView['status']) => text(...STATUS_LABELS[status]),
+    [text],
+  )
+
+  /** 左侧线索清单：按状态筛选。 */
+  const listedThreads = useMemo(
+    () => (statusFilter === 'all'
+      ? threads
+      : threads.filter(thread => thread.status === statusFilter)),
+    [threads, statusFilter],
+  )
+
+  const listFilterActive = statusFilter !== 'all'
+
+  const focusPlanForm = useCallback(() => {
+    document.getElementById('narrative-plan-form')?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }, [])
+
   return (
-    <div className="h-full overflow-y-auto p-5" style={{ color: 'var(--color-text)' }}>
-      <div className="mx-auto max-w-5xl space-y-5">
-        <header className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">{text('剧情树与叙事线索', 'Plot tree & narrative threads')}</h2>
-          <div className="flex gap-2" role="tablist" aria-label={text('剧情编辑器视图', 'Plot editor views')}>
-            <Button
-              size="sm"
-              variant={view === 'plot-tree' ? 'default' : 'outline'}
-              role="tab"
-              aria-selected={view === 'plot-tree'}
-              onClick={() => setView('plot-tree')}
-            >
-              {text('剧情树', 'Plot tree')}
-            </Button>
-            <Button
-              size="sm"
-              variant={view === 'plans' ? 'default' : 'outline'}
-              role="tab"
-              aria-selected={view === 'plans'}
-              onClick={() => setView('plans')}
-            >
-              {text('计划清单', 'Plan list')}
-            </Button>
-          </div>
-        </header>
-
-        {view === 'plot-tree' ? (
-          <PlotTreeView
-            key={plotSources?.snapshot?.generatedAt ?? 'empty'}
-            snapshot={plotSources?.snapshot ?? null}
-            sourceRevision={plotSources?.sourceRevision ?? ''}
-            currentChapter={Math.max(1, ...(plotSources?.finalizedChapters.map(chapter => chapter.chapterNumber) ?? []))}
-            busy={plotBusy}
-            error={plotError}
-            sourceReady={Boolean(plotSources && hasUsablePlotTreeEventSource(plotSources))}
-            storedSnapshotInvalid={plotSources?.storedSnapshotInvalid === true}
-            onGenerate={() => void refreshPlotTree()}
-            onClear={() => void clearPlotTree()}
-            onOpenSource={openPlotSource}
-            onNewStoryline={() => setView('plans')}
-          />
-        ) : <>
-        <div className="flex items-start justify-between gap-3">
-          <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            {text('设置埋设与预计回收章节；活跃计划会自动注入后续写作，逾期或沉寂时提醒。只有人工确认的定稿内容才记为已发生事件。', 'Set setup and expected payoff chapters. Active plans are injected into later writing and flagged when overdue or dormant; only user-confirmed finalized text becomes an event.')}
-          </p>
-          <Button className="shrink-0" variant="ai" size="sm" onClick={() => openAI('plan')} disabled={blueprints.length === 0}>
-            <Sparkles size={13} />{text('AI 建议伏笔与线索', 'Suggest foreshadowing with AI')}
-          </Button>
-        </div>
-
-        <section className="rounded-lg border p-4 space-y-3" style={{ borderColor: 'var(--color-border)', background: 'var(--color-panel)' }}>
-          <div className="flex items-center gap-2 font-medium"><Plus size={16} />{editingId === null ? text('新建计划', 'New plan') : text('编辑计划', 'Edit plan')}</div>
-          <div className="grid grid-cols-2 gap-3">
-            <label><Label>{text('标题', 'Title')}</Label><Input value={plan.title} onChange={event => setPlan({ ...plan, title: event.target.value })} /></label>
-            <label><Label>{text('类型', 'Type')}</Label><Input value={plan.type} onChange={event => setPlan({ ...plan, type: event.target.value })} /></label>
-            <label><Label>{text('计划埋设 / 开始章', 'Setup / start chapter')}</Label><Input type="number" min={1} value={plan.targetStartChapter} onChange={event => setPlan({ ...plan, targetStartChapter: Number(event.target.value) })} /></label>
-            <label><Label>{text('预计回收 / 结束章', 'Expected payoff / end chapter')}</Label><Input type="number" min={1} value={plan.targetEndChapter} onChange={event => setPlan({ ...plan, targetEndChapter: Number(event.target.value) })} /></label>
-          </div>
-          <label><Label>{text('作者意图 / 理由', 'Author intent / rationale')}</Label><Textarea value={plan.authorIntent} onChange={event => setPlan({ ...plan, authorIntent: event.target.value })} /></label>
-          <Button onClick={() => void savePlan()} disabled={busy || !plan.title.trim() || !plan.type.trim() || !plan.authorIntent.trim() || plan.targetEndChapter < plan.targetStartChapter}>{text('保存计划', 'Save plan')}</Button>
-        </section>
-
-        {threads.length === 0 && <p className="text-sm text-center py-8" style={{ color: 'var(--color-text-muted)' }}>{text('暂无伏笔或叙事线索', 'No foreshadowing or narrative threads yet')}</p>}
-        {threads.map(thread => (
-          <section
-            id={`narrative-plan-${thread.id}`}
-            key={thread.id}
-            className="rounded-lg border p-4 space-y-3"
-            style={{
-              borderColor: sourcePlanId === thread.id ? 'var(--color-accent)' : 'var(--color-border)',
-              background: 'var(--color-panel)',
-            }}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="font-semibold">{thread.title}</h3>
-                <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{thread.type} · {text(`埋设/开始 ${thread.targetStartChapter} · 预计回收/结束 ${thread.targetEndChapter}`, `Setup/start ${thread.targetStartChapter} · expected payoff/end ${thread.targetEndChapter}`)}</p>
-              </div>
-              <span className="text-xs rounded px-2 py-1" style={{ background: 'var(--color-bg)' }}>{text(...STATUS_LABELS[thread.status])}</span>
+    <>
+      <PlanningPageShell
+        breadcrumb={[
+          { label: backPath.overviewLabel, onClick: backPath.openOverview },
+          { label: backPath.planLabel, onClick: backPath.revealWritingPlan },
+          { label: text('章节脉络', 'Chapter thread') },
+        ]}
+        icon={<GitBranch size={15} />}
+        title={text('章节脉络', 'Chapter thread')}
+        description={text(
+          '两层脉络同页对照：「章节脉络图」（由章节蓝图与定稿确定性投影出的剧情树与叙事线索，零模型依赖）只反映已确定的事实，不做任何推测；「线索计划」记录你事先写下的埋设与回收意图，可注入后续写作。两者各自独立存储，互不覆盖。',
+          'Two layers on one page. Plot tree & narrative threads: a deterministic projection of chapter blueprints and finalized chapters with no model dependency, reflecting settled facts only. Thread plans: the setups and payoffs you intend, injectable into later writing. Each keeps its own storage.',
+        )}
+        meta={text(
+          `${threads.length} 条线索计划 · ${finalizedDrafts.length} 章定稿 · ${blueprints.length} 章蓝图`,
+          `${threads.length} plans · ${finalizedDrafts.length} finalized · ${blueprints.length} blueprints`,
+        )}
+        actions={
+          <>
+            <div className="planning-segmented" role="group" aria-label={text('章节脉络视图', 'Chapter thread views')}>
+              <button
+                type="button"
+                aria-pressed={view === 'plot-tree'}
+                className={`planning-segmented__option${view === 'plot-tree' ? ' is-active' : ''}`}
+                onClick={() => setView('plot-tree')}
+              >
+                <GitBranch size={12} />
+                {text('章节脉络图', 'Thread graph')}
+              </button>
+              <button
+                type="button"
+                aria-pressed={view === 'plans'}
+                className={`planning-segmented__option${view === 'plans' ? ' is-active' : ''}`}
+                onClick={() => setView('plans')}
+              >
+                <Clock3 size={12} />
+                {text('计划清单', 'Plan list')}
+              </button>
             </div>
-            <p className="text-sm">{thread.authorIntent}</p>
-            {thread.status !== 'resolved' && thread.status !== 'abandoned' && (
-              <div className="flex gap-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                <span className="flex items-center gap-1"><Clock3 size={13} />{text(`沉寂 ${thread.dormantChapters} 章`, `Dormant ${thread.dormantChapters} chapters`)}</span>
-                {thread.dormantChapters >= dormantThreshold && (
-                  <span role="status">{text('已达到项目沉寂提醒阈值', 'Project dormant threshold reached')}</span>
-                )}
-                {thread.overdue && <span>{text('已逾期', 'Overdue')}</span>}
-              </div>
+            {view === 'plans' && (
+              <Button className="shrink-0" variant="ai" size="sm" onClick={() => openAI('plan')} disabled={blueprints.length === 0}>
+                <Sparkles size={13} />{text('AI 建议伏笔与线索', 'Suggest foreshadowing with AI')}
+              </Button>
             )}
-            <div className="space-y-1">
-              {thread.events.map(event => <div key={event.id} className="text-xs flex gap-2"><CheckCircle2 size={13} /><span>{text(`第${event.chapterNumber}章`, `Chapter ${event.chapterNumber}`)} · {text(...STATUS_LABELS[event.type])} · {event.evidence}</span></div>)}
+          </>
+        }
+      >
+        {view === 'plot-tree' ? (
+          <main className="planning-page__main planning-page__scroll">
+            <div className="mx-auto max-w-5xl p-4">
+              <PlotTreeView
+                key={plotSources?.snapshot?.generatedAt ?? 'empty'}
+                snapshot={plotSources?.snapshot ?? null}
+                sourceRevision={plotSources?.sourceRevision ?? ''}
+                currentChapter={Math.max(1, ...(plotSources?.finalizedChapters.map(chapter => chapter.chapterNumber) ?? []))}
+                busy={plotBusy}
+                error={plotError}
+                sourceReady={Boolean(plotSources && hasUsablePlotTreeEventSource(plotSources))}
+                storedSnapshotInvalid={plotSources?.storedSnapshotInvalid === true}
+                onGenerate={() => void refreshPlotTree()}
+                onClear={() => void clearPlotTree()}
+                onOpenSource={openPlotSource}
+                onNewStoryline={() => setView('plans')}
+              />
             </div>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => { setEditingId(thread.id); setPlan({ title: thread.title, type: thread.type, targetStartChapter: thread.targetStartChapter, targetEndChapter: thread.targetEndChapter, authorIntent: thread.authorIntent }) }}><Pencil size={13} />{text('编辑', 'Edit')}</Button>
-              <Button variant="outline" size="sm" onClick={() => { setEventPlanId(thread.id); setEventError('') }} disabled={finalizedDrafts.length === 0}>{text('确认定稿事件', 'Confirm finalized event')}</Button>
-              <Button variant="ghost" size="sm" onClick={() => void deletePlan(thread.id)}><Trash2 size={13} />{text('删除', 'Delete')}</Button>
-            </div>
-            {eventPlanId === thread.id && <div className="grid grid-cols-2 gap-2 border-t pt-3" style={{ borderColor: 'var(--color-border)' }}>
-              <NativeSelect value={eventDraftId} onChange={event => setEventDraftId(Number(event.target.value))}>{finalizedDrafts.map(draft => <option key={draft.id} value={draft.id}>{text(`第${draft.chapterNumber}章 · 定稿 v${draft.version}`, `Chapter ${draft.chapterNumber} · Finalized v${draft.version}`)}</option>)}</NativeSelect>
-              <NativeSelect value={eventType} onChange={event => setEventType(event.target.value as NarrativeThreadEventType)}><option value="planted">{text('埋设', 'Planted')}</option><option value="progressing">{text('推进', 'Progressing')}</option><option value="resolved">{text('解决', 'Resolved')}</option><option value="abandoned">{text('放弃', 'Abandoned')}</option></NativeSelect>
-              <div className="col-span-2">
-                <Input placeholder={text('粘贴该定稿章节中的短原文', 'Paste a short excerpt from this finalized chapter')} value={eventEvidence} onChange={event => setEventEvidence(event.target.value)} />
-                <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>{text('证据必须逐字来自所选定稿章节。', 'Evidence must be copied from the selected finalized chapter.')}</p>
-              </div>
-              <Input className="col-span-2" placeholder={text('确认理由', 'Confirmation rationale')} value={eventReason} onChange={event => setEventReason(event.target.value)} />
-              {eventError && <p className="col-span-2 text-xs" style={{ color: 'var(--color-error-text)' }}>{eventError}</p>}
-              <div className="col-span-2 flex gap-2">
-                <Button onClick={() => void saveEvent()} disabled={busy || !eventEvidence.trim() || !eventReason.trim()}>{text('保存事件', 'Save event')}</Button>
-                <Button variant="ai" onClick={() => openAI('event')} disabled={busy}>
-                  <Sparkles size={13} />{text('AI 识别定稿事件', 'Find finalized events with AI')}
+          </main>
+        ) : (
+          <>
+            <PlanningPane
+              title={text('线索计划', 'Thread plans')}
+              icon={<Clock3 size={12} />}
+              width={260}
+              actions={
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={focusPlanForm}
+                  title={text('新建计划', 'New plan')}
+                  aria-label={text('新建计划', 'New plan')}
+                >
+                  <Plus size={13} />
                 </Button>
+              }
+              filters={
+                <PlanningChipGroup
+                  value={statusFilter}
+                  onChange={setStatusFilter}
+                  ariaLabel={text('线索状态筛选', 'Thread status filter')}
+                  options={[
+                    { value: 'all', label: text('全部', 'All') },
+                    { value: 'planned', label: statusText('planned') },
+                    { value: 'planted', label: statusText('planted') },
+                    { value: 'progressing', label: statusText('progressing') },
+                    { value: 'resolved', label: statusText('resolved') },
+                    { value: 'abandoned', label: statusText('abandoned') },
+                  ]}
+                />
+              }
+              footer={text(
+                `显示 ${listedThreads.length} / ${threads.length} 条`,
+                `Showing ${listedThreads.length} of ${threads.length}`,
+              )}
+            >
+              {listedThreads.length === 0 ? (
+                <PlanningEmptyState
+                  icon={<Clock3 size={20} />}
+                  title={threads.length === 0
+                    ? text('暂无伏笔或叙事线索', 'No foreshadowing or narrative threads yet')
+                    : text('没有符合筛选的线索', 'No matching plans')}
+                  description={threads.length === 0
+                    ? text(
+                        '线索计划写的是你「打算怎么埋、怎么回收」，和已经写下的正文无关，也不会自动生成。',
+                        'A thread plan records how you intend to set up and pay off a thread; it is independent of prose already written and is never auto-generated.',
+                      )
+                    : text('可以调整搜索词，或切换状态筛选。', 'Adjust the search term or switch the status filter.')}
+                  steps={threads.length === 0 ? [
+                    text('在右侧「新建计划」里填写标题、类型与埋设/回收章节；', 'Fill in title, type, and setup/payoff chapters in “New plan” on the right.'),
+                    text('正文定稿后，可在计划卡片上「确认定稿事件」把已发生的情节记入这条线索。', 'After a chapter is finalized, use “Confirm finalized event” on its card to record what happened.'),
+                  ] : undefined}
+                  actions={threads.length === 0 ? (
+                    <Button variant="default" size="sm" onClick={focusPlanForm}>
+                      <Plus size={13} /> {text('新建计划', 'New plan')}
+                    </Button>
+                  ) : listFilterActive ? (
+                    <Button variant="outline" size="sm" onClick={() => { setStatusFilter('all') }}>
+                      {text('清除筛选', 'Clear filters')}
+                    </Button>
+                  ) : undefined}
+                />
+              ) : listedThreads.map(thread => (
+                <PlanningListRow
+                  key={thread.id}
+                  selected={sourcePlanId === thread.id}
+                  onSelect={() => setSourcePlanId(thread.id)}
+                  icon={<GitBranch size={12} />}
+                  title={thread.title}
+                  subtitle={text(
+                    `${thread.type} · 埋设/开始 ${thread.targetStartChapter} · 预计回收/结束 ${thread.targetEndChapter}`,
+                    `${thread.type} · setup/start ${thread.targetStartChapter} · payoff/end ${thread.targetEndChapter}`,
+                  )}
+                  titleAttr={text('在右侧定位到这条线索', 'Locate this plan on the right')}
+                  trailing={
+                    <>
+                      {thread.overdue && <span className="planning-tag is-warning">{text('已逾期', 'Overdue')}</span>}
+                      <span className="planning-tag">{statusText(thread.status)}</span>
+                    </>
+                  }
+                />
+              ))}
+            </PlanningPane>
+
+            <main className="planning-page__main planning-page__scroll">
+              <div className="mx-auto max-w-4xl space-y-4 p-4">
+                <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                  {text('设置埋设与预计回收章节；活跃计划会自动注入后续写作，逾期或沉寂时提醒。只有人工确认的定稿内容才记为已发生事件。', 'Set setup and expected payoff chapters. Active plans are injected into later writing and flagged when overdue or dormant; only user-confirmed finalized text becomes an event.')}
+                </p>
+
+                <section
+                  id="narrative-plan-form"
+                  className="rounded-lg border p-4 space-y-3"
+                  style={{ borderColor: 'var(--color-border)', background: 'var(--color-panel)' }}
+                >
+                  <div className="flex items-center gap-2 font-medium"><Plus size={16} />{editingId === null ? text('新建计划', 'New plan') : text('编辑计划', 'Edit plan')}</div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label><Label>{text('标题', 'Title')}</Label><Input value={plan.title} onChange={event => setPlan({ ...plan, title: event.target.value })} /></label>
+                    <label><Label>{text('类型', 'Type')}</Label><Input value={plan.type} onChange={event => setPlan({ ...plan, type: event.target.value })} /></label>
+                    <label><Label>{text('计划埋设 / 开始章', 'Setup / start chapter')}</Label><Input type="number" min={1} value={plan.targetStartChapter} onChange={event => setPlan({ ...plan, targetStartChapter: Number(event.target.value) })} /></label>
+                    <label><Label>{text('预计回收 / 结束章', 'Expected payoff / end chapter')}</Label><Input type="number" min={1} value={plan.targetEndChapter} onChange={event => setPlan({ ...plan, targetEndChapter: Number(event.target.value) })} /></label>
+                  </div>
+                  <label><Label>{text('作者意图 / 理由', 'Author intent / rationale')}</Label><Textarea value={plan.authorIntent} onChange={event => setPlan({ ...plan, authorIntent: event.target.value })} /></label>
+                  <div className="flex gap-2">
+                    <Button onClick={() => void savePlan()} disabled={busy || !plan.title.trim() || !plan.type.trim() || !plan.authorIntent.trim() || plan.targetEndChapter < plan.targetStartChapter}>{text('保存计划', 'Save plan')}</Button>
+                    {editingId !== null && (
+                      <Button variant="ghost" onClick={() => { setEditingId(null); setPlan(EMPTY_PLAN) }}>{text('取消编辑', 'Cancel edit')}</Button>
+                    )}
+                  </div>
+                </section>
+
+                {listedThreads.length === 0 && threads.length > 0 && (
+                  <p className="py-6 text-center text-sm" style={{ color: 'var(--color-text-muted)' }}>
+                    {text('没有符合当前筛选的线索。', 'No plans match the current filters.')}
+                  </p>
+                )}
+                {listedThreads.map(thread => (
+                  <section
+                    id={`narrative-plan-${thread.id}`}
+                    key={thread.id}
+                    className="rounded-lg border p-4 space-y-3"
+                    style={{
+                      borderColor: sourcePlanId === thread.id ? 'var(--color-accent)' : 'var(--color-border)',
+                      background: 'var(--color-panel)',
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h3 className="font-semibold">{thread.title}</h3>
+                        <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{thread.type} · {text(`埋设/开始 ${thread.targetStartChapter} · 预计回收/结束 ${thread.targetEndChapter}`, `Setup/start ${thread.targetStartChapter} · expected payoff/end ${thread.targetEndChapter}`)}</p>
+                      </div>
+                      <span className="text-xs rounded px-2 py-1" style={{ background: 'var(--color-bg)' }}>{text(...STATUS_LABELS[thread.status])}</span>
+                    </div>
+                    <p className="text-sm">{thread.authorIntent}</p>
+                    {thread.status !== 'resolved' && thread.status !== 'abandoned' && (
+                      <div className="flex gap-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                        <span className="flex items-center gap-1"><Clock3 size={13} />{text(`沉寂 ${thread.dormantChapters} 章`, `Dormant ${thread.dormantChapters} chapters`)}</span>
+                        {thread.dormantChapters >= dormantThreshold && (
+                          <span role="status">{text('已达到项目沉寂提醒阈值', 'Project dormant threshold reached')}</span>
+                        )}
+                        {thread.overdue && <span>{text('已逾期', 'Overdue')}</span>}
+                      </div>
+                    )}
+                    <div className="space-y-1">
+                      {thread.events.map(event => <div key={event.id} className="text-xs flex gap-2"><CheckCircle2 size={13} /><span>{text(`第${event.chapterNumber}章`, `Chapter ${event.chapterNumber}`)} · {text(...STATUS_LABELS[event.type])} · {event.evidence}</span></div>)}
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={() => { setSourcePlanId(thread.id); setEditingId(thread.id); setPlan({ title: thread.title, type: thread.type, targetStartChapter: thread.targetStartChapter, targetEndChapter: thread.targetEndChapter, authorIntent: thread.authorIntent }); focusPlanForm() }}><Pencil size={13} />{text('编辑', 'Edit')}</Button>
+                      <Button variant="outline" size="sm" onClick={() => { setEventPlanId(thread.id); setEventError('') }} disabled={finalizedDrafts.length === 0}>{text('确认定稿事件', 'Confirm finalized event')}</Button>
+                      <Button variant="ghost" size="sm" onClick={() => void deletePlan(thread.id)}><Trash2 size={13} />{text('删除', 'Delete')}</Button>
+                    </div>
+                    {eventPlanId === thread.id && <div className="grid grid-cols-2 gap-2 border-t pt-3" style={{ borderColor: 'var(--color-border)' }}>
+                      <NativeSelect value={eventDraftId} onChange={event => setEventDraftId(Number(event.target.value))}>{finalizedDrafts.map(draft => <option key={draft.id} value={draft.id}>{text(`第${draft.chapterNumber}章 · 定稿 v${draft.version}`, `Chapter ${draft.chapterNumber} · Finalized v${draft.version}`)}</option>)}</NativeSelect>
+                      <NativeSelect value={eventType} onChange={event => setEventType(event.target.value as NarrativeThreadEventType)}><option value="planted">{text('埋设', 'Planted')}</option><option value="progressing">{text('推进', 'Progressing')}</option><option value="resolved">{text('解决', 'Resolved')}</option><option value="abandoned">{text('放弃', 'Abandoned')}</option></NativeSelect>
+                      <div className="col-span-2">
+                        <Input placeholder={text('粘贴该定稿章节中的短原文', 'Paste a short excerpt from this finalized chapter')} value={eventEvidence} onChange={event => setEventEvidence(event.target.value)} />
+                        <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>{text('证据必须逐字来自所选定稿章节。', 'Evidence must be copied from the selected finalized chapter.')}</p>
+                      </div>
+                      <Input className="col-span-2" placeholder={text('确认理由', 'Confirmation rationale')} value={eventReason} onChange={event => setEventReason(event.target.value)} />
+                      {eventError && <p className="col-span-2 text-xs" style={{ color: 'var(--color-error-text)' }}>{eventError}</p>}
+                      <div className="col-span-2 flex gap-2">
+                        <Button onClick={() => void saveEvent()} disabled={busy || !eventEvidence.trim() || !eventReason.trim()}>{text('保存事件', 'Save event')}</Button>
+                        <Button variant="ai" onClick={() => openAI('event')} disabled={busy}>
+                          <Sparkles size={13} />{text('AI 识别定稿事件', 'Find finalized events with AI')}
+                        </Button>
+                      </div>
+                    </div>}
+                  </section>
+                ))}
               </div>
-            </div>}
-          </section>
-        ))}
-        </>}
-      </div>
+            </main>
+          </>
+        )}
+      </PlanningPageShell>
+
       <Dialog open={aiOpen} onOpenChange={open => { if (!open) closeAI() }}>
         <DialogContent className="max-w-[620px]">
           <DialogHeader>
@@ -819,6 +973,6 @@ export default function NarrativeThreadEditor({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   )
 }

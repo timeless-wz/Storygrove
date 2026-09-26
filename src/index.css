@@ -274,6 +274,21 @@
     --accent-rgb: var(--color-accent-rgb);
     /* 强调色填充上的前景文字（白字在 #2563EB 上为 5.17:1） */
     --color-accent-foreground: #FFFFFF;
+    --accent-foreground: var(--color-accent-foreground);
+
+    /* 正文墨色、纸面与画布语义令牌 */
+    --color-editor-text: var(--color-text);
+    --color-editor-text-muted: var(--color-text-secondary);
+    --color-editor-ink: var(--color-text);
+    --color-editor-ink-strong: #111827;
+    --color-editor-ink-muted: var(--color-text-secondary);
+    --editor-page-bg: var(--color-editor-bg);
+    --editor-ink-primary: var(--color-text);
+    --editor-ink-strong: #111827;
+    --editor-ink-muted: var(--color-text-secondary);
+    --color-canvas: var(--color-editor-bg);
+    --color-canvas-border: var(--color-border);
+    --color-canvas-text: var(--color-text);
 
     /* ===== 尺寸规范（顶部仅保留系统壳，状态栏承接上下文） ===== */
     --height-titlebar: 32px;
@@ -395,6 +410,21 @@
     --accent-rgb: var(--color-accent-rgb);
     /* 强调色填充上的前景文字：galaxy 强调色是浅冰蓝 #7EC8E3，白字仅 1.87:1，须用深墨 */
     --color-accent-foreground: #0A1628;
+    --accent-foreground: var(--color-accent-foreground);
+
+    /* 正文墨色、纸面与画布语义令牌 */
+    --color-editor-text: var(--color-text);
+    --color-editor-text-muted: var(--color-text-secondary);
+    --color-editor-ink: var(--color-text);
+    --color-editor-ink-strong: #FFFFFF;
+    --color-editor-ink-muted: var(--color-text-secondary);
+    --editor-page-bg: var(--color-editor-bg);
+    --editor-ink-primary: var(--color-text);
+    --editor-ink-strong: #FFFFFF;
+    --editor-ink-muted: var(--color-text-secondary);
+    --color-canvas: var(--color-editor-bg);
+    --color-canvas-border: var(--color-border);
+    --color-canvas-text: var(--color-text);
 
     /* 阴影 — 深色下同样保持极弱，靠边框分层 */
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
@@ -434,10 +464,10 @@
     --writer-command-divider: var(--color-border);
     --writer-brand-mark-surface: var(--color-accent);
     --writer-brand-mark-border: var(--color-accent-hover);
-    --writer-brand-mark-text: #FCFAF3;
+    --writer-brand-mark-text: var(--color-accent-foreground);
 
     --writer-primary-surface: var(--color-accent);
-    --writer-primary-text: #FCFAF3;
+    --writer-primary-text: var(--color-accent-foreground);
     --writer-primary-border: transparent;
     --writer-primary-shadow: var(--shadow-sm);
 
@@ -564,6 +594,21 @@
     --accent-rgb: var(--color-accent-rgb);
     /* 强调色填充上的前景文字（白字在 #0E639C 上为 6.40:1） */
     --color-accent-foreground: #FFFFFF;
+    --accent-foreground: var(--color-accent-foreground);
+
+    /* 正文墨色、纸面与画布语义令牌 */
+    --color-editor-text: var(--color-text);
+    --color-editor-text-muted: var(--color-text-secondary);
+    --color-editor-ink: var(--color-text);
+    --color-editor-ink-strong: #FFFFFF;
+    --color-editor-ink-muted: var(--color-text-secondary);
+    --editor-page-bg: var(--color-editor-bg);
+    --editor-ink-primary: var(--color-text);
+    --editor-ink-strong: #FFFFFF;
+    --editor-ink-muted: var(--color-text-secondary);
+    --color-canvas: var(--color-editor-bg);
+    --color-canvas-border: var(--color-border);
+    --color-canvas-text: var(--color-text);
 
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 1px 3px rgba(0, 0, 0, 0.35);
@@ -1558,10 +1603,11 @@
     color: var(--color-text);
   }
 
-  /* ===== Default 主按钮 — 朱砂实色（cva 提供 text-white） ===== */
+  /* ===== Default 主按钮 — 朱砂实色（跟随主题强调色前景） ===== */
   .btn-primary {
     background: var(--color-accent);
     border: 1px solid var(--color-accent-hover);
+    color: var(--color-accent-foreground) !important;
     box-shadow: var(--shadow-sm);
     transition: background var(--transition-fast),
                 box-shadow var(--transition-fast);
@@ -1569,16 +1615,17 @@
 
   .btn-primary:hover {
     background: var(--color-accent-hover);
+    color: var(--color-accent-foreground) !important;
   }
 
   .btn-primary:active {
     filter: brightness(0.95);
   }
 
-  /* ===== AI 功能按钮 — 朱砂实色，无辉光（cva 提供 text-white） ===== */
+  /* ===== AI 功能按钮 — 朱砂实色，无辉光（跟随主题强调色前景） ===== */
   .ai-glow {
     background: var(--color-accent);
-    color: #fff;
+    color: var(--color-accent-foreground) !important;
     border: none;
     transition: background var(--transition-fast),
                 filter var(--transition-fast);
@@ -1586,6 +1633,7 @@
 
   .ai-glow:hover {
     background: var(--color-accent-hover);
+    color: var(--color-accent-foreground) !important;
   }
 
   .ai-glow:active {
@@ -1768,11 +1816,16 @@
 
 /* 图片皮肤采用独立的可读性语义，而不是沿用主题默认文本色与不透明面板。 */
 .app-skin-root[data-skin-readability='high-contrast'] {
-  --skin-welcome-surface: color-mix(in srgb, var(--color-bg) 64%, transparent);
-  --skin-panel-surface: color-mix(in srgb, var(--color-panel) 72%, transparent);
+  /* Literary themes have their own shell ink. Without these defaults the
+     image-skin aliases below become invalid outside the four legacy themes. */
+  --skin-text-primary: var(--text-primary, var(--color-text));
+  --skin-text-secondary: var(--text-secondary, var(--color-text-secondary));
+  --skin-border: var(--border, var(--color-border));
+  --skin-welcome-surface: color-mix(in srgb, var(--color-bg) 84%, transparent);
+  --skin-panel-surface: color-mix(in srgb, var(--color-panel) 78%, transparent);
   --skin-main-surface: color-mix(in srgb, var(--skin-editor-base) 78%, transparent);
-  --skin-workspace-panel-surface: color-mix(in srgb, var(--color-sidebar) 56%, transparent);
-  --skin-workspace-page-surface: color-mix(in srgb, var(--skin-editor-base) 60%, transparent);
+  --skin-workspace-panel-surface: color-mix(in srgb, var(--color-sidebar) 84%, transparent);
+  --skin-workspace-page-surface: color-mix(in srgb, var(--skin-editor-base) 84%, transparent);
   --skin-background-scrim: color-mix(in srgb, var(--color-bg) 12%, transparent);
   --skin-control-surface: color-mix(in srgb, var(--color-panel) 88%, transparent);
   --skin-control-text: var(--skin-text-primary);
@@ -1817,7 +1870,7 @@
   background: var(--skin-background-scrim);
 }
 
-/* 欢迎区域 64%，侧栏 / AI / 任务区域 72%，正文区域 78%。 */
+/* 图片皮肤的阅读表面使用足够强的底色，避免自定义图片的极端明暗吞没文字。 */
 .app-skin-root[data-skin-readability='high-contrast'] :is(
   .writer-shell-surface,
   .writer-project-tree,

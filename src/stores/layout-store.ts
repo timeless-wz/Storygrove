@@ -124,11 +124,11 @@ export const useLayoutStore = create<LayoutState>()((set) => ({
     manuscript: true,
   },
 
-  // 参考栏是默认右侧信息架；AI 对话在用户需要时由右侧栏或快捷按钮打开。
+  // 参考栏与 AI 对话默认均收起，按需由右下角状态栏或创作入口打开。
   aiPanelOpen: false,
   aiPanelWidth: 320,
   rightView: 'agent',
-  referencePanelOpen: true,
+  referencePanelOpen: false,
   focusMode: false,
 
   // 任务面板是状态栏触发的悬浮窗；默认关闭，绝不为它预留工作区。
@@ -177,8 +177,16 @@ export const useLayoutStore = create<LayoutState>()((set) => ({
   setAIPanelWidth: (width) => set({ aiPanelWidth: Math.max(260, Math.min(600, width)) }),
   setRightView: (view) => set({ rightView: view }),
   openRightPanel: (view) => set({ aiPanelOpen: true, rightView: view }),
-  toggleReferencePanel: () => set((s) => ({ referencePanelOpen: !s.referencePanelOpen })),
-  setReferencePanelOpen: (open) => set({ referencePanelOpen: open }),
+  toggleReferencePanel: () =>
+    set((s) => ({
+      referencePanelOpen: !s.referencePanelOpen,
+      ...(s.referencePanelOpen ? {} : { aiPanelOpen: false }),
+    })),
+  setReferencePanelOpen: (open) =>
+    set({
+      referencePanelOpen: open,
+      ...(open ? { aiPanelOpen: false } : {}),
+    }),
   toggleFocusMode: () => set((s) => ({ focusMode: !s.focusMode })),
 
   toggleBottomPanel: () => set((s) => ({ bottomPanelOpen: !s.bottomPanelOpen })),

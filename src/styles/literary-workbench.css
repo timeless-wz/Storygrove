@@ -1,23 +1,25 @@
-/* Paper, forest and bookbinding, inspired by StoryForge. No external assets. */
+/* Paper, forest and bookbinding literary workbench.
+   Pure semantic tokens, theme-adaptive, zero external assets, strictly no fixed palette classes. */
 @layer base {
   :root {
     --literary-serif: 'Noto Serif SC', 'Songti SC', SimSun, Georgia, serif;
-    --literary-hero-bg: var(--hero-background, color-mix(in srgb, var(--color-accent) 80%, black));
-    --literary-hero-ink: var(--accent-foreground, #ffffff);
-    --literary-hero-muted: var(--color-text-secondary);
-    --literary-book-bg: color-mix(in srgb, var(--color-accent) 75%, var(--color-raised));
-    --literary-book-ink: var(--accent-foreground, #ffffff);
-  }
-  :root.dark, :root.galaxy {
-    --literary-hero-bg: var(--hero-background, color-mix(in srgb, var(--color-bg) 85%, var(--color-accent)));
+    --literary-hero-bg: linear-gradient(135deg, var(--color-panel), var(--color-hover));
     --literary-hero-ink: var(--color-text);
     --literary-hero-muted: var(--color-text-secondary);
-    --literary-book-bg: color-mix(in srgb, var(--color-panel) 80%, var(--color-accent));
+    --literary-book-bg: var(--color-panel);
+    --literary-book-ink: var(--color-text);
+  }
+  :root.dark, :root.galaxy {
+    --literary-hero-bg: linear-gradient(135deg, color-mix(in srgb, var(--color-panel) 85%, var(--color-accent)), var(--color-panel));
+    --literary-hero-ink: var(--color-text);
+    --literary-hero-muted: var(--color-text-secondary);
+    --literary-book-bg: var(--color-panel);
     --literary-book-ink: var(--color-text);
   }
 }
 
 @layer components {
+  /* ===== 基础布局容器 ===== */
   .literary-home {
     background: linear-gradient(var(--shell-wash-effective, var(--shell-wash, transparent)), var(--shell-wash-effective, var(--shell-wash, transparent))), var(--shell-background, var(--color-bg));
     background-attachment: fixed;
@@ -25,89 +27,778 @@
     background-position: center top;
     container-type: inline-size;
   }
+
   .literary-overview {
     background: linear-gradient(var(--shell-wash-effective, var(--shell-wash, transparent)), var(--shell-wash-effective, var(--shell-wash, transparent))), var(--shell-background, var(--color-bg));
     background-attachment: fixed;
     background-size: cover;
     background-position: center top;
+    container-type: inline-size;
   }
-  .literary-home-inner { max-width: 1240px; margin: 0 auto; padding: 28px clamp(20px, 4%, 56px) 20px; }
-  .literary-home-heading, .literary-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-  .literary-home-heading { margin-bottom: 24px; color: var(--color-text-secondary); font-size: 12px; }
-  .literary-eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: 10px; font-weight: 500; letter-spacing: .16em; }
-  .literary-hero { position: relative; display: flex; align-items: center; min-height: 280px; padding: 38px 42px; overflow: hidden; border-radius: 18px; background: radial-gradient(ellipse at 80% 20%, #abc69b20, transparent 65%), var(--literary-hero-bg); color: var(--color-text); border: 1px solid var(--color-border); box-shadow: var(--shadow-sm); backdrop-filter: blur(8px); }
-  .literary-hero-copy { position: relative; z-index: 1; flex: 1; min-width: 0; }
-  .literary-hero .literary-eyebrow { color: var(--color-accent); font-weight: 600; }
-  .literary-hero h1 { max-width: 650px; margin: 16px 0; font: 600 clamp(26px, 3vw, 38px)/1.45 var(--literary-serif); letter-spacing: .035em; text-wrap: balance; color: var(--color-text); }
-  .literary-hero p { max-width: 510px; margin-bottom: 26px; font-size: 13px; line-height: 1.9; color: var(--color-text-secondary); }
-  .literary-hero-action { display: inline-flex; align-items: center; gap: 10px; min-height: 40px; padding: 10px 20px; border-radius: 8px; background: var(--color-accent); color: var(--accent-foreground, #ffffff); font-size: 13px; font-weight: 600; box-shadow: 0 4px 14px color-mix(in srgb, var(--color-accent) 28%, transparent); transition: box-shadow .2s, transform .2s, background-color .2s; cursor: pointer; }
-  .literary-hero-action:hover { transform: translateY(-2px); background: var(--color-accent-hover); box-shadow: 0 8px 22px color-mix(in srgb, var(--color-accent) 40%, transparent); }
-  .literary-current-title { display: block; margin-top: 12px; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-muted); font-size: 11px; }
-  .literary-hero-art { position: relative; width: 225px; height: 215px; flex-shrink: 0; margin-left: 30px; }
-  .literary-orbit { position: absolute; inset: -55px -80px; border: 1px solid #e0e8c81a; border-radius: 50%; transform: rotate(-30deg); }
-  .literary-orbit::after { content: ''; position: absolute; inset: 26px; border: 1px solid #e0e8c814; border-radius: 50%; }
-  .literary-display-book { position: absolute; z-index: 1; top: 4px; left: 32px; display: flex; flex-direction: column; justify-content: space-between; align-items: center; width: 146px; height: 202px; padding: 23px 15px; border: 1px solid #d9d1a850; border-radius: 3px 10px 10px 3px; background: linear-gradient(90deg, #0003 0 5px, #e8e0af20 6px 8px, transparent 9px), var(--literary-book-bg); box-shadow: 12px 15px 24px #0003, 4px 2px 0 #dcd9c6; color: var(--literary-book-ink); transform: rotate(9deg); }
-  .literary-display-book > span { font: 22px/1.65 var(--literary-serif); white-space: pre-line; text-align: center; letter-spacing: .1em; }
-  .literary-display-book small { font-size: 7px; letter-spacing: .13em; }
-  .literary-book-shadow { position: absolute; bottom: -3px; left: 0; width: 220px; height: 22px; border-radius: 50%; background: #0002; filter: blur(10px); }
-  .literary-quick-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin: 24px 0 36px; }
-  .literary-action-card { display: flex; align-items: center; gap: 14px; min-width: 0; padding: 20px 18px; border: 1px solid var(--color-border); border-radius: 12px; background: var(--color-panel); text-align: left; transition: background .2s, border-color .2s, box-shadow .2s; }
-  .literary-action-card > span:nth-child(2) { flex: 1; min-width: 0; }
-  .literary-action-card > svg { flex-shrink: 0; color: var(--color-text-muted); }
-  .literary-action-card:hover, .literary-project-card:hover { border-color: var(--color-accent); box-shadow: var(--shadow-md); background: var(--color-raised); }
-  .literary-action-icon { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex-shrink: 0; border-radius: 10px; background: var(--color-hover); color: var(--color-accent-text); }
-  .literary-action-card strong, .literary-hub-card strong { display: block; font-size: 13px; font-weight: 600; color: var(--color-text); }
-  .literary-action-card small, .literary-hub-card small { display: block; margin-top: 6px; font-size: 11px; line-height: 1.6; color: var(--color-text-secondary); }
-  .literary-section-heading { margin-bottom: 20px; color: var(--color-text-muted); font-size: 11px; }
-  .literary-section-heading h2 { margin-top: 6px; font: 500 25px/1.5 var(--literary-serif); color: var(--color-text); }
-  .literary-bookshelf { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 18px; }
-  .literary-project-card { display: flex; align-items: center; gap: 24px; min-width: 0; padding: 24px; border: 1px solid var(--color-border); border-radius: 14px; background: var(--color-panel); text-align: left; transition: border-color .2s, box-shadow .2s, background .2s; }
-  .literary-book-cover { display: flex; flex-direction: column; justify-content: space-between; align-items: center; flex-shrink: 0; width: 100px; height: 144px; padding: 16px 12px; border-radius: 2px 7px 7px 2px; background: linear-gradient(90deg, #0002, transparent 10%, #ffffff06 90%, #0001), var(--literary-book-bg); box-shadow: inset 4px 0 #e8e0af20, 4px 5px 10px #0002; color: var(--literary-book-ink); text-align: center; }
-  .literary-book-cover strong { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; font: 17px/1.6 var(--literary-serif); }
-  .literary-book-cover > span { font-size: 7px; letter-spacing: .18em; }
-  .literary-project-info { min-width: 0; flex: 1; }
-  .literary-project-info > small { display: block; margin-bottom: 10px; font-size: 10px; letter-spacing: .06em; color: var(--color-text-muted); }
-  .literary-project-info > strong { display: block; font: 600 18px/1.5 var(--literary-serif); overflow-wrap: anywhere; color: var(--color-text); }
-  .literary-project-path { display: block; margin-top: 8px; font-size: 10px; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .literary-project-open { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--color-accent-text); }
-  .literary-project-info .literary-project-open { margin-top: 22px; }
-  .literary-empty-shelf { display: flex; flex-direction: column; align-items: center; padding: 35px 20px; border: 1px dashed var(--color-border); border-radius: 14px; background: color-mix(in srgb, var(--color-panel) 70%, transparent); text-align: center; color: var(--color-text-secondary); }
-  .literary-empty-shelf > svg { color: var(--color-accent-text); margin-bottom: 16px; }
-  .literary-empty-shelf h3 { font: 500 18px/1.6 var(--literary-serif); color: var(--color-text); }
-  .literary-empty-shelf p { margin: 10px 0 18px; font-size: 12px; line-height: 1.8; }
-  .literary-text-action { display: inline-flex; align-items: center; gap: 8px; color: var(--color-accent-text); font-size: 12px; }
-  .literary-hub-card { display: flex; align-items: center; gap: 16px; width: 100%; padding: 20px; margin-top: 24px; border: 1px solid var(--color-border); border-radius: 12px; text-align: left; background: var(--color-panel); }
-  .literary-hub-card > span:nth-child(2) { flex: 1; }
-  .literary-hub-card:hover { border-color: var(--color-accent); }
-  .literary-home-footer { display: flex; align-items: center; justify-content: center; gap: 8px; padding-top: 30px; color: var(--color-text-muted); font-size: 10px; }
-  .literary-home button:focus-visible { outline: 2px solid var(--color-accent-text); outline-offset: 4px; }
-  .literary-hero button:focus-visible { outline-color: var(--literary-hero-ink); }
-  .literary-sidebar .writer-project-sidebar-header--compact { padding: 14px 10px; }
-  .literary-sidebar [data-sidebar='group-label'] { letter-spacing: .06em; }
-  .literary-sidebar .panel-header { min-height: 42px; }
-  .literary-sidebar .writer-project-tree { padding-top: 10px; }
-  .literary-overview .literary-overview-hero { padding: 28px; border-radius: 16px; background: linear-gradient(115deg, var(--color-panel), var(--color-hover)); box-shadow: var(--shadow-md); }
-  .literary-overview h1 { font-family: var(--literary-serif); font-size: 30px; line-height: 1.5; overflow-wrap: anywhere; }
-  .literary-overview [role='button'] { border-radius: 14px; }
-  .literary-overview [role='button']:hover { box-shadow: var(--shadow-md); }
-  .literary-overview h3 { font-family: var(--literary-serif); }
-  @container (max-width: 760px) {
-    .literary-hero { padding: 28px; }
-    .literary-hero-art { width: 160px; margin-left: 10px; transform: scale(.85); transform-origin: center right; }
-    .literary-quick-actions { grid-template-columns: 1fr; gap: 10px; }
-    .literary-action-card { padding: 14px 18px; }
+
+  .literary-home-inner {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 28px clamp(16px, 4%, 48px) 36px;
   }
+
+  .literary-home-heading,
+  .literary-section-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .literary-home-heading {
+    margin-bottom: 22px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .literary-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    color: var(--color-accent-text);
+  }
+
+  /* ===== 首页焦点 / 继续创作 Hero ===== */
+  .literary-hero {
+    /* The theme preview ink is chosen for each hero backdrop; accent button ink is not. */
+    --literary-hero-ink: var(--sample-ink, var(--color-text));
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    justify-content: space-between;
+    gap: 32px;
+    min-height: 220px;
+    padding: 32px 36px;
+    overflow: hidden;
+    border-radius: 16px;
+    background: var(--hero-background, var(--literary-hero-bg));
+    color: var(--literary-hero-ink, var(--color-text));
+    border: 1px solid var(--color-border);
+    box-shadow: var(--shadow-sm);
+    backdrop-filter: blur(8px);
+  }
+
+  .literary-hero .literary-eyebrow {
+    color: var(--literary-hero-ink, var(--color-accent-text));
+    opacity: 0.95;
+    font-weight: 600;
+  }
+
+  .literary-hero-copy {
+    position: relative;
+    z-index: 1;
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+
+  .literary-hero h1 {
+    margin: 12px 0 10px;
+    font-family: var(--literary-serif);
+    font-size: clamp(24px, 2.5vw, 32px);
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: .02em;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    color: var(--literary-hero-ink, var(--color-text));
+    text-shadow: 0 1px 3px color-mix(in srgb, black 40%, transparent);
+  }
+
+  .literary-hero p {
+    max-width: 580px;
+    margin-bottom: 20px;
+    font-size: 13px;
+    line-height: 1.8;
+    color: color-mix(in srgb, var(--literary-hero-ink, var(--color-text)) 88%, transparent);
+    text-shadow: 0 1px 2px color-mix(in srgb, black 30%, transparent);
+  }
+
+  .literary-hero-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: auto;
+  }
+
+  .literary-hero-actions button {
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .literary-hero-actions button:not(.literary-hero-primary-btn) {
+    background: color-mix(in srgb, var(--shell-base, var(--color-panel)) 88%, transparent) !important;
+    color: var(--literary-hero-ink) !important;
+    border: 1px solid color-mix(in srgb, var(--literary-hero-ink) 45%, transparent) !important;
+    backdrop-filter: blur(4px);
+    height: 38px;
+    padding: 0 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .literary-hero-actions button:not(.literary-hero-primary-btn):hover {
+    background: var(--shell-base, var(--color-panel)) !important;
+    border-color: var(--literary-hero-ink) !important;
+  }
+
+  .literary-hero-primary-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 40px;
+    padding: 9px 20px;
+    border-radius: 8px;
+    background: var(--color-accent);
+    color: var(--accent-foreground, #ffffff);
+    font-size: 13px;
+    font-weight: 600;
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--color-accent) 25%, transparent);
+    transition: box-shadow .2s, transform .15s, background-color .2s;
+    cursor: pointer;
+  }
+
+  .literary-hero-primary-btn:hover {
+    transform: translateY(-1px);
+    background: var(--color-accent-hover);
+    box-shadow: 0 6px 18px color-mix(in srgb, var(--color-accent) 35%, transparent);
+  }
+
+  .literary-hero-art {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 220px;
+  }
+
+  /* 拟物书册封面 */
+  .literary-display-book {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    width: 140px;
+    height: 196px;
+    padding: 18px 14px;
+    border-radius: 3px 10px 10px 3px;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--color-text) 12%, transparent) 0px, transparent 6px), var(--color-panel);
+    border: 1px solid var(--color-border);
+    box-shadow: -4px 0 0 color-mix(in srgb, var(--color-accent) 40%, transparent), 8px 12px 24px color-mix(in srgb, black 15%, transparent);
+    color: var(--color-text);
+    transform: rotate(4deg);
+    transition: transform .3s ease;
+  }
+
+  .literary-display-book:hover {
+    transform: rotate(1deg) translateY(-4px);
+  }
+
+  .literary-display-book-tag {
+    font-size: 9px;
+    letter-spacing: .12em;
+    color: var(--color-accent-text);
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+
+  .literary-display-book-title {
+    font-family: var(--literary-serif);
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.5;
+    letter-spacing: .06em;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    color: var(--color-text);
+  }
+
+  .literary-display-book-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 9px;
+    color: var(--color-text-muted);
+  }
+
+  /* ===== 书架区域 ===== */
+  .literary-bookshelf-section {
+    margin-top: 32px;
+  }
+
+  .literary-section-heading {
+    margin-bottom: 18px;
+  }
+
+  .literary-section-heading h2 {
+    font-family: var(--literary-serif);
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--color-text);
+  }
+
+  .literary-bookshelf {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 18px;
+  }
+
+  /* 书籍卡片 */
+  .literary-project-card {
+    display: flex;
+    align-items: stretch;
+    gap: 16px;
+    padding: 16px;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background: var(--color-panel);
+    text-align: left;
+    transition: border-color .2s, box-shadow .2s, transform .2s, background .2s;
+    cursor: pointer;
+  }
+
+  .literary-project-card:hover {
+    border-color: var(--color-accent);
+    box-shadow: var(--shadow-md);
+    background: var(--color-raised);
+    transform: translateY(-2px);
+  }
+
+  .literary-book-cover {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    flex-shrink: 0;
+    width: 86px;
+    height: 126px;
+    padding: 12px 10px;
+    border-radius: 2px 7px 7px 2px;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--color-text) 10%, transparent) 0 4px, transparent 6px), var(--color-hover);
+    border: 1px solid var(--color-border);
+    box-shadow: inset 3px 0 0 color-mix(in srgb, var(--color-accent) 50%, transparent), 2px 4px 10px color-mix(in srgb, var(--color-text) 8%, transparent);
+    color: var(--color-text);
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .literary-book-cover strong {
+    font-family: var(--literary-serif);
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.45;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    color: var(--color-text);
+  }
+
+  .literary-book-cover-tag {
+    font-size: 8px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    color: var(--color-accent-text);
+  }
+
+  .literary-project-info {
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+
+  .literary-project-info-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+
+  .literary-project-info-title {
+    font-family: var(--literary-serif);
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--color-text);
+  }
+
+  .literary-project-path {
+    display: block;
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--color-text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .literary-project-open {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--color-accent-text);
+  }
+
+  /* 新书立项槽位 */
+  .literary-new-book-slot {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 158px;
+    padding: 20px;
+    border: 1.5px dashed var(--color-border);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--color-panel) 60%, transparent);
+    color: var(--color-text-secondary);
+    text-align: center;
+    transition: border-color .2s, background-color .2s, transform .2s, box-shadow .2s;
+    cursor: pointer;
+  }
+
+  .literary-new-book-slot:hover {
+    border-color: var(--color-accent);
+    background-color: var(--color-hover);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .literary-new-book-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: 1px solid var(--color-border);
+    background: var(--color-panel);
+    color: var(--color-accent-text);
+    transition: transform .2s;
+  }
+
+  .literary-new-book-slot:hover .literary-new-book-icon {
+    transform: scale(1.08);
+  }
+
+  .literary-new-book-slot strong {
+    font-family: var(--literary-serif);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--color-text);
+  }
+
+  .literary-new-book-slot small {
+    font-size: 11px;
+    color: var(--color-text-muted);
+  }
+
+  /* 空书架状态 */
+  .literary-empty-shelf {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 48px 24px;
+    border: 1.5px dashed var(--color-border);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--color-panel) 70%, transparent);
+    text-align: center;
+    color: var(--color-text-secondary);
+  }
+
+  .literary-empty-shelf > svg {
+    color: var(--color-accent-text);
+    margin-bottom: 16px;
+  }
+
+  .literary-empty-shelf h3 {
+    font-family: var(--literary-serif);
+    font-size: 19px;
+    font-weight: 600;
+    color: var(--color-text);
+    margin-bottom: 8px;
+  }
+
+  .literary-empty-shelf p {
+    max-width: 440px;
+    margin-bottom: 22px;
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--color-text-secondary);
+  }
+
+  /* 提示卡片 */
+  .literary-tip-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 24px;
+    padding: 14px 18px;
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    background: var(--color-panel);
+    font-size: 12px;
+    color: var(--color-text-secondary);
+  }
+
+  .literary-tip-card strong {
+    color: var(--color-text);
+    font-weight: 600;
+  }
+
+  .literary-home-footer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding-top: 36px;
+    color: var(--color-text-muted);
+    font-size: 11px;
+  }
+
+  /* ===== 项目总览专区 ===== */
+  .literary-overview-hero {
+    padding: 24px 28px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, var(--color-panel), var(--color-hover));
+    border: 1px solid var(--color-border);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .literary-overview-title {
+    font-family: var(--literary-serif);
+    font-size: clamp(22px, 2.4vw, 30px);
+    font-weight: 600;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    color: var(--color-text);
+  }
+
+  /* 真实指标条 */
+  .literary-metric-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 16px;
+    margin-top: 20px;
+    padding-top: 18px;
+    border-top: 1px solid var(--color-border);
+  }
+
+  .literary-metric-item {
+    min-width: 0;
+  }
+
+  .literary-metric-label {
+    font-size: 11px;
+    color: var(--color-text-muted);
+    margin-bottom: 2px;
+  }
+
+  .literary-metric-value {
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.3;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-text);
+  }
+
+  .literary-metric-sub {
+    font-size: 10px;
+    font-weight: normal;
+    color: var(--color-text-muted);
+  }
+
+  /* ===== 4 步创作路径全景阶梯 ===== */
+  .literary-stepper-card {
+    padding: 20px 24px;
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    background: var(--color-panel);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .literary-stepper-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .literary-stepper-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+  }
+
+  .literary-step-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 16px;
+    border-radius: 10px;
+    border: 1px solid var(--color-border);
+    background: var(--color-hover);
+    transition: border-color .2s, box-shadow .2s, background .2s;
+  }
+
+  .literary-step-card:hover {
+    border-color: var(--color-accent);
+    background: var(--color-raised);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .literary-step-card.active-step {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 1px var(--color-accent);
+  }
+
+  .literary-step-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .literary-step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    background: var(--color-panel);
+    border: 1px solid var(--color-border);
+    color: var(--color-accent-text);
+  }
+
+  .literary-step-name {
+    font-family: var(--literary-serif);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text);
+  }
+
+  .literary-step-badge {
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 9999px;
+    font-weight: 500;
+    border: 1px solid transparent;
+  }
+
+  .literary-step-badge.ready {
+    background: color-mix(in srgb, var(--color-success) 12%, transparent);
+    color: var(--color-success-text);
+    border-color: color-mix(in srgb, var(--color-success) 24%, transparent);
+  }
+
+  .literary-step-badge.in_progress {
+    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+    color: var(--color-accent-text);
+    border-color: color-mix(in srgb, var(--color-accent) 24%, transparent);
+  }
+
+  .literary-step-badge.pending {
+    background: var(--color-panel);
+    color: var(--color-text-muted);
+    border-color: var(--color-border);
+  }
+
+  .literary-step-desc {
+    font-size: 11px;
+    line-height: 1.6;
+    margin-bottom: 14px;
+    color: var(--color-text-secondary);
+  }
+
+  .literary-step-action {
+    margin-top: auto;
+  }
+
+  /* ===== 创作阶段分组工作区 ===== */
+  .literary-stage-section {
+    margin-top: 28px;
+  }
+
+  .literary-stage-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+
+  .literary-stage-tag {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+    color: var(--color-accent-text);
+    border: 1px solid color-mix(in srgb, var(--color-accent) 20%, transparent);
+  }
+
+  .literary-stage-title {
+    font-family: var(--literary-serif);
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--color-text);
+  }
+
+  .literary-stage-desc {
+    font-size: 12px;
+    color: var(--color-text-muted);
+  }
+
+  .literary-stage-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+  }
+
+  /* 工作站卡片 */
+  .literary-workstation-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 20px;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background: var(--color-panel);
+    transition: border-color .2s, box-shadow .2s, background .2s;
+    cursor: pointer;
+  }
+
+  .literary-workstation-card:hover {
+    border-color: var(--color-accent);
+    box-shadow: var(--shadow-md);
+    background: var(--color-raised);
+  }
+
+  .literary-workstation-card h3 {
+    font-family: var(--literary-serif);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--color-text);
+  }
+
+  .literary-card-action-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--color-border);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--color-accent-text);
+  }
+
+  /* 焦点状态 */
+  .literary-home button:focus-visible,
+  .literary-overview button:focus-visible,
+  .literary-workstation-card:focus-visible,
+  .literary-project-card:focus-visible,
+  .literary-new-book-slot:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  /* ===== 响应式容器适配 ===== */
+  @container (max-width: 900px) {
+    .literary-stepper-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @container (max-width: 768px) {
+    .literary-hero {
+      flex-direction: column;
+      padding: 24px;
+      gap: 20px;
+    }
+    .literary-hero-art {
+      width: 100%;
+      justify-content: flex-start;
+    }
+    .literary-display-book {
+      transform: none;
+      width: 120px;
+      height: 168px;
+    }
+    .literary-bookshelf {
+      grid-template-columns: 1fr;
+    }
+    .literary-stage-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
   @container (max-width: 540px) {
-    .literary-home-inner { padding: 20px 16px; }
-    .literary-home-heading > span, .literary-hero-art { display: none; }
-    .literary-hero { min-height: 260px; padding: 26px; }
-    .literary-hero h1 { font-size: 27px; }
-    .literary-project-card { padding: 18px; gap: 18px; }
-    .literary-hub-card { flex-wrap: wrap; }
-    .literary-hub-card > .literary-project-open { margin-left: 56px; }
+    .literary-home-inner {
+      padding: 16px 12px 28px;
+    }
+    .literary-hero {
+      padding: 18px;
+    }
+    .literary-hero h1 {
+      font-size: 22px;
+    }
+    .literary-stepper-grid {
+      grid-template-columns: 1fr;
+    }
+    .literary-hero-art {
+      display: none;
+    }
+    .literary-metric-grid {
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
   }
+
   @media (prefers-reduced-motion: reduce) {
-    .literary-home *, .literary-overview * { transition: none; }
-    .literary-hero-action:hover { transform: none; }
+    .literary-home *,
+    .literary-overview * {
+      transition: none !important;
+      transform: none !important;
+    }
   }
 }
