@@ -250,13 +250,22 @@ describe('回到上次创作位置（真实路径）', () => {
     Object.defineProperty(window, 'velaAPI', {
       configurable: true,
       value: {
-        invoke: vi.fn(async () => ({ success: true })),
+        invoke: vi.fn(async (channel: string) => channel === 'db:blueprint-get-all' ? [] : { success: true }),
         on: vi.fn(() => () => {}),
         once: vi.fn(),
         send: vi.fn(),
       },
     })
     seedOverviewStores()
+
+    // 第 2 章仍有草稿，但蓝图已经删除；不能把草稿误当成蓝图目标。
+    recordLastCreationLocation(PROJECT_PATH, {
+      kind: 'chapter-canvas', chapterNumber: 2, title: '已删除蓝图', savedAt: new Date().toISOString(),
+    })
+    await act(async () => { root.render(<ProjectOverviewPage />) })
+    await vi.waitFor(() => expect(container.textContent).toContain('继续写正文'))
+    await vi.waitFor(() => expect(useDraftStore.getState().dataProjectKey).toBe(PROJECT_PATH))
+    expect(container.querySelector('[data-testid="overview-resume-location"]')).toBeNull()
 
     // 章节已被删除：蓝图与草稿里都没有第 99 章。
     recordLastCreationLocation(PROJECT_PATH, {

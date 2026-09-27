@@ -25,7 +25,7 @@ import { Button } from '../ui/Button'
 import { Card } from '../ui/Card'
 import { openBuiltinEditor, openChapterFile } from '../panels/sidebar/sidebar-file-openers'
 import { ipc } from '../../services/ipc-client'
-import { captureProjectSession } from '../project-session-gate'
+import { captureProjectSession, isProjectSessionCurrent } from '../project-session-gate'
 import type { ChapterBlueprint } from '../../services/workflows/directory-workflow'
 import { NewDraftDialog } from '../panels/sidebar/NewDraftDialog'
 import { openResumableDraft } from './workbench-draft-entry'
@@ -40,6 +40,7 @@ export default function ProjectOverviewPage() {
   const text = useLocaleStore(s => s.text)
   const currentProject = useProjectStore(s => s.currentProject)
   const draftsByChapter = useDraftStore(s => s.draftsByChapter)
+  const draftsProjectKey = useDraftStore(s => s.dataProjectKey)
   const nodes = useWorldMapStore(s => s.nodes)
   const edges = useWorldMapStore(s => s.edges)
   const maps = useWorldMapStore(s => s.maps)
@@ -51,6 +52,7 @@ export default function ProjectOverviewPage() {
   const loadCharacters = useCharacterStore(s => s.loadCharacters)
 
   const [blueprints, setBlueprints] = useState<ChapterBlueprint[]>([])
+  const [blueprintsProjectKey, setBlueprintsProjectKey] = useState<string | null>(null)
   const [stepperExpanded, setStepperExpanded] = useState(true)
   const [createDraftDialogOpen, setCreateDraftDialogOpen] = useState(false)
 
@@ -62,6 +64,7 @@ export default function ProjectOverviewPage() {
   // 加载地图册、角色档案和章节蓝图
   useEffect(() => {
     if (!projectPath) return
+    setBlueprintsProjectKey(null)
     void loadWorldMap(projectPath)
     void loadCharacters(projectPath)
 
@@ -73,6 +76,7 @@ export default function ProjectOverviewPage() {
       .then((res: unknown) => {
         if (!cancelled && Array.isArray(res)) {
           setBlueprints(res as ChapterBlueprint[])
+          setBlueprintsProjectKey(projectPath)
         }
       })
       .catch(() => {})
@@ -168,33 +172,47 @@ export default function ProjectOverviewPage() {
   // 「继续写正文」流程。
   const lastLocation = useMemo(() => readLastCreationLocation(projectPath), [projectPath])
 
-  const lastLocationChapterExists = useMemo(() => {
-    if (!lastLocation) return false
-    if (blueprints.some(blueprint => blueprint.chapterNumber === lastLocation.chapterNumber)) return true
-    return Boolean(draftsByChapter[lastLocation.chapterNumber]?.length)
-  }, [lastLocation, blueprints, draftsByChapter])
-
   const lastLocationValid = useMemo(() => {
     if (!lastLocation) return false
     if (lastLocation.kind === 'blueprint' || lastLocation.kind === 'chapter-canvas') {
-      return lastLocationChapterExists
+      return blueprintsProjectKey === projectPath
+        && blueprints.some(blueprint => blueprint.chapterNumber === lastLocation.chapterNumber)
     }
     if (lastLocation.kind === 'draft') {
-      if (!lastLocation.draftId) return false
+      if (!lastLocation.draftId || draftsProjectKey !== projectPath) return false
       return Object.values(draftsByChapter).flat().some(draft =>
         draft.id === lastLocation.draftId && draft.status !== 'archived')
     }
     return false
-  }, [lastLocation, lastLocationChapterExists, draftsByChapter])
+  }, [lastLocation, blueprintsProjectKey, projectPath, blueprints, draftsProjectKey, draftsByChapter])
 
   const handleResumeLastLocation = async () => {
     const location: LastCreationLocation | null = lastLocation
     if (!location || !projectPath) return
+    const projectSession = captureProjectSession(currentProject)
+    if (!projectSession || projectSession.projectPath !== projectPath) return
     if (location.kind === 'draft' && location.draftId && lastLocationValid) {
       // openChapterFile 读取权威 DB 正文后再挂编辑器；草稿被删除或会话
       // 失效时它自己会提示且不创建空 Tab。
       await openChapterFile(`vela://draft/${location.draftId}`, location.title)
       return
+    }
+    if ((location.kind === 'blueprint' || location.kind === 'chapter-canvas') && lastLocationValid) {
+      try {
+        const currentBlueprints = await ipc.invokeWithProjectSession(
+          projectSession, 'db:blueprint-get-all', projectPath,
+        )
+        if (!isProjectSessionCurrent(projectSession)) return
+        if (!Array.isArray(currentBlueprints) || !currentBlueprints.some(
+          (blueprint: ChapterBlueprint) => blueprint.chapterNumber === location.chapterNumber,
+        )) {
+          await handleResumeDrafting()
+          return
+        }
+      } catch {
+        if (isProjectSessionCurrent(projectSession)) await handleResumeDrafting()
+        return
+      }
     }
     if (location.kind === 'blueprint' && lastLocationValid) {
       openBuiltinEditor('chapter-card-editor', text('章节蓝图', 'Chapter blueprints'), 'chapter-card', undefined, location.chapterNumber)
