@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 
 import type { EntitySourceRef, PlotGraphNodeData } from './types'
+import type { PlotCanvasNodeEntityRef } from '../../../shared/plot-canvas'
 import { getPlotNodeKindMeta } from './kind-meta'
 import { useLocaleStore } from '../../../stores/locale-store'
 import './plot-graph.css'
@@ -32,7 +33,7 @@ export interface PlotNodeDetailPanelProps {
   onDelete?: (nodeId: string) => void
   onSplit?: (nodeId: string) => void
   onEnterSubCanvas?: (nodeId: string, subCanvasId: string) => void
-  onNavigateEntity?: (entity: EntitySourceRef) => void
+  onNavigateEntity?: (entity: EntitySourceRef | PlotCanvasNodeEntityRef) => void
   onOpenPlan?: (planId: number) => void
   readOnly?: boolean
 }
@@ -81,7 +82,10 @@ export function PlotNodeDetailPanel({
   }
 
   const canEnterSubCanvas = Boolean(nodeData.subCanvasId && onEnterSubCanvas)
-  const canNavigateEntity = Boolean(nodeData.entityRef && onNavigateEntity)
+  const displayedEntityRefs = nodeData.entityRefs?.length
+    ? nodeData.entityRefs
+    : nodeData.entityRef ? [nodeData.entityRef] : []
+  const canNavigateEntity = Boolean(onNavigateEntity)
   const canOpenPlan = Boolean(nodeData.planId && onOpenPlan)
 
   return (
@@ -227,31 +231,31 @@ export function PlotNodeDetailPanel({
         )}
 
         {/* 关联实体来源 */}
-        {nodeData.entityRef && (
+        {displayedEntityRefs.length > 0 && (
           <div className="plot-graph-detail-section">
             <span className="plot-graph-detail-section__label">
               {text('关联实体', 'Linked Entity')}
             </span>
-            <div className="flex items-center justify-between p-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)]">
+            {displayedEntityRefs.map((ref, index) => <div key={index} className="flex items-center justify-between p-2 rounded border border-[var(--color-border)] bg-[var(--color-bg)]">
               <div className="flex flex-col min-w-0">
                 <span className="text-xs font-medium text-[var(--color-text)] truncate">
-                  {nodeData.entityRef.name ?? String(nodeData.entityRef.id)}
+                  {'entityType' in ref ? String(ref.entityId) : ref.name ?? String(ref.id)}
                 </span>
                 <span className="text-[10px] text-[var(--color-text-muted)]">
-                  {nodeData.entityRef.type}
+                  {'entityType' in ref ? ref.entityType : ref.type}
                 </span>
               </div>
               <button
                 type="button"
                 className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs text-[var(--color-accent)] hover:bg-[var(--color-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                 disabled={!canNavigateEntity}
-                onClick={() => nodeData.entityRef && onNavigateEntity?.(nodeData.entityRef)}
+                onClick={() => onNavigateEntity?.(ref)}
                 title={canNavigateEntity ? text('跳转到关联实体', 'Jump to entity') : text('不可跳转', 'Unavailable')}
               >
                 <ExternalLink size={12} />
                 <span>{text('查看实体', 'View Entity')}</span>
               </button>
-            </div>
+            </div>)}
           </div>
         )}
       </div>

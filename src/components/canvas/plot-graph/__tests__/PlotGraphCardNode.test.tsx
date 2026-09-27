@@ -115,6 +115,24 @@ describe('PlotGraphCardNode component', () => {
     expect(html).toContain('苏砚')
   })
 
+  it('shows every persisted entity reference without inventing a resolved entity name', () => {
+    const html = renderNode({
+      id: 'node-refs',
+      type: 'plot-graph-card',
+      position: { x: 0, y: 0 },
+      data: {
+        kind: 'note',
+        title: '来源汇总',
+        entityRefs: [
+          { entityType: 'foreshadowing', entityId: 'fsh-1' },
+          { entityType: 'draft', entityId: 12 },
+        ],
+      },
+    })
+    expect(html).toContain('foreshadowing: fsh-1')
+    expect(html).toContain('draft: 12')
+  })
+
   it('renders selected, search-hit, dimmed, and hidden class names accurately', () => {
     const nodeSelected: PlotGraphNode = {
       id: 'n1',

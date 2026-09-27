@@ -7,7 +7,7 @@ import {
 import type { PlotGraphEdgeData, PlotGraphFilterState, PlotGraphNodeData } from '../types'
 
 describe('plot-graph filter-utils', () => {
-  const sampleNodes: Array<{ id: string; data: PlotGraphNodeData }> = [
+  const sampleNodes: Array<{ id: string; data: PlotGraphNodeData; hidden?: boolean }> = [
     {
       id: 'node-1',
       data: {
@@ -150,6 +150,8 @@ describe('plot-graph filter-utils', () => {
       expect(result.processedNodes).toHaveLength(10)
       const hiddenNodes = result.processedNodes.filter(n => n.data.hidden)
       expect(hiddenNodes).toHaveLength(8)
+      expect(result.processedNodes.filter(n => n.hidden)).toHaveLength(8)
+      expect(result.visibleNodes.every(n => !n.hidden)).toBe(true)
     })
 
     it('calculates search hits and dims non-matching visible nodes', () => {

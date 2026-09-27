@@ -64,7 +64,7 @@ export function PlotCanvasInfoPanel({
         <div className="plot-canvas-info__stats" data-testid="plot-canvas-info-stats">
           <span className="plot-canvas-info__stat">
             <Workflow size={11} aria-hidden="true" />
-            {text(`${nodeCount} 个剧情事件`, `${nodeCount} plot event(s)`)}
+            {text(`${nodeCount} 个节点`, `${nodeCount} node(s)`)}
           </span>
           <span className="plot-canvas-info__stat">
             <Film size={11} aria-hidden="true" />
@@ -74,8 +74,8 @@ export function PlotCanvasInfoPanel({
         {nodeCount === 0 && (
           <div className="plot-canvas-info__empty" data-testid="plot-canvas-info-empty">
             {text(
-              '该画布还没有剧情事件。点击顶部「新增事件」，或双击画布空白处手动添加。',
-              'This canvas has no plot events yet. Click “Add event” above, or double-click an empty spot on the canvas.',
+              '该画布还没有节点。点击顶部「新增事件」，或双击画布空白处手动添加。',
+              'This canvas has no nodes yet. Click “Add event” above, or double-click an empty spot on the canvas.',
             )}
           </div>
         )}

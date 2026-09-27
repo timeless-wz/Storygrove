@@ -45,7 +45,7 @@ export function checkNodeSearchHit(node: PlotGraphNodeData, query: string): bool
 /**
  * 计算节点筛选与搜索状态
  */
-export function filterPlotGraphNodes<TNode extends { id: string; data: PlotGraphNodeData }>(
+export function filterPlotGraphNodes<TNode extends { id: string; data: PlotGraphNodeData; hidden?: boolean }>(
   nodes: TNode[],
   filter: PlotGraphFilterState
 ): FilterResult<TNode> {
@@ -92,6 +92,8 @@ export function filterPlotGraphNodes<TNode extends { id: string; data: PlotGraph
       // 被 kind 筛选隐藏
       processedNodes.push({
         ...node,
+        // React Flow reads visibility from Node.hidden, not Node.data.hidden.
+        hidden: true,
         data: {
           ...node.data,
           hidden: true,
@@ -108,6 +110,7 @@ export function filterPlotGraphNodes<TNode extends { id: string; data: PlotGraph
 
     const updatedNode: TNode = {
       ...node,
+      hidden: false,
       data: {
         ...node.data,
         hidden: false,

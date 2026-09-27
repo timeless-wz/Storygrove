@@ -18,7 +18,7 @@ import {
 } from '@xyflow/react'
 import {
   CornerUpRight,
-  ExternalLink,
+  Link2,
   Pencil,
   Scissors,
   Trash2,
@@ -56,6 +56,7 @@ function PlotGraphCardNodeView({ id, data, selected }: NodeProps<PlotGraphNode>)
     data.subCanvasTitle ||
     data.hasPlan ||
     (data.chapterRefs && data.chapterRefs.length > 0) ||
+    (data.entityRefs && data.entityRefs.length > 0) ||
     data.entityRef
   )
 
@@ -128,7 +129,7 @@ function PlotGraphCardNodeView({ id, data, selected }: NodeProps<PlotGraphNode>)
 
           {hasBadges && (
             <>
-              {data.subCanvasTitle && (
+              {data.subCanvasTitle && data.onEnterSubCanvas && (
                 <button
                   type="button"
                   className="plot-graph-card__badge is-subcanvas"
@@ -141,6 +142,12 @@ function PlotGraphCardNodeView({ id, data, selected }: NodeProps<PlotGraphNode>)
                   <CornerUpRight size={9} />
                   <span>{data.subCanvasTitle}</span>
                 </button>
+              )}
+              {data.subCanvasTitle && !data.onEnterSubCanvas && (
+                <span className="plot-graph-card__badge is-subcanvas">
+                  <CornerUpRight size={9} />
+                  <span>{data.subCanvasTitle}</span>
+                </span>
               )}
 
               {data.hasPlan && (
@@ -160,21 +167,21 @@ function PlotGraphCardNodeView({ id, data, selected }: NodeProps<PlotGraphNode>)
                 </span>
               ))}
 
-              {data.entityRef && (
+              {(data.entityRefs?.length ? data.entityRefs : data.entityRef ? [data.entityRef] : []).map((ref, index) => {
+                const label = 'entityType' in ref
+                  ? `${ref.entityType}: ${ref.entityId}`
+                  : ref.name ?? `${ref.type}: ${ref.id}`
+                return (
                 <span
+                  key={`${label}-${index}`}
                   className="plot-graph-card__badge"
-                  title={text(`关联来源: ${data.entityRef.name ?? data.entityRef.type}`, `Entity: ${data.entityRef.name ?? data.entityRef.type}`)}
-                  onClick={event => {
-                    if (data.onNavigateEntity && data.entityRef) {
-                      event.stopPropagation()
-                      data.onNavigateEntity(data.entityRef)
-                    }
-                  }}
+                  title={text(`关联来源: ${label}`, `Entity: ${label}`)}
                 >
-                  <ExternalLink size={9} />
-                  <span>{data.entityRef.name ?? data.entityRef.type}</span>
+                  <Link2 size={9} />
+                  <span>{label}</span>
                 </span>
-              )}
+                )
+              })}
             </>
           )}
         </div>

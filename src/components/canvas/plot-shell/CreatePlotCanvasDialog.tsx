@@ -12,6 +12,7 @@ import type { FormEvent, KeyboardEvent } from 'react'
 import { useLocaleStore } from '../../../stores/locale-store'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../../ui/Dialog'
 import type { PlotCanvasDraftValues } from './types'
+import { MAX_PLOT_CANVAS_DESCRIPTION_LENGTH, MAX_PLOT_CANVAS_NAME_LENGTH } from '../../../shared/plot-canvas'
 import './plot-shell.css'
 
 export interface CreatePlotCanvasDialogProps {
@@ -37,21 +38,38 @@ export function CreatePlotCanvasDialog({
   onSubmit,
   className,
 }: CreatePlotCanvasDialogProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {open && (
+        <CreatePlotCanvasDialogContent
+          key={JSON.stringify([initialTitle, initialDescription])}
+          onOpenChange={onOpenChange}
+          initialTitle={initialTitle}
+          initialDescription={initialDescription}
+          submitting={submitting}
+          onSubmit={onSubmit}
+          className={className}
+        />
+      )}
+    </Dialog>
+  )
+}
+
+function CreatePlotCanvasDialogContent({
+  onOpenChange,
+  initialTitle = '',
+  initialDescription = '',
+  submitting,
+  onSubmit,
+  className,
+}: Omit<CreatePlotCanvasDialogProps, 'open'>) {
   const text = useLocaleStore(s => s.text)
   const [title, setTitle] = useState(initialTitle)
   const [description, setDescription] = useState(initialDescription)
   const titleRef = useRef<HTMLInputElement | null>(null)
 
-  // 每次打开都按调用方给定的初始值重置表单，并聚焦标题输入。
+  // The body mounts for each opening, so its initial state matches the draft.
   useEffect(() => {
-    if (open) {
-      setTitle(initialTitle)
-      setDescription(initialDescription)
-    }
-  }, [open, initialTitle, initialDescription])
-
-  useEffect(() => {
-    if (!open) return
     const timer = window.setTimeout(() => {
       const node = titleRef.current
       if (!node) return
@@ -59,7 +77,7 @@ export function CreatePlotCanvasDialog({
       node.select()
     }, 30)
     return () => window.clearTimeout(timer)
-  }, [open])
+  }, [])
 
   const trimmedTitle = title.trim()
   const canSubmit = trimmedTitle.length > 0 && !submitting
@@ -84,7 +102,6 @@ export function CreatePlotCanvasDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className={className}
         style={{ maxWidth: 420 }}
@@ -111,7 +128,7 @@ export function CreatePlotCanvasDialog({
               value={title}
               onChange={event => setTitle(event.target.value)}
               placeholder={text('例如：第一卷主线', 'e.g. Volume 1 main line')}
-              maxLength={80}
+              maxLength={MAX_PLOT_CANVAS_NAME_LENGTH}
               aria-required="true"
               aria-invalid={title.length > 0 && trimmedTitle.length === 0 ? 'true' : undefined}
               data-testid="plot-canvas-create-title-input"
@@ -130,6 +147,7 @@ export function CreatePlotCanvasDialog({
               id="plot-canvas-create-description"
               className="plot-canvas-create-form__textarea"
               rows={3}
+              maxLength={MAX_PLOT_CANVAS_DESCRIPTION_LENGTH}
               value={description}
               onChange={event => setDescription(event.target.value)}
               onKeyDown={handleDescriptionKeyDown}
@@ -157,6 +175,5 @@ export function CreatePlotCanvasDialog({
           </div>
         </form>
       </DialogContent>
-    </Dialog>
   )
 }

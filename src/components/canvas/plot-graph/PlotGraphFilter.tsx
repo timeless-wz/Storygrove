@@ -91,12 +91,17 @@ export function PlotGraphFilter({
 
   // 单选/反选单个类别
   const toggleKind = useCallback((kind: PlotNodeKind) => {
-    const nextSet = new Set(filter.selectedKinds)
+    const nextSet = filter.selectedKinds.size === 0
+      ? new Set(ALL_PLOT_NODE_KINDS)
+      : new Set(filter.selectedKinds)
     if (nextSet.has(kind)) {
       nextSet.delete(kind)
     } else {
       nextSet.add(kind)
     }
+    // Empty means "no kind filter". Do not turn the final deselection
+    // into an apparently unchanged selection of every kind.
+    if (nextSet.size === 0) return
     onFilterChange({
       ...filter,
       selectedKinds: nextSet,
@@ -111,7 +116,7 @@ export function PlotGraphFilter({
     })
   }, [filter, onFilterChange])
 
-  // 清空
+  // 重置为默认的全部可见状态。
   const handleClearAll = useCallback(() => {
     onFilterChange({
       ...filter,
@@ -119,7 +124,7 @@ export function PlotGraphFilter({
     })
   }, [filter, onFilterChange])
 
-  // 反选
+  // 反选仅在部分种类被选中时有明确结果。
   const handleInvert = useCallback(() => {
     const nextSet = new Set<PlotNodeKind>()
     for (const kind of ALL_PLOT_NODE_KINDS) {
@@ -179,6 +184,7 @@ export function PlotGraphFilter({
           className="plot-graph-search-input"
           placeholder={text('搜索标题、摘要或标签…', 'Search title, summary or tags…')}
           value={filter.searchQuery}
+          aria-label={text('搜索节点标题、摘要或标签', 'Search node title, summary, or tags')}
           onChange={handleSearchChange}
           onKeyDown={handleSearchKeyDown}
           disabled={disabled}
@@ -195,6 +201,8 @@ export function PlotGraphFilter({
               className="p-0.5 rounded hover:bg-[var(--color-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
               title={text('上一个 (Shift+Enter)', 'Previous match (Shift+Enter)')}
               onClick={onPrevMatch}
+              disabled={!onPrevMatch}
+              aria-label={text('上一个匹配', 'Previous match')}
             >
               <ChevronUp size={12} />
             </button>
@@ -203,6 +211,8 @@ export function PlotGraphFilter({
               className="p-0.5 rounded hover:bg-[var(--color-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
               title={text('下一个 (Enter)', 'Next match (Enter)')}
               onClick={onNextMatch}
+              disabled={!onNextMatch}
+              aria-label={text('下一个匹配', 'Next match')}
             >
               <ChevronDown size={12} />
             </button>
@@ -268,14 +278,15 @@ export function PlotGraphFilter({
             <button
               type="button"
               className="plot-graph-filter-action-btn"
-              disabled={selectedCount === 0}
+              disabled={!isFilterActive}
               onClick={handleClearAll}
             >
-              {text('清空', 'Clear')}
+              {text('重置', 'Reset')}
             </button>
             <button
               type="button"
               className="plot-graph-filter-action-btn"
+              disabled={!isFilterActive}
               onClick={handleInvert}
             >
               {text('反选', 'Invert')}
@@ -286,7 +297,7 @@ export function PlotGraphFilter({
           <div className="plot-graph-filter-chips-grid">
             {ALL_PLOT_NODE_KINDS.map(kind => {
               const meta = PLOT_NODE_KIND_METAS[kind]
-              const isSelected = filter.selectedKinds.has(kind)
+              const isSelected = selectedCount === 0 || filter.selectedKinds.has(kind)
               const count = kindCounts?.[kind] ?? 0
               const chipStyle = {
                 '--chip-color': meta.accentColor,
@@ -298,6 +309,7 @@ export function PlotGraphFilter({
                   type="button"
                   style={chipStyle}
                   className={`plot-graph-filter-chip ${isSelected ? 'is-selected' : ''}`}
+                  aria-pressed={isSelected}
                   onClick={() => toggleKind(kind)}
                   title={text(meta.descriptionZh, meta.descriptionEn)}
                 >

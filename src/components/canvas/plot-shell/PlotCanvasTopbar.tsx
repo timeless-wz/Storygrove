@@ -76,6 +76,7 @@ export function PlotCanvasTopbar({
           type="button"
           className={`plot-shell__canvas-picker${canvasName ? '' : ' plot-shell__canvas-picker--placeholder'}`}
           onClick={onOpenCanvasSelector}
+          disabled={!onOpenCanvasSelector}
           title={canvasName ?? placeholder}
           data-testid="plot-canvas-picker"
         >
@@ -95,6 +96,7 @@ export function PlotCanvasTopbar({
                   type="button"
                   className="plot-shell__breadcrumb-crumb"
                   onClick={() => onBreadcrumbSelect?.(crumb.id)}
+                  disabled={!onBreadcrumbSelect}
                   title={crumb.name}
                 >
                   {crumb.name}
@@ -108,7 +110,7 @@ export function PlotCanvasTopbar({
           type="button"
           className="plot-shell__pill"
           onClick={onAddEvent}
-          disabled={addEventDisabled}
+          disabled={addEventDisabled || !onAddEvent}
           title={addEventLabel ?? text('新增事件', 'Add event')}
           data-testid="plot-canvas-add-event"
         >
@@ -124,7 +126,7 @@ export function PlotCanvasTopbar({
           type="button"
           className={`plot-shell__icon-btn${searchActive ? ' is-active' : ''}`}
           onClick={onToggleSearch}
-          disabled={searchDisabled}
+          disabled={searchDisabled || !onToggleSearch}
           title={text('搜索画布', 'Search canvas')}
           aria-label={text('搜索画布', 'Search canvas')}
           aria-pressed={searchActive}
@@ -136,7 +138,7 @@ export function PlotCanvasTopbar({
           type="button"
           className={`plot-shell__icon-btn${filtersActive ? ' is-active' : ''}`}
           onClick={onOpenFilters}
-          disabled={filtersDisabled}
+          disabled={filtersDisabled || !onOpenFilters}
           title={text('画布筛选', 'Canvas filters')}
           aria-label={text('画布筛选', 'Canvas filters')}
           aria-pressed={filtersActive}
@@ -148,7 +150,7 @@ export function PlotCanvasTopbar({
           type="button"
           className={`plot-shell__icon-btn${infoActive ? ' is-active' : ''}`}
           onClick={onOpenInfo}
-          disabled={infoDisabled}
+          disabled={infoDisabled || !onOpenInfo}
           title={text('画布信息', 'Canvas info')}
           aria-label={text('画布信息', 'Canvas info')}
           aria-pressed={infoActive}

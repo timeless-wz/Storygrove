@@ -225,7 +225,7 @@ describe('PlotCanvasSidebar', () => {
 
     const items = container.querySelectorAll('[data-testid="plot-canvas-sidebar-item"]')
     expect(items).toHaveLength(plotCanvasSidebarFixtures.length)
-    expect(items[0].getAttribute('aria-selected')).toBe('true')
+    expect(items[0].querySelector('button')?.getAttribute('aria-current')).toBe('true')
     expect(items[0].textContent).toContain('第一卷 · 归墟主线')
     expect(items[0].textContent).toContain('渔村灭门')
     // 子画布缩进
@@ -268,6 +268,14 @@ describe('PlotCanvasSidebar', () => {
 })
 
 describe('PlotCanvasTopbar', () => {
+  it('无回调时禁用操作入口，避免出现无效按钮', async () => {
+    await mount(<PlotCanvasTopbar canvasName={null} />)
+    expect(query<HTMLButtonElement>('plot-canvas-picker').disabled).toBe(true)
+    expect(query<HTMLButtonElement>('plot-canvas-add-event').disabled).toBe(true)
+    expect(query<HTMLButtonElement>('plot-canvas-topbar-search').disabled).toBe(true)
+    expect(query<HTMLButtonElement>('plot-canvas-topbar-filters').disabled).toBe(true)
+    expect(query<HTMLButtonElement>('plot-canvas-topbar-info').disabled).toBe(true)
+  })
   it('无画布时显示占位并禁用新增事件；回调上抛选择器/新增/搜索/筛选/信息', async () => {
     const onOpenCanvasSelector = vi.fn()
     const onAddEvent = vi.fn()
@@ -367,6 +375,8 @@ describe('CreatePlotCanvasDialog', () => {
     const dialog = query('plot-canvas-create-dialog')
     expect(dialog.textContent).toContain('新增剧情画布')
     expect(query('plot-canvas-create-title-hint').textContent).toContain('请填写画布标题')
+    expect(query<HTMLInputElement>('plot-canvas-create-title-input').maxLength).toBe(120)
+    expect(query<HTMLTextAreaElement>('plot-canvas-create-description-input').maxLength).toBe(2000)
     expect(query<HTMLButtonElement>('plot-canvas-create-submit').disabled).toBe(true)
     // 打开后自动聚焦标题输入框
     expect(document.activeElement?.id).toBe('plot-canvas-create-title')
@@ -414,14 +424,14 @@ describe('PlotCanvasInfoPanel', () => {
       <PlotCanvasInfoPanel canvasName="第一卷 · 归墟主线" description="铜牌指引的归墟之门。" nodeCount={4} edgeCount={3} onClose={onClose} />,
     )
     expect(query('plot-canvas-info-name').textContent).toContain('第一卷 · 归墟主线')
-    expect(query('plot-canvas-info-stats').textContent).toContain('4 个剧情事件')
+    expect(query('plot-canvas-info-stats').textContent).toContain('4 个节点')
     expect(query('plot-canvas-info-stats').textContent).toContain('3 条连线')
     expect(container.querySelector('[data-testid="plot-canvas-info-empty"]')).toBeNull()
     await act(async () => { query<HTMLButtonElement>('plot-canvas-info-close').click() })
     expect(onClose).toHaveBeenCalledTimes(1)
 
     await mount(<PlotCanvasInfoPanel canvasName={null} nodeCount={0} edgeCount={0} />)
-    expect(container.textContent).toContain('该画布还没有剧情事件')
+    expect(container.textContent).toContain('该画布还没有节点')
     expect(container.textContent).toContain('新增事件')
   })
 })
@@ -436,7 +446,7 @@ describe('PlotCanvasShell assembly', () => {
     expect(container.querySelectorAll('.plot-shell__right-panel')).toHaveLength(1)
 
     await act(async () => { query<HTMLButtonElement>('plot-canvas-add-event').click() })
-    expect(query('plot-canvas-info-stats').textContent).toContain('1 个剧情事件')
+    expect(query('plot-canvas-info-stats').textContent).toContain('1 个节点')
 
     await act(async () => { query<HTMLButtonElement>('plot-canvas-sidebar-collapse').click() })
     expect(query('plot-canvas-shell-sidebar-rail')).toBeTruthy()

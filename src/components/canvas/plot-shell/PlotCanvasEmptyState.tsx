@@ -52,7 +52,7 @@ export function PlotCanvasEmptyState({
             {text('从左侧目录选择一个剧情画布，或创建新的剧情画布', 'Pick a canvas from the list on the left, or create a new one')}
           </p>
           <div className="plot-canvas-empty__actions">
-            <button type="button" className="plot-shell__pill" onClick={onCreateCanvas} data-testid="plot-canvas-empty-create">
+            <button type="button" className="plot-shell__pill" onClick={onCreateCanvas} disabled={!onCreateCanvas} data-testid="plot-canvas-empty-create">
               <span className="plot-shell__pill-icon" aria-hidden="true">
                 <Plus size={14} />
               </span>
@@ -74,7 +74,7 @@ export function PlotCanvasEmptyState({
               type="button"
               className="plot-shell__pill"
               onClick={onAddEvent}
-              disabled={addEventDisabled}
+              disabled={addEventDisabled || !onAddEvent}
               data-testid="plot-canvas-empty-add-event"
             >
               <span className="plot-shell__pill-icon" aria-hidden="true">

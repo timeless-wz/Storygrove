@@ -50,21 +50,17 @@
 
 ---
 
-## 4. 10 种 Kind 的实体链接与扩展映射
+## 4. 10 种 Kind 与实体引用
 
-本组件支持的 10 种类别可通过过渡 View Model 与项目现有的实体模型安全映射：
-| Kind | 含义 | 对应本地或规划实体 | 推荐实体链接（entityRef.type） |
-| :--- | :--- | :--- | :--- |
-| `plot` | 剧情事件 | `PlotCanvasNodeData` | - |
-| `idea` | 灵感脑洞 | `vela://inspiration/*` | `'idea'` |
-| `foreshadow` | 伏笔暗线 | `db:foreshadowing-*` | `'foreshadow'` |
-| `character` | 角色出场 | `db:character-*` | `'character'` |
-| `location` | 地点环境 | 世界观地点设定词条 | `'location'` |
-| `item` | 道具宝物 | 世界观物品设定词条 | `'item'` |
-| `faction` | 势力组织 | 世界观势力设定词条 | `'faction'` |
-| `skill` | 功法秘技 | 世界观功法设定词条 | `'skill'` |
-| `chapter` | 章节归属 | 蓝图与定稿章节号 | `'chapter'` |
-| `note` | 便签批注 | 作者自由备忘 | `'note'` |
+`kind` 只表示卡片的展示类别，不证明存在对应的实体表。持久化引用必须来自
+`PlotCanvasNodeData.entityRefs`，使用数据层允许的 `entityType/entityId`：
+`foreshadowing`、`world-map-node`、`timeline-event`、`draft`。这些 ID 仍可能
+悬挂，打开目标前应由集成层查询并处理失效。人物、物品、势力、技能等类别
+可以是本地卡片，不得根据类别虚构实体 ID 或跳转地址。
+
+`PlotGraphNodeData.entityRef` 仅保留旧演示数据的单条展示兼容；真实数据应传
+`entityRefs` 数组，详情面板可展示全部引用。演示测试中的人物和地点名称是
+fixture，不代表项目数据库中存在这些记录。
 
 ---
 

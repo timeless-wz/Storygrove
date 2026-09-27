@@ -1,7 +1,7 @@
 import { act, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { page } from 'vitest/browser'
-import { afterEach, beforeEach, describe, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   Background,
   BackgroundVariant,
@@ -339,5 +339,17 @@ describe('Plot Graph interactive visual demonstration capture', () => {
     await new Promise(r => setTimeout(r, 1200))
 
     await page.screenshot({ path: '__screenshots__/plot-canvas-graph-demo.png' })
+
+    // Exercise React Flow itself: filtering a kind must hide its rendered node,
+    // rather than merely setting a flag inside Node.data.
+    const trigger = container.querySelector<HTMLButtonElement>('.plot-graph-filter-trigger')
+    expect(trigger).not.toBeNull()
+    await act(async () => { trigger?.click() })
+    const characterChip = Array.from(container.querySelectorAll<HTMLButtonElement>('.plot-graph-filter-chip'))
+      .find(chip => chip.textContent?.includes('角色'))
+    expect(characterChip).not.toBeUndefined()
+    await act(async () => { characterChip?.click() })
+    const characterCard = container.querySelector<HTMLElement>('[data-node-id="n-char"]')
+    expect(characterCard).toBeNull()
   })
 })

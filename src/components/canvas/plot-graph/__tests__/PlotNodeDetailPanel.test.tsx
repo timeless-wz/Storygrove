@@ -77,6 +77,24 @@ describe('PlotNodeDetailPanel component', () => {
     expect(html).toContain('disabled=""')
   })
 
+  it('shows all persisted references, including IDs whose targets are not resolved', () => {
+    const html = renderToStaticMarkup(
+      <PlotNodeDetailPanel
+        nodeId="node-refs"
+        nodeData={{
+          title: '来源汇总',
+          entityRefs: [
+            { entityType: 'foreshadowing', entityId: 'fsh-1' },
+            { entityType: 'draft', entityId: 12 },
+          ],
+        }}
+      />,
+    )
+    expect(html).toContain('fsh-1')
+    expect(html).toContain('12')
+    expect(html.match(/查看实体/g)).toHaveLength(2)
+  })
+
   it('hides footer action buttons when readOnly is true', () => {
     const data: PlotGraphNodeData = {
       kind: 'plot',

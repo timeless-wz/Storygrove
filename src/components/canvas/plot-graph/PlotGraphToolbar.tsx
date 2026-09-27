@@ -10,7 +10,7 @@
  * 6. 全局快捷键智能接管：输入框（Input / Textarea / ContentEditable）获焦时严防拦截，保证不冲突。
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type RefObject } from 'react'
 import {
   ChevronLeft,
   ChevronRight,
@@ -47,6 +47,8 @@ export interface PlotGraphToolbarProps {
   onFocusSearch?: () => void
   /** 是否允许快捷键 */
   enableShortcuts?: boolean
+  /** Keyboard shortcuts only apply while focus is inside this canvas host. */
+  shortcutScopeRef?: RefObject<HTMLElement | null>
 }
 
 /**
@@ -78,21 +80,23 @@ export function PlotGraphToolbar({
   onZoomIn,
   onZoomOut,
   onFocusSearch,
-  enableShortcuts = true,
+  enableShortcuts = false,
+  shortcutScopeRef,
 }: PlotGraphToolbarProps) {
   const text = useLocaleStore(s => s.text)
   const [collapsed, setCollapsed] = useState(false)
 
   // 快捷键监听
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if (!enableShortcuts) return
+    if (!enableShortcuts || e.defaultPrevented) return
+    if (!shortcutScopeRef?.current?.contains(e.target as Node)) return
     if (isTypingInInput()) return
 
     const key = e.key.toLowerCase()
     const isCtrlOrCmd = e.ctrlKey || e.metaKey
 
     // Ctrl+F / Cmd+F: 呼出搜索
-    if (isCtrlOrCmd && key === 'f') {
+    if (isCtrlOrCmd && key === 'f' && onFocusSearch) {
       e.preventDefault()
       onFocusSearch?.()
       return
@@ -121,6 +125,7 @@ export function PlotGraphToolbar({
     }
   }, [
     enableShortcuts,
+    shortcutScopeRef,
     onInteractionModeChange,
     onToggleGrid,
     onZoomIn,

@@ -146,7 +146,7 @@ export function PlotCanvasSidebar({
         )}
       </div>
 
-      <div className="plot-canvas-sidebar__list" data-testid="plot-canvas-sidebar-list" role="listbox" aria-label={text('剧情画布列表', 'Plot canvas list')}>
+      <div className="plot-canvas-sidebar__list" data-testid="plot-canvas-sidebar-list" role="list" aria-label={text('剧情画布列表', 'Plot canvas list')}>
         {canvases.length === 0 ? (
           <div className="plot-canvas-sidebar__empty" data-testid="plot-canvas-sidebar-empty">
             <span className="plot-canvas-sidebar__empty-icon" aria-hidden="true">📭</span>
@@ -161,8 +161,7 @@ export function PlotCanvasSidebar({
               <div
                 key={canvas.id}
                 className="plot-canvas-sidebar__item"
-                role="option"
-                aria-selected={selected ? 'true' : 'false'}
+                role="listitem"
                 data-testid="plot-canvas-sidebar-item"
                 data-canvas-id={canvas.id}
               >

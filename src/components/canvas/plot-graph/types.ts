@@ -9,7 +9,7 @@
  */
 
 import type { Node, Edge } from '@xyflow/react'
-import type { PlotCanvasColorKey, PlotCanvasEdgeKind } from '../../../shared/plot-canvas'
+import type { PlotCanvasColorKey, PlotCanvasEdgeKind, PlotCanvasNodeEntityRef } from '../../../shared/plot-canvas'
 
 /**
  * 剧情画布支持的 10 种节点类别：
@@ -49,7 +49,7 @@ export const ALL_PLOT_NODE_KINDS: readonly PlotNodeKind[] = [
   'note',
 ] as const
 
-/** 关联实体描述（用于角色/设定/世界观跳转，纯只读信息） */
+/** Legacy display-only entity label. Persisted references use entityRefs below. */
 export interface EntitySourceRef {
   type: 'character' | 'location' | 'item' | 'faction' | 'skill' | 'chapter' | 'world-entry' | string
   id: string | number
@@ -84,6 +84,8 @@ export type PlotGraphNodeData = {
   subCanvasId?: string | null
   /** 关联实体来源（如关联角色、世界观词条等） */
   entityRef?: EntitySourceRef | null
+  /** Persisted references from PlotCanvasNodeData; IDs may be dangling. */
+  entityRefs?: PlotCanvasNodeEntityRef[]
   /** 搜索命中高亮标志 */
   searchHit?: boolean
   /** 搜索或筛选时的灰显/变淡标志 */
@@ -95,7 +97,7 @@ export type PlotGraphNodeData = {
   onSplit?: (nodeId: string) => void
   onEnterSubCanvas?: (nodeId: string, subCanvasId?: string) => void
   onEdit?: (nodeId: string) => void
-  onNavigateEntity?: (entity: EntitySourceRef) => void
+  onNavigateEntity?: (entity: EntitySourceRef | PlotCanvasNodeEntityRef) => void
   onOpenPlan?: (planId: number) => void
 }
 

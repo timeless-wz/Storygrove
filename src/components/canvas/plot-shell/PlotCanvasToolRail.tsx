@@ -54,7 +54,7 @@ export function PlotCanvasToolRail({
                 data-tip={item.label}
                 aria-label={item.label}
                 aria-pressed={item.active}
-                disabled={item.disabled}
+                disabled={item.disabled || !onToolSelect}
                 onClick={() => onToolSelect?.(item.id)}
                 data-testid={`plot-canvas-tool-${item.id}`}
               >
