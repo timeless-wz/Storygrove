@@ -508,6 +508,61 @@
     color: var(--color-text);
   }
 
+
+  /* 回到上次创作位置（真实保存记录，点击直达） */
+  .literary-resume-location {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    margin-top: 14px;
+    padding: 8px 12px;
+    border: 1px solid color-mix(in srgb, var(--color-accent) 26%, var(--color-border));
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+
+  .literary-resume-location:hover {
+    border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  }
+
+  .literary-resume-location:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--color-focus-ring);
+  }
+
+  .literary-resume-location-label {
+    font-weight: 600;
+    color: var(--color-accent-text);
+    flex-shrink: 0;
+  }
+
+  .literary-resume-location-target {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--color-text);
+    font-weight: 500;
+  }
+
+  .literary-resume-location-time {
+    flex-shrink: 0;
+    color: var(--color-text-muted);
+  }
+
+  .literary-resume-location .literary-resume-location-arrow {
+    margin-left: auto;
+    flex-shrink: 0;
+    color: var(--color-accent-text);
+  }
+
   /* 真实指标条 */
   .literary-metric-grid {
     display: grid;

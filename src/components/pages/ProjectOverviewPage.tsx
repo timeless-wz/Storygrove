@@ -12,6 +12,7 @@ import {
   Sparkles,
   ChevronDown,
   ChevronUp,
+  History,
 } from 'lucide-react'
 import { useProjectStore } from '../../stores/project-store'
 import { useDraftStore } from '../../stores/draft-store'
@@ -22,12 +23,18 @@ import { useLayoutStore } from '../../stores/layout-store'
 import { useLocaleStore } from '../../stores/locale-store'
 import { Button } from '../ui/Button'
 import { Card } from '../ui/Card'
-import { openBuiltinEditor } from '../panels/sidebar/sidebar-file-openers'
+import { openBuiltinEditor, openChapterFile } from '../panels/sidebar/sidebar-file-openers'
 import { ipc } from '../../services/ipc-client'
 import { captureProjectSession } from '../project-session-gate'
 import type { ChapterBlueprint } from '../../services/workflows/directory-workflow'
 import { NewDraftDialog } from '../panels/sidebar/NewDraftDialog'
 import { openResumableDraft } from './workbench-draft-entry'
+import {
+  formatLocationKind,
+  formatSavedAt,
+  readLastCreationLocation,
+  type LastCreationLocation,
+} from '../../services/last-creation-location'
 
 export default function ProjectOverviewPage() {
   const text = useLocaleStore(s => s.text)
@@ -154,6 +161,57 @@ export default function ProjectOverviewPage() {
     if (!projectPath) return
     if (!await openResumableDraft(draftsByChapter)) setCreateDraftDialogOpen(true)
   }
+
+  // ===== 回到上次创作位置 =====
+  // 记录只来自真实保存行为（正文保存 / 蓝图保存 / 画布内容保存），按项目
+  // 路径隔离。展示前校验目标仍存在；点击直达对应视图，失效时回退到既有
+  // 「继续写正文」流程。
+  const lastLocation = useMemo(() => readLastCreationLocation(projectPath), [projectPath])
+
+  const lastLocationChapterExists = useMemo(() => {
+    if (!lastLocation) return false
+    if (blueprints.some(blueprint => blueprint.chapterNumber === lastLocation.chapterNumber)) return true
+    return Boolean(draftsByChapter[lastLocation.chapterNumber]?.length)
+  }, [lastLocation, blueprints, draftsByChapter])
+
+  const lastLocationValid = useMemo(() => {
+    if (!lastLocation) return false
+    if (lastLocation.kind === 'blueprint' || lastLocation.kind === 'chapter-canvas') {
+      return lastLocationChapterExists
+    }
+    if (lastLocation.kind === 'draft') {
+      if (!lastLocation.draftId) return false
+      return Object.values(draftsByChapter).flat().some(draft =>
+        draft.id === lastLocation.draftId && draft.status !== 'archived')
+    }
+    return false
+  }, [lastLocation, lastLocationChapterExists, draftsByChapter])
+
+  const handleResumeLastLocation = async () => {
+    const location: LastCreationLocation | null = lastLocation
+    if (!location || !projectPath) return
+    if (location.kind === 'draft' && location.draftId && lastLocationValid) {
+      // openChapterFile 读取权威 DB 正文后再挂编辑器；草稿被删除或会话
+      // 失效时它自己会提示且不创建空 Tab。
+      await openChapterFile(`vela://draft/${location.draftId}`, location.title)
+      return
+    }
+    if (location.kind === 'blueprint' && lastLocationValid) {
+      openBuiltinEditor('chapter-card-editor', text('章节蓝图', 'Chapter blueprints'), 'chapter-card', undefined, location.chapterNumber)
+      return
+    }
+    if (location.kind === 'chapter-canvas' && lastLocationValid) {
+      openBuiltinEditor('chapter-card-editor', text('章节蓝图', 'Chapter blueprints'), 'chapter-card', undefined, location.chapterNumber, 'canvas')
+      return
+    }
+    // 记录失效（目标被删除 / 不可用）→ 安全回退到既有流程。
+    await handleResumeDrafting()
+  }
+
+  const lastLocationTime = useMemo(() => {
+    if (!lastLocation) return null
+    return formatSavedAt(lastLocation.savedAt)
+  }, [lastLocation])
 
   const firstPlannedUnwrittenChapter = blueprints
     .map(blueprint => blueprint.chapterNumber)
@@ -326,6 +384,37 @@ export default function ProjectOverviewPage() {
               </div>
             </div>
           </div>
+
+          {/* 回到上次创作位置：来自真实保存记录，点击直达；失效时回退既有流程 */}
+          {lastLocation && lastLocationValid && (
+            <button
+              type="button"
+              className="literary-resume-location"
+              onClick={handleResumeLastLocation}
+              title={text(
+                `上次保存于 ${new Date(lastLocation.savedAt).toLocaleString()}`,
+                `Last saved at ${new Date(lastLocation.savedAt).toLocaleString()}`,
+              )}
+              data-testid="overview-resume-location"
+            >
+              <History size={14} className="flex-shrink-0" />
+              <span className="literary-resume-location-label">
+                {text('回到上次创作位置', 'Resume last location')}
+              </span>
+              <span className="literary-resume-location-target">
+                {text(formatLocationKind(lastLocation.kind).zh, formatLocationKind(lastLocation.kind).en)}
+                {text(' · ', ' · ')}
+                {text(`第 ${lastLocation.chapterNumber} 章`, `Ch ${lastLocation.chapterNumber}`)}
+                {lastLocation.title ? text(` ${lastLocation.title}`, ` ${lastLocation.title}`) : null}
+              </span>
+              {lastLocationTime && (
+                <span className="literary-resume-location-time">
+                  {text(lastLocationTime.zh, lastLocationTime.en)}
+                </span>
+              )}
+              <ArrowRight size={13} className="literary-resume-location-arrow" />
+            </button>
+          )}
         </Card>
 
         {/* 可跳过的 4 步创作路径全景阶梯（定方向 → 建设定 → 做章节规划 → 写正文） */}

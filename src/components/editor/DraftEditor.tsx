@@ -41,6 +41,7 @@ import {
   isProjectSessionPath,
 } from '../project-session-gate'
 import { readDraftBody } from '../../stores/draft-store'
+import { recordLastCreationLocation } from '../../services/last-creation-location'
 import { BlueprintBindingDialog } from '../panels/sidebar/BlueprintBindingDialog'
 import { openChapterFile } from '../panels/sidebar/sidebar-file-openers'
 
@@ -366,6 +367,17 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
           projectSession.projectPath,
         )
         if (!result.success) throw new Error(result.error || text('草稿保存失败', 'Could not save the draft'))
+        // 真实保存完成 → 记录“上次创作位置”（只写导航辅助，不动权威数据）。
+        const resumeChapterNumber = targetTab.chapterNumber ?? meta?.chapterNumber
+        if (Number.isSafeInteger(resumeChapterNumber) && (resumeChapterNumber as number) > 0) {
+          recordLastCreationLocation(projectSession.projectPath, {
+            kind: 'draft',
+            chapterNumber: resumeChapterNumber as number,
+            title: meta?.chapterTitle || targetTab.name,
+            savedAt: new Date().toISOString(),
+            draftId,
+          })
+        }
         if (status === 'finalized' && meta) {
           const snapshot = captureFinalizationSnapshot({
             tab: { ...targetTab, content: saveSnapshot.content },

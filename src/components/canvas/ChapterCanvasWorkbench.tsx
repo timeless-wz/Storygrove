@@ -47,6 +47,7 @@ import {
   type ChapterCanvasNodeData,
 } from '../../shared/chapter-canvas'
 import { ipc } from '../../services/ipc-client'
+import { recordLastCreationLocation } from '../../services/last-creation-location'
 import { captureProjectSession, isProjectSessionCurrent } from '../project-session-gate'
 import { useProjectStore } from '../../stores/project-store'
 import { useLocaleStore } from '../../stores/locale-store'
@@ -215,11 +216,20 @@ export default function ChapterCanvasWorkbench({
             x: Math.round(node.x),
             y: Math.round(node.y),
           }, projectKey)
+          if (result.success) {
+            // 真实保存完成 → 记录“上次创作位置”（只写导航辅助，不动权威数据）。
+            recordLastCreationLocation(projectKey, {
+              kind: 'chapter-canvas',
+              chapterNumber,
+              title: chapterTitle,
+              savedAt: new Date().toISOString(),
+            })
+          }
           return result.success
         })()
       },
     })
-  }, [chapterNumber, persist, projectKey])
+  }, [chapterNumber, chapterTitle, persist, projectKey])
 
   const persistEdge = useCallback((edge: ChapterCanvasEdgeData) => {
     persist.schedule({
@@ -236,11 +246,19 @@ export default function ChapterCanvasWorkbench({
             label: edge.label,
             kind: edge.kind,
           }, projectKey)
+          if (result.success) {
+            recordLastCreationLocation(projectKey, {
+              kind: 'chapter-canvas',
+              chapterNumber,
+              title: chapterTitle,
+              savedAt: new Date().toISOString(),
+            })
+          }
           return result.success
         })()
       },
     })
-  }, [chapterNumber, persist, projectKey])
+  }, [chapterNumber, chapterTitle, persist, projectKey])
 
   const deleteNodeById = useCallback(async (nodeId: string) => {
     const current = graphRef.current

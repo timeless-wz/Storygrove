@@ -711,6 +711,8 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
             key={activeTab.id}
             projectKey={activeTab.projectKey}
             initialChapterNumber={activeTab.chapterNumber}
+            initialChapterView={activeTab.chapterView}
+            chapterViewRequest={activeTab.chapterViewRequest}
           />
         )}
         {activeTab?.type === 'world-building' && activeTab.projectKey && (

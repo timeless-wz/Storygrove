@@ -126,6 +126,7 @@ export function openBuiltinEditor(
   type: 'chapter-card' | 'character' | 'world-building' | 'narrative-thread' | 'world-map' | 'story-timeline' | 'overview' | 'config' | 'foreshadowing',
   narrativeThreadView?: 'plot-tree' | 'canvas' | 'plans',
   chapterNumber?: number,
+  chapterView?: 'blueprint' | 'canvas',
 ): void {
   const projectKey = useProjectStore.getState().currentProject?.path
   useEditorStore.getState().openFile({
@@ -136,6 +137,7 @@ export function openBuiltinEditor(
       ? { narrativeThreadView: narrativeThreadView ?? 'plans' }
       : {}),
     ...(type === 'chapter-card' && chapterNumber !== undefined ? { chapterNumber } : {}),
+    ...(type === 'chapter-card' && chapterView !== undefined ? { chapterView } : {}),
     ...(projectKey ? { projectKey } : {}),
   })
 }

@@ -58,6 +58,10 @@ export interface EditorTab {
   narrativeThreadView?: 'plot-tree' | 'canvas' | 'plans'
   /** 重复打开同一叙事线 Tab 时递增，确保本次视图请求生效。 */
   narrativeThreadViewRequest?: number
+  /** 章节蓝图编辑器本次打开的主区视图（蓝图表单 / 章内场景画布）。 */
+  chapterView?: 'blueprint' | 'canvas'
+  /** 重复打开同一章节蓝图 Tab 时递增，确保本次视图请求生效。 */
+  chapterViewRequest?: number
 }
 
 interface EditorState {
@@ -253,6 +257,12 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
                       narrativeThreadView: tabWithDraftState.narrativeThreadView,
                       narrativeThreadViewRequest: (t.narrativeThreadViewRequest ?? 0) + 1,
                     }),
+                ...(tabWithDraftState.chapterView === undefined
+                  ? {}
+                  : {
+                      chapterView: tabWithDraftState.chapterView,
+                      chapterViewRequest: (t.chapterViewRequest ?? 0) + 1,
+                    }),
               }
             : t),
           activeTabId: existing.id,
@@ -266,6 +276,9 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
           tabWithDraftState.type === 'narrative-thread'
             && tabWithDraftState.narrativeThreadView !== undefined
             ? { ...tabWithDraftState, narrativeThreadViewRequest: 1 }
+            : tabWithDraftState.type === 'chapter-card'
+            && tabWithDraftState.chapterView !== undefined
+            ? { ...tabWithDraftState, chapterViewRequest: 1 }
             : tabWithDraftState,
         ],
         activeTabId: tabWithDraftState.id,

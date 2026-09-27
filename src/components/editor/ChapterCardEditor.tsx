@@ -22,6 +22,7 @@ import {
   saveAllBlueprints,
   type ChapterBlueprint,
 } from '../../services/workflows/directory-workflow'
+import { recordLastCreationLocation } from '../../services/last-creation-location'
 import type { BlueprintVolumeData } from '../../../electron/repositories/blueprint-repository'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
@@ -111,9 +112,13 @@ function isCurrentProjectSession(projectSession: ProjectSessionContext): boolean
 export default function ChapterCardEditor({
   projectKey,
   initialChapterNumber,
+  initialChapterView,
+  chapterViewRequest,
 }: {
   projectKey: string
   initialChapterNumber?: number
+  initialChapterView?: 'blueprint' | 'canvas'
+  chapterViewRequest?: number
 }) {
   const text = useLocaleStore(s => s.text)
   const locale = useLocaleStore(s => s.locale)
@@ -167,6 +172,25 @@ export default function ChapterCardEditor({
     )
     if (targetIndex >= 0) setSelectedIdx(targetIndex)
   }, [initialChapterNumber, loading])
+
+  // 外部视图请求（如概览「回到上次创作位置」直达场景画布）：定位到目标章并
+  // 应用请求的视图。与 lastSelectedIdx 同批更新，避免渲染期重置覆盖请求。
+  useEffect(() => {
+    if (chapterViewRequest === undefined) return
+    if (loading) return
+    if (initialChapterView !== 'blueprint' && initialChapterView !== 'canvas') return
+    setChapterView(initialChapterView)
+    if (initialChapterNumber !== undefined) {
+      const targetIndex = blueprintsRef.current.findIndex(
+        blueprint => blueprint.chapterNumber === initialChapterNumber,
+      )
+      if (targetIndex >= 0) {
+        setSelectedIdx(targetIndex)
+        setLastSelectedIdx(targetIndex)
+      }
+    }
+    // chapterViewRequest 变化代表一次新的外部视图请求。
+  }, [chapterViewRequest, initialChapterView, initialChapterNumber, loading])
 
   // 切换选中章节时退出画布视图，避免把上一章的画布语境带进新章。
   // React 推荐的「props/state 变化时调整状态」模式：渲染期比较并重置。
@@ -438,6 +462,13 @@ export default function ChapterCardEditor({
     try {
       await saveChapterBlueprint(selected, projectKey, projectSession)
       if (!isCurrentProjectSession(projectSession)) return
+      // 真实保存完成 → 记录“上次创作位置”（只写导航辅助，不动权威数据）。
+      recordLastCreationLocation(projectKey, {
+        kind: 'blueprint',
+        chapterNumber: selected.chapterNumber,
+        title: selected.title || text(`第 ${selected.chapterNumber} 章`, `Chapter ${selected.chapterNumber}`),
+        savedAt: new Date().toISOString(),
+      })
       const current = currentWorkingState(projectKey, projectSession)
       const nextDirty = reconcileSavedBlueprintSnapshots(
         current.blueprints,
@@ -470,6 +501,16 @@ export default function ChapterCardEditor({
     try {
       await saveAllBlueprints(saveInput, projectKey, projectSession)
       if (!isCurrentProjectSession(projectSession)) return
+      // 全量保存成功 → 以作者当前所在章记录“上次创作位置”。
+      const resumeSelected = selected
+      if (resumeSelected) {
+        recordLastCreationLocation(projectKey, {
+          kind: 'blueprint',
+          chapterNumber: resumeSelected.chapterNumber,
+          title: resumeSelected.title || text(`第 ${resumeSelected.chapterNumber} 章`, `Chapter ${resumeSelected.chapterNumber}`),
+          savedAt: new Date().toISOString(),
+        })
+      }
       const current = currentWorkingState(projectKey, projectSession)
       const nextDirty = reconcileSavedBlueprintSnapshots(
         current.blueprints,
