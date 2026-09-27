@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLayoutStore } from '../stores/layout-store'
 
 /**
@@ -20,6 +20,25 @@ export function resolveWidthBucket(width: number): WidthBucket {
   if (width < NARROW_BREAKPOINT) return 'narrow'
   if (width < WIDE_BREAKPOINT) return 'medium'
   return 'wide'
+}
+
+/**
+ * 只读订阅当前窗口宽度档位。
+ *
+ * 与 useResponsiveWorkbenchLayout 共用同一组断点，但**不改动任何面板开关**：
+ * 编辑器内的辅助栏用它决定自己是内联列还是抽屉，而不是替作者收起面板。
+ */
+export function useWidthBucket(): WidthBucket {
+  const [bucket, setBucket] = useState<WidthBucket>(() => resolveWidthBucket(window.innerWidth))
+
+  useEffect(() => {
+    const apply = () => setBucket(resolveWidthBucket(window.innerWidth))
+    apply()
+    window.addEventListener('resize', apply)
+    return () => window.removeEventListener('resize', apply)
+  }, [])
+
+  return bucket
 }
 
 export function useResponsiveWorkbenchLayout(): void {

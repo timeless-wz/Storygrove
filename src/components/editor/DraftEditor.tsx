@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Search, Upload, Save, FileText, Wrench, Check, Link2, Bookmark,
-  ChevronLeft, ChevronRight, BookOpen,
+  ChevronLeft, ChevronRight, BookOpen, Layers,
 } from 'lucide-react'
 
 import { useProjectStore } from '../../stores/project-store'
@@ -43,7 +43,19 @@ import {
 import { readDraftBody } from '../../stores/draft-store'
 import { recordLastCreationLocation } from '../../services/last-creation-location'
 import { BlueprintBindingDialog } from '../panels/sidebar/BlueprintBindingDialog'
-import { openChapterFile } from '../panels/sidebar/sidebar-file-openers'
+import { openBuiltinEditor, openChapterFile } from '../panels/sidebar/sidebar-file-openers'
+import {
+  boundBlueprintChapterNumber,
+  loadChapterContext,
+  type ChapterContextState,
+} from '../../services/chapter-context'
+import {
+  draftEditorPositionKey,
+  takeDraftEditorPosition,
+} from '../../services/draft-editor-position'
+import { useWidthBucket } from '../../hooks/useResponsiveWorkbenchLayout'
+import ChapterContextSidebar from './ChapterContextSidebar'
+import './chapter-context.css'
 
 const DRAFT_STATUS_EN: Record<string, string> = {
   draft: 'Draft',
@@ -85,6 +97,16 @@ export default function DraftEditor(props: Props) {
   return <DraftEditorSession key={sessionKey} {...props} />
 }
 
+/**
+ * 「本章创作上下文」的身份键：项目路径 + 草稿 ID。
+ *
+ * 生产端（跳转前读取）与消费端（渲染判断）必须算出逐字相同的键，因此统一走
+ * 这个函数，避免路径大小写或分隔符写法不同导致侧栏卡在加载态。
+ */
+function chapterContextIdentityKey(projectKey: string, draftId: number): string {
+  return `${projectKey}::${draftId}`
+}
+
 function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
   // 从系统读取草稿元数据与章节标题
   const [meta, setMeta] = useState<(DraftMeta & { chapterTitle?: string; filePath?: string }) | null>(null)
@@ -98,6 +120,43 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
   const tabDraftStatus = editorTab?.draftStatus
   const [reviewCount, setReviewCount] = useState(0)
   const [bindingDialogOpen, setBindingDialogOpen] = useState(false)
+  /**
+   * 绑定变更计数。
+   *
+   * 绑定对话框保存成功后，草稿的 `blueprint_chapter_number` 已在数据库里变化，
+   * 但本组件持有的 meta 是快照；递增它让 meta 与上下文重新读取。
+   */
+  const [bindingRevision, setBindingRevision] = useState(0)
+
+  // ===== 本章创作上下文侧栏 =====
+  const widthBucket = useWidthBucket()
+  /** 只有宽屏才内联展开；中窄屏改为抽屉，绝不挤压正文宽度。 */
+  const chapterContextAsDrawer = widthBucket !== 'wide'
+  const chapterContextPreference = useLayoutStore(s => s.chapterContextOpen)
+  const setChapterContextOpen = useLayoutStore(s => s.setChapterContextOpen)
+  /**
+   * 作者没表态时按宽度决定：宽屏展开、窄屏收起。
+   * 窄屏下抽屉会覆盖工具栏与正文，不能在作者没要求时自己弹出来。
+   */
+  const chapterContextOpen = chapterContextPreference ?? !chapterContextAsDrawer
+  /**
+   * 已加载的上下文连同它的身份键。
+   *
+   * 键包含项目会话与草稿 ID：切章、切项目后即使旧请求刚回来，也因键不匹配
+   * 而不会显示上一章的内容。
+   */
+  const [chapterContext, setChapterContext] = useState<{ key: string; state: ChapterContextState } | null>(null)
+
+  /**
+   * 回到正文时要还原的编辑位置。
+   *
+   * 位置在跳转前由编辑器记入内存；这里在同一挂载生命周期内只取一次，
+   * 取走即清空，避免作者之后主动滚动时又被拉回旧位置。
+   */
+  const [restorePosition, setRestorePosition] = useState<
+    (NonNullable<ReturnType<typeof takeDraftEditorPosition>> & { requestId: number }) | null
+  >(null)
+  const restoreRequestedRef = useRef(false)
 
   // ===== 伏笔管理与正文标注状态 =====
   const proseEditorRef = useRef<VditorProseEditorRef | null>(null)
@@ -267,6 +326,14 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
         b as { chapterNumber?: number }
       ).chapterNumber === (m.blueprintChapterNumber ?? m.chapterNumber)) : null
       setMeta({ ...m, chapterTitle: bp ? (bp as { title?: string }).title : undefined, filePath, fileName: `v${m.version}`, createdAt: m.updatedAt ?? m.createdAt })
+      // 回到正文时还原编辑位置：位置在跳转前或上次卸载时记录，取走即不再复用。
+      // 键一律用本 Tab 的 projectKey（而不是会话里的写法）：路径大小写或分隔符
+      // 不同也会被会话门判为同一项目，用同一个字符串才能命中同一条记忆。
+      if (!restoreRequestedRef.current) {
+        restoreRequestedRef.current = true
+        const position = takeDraftEditorPosition(draftEditorPositionKey(projectKey, m.id))
+        if (position) setRestorePosition({ ...position, requestId: 1 })
+      }
       // 使用 DB 化的虚拟 chapterDir（用于 draft-index 兼容层解析章节号）
       const chapterDir = `vela://draft/ch${m.chapterNumber}`
       // 检查审稿报告
@@ -280,10 +347,72 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
     return () => {
       cancelled = true
     }
-  }, [currentProject, filePath, projectKey])
+  }, [bindingRevision, currentProject, filePath, projectKey])
 
   const status: DraftStatus = tabDraftStatus ?? meta?.status ?? 'draft'
   const isReadonly = status === 'archived'
+
+  /**
+   * 当前上下文身份键。
+   *
+   * 回答的是「这是哪一份草稿」：项目路径 + 草稿 ID。切章、切项目后旧结果都因
+   * 键不匹配被丢弃；同一目录重开会话（新租约）则由外层按会话键重挂载本组件
+   * 加 isProjectSessionCurrent 校验兜住。未拿到 meta 时为 null，此时侧栏停在
+   * 加载态而不是展示旧内容。
+   */
+  const chapterContextKey = meta
+    && isProjectSessionPath(captureProjectSession(currentProject), projectKey)
+    ? chapterContextIdentityKey(projectKey, meta.id)
+    : null
+
+  // 读取本章上下文：严格以草稿绑定的蓝图章号为准，未绑定就只显示未绑定状态。
+  useEffect(() => {
+    if (!meta) return
+    const projectSession = captureProjectSession(currentProject)
+    if (!projectSession || !isProjectSessionPath(projectSession, projectKey)) return
+    const key = chapterContextIdentityKey(projectKey, meta.id)
+    let cancelled = false
+    void loadChapterContext(projectSession, meta).then(state => {
+      if (cancelled || !isProjectSessionCurrent(projectSession)) return
+      // 会话失效返回 status='session-lost'，同样不进入侧栏内容。
+      setChapterContext({ key, state })
+    })
+    return () => { cancelled = true }
+  }, [currentProject, meta, projectKey])
+
+  /** 身份键不匹配时一律按加载中处理，杜绝上一章内容短暂闪现。 */
+  const chapterContextState: ChapterContextState = meta
+    ? (chapterContext && chapterContextKey && chapterContext.key === chapterContextKey
+        ? chapterContext.state
+        : { status: 'loading' })
+    : { status: 'loading' }
+
+  /**
+   * 跳转到当前草稿的蓝图 / 章内场景画布。
+   *
+   * 用草稿绑定的章号而不是草稿自身章号：作者绑定哪一章的蓝图，就打开哪一章。
+   * 跳转前先把光标与滚动位置记下来，返回正文时由编辑器还原；这里只做导航，
+   * 不触发任何保存。
+   */
+  const openChapterCardSurface = useCallback((view: 'blueprint' | 'canvas') => {
+    const projectSession = captureProjectSession(useProjectStore.getState().currentProject)
+    if (!projectSession || !isProjectSessionPath(projectSession, projectKey)) return
+    const targetChapterNumber = boundBlueprintChapterNumber(meta)
+    if (targetChapterNumber === null) return
+    // 此刻正文还在文档里，位置记录最准；失败也不影响跳转本身。
+    proseEditorRef.current?.rememberPosition()
+    openBuiltinEditor(
+      'chapter-card-editor',
+      text('章节蓝图', 'Chapter blueprints'),
+      'chapter-card',
+      undefined,
+      targetChapterNumber,
+      view,
+    )
+  }, [meta, projectKey, text])
+
+  /** 记录编辑位置用的键；草稿身份未就绪时不记录，避免把位置写到别的草稿上。 */
+  const editorPositionMemoryKey = meta ? draftEditorPositionKey(projectKey, meta.id) : undefined
 
   // 检查是否有相关章节工作流正在运行
   // ✅ 只订阅 activeRuns，不订阅 globalLogs 等高频更新字段
@@ -665,7 +794,7 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
   }
 
   return (
-    <div className="w-full h-full flex flex-col overflow-hidden">
+    <div className="relative w-full h-full flex flex-col overflow-hidden">
       {/* 顶部工具栏：文学工坊元数据看板与动作控制台 */}
       <div
         className="draft-workbench-toolbar flex flex-wrap items-center justify-between gap-2 px-3.5 py-1 min-h-10 flex-shrink-0 border-b select-none transition-colors"
@@ -881,6 +1010,30 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
 
             <div className="h-3 w-px bg-[var(--editor-ruled-line,var(--color-border))] mx-0.5 opacity-60" />
 
+            {/* 本章创作上下文侧栏开关 */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setChapterContextOpen(!chapterContextOpen)}
+              aria-expanded={chapterContextOpen}
+              aria-controls="chapter-context-panel"
+              className={`h-6 px-2 text-xs transition-colors border ${
+                chapterContextOpen
+                  ? 'bg-[var(--editor-selection-bg,var(--color-hover))] text-[var(--color-accent)] border-[var(--editor-ruled-line,var(--color-border))]'
+                  : 'border-transparent text-[var(--editor-ink-muted,var(--color-text-secondary))] hover:bg-[var(--editor-selection-bg,var(--color-hover))] hover:text-[var(--editor-ink-primary,var(--color-text))]'
+              }`}
+              title={text(
+                chapterContextOpen ? '收起本章创作上下文' : '展开本章创作上下文（本章蓝图要点与场景顺序）',
+                chapterContextOpen ? 'Collapse chapter writing context' : 'Expand chapter writing context (blueprint goals and scene order)',
+              )}
+              data-testid="draft-chapter-context-toggle"
+            >
+              <Layers size={11} className="opacity-80" />
+              <span>{text('本章上下文', 'Chapter context')}</span>
+            </Button>
+
+            <div className="h-3 w-px bg-[var(--editor-ruled-line,var(--color-border))] mx-0.5 opacity-60" />
+
             {/* 辅助上下文面板切换按钮 */}
             <Button
               variant="ghost"
@@ -926,6 +1079,28 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
               </Button>
             )}
 
+            {/* 本章创作上下文侧栏开关（只读模式） */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setChapterContextOpen(!chapterContextOpen)}
+              aria-expanded={chapterContextOpen}
+              aria-controls="chapter-context-panel"
+              className={`h-6 px-2 text-xs transition-colors border ${
+                chapterContextOpen
+                  ? 'bg-[var(--editor-selection-bg,var(--color-hover))] text-[var(--color-accent)] border-[var(--editor-ruled-line,var(--color-border))]'
+                  : 'border-transparent text-[var(--editor-ink-muted,var(--color-text-secondary))] hover:bg-[var(--editor-selection-bg,var(--color-hover))] hover:text-[var(--editor-ink-primary,var(--color-text))]'
+              }`}
+              title={text(
+                chapterContextOpen ? '收起本章创作上下文' : '展开本章创作上下文（本章蓝图要点与场景顺序）',
+                chapterContextOpen ? 'Collapse chapter writing context' : 'Expand chapter writing context (blueprint goals and scene order)',
+              )}
+              data-testid="draft-chapter-context-toggle"
+            >
+              <Layers size={11} className="opacity-80" />
+              <span>{text('本章上下文', 'Chapter context')}</span>
+            </Button>
+
             {/* 辅助上下文面板切换按钮（只读模式） */}
             <Button
               variant="ghost"
@@ -948,7 +1123,8 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
         )}
       </div>
 
-      {/* 正文区：Markdown 编辑与预览都由 Vditor 承担。 */}
+      {/* 正文区：Markdown 编辑与预览都由 Vditor 承担。
+          窄屏下本章上下文以抽屉覆盖呈现，正文宽度不被挤压。 */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <div className="min-w-0 flex-1 overflow-hidden">
           <VditorProseEditor
@@ -957,6 +1133,8 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
             editable={!isReadonly && !isChapterBusy}
             placeholder={text('开始写这一章…', 'Start writing this chapter…')}
             onCharCountChange={setCharCount}
+            positionMemoryKey={editorPositionMemoryKey}
+            restorePosition={restorePosition}
             onChange={(nextContent) => {
               currentBodyRef.current = nextContent
               useEditorStore.getState().updateTabContent(tabId, nextContent)
@@ -968,6 +1146,15 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
             onMarkForeshadowing={handleBubbleMarkForeshadowing}
           />
         </div>
+        <ChapterContextSidebar
+          open={chapterContextOpen}
+          onCollapse={() => setChapterContextOpen(false)}
+          asDrawer={chapterContextAsDrawer}
+          state={chapterContextState}
+          onOpenBlueprint={() => openChapterCardSurface('blueprint')}
+          onOpenCanvas={() => openChapterCardSurface('canvas')}
+          onOpenBindingDialog={() => setBindingDialogOpen(true)}
+        />
       </div>
 
       {/* AI 一致性审核确认弹窗（只读） */}
@@ -1036,7 +1223,16 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
       </Dialog>
       <BlueprintBindingDialog
         open={bindingDialogOpen}
-        onOpenChange={setBindingDialogOpen}
+        onOpenChange={(open) => {
+          setBindingDialogOpen(open)
+          // 对话框里的保存可能改写绑定关系；关闭时重新读取 meta 与本章上下文，
+          // 让侧栏立刻反映新的绑定，而不是停留在旧快照上。
+          if (!open) {
+            setMeta(null)
+            setChapterContext(null)
+            setBindingRevision(revision => revision + 1)
+          }
+        }}
         target={meta ? {
           draftId: meta.id,
           chapterNumber: meta.chapterNumber,

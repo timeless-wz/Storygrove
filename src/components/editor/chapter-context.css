@@ -1,0 +1,333 @@
+/**
+ * 「本章创作上下文」侧栏样式。
+ *
+ * 视觉语言与正文写作界面一致：纸面感的柔边、低饱和的墨色、细描边。
+ * 结构上只有两种形态 —— 宽屏内联列、窄屏抽屉；两者共用同一份卡片样式。
+ */
+
+.chapter-context {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background-color: var(--color-editor-bg);
+  color: var(--editor-ink-primary, var(--color-text));
+  border-left: 1px solid var(--editor-ruled-line, var(--color-border));
+}
+
+/* 宽屏：内联列。固定宽度，正文容器保持 min-width:0 即可自由收缩。 */
+.chapter-context--inline {
+  width: 300px;
+  flex: 0 0 300px;
+  height: 100%;
+}
+
+/* 窄屏：抽屉。覆盖在正文之上，绝不改变正文可用宽度。 */
+.chapter-context--drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(320px, 88vw);
+  z-index: 30;
+  box-shadow: -8px 0 28px rgb(0 0 0 / 18%);
+}
+
+.chapter-context-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background-color: rgb(0 0 0 / 28%);
+}
+
+.chapter-context-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--editor-ruled-line, var(--color-border));
+}
+
+.chapter-context-header-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--editor-ink-primary, var(--color-text));
+}
+
+.chapter-context-header-icon {
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.chapter-context-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm, 4px);
+  color: var(--editor-ink-muted, var(--color-text-secondary));
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.chapter-context-icon-btn:hover {
+  background-color: var(--editor-selection-bg, var(--color-hover));
+  color: var(--editor-ink-primary, var(--color-text));
+}
+
+.chapter-context-icon-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.chapter-context-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 10px 10px 16px;
+}
+
+.chapter-context-status {
+  margin: 4px 0;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--editor-ink-muted, var(--color-text-secondary));
+}
+
+/* ===== 已绑定：蓝图抬头 ===== */
+
+.chapter-context-blueprint-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 8px;
+}
+
+.chapter-context-chapter-no {
+  flex-shrink: 0;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--editor-ruled-line, var(--color-border));
+  background-color: var(--editor-selection-bg, var(--color-hover));
+  color: var(--editor-ink-muted, var(--color-text-secondary));
+}
+
+.chapter-context-chapter-title {
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ===== 分区 ===== */
+
+.chapter-context-section {
+  padding-top: 10px;
+  margin-top: 10px;
+  border-top: 1px dashed var(--editor-ruled-line, var(--color-border));
+}
+
+.chapter-context-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 0 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--editor-ink-muted, var(--color-text-secondary));
+}
+
+.chapter-context-section-icon {
+  display: inline-flex;
+  color: var(--color-accent);
+  opacity: 0.85;
+}
+
+.chapter-context-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.85;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.chapter-context-empty {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--editor-ink-muted, var(--color-text-secondary));
+  opacity: 0.85;
+}
+
+/* ===== 节拍清单 ===== */
+
+.chapter-context-beats,
+.chapter-context-scenes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chapter-context-beat {
+  position: relative;
+  padding-left: 12px;
+  font-size: 12px;
+  line-height: 1.8;
+  overflow-wrap: break-word;
+}
+
+.chapter-context-beat::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 0.72em;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background-color: var(--color-accent);
+  opacity: 0.7;
+}
+
+/* ===== 场景顺序 ===== */
+
+.chapter-context-scene {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 5px 6px;
+  border-radius: var(--radius-sm, 4px);
+  background-color: var(--editor-selection-bg, var(--color-hover));
+}
+
+.chapter-context-scene-index {
+  flex-shrink: 0;
+  min-width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 9px;
+  font-weight: 600;
+  background-color: var(--color-accent);
+  color: var(--color-accent-foreground, #fff);
+}
+
+.chapter-context-scene-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.chapter-context-scene-title {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+  overflow-wrap: break-word;
+}
+
+.chapter-context-scene-role {
+  margin-left: 5px;
+  padding: 0 4px;
+  border-radius: var(--radius-sm, 4px);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  vertical-align: 1px;
+  border: 1px solid var(--editor-ruled-line, var(--color-border));
+  color: var(--editor-ink-muted, var(--color-text-secondary));
+}
+
+.chapter-context-scene-summary {
+  font-size: 11px;
+  line-height: 1.65;
+  color: var(--editor-ink-muted, var(--color-text-secondary));
+  overflow-wrap: break-word;
+}
+
+/* ===== 标签 ===== */
+
+.chapter-context-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chapter-context-tag {
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--editor-ruled-line, var(--color-border));
+  background-color: var(--editor-selection-bg, var(--color-hover));
+  font-size: 10px;
+  line-height: 1.7;
+  color: var(--editor-ink-primary, var(--color-text-secondary));
+}
+
+/* ===== 未绑定 / 目标缺失 ===== */
+
+.chapter-context-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: var(--radius-md, 6px);
+  border: 1px dashed color-mix(in srgb, var(--color-warning, #d97706) 45%, transparent);
+  background-color: color-mix(in srgb, var(--color-warning, #d97706) 8%, transparent);
+}
+
+.chapter-context-notice-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-warning-text, var(--color-text));
+}
+
+.chapter-context-notice-action {
+  align-self: flex-start;
+}
+
+/* ===== 跳转区 ===== */
+
+.chapter-context-footer {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px 8px;
+  border-top: 1px solid var(--editor-ruled-line, var(--color-border));
+}
+
+.chapter-context-jump {
+  justify-content: flex-start;
+  gap: 6px;
+  width: 100%;
+  color: var(--editor-ink-muted, var(--color-text-secondary));
+}
+
+.chapter-context-jump:hover {
+  color: var(--color-accent);
+}

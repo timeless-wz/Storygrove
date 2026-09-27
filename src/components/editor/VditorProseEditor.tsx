@@ -23,6 +23,12 @@ import './foreshadowing.css'
 
 import { locateForeshadowingInText } from '../../services/foreshadowing-locator'
 import type { ForeshadowingRecord } from '../../shared/foreshadowing'
+import {
+  rememberDraftEditorPosition,
+  rememberDraftEditorPositionIfAbsent,
+  type DraftEditorMode,
+  type DraftEditorPosition,
+} from '../../services/draft-editor-position'
 
 import { countDraftUnits } from '../../shared/draft-units'
 import { useLocaleStore } from '../../stores/locale-store'
@@ -234,7 +240,17 @@ export type ForeshadowingSelectionResult =
 
 export interface VditorProseEditorRef {
   getSelectionInfo: () => ForeshadowingSelectionResult
+  /**
+   * 主动把当前光标与滚动位置记到 `positionMemoryKey` 下。
+   *
+   * 跳转到蓝图/场景画布**之前**调用：此时正文仍在文档中，滚动距离是准的。
+   * 未设置记忆键或编辑器未就绪时静默不做任何事。
+   */
+  rememberPosition: () => void
 }
+
+/** 外部请求把光标与滚动位置放回先前记录的位置；只在 requestId 变化时执行一次。 */
+export type VditorRestorePositionRequest = DraftEditorPosition & { requestId: number }
 
 export interface VditorProseEditorProps {
   content: string
@@ -253,6 +269,16 @@ export interface VditorProseEditorProps {
    * 外部请求在光标处插入文本（例如插入图片引用）；只在 requestId 变化时执行一次。
    */
   insertRequest?: { text: string; requestId: number } | null
+  /**
+   * 编辑位置记忆键。设置后，编辑器卸载时会把光标与滚动位置记到该键下，
+   * 供作者从蓝图/场景画布返回正文时还原。不设置则完全不影响编辑器。
+   */
+  positionMemoryKey?: string
+  /**
+   * 外部请求还原编辑位置；只在 requestId 变化时执行一次。
+   * 与 `positionMemoryKey` 配对使用：本组件负责还原，不负责跨挂载持久化。
+   */
+  restorePosition?: VditorRestorePositionRequest | null
   /** 伏笔数据与交互回调 */
   foreshadowings?: ForeshadowingRecord[]
   onToggleForeshadowingCompleted?: (id: string, completed: boolean) => void
@@ -271,6 +297,8 @@ export default function VditorProseEditor({
   className,
   jumpTarget,
   insertRequest,
+  positionMemoryKey,
+  restorePosition,
   foreshadowings,
   onToggleForeshadowingCompleted,
   onOpenForeshadowingManager,
@@ -486,11 +514,226 @@ export default function VditorProseEditor({
     }
   }, [text])
 
+  // ===== 编辑位置记忆：作者去蓝图/场景画布再回来时放回原处 =====
+
+  // 位置记忆键经 ref 读取，创建编辑器的 effect 才能保持「只执行一次」。
+  const positionMemoryKeyRef = useRef(positionMemoryKey)
+  useEffect(() => {
+    positionMemoryKeyRef.current = positionMemoryKey
+  }, [positionMemoryKey])
+
+  /** 当前可见模式的滚动容器（正文滚动发生在 .vditor-ir / .vditor-wysiwyg / .vditor-sv 上）。 */
+  const findScrollContainer = useCallback((host: HTMLElement, mode: DraftEditorMode): HTMLElement | null => {
+    const selector = mode === 'sv'
+      ? '.vditor-sv'
+      : mode === 'wysiwyg' ? '.vditor-wysiwyg' : '.vditor-ir'
+    return host.querySelector<HTMLElement>(selector)
+  }, [])
+
+  /** 当前可见模式的正文可编辑元素。 */
+  const findActiveEditorElement = useCallback((host: HTMLElement): HTMLElement | null => (
+    host.querySelector<HTMLElement>(
+      '.vditor-ir:not([style*="display: none"]) pre.vditor-reset, .vditor-wysiwyg:not([style*="display: none"]) pre.vditor-reset',
+    )
+  ), [])
+
+  /**
+   * 记录作者离开时的光标与滚动位置。
+   *
+   * 正常路径由父组件在**跳转前**调用（见 `rememberPosition`）：那时正文还在文档里，
+   * 滚动距离是准的。卸载清理里只作为兜底 —— 此刻元素可能已脱离文档、滚动距离读不到
+   * 真实值，所以它不会覆盖跳转前记下的位置。
+   *
+   * 记录失败（未就绪 / 没有正文元素）时不写入：宁可没有记忆，也不要一个错的位置。
+   */
+  const captureEditorPosition = useCallback((): DraftEditorPosition | null => {
+    const host = hostRef.current
+    if (!host || !readyRef.current) return null
+
+    const internal = vditorRef.current as unknown as { vditor?: { currentMode?: DraftEditorMode } }
+    const mode = internal?.vditor?.currentMode ?? 'ir'
+    const scrollTop = findScrollContainer(host, mode)?.scrollTop ?? 0
+
+    if (mode === 'sv') {
+      const textarea = host.querySelector<HTMLTextAreaElement>('textarea.vditor-sv')
+      if (!textarea) return null
+      const sourceOffset = document.activeElement === textarea
+        ? textarea.selectionStart
+        : lastSvRangeRef.current?.start ?? textarea.selectionStart
+      return { mode, blockIndex: -1, offsetInBlock: 0, blockText: '', sourceOffset, scrollTop }
+    }
+
+    const editorEl = findActiveEditorElement(host)
+    if (!editorEl) return null
+    // 失焦后 window.getSelection() 可能已经被清空，此时退回最后一次记录的选区。
+    const selection = window.getSelection()
+    let range: Range | null = null
+    if (selection && selection.rangeCount > 0 && selection.anchorNode && editorEl.contains(selection.anchorNode)) {
+      range = selection.getRangeAt(0).cloneRange()
+    } else if (lastRangeRef.current && editorEl.contains(lastRangeRef.current.startContainer)) {
+      range = lastRangeRef.current.cloneRange()
+    }
+    if (!range) return { mode, blockIndex: -1, offsetInBlock: 0, blockText: '', sourceOffset: 0, scrollTop }
+
+    const blocks = Array.from(editorEl.children)
+    const container = range.startContainer
+    const blockIndex = blocks.findIndex(block => block === container || block.contains(container))
+    if (blockIndex < 0) return { mode, blockIndex: -1, offsetInBlock: 0, blockText: '', sourceOffset: 0, scrollTop }
+
+    const block = blocks[blockIndex]
+    let offsetInBlock = 0
+    try {
+      const beforeCaret = document.createRange()
+      beforeCaret.setStart(block, 0)
+      beforeCaret.setEnd(range.startContainer, range.startOffset)
+      offsetInBlock = beforeCaret.toString().length
+    } catch {
+      offsetInBlock = 0
+    }
+    return {
+      mode,
+      blockIndex,
+      offsetInBlock,
+      blockText: (block.textContent ?? '').trim().slice(0, 40),
+      sourceOffset: 0,
+      scrollTop,
+    }
+  }, [findActiveEditorElement, findScrollContainer])
+
+  /** 卸载时的兜底记录：只在作者离开前没有主动记录时生效。 */
+  const rememberPositionOnUnmount = useCallback(() => {
+    const memoryKey = positionMemoryKeyRef.current
+    if (!memoryKey) return
+    const position = captureEditorPosition()
+    if (position) rememberDraftEditorPositionIfAbsent(memoryKey, position)
+  }, [captureEditorPosition])
+
+  /** 供外部在跳转前主动记录位置（例如从正文跳到章节蓝图）。 */
+  const rememberPosition = useCallback(() => {
+    const memoryKey = positionMemoryKeyRef.current
+    if (!memoryKey) return
+    const position = captureEditorPosition()
+    if (position) rememberDraftEditorPosition(memoryKey, position)
+  }, [captureEditorPosition])
+
+  /** 待还原的位置请求；就绪前到达时由 Vditor 的 after 回调补做。 */
+  const pendingRestoreRef = useRef<VditorRestorePositionRequest | null>(null)
+  const appliedRestoreIdRef = useRef<number | null>(null)
+
+  /**
+   * 还原光标与滚动位置。
+   *
+   * 优先把光标放回原来的段落：浏览器把它带进视野比死记滚动距离更贴近作者的
+   * 「刚才写到这里」。只有完全找不到落点时，才退回记录过的滚动距离。
+   * 任何情况下都不改动正文。
+   */
+  const applyRestorePosition = useCallback(() => {
+    const request = pendingRestoreRef.current
+    if (!request) return
+    if (appliedRestoreIdRef.current === request.requestId) return
+    const host = hostRef.current
+    if (!host || !readyRef.current) return
+    appliedRestoreIdRef.current = request.requestId
+    pendingRestoreRef.current = null
+
+    const restoreScrollOnly = () => {
+      const scroller = findScrollContainer(host, request.mode)
+      if (scroller) scroller.scrollTop = Math.max(0, request.scrollTop)
+    }
+
+    if (request.mode === 'sv') {
+      const textarea = host.querySelector<HTMLTextAreaElement>('textarea.vditor-sv')
+      if (!textarea) {
+        restoreScrollOnly()
+        return
+      }
+      const offset = Math.min(Math.max(0, request.sourceOffset), textarea.value.length)
+      textarea.focus()
+      textarea.setSelectionRange(offset, offset)
+      lastSvRangeRef.current = { start: offset, end: offset }
+      return
+    }
+
+    const editorEl = findActiveEditorElement(host)
+    if (!editorEl) {
+      restoreScrollOnly()
+      return
+    }
+    const blocks = Array.from(editorEl.children)
+    if (blocks.length === 0) {
+      restoreScrollOnly()
+      return
+    }
+
+    // 段落快照优先：块序号在正文被改动后会偏移，快照能确认我们找的是同一段。
+    const snapshot = request.blockText
+    // 只记下滚动距离（作者当时只是滚动、没有落点）：不要因此把光标丢到文档开头。
+    if (request.blockIndex < 0 && !snapshot) {
+      restoreScrollOnly()
+      return
+    }
+    let target: Element | undefined = blocks[request.blockIndex]
+    if (!target || (snapshot && !(target.textContent ?? '').trim().startsWith(snapshot))) {
+      target = snapshot
+        ? blocks.find(block => (block.textContent ?? '').trim().startsWith(snapshot))
+        : undefined
+    }
+    const resolved: Element | undefined = target
+      ?? blocks[Math.min(Math.max(0, request.blockIndex), blocks.length - 1)]
+    if (!resolved) {
+      restoreScrollOnly()
+      return
+    }
+
+    editorEl.focus()
+    const range = document.createRange()
+    let placed = false
+    const walker = document.createTreeWalker(resolved, NodeFilter.SHOW_TEXT)
+    let node = walker.nextNode()
+    let remaining = Math.max(0, request.offsetInBlock)
+    while (node) {
+      const length = node.nodeValue?.length ?? 0
+      if (remaining <= length) {
+        range.setStart(node, remaining)
+        range.collapse(true)
+        placed = true
+        break
+      }
+      remaining -= length
+      node = walker.nextNode()
+    }
+    if (!placed) {
+      // 段落变短：停在段落末尾，而不是跳回文档开头。
+      range.selectNodeContents(resolved)
+      range.collapse(false)
+    }
+    const selection = window.getSelection()
+    if (selection) {
+      selection.removeAllRanges()
+      selection.addRange(range)
+    }
+    lastRangeRef.current = range.cloneRange()
+    // 把落点带进视野；死记滚动距离在段落被改动后会指到别处。
+    const resolvedElement = resolved as HTMLElement
+    if (typeof resolvedElement.scrollIntoView === 'function') {
+      resolvedElement.scrollIntoView({ block: 'center' })
+    } else {
+      restoreScrollOnly()
+    }
+  }, [findActiveEditorElement, findScrollContainer])
+
+  // 请求可能在编辑器就绪前到达：先存起来，就绪后由 after() 补做。
+  useEffect(() => {
+    pendingRestoreRef.current = restorePosition ?? null
+    applyRestorePosition()
+  }, [applyRestorePosition, restorePosition])
+
+  // 暴露给父组件的命令式接口。
   useEffect(() => {
     if (editorRef) {
-      editorRef.current = { getSelectionInfo }
+      editorRef.current = { getSelectionInfo, rememberPosition }
     }
-  }, [editorRef, getSelectionInfo])
+  }, [editorRef, getSelectionInfo, rememberPosition])
 
   const updateHighlights = useCallback(() => {
     if (typeof CSS === 'undefined' || !('highlights' in CSS)) return
@@ -719,6 +962,8 @@ export default function VditorProseEditor({
           onCharCountRef.current?.(countDraftUnits(instance.getValue()))
           applyEditableState()
           updateHighlights()
+          // 还原请求可能早于就绪到达（跳回正文时组件刚重新挂载）。
+          applyRestorePosition()
         },
       })
       if (disposed) {
@@ -729,6 +974,8 @@ export default function VditorProseEditor({
       vditorRef.current = instance
     }, 0)
     return () => {
+      // 兜底记录编辑位置：作者跳转前已主动记录过时不会覆盖那份更准的位置。
+      rememberPositionOnUnmount()
       disposed = true
       window.clearTimeout(timer)
       if (vditorRef.current === vditor) vditorRef.current = null
@@ -737,7 +984,13 @@ export default function VditorProseEditor({
       host.removeAttribute('data-vditor-ready')
       if (vditor) disposeVditor(vditor, host)
     }
-  }, [applyEditableState, applyExternalContent, emitInput])
+  }, [
+    applyEditableState,
+    applyExternalContent,
+    applyRestorePosition,
+    emitInput,
+    rememberPositionOnUnmount,
+  ])
 
   // 外部内容更新（打开其他章节、保存后归一化、AI 写回）。
   useEffect(() => {

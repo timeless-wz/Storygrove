@@ -45,6 +45,17 @@ interface LayoutState {
   rightView: RightView
   /** 三栏工作台的项目参考栏。它与 AI 对话面板独立，窄窗口可单独收起。 */
   referencePanelOpen: boolean
+  /**
+   * 正文写作界面的「本章创作上下文」侧栏。
+   *
+   * `null` 表示作者还没有表态：此时由编辑器按当前窗口宽度决定 —— 宽屏内联展开，
+   * 窄屏收起（窄屏下它会以抽屉覆盖正文，不该在作者没要求时挡住写作界面）。
+   * 作者一旦手动开关过，就记住这个选择，不再随窗口宽度改变。
+   *
+   * 它只描述当前草稿绑定的章节蓝图，属于布局状态而不进入编辑器数据流：
+   * 收起侧栏、切换章节都不得影响草稿正文、自动保存与版本。
+   */
+  chapterContextOpen: boolean | null
   /** 专注模式仅收起工作台辅助栏，不卸载任何编辑器或数据流。 */
   focusMode: boolean
 
@@ -89,6 +100,8 @@ interface LayoutState {
   openRightPanel: (view: RightView) => void
   toggleReferencePanel: () => void
   setReferencePanelOpen: (open: boolean) => void
+  toggleChapterContext: () => void
+  setChapterContextOpen: (open: boolean) => void
   toggleFocusMode: () => void
   toggleBottomPanel: () => void
   setBottomTab: (tab: BottomTab) => void
@@ -129,6 +142,8 @@ export const useLayoutStore = create<LayoutState>()((set) => ({
   aiPanelWidth: 320,
   rightView: 'agent',
   referencePanelOpen: false,
+  // 尚未由作者表态：宽屏默认展开，窄屏默认收起，见上方字段说明。
+  chapterContextOpen: null,
   focusMode: false,
 
   // 任务面板是状态栏触发的悬浮窗；默认关闭，绝不为它预留工作区。
@@ -187,6 +202,8 @@ export const useLayoutStore = create<LayoutState>()((set) => ({
       referencePanelOpen: open,
       ...(open ? { aiPanelOpen: false } : {}),
     }),
+  toggleChapterContext: () => set((s) => ({ chapterContextOpen: !s.chapterContextOpen })),
+  setChapterContextOpen: (open) => set({ chapterContextOpen: open }),
   toggleFocusMode: () => set((s) => ({ focusMode: !s.focusMode })),
 
   toggleBottomPanel: () => set((s) => ({ bottomPanelOpen: !s.bottomPanelOpen })),
