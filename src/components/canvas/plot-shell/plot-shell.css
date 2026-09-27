@@ -1,0 +1,1109 @@
+/*
+ * plot-shell.css — 剧情画布展示外壳（PlotCanvasShell 及其插槽组件）。
+ *
+ * 视觉基线来自参考项目的 WorldStudio 画布外壳：浅色圆角侧栏、淡紫点阵
+ * 画布、悬浮胶囊按钮、居中白色空状态卡片。所有颜色只使用主题 token
+ * （--color-*）与 color-mix 派生色，不写死参考项目的固定色值，因此
+ * 18 个主题与深浅外壳下一起变化。布局尺寸（圆角、间距、栏宽）为外壳
+ * 专属，不与 canvas-workbench.css 共享选择器，避免章节画布样式回归。
+ */
+
+/* ===== Shell 骨架 ===== */
+
+.plot-shell {
+  display: flex;
+  align-items: stretch;
+  gap: 16px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: 16px;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+/* 窄屏（≤1440px，含 1264×900）收紧行距与栏宽，避免悬浮工具相互遮挡。 */
+@media (max-width: 1440px) {
+  .plot-shell {
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .plot-shell__sidebar {
+    width: 248px;
+  }
+}
+
+@media (max-width: 1080px) {
+  .plot-shell__sidebar {
+    width: 220px;
+  }
+}
+
+.plot-shell__sidebar {
+  display: flex;
+  flex-direction: column;
+  width: 280px;
+  flex-shrink: 0;
+  min-height: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 20px;
+  background: var(--color-panel);
+  box-shadow: 0 18px 46px color-mix(in srgb, var(--color-text) 8%, transparent);
+  overflow: hidden;
+}
+
+/* 折叠后的细条：只留一个展开按钮，与参考页收起态一致。 */
+.plot-shell__sidebar-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 48px;
+  flex-shrink: 0;
+  padding-top: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 20px;
+  background: var(--color-panel);
+  box-shadow: 0 18px 46px color-mix(in srgb, var(--color-text) 8%, transparent);
+}
+
+.plot-shell__main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 20px;
+  background: var(--color-bg);
+  box-shadow: 0 18px 46px color-mix(in srgb, var(--color-text) 8%, transparent);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+/* 画布插槽：React Flow 等宿主内容铺满整个主区，外壳不实例化画布。 */
+.plot-shell__canvas-host {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+}
+
+/* 淡紫/淡蓝点阵底纹：无画布内容时露出；真实 React Flow 背景层会盖在上面。 */
+.plot-shell__canvas-host--dotted {
+  background-image: radial-gradient(
+    color-mix(in srgb, var(--color-accent) 20%, transparent) 1.3px,
+    transparent 1.3px
+  );
+  background-size: 22px 22px;
+  background-position: 11px 11px;
+}
+
+.plot-shell__right-panel {
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  flex-shrink: 0;
+  min-height: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 20px;
+  background: var(--color-panel);
+  box-shadow: 0 18px 46px color-mix(in srgb, var(--color-text) 8%, transparent);
+  overflow: hidden;
+}
+
+/* ===== 顶部悬浮操作 ===== */
+
+.plot-shell__topbar {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  right: 14px;
+  z-index: 30;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  /* 覆盖层自身不拦截画布拖拽，只有控件可点。 */
+  pointer-events: none;
+}
+
+.plot-shell__topbar > * {
+  pointer-events: auto;
+}
+
+.plot-shell__topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.plot-shell__topbar-right {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 顶部左侧的类型小方块（参考页画布选择器前的紫色图标按钮）。 */
+.plot-shell__canvas-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 26%, var(--color-border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-accent) 9%, var(--color-panel));
+  color: var(--color-accent);
+  cursor: inherit;
+}
+
+/* 画布选择器（胶囊）。 */
+.plot-shell__canvas-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 260px;
+  min-height: 36px;
+  padding: 4px 14px 4px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-panel);
+  color: var(--color-accent-text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--color-text) 7%, transparent);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.plot-shell__canvas-picker:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--color-text) 10%, transparent);
+}
+
+.plot-shell__canvas-picker:focus-visible,
+.plot-shell__icon-btn:focus-visible,
+.plot-shell__pill:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-focus-ring);
+}
+
+.plot-shell__canvas-picker--placeholder {
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+
+.plot-shell__canvas-picker-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plot-shell__canvas-picker-caret {
+  flex-shrink: 0;
+  opacity: 0.55;
+}
+
+/* 面包屑（子画布层级，出现在选择器右侧）。 */
+.plot-shell__breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  flex-wrap: nowrap;
+}
+
+.plot-shell__breadcrumb-crumb {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font: inherit;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.plot-shell__breadcrumb-crumb:hover {
+  color: var(--color-accent);
+}
+
+.plot-shell__breadcrumb-sep {
+  flex-shrink: 0;
+  opacity: 0.55;
+}
+
+/* 右上角图标按钮（搜索 / 筛选 / 信息）。 */
+.plot-shell__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-panel);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--color-text) 7%, transparent);
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.plot-shell__icon-btn:hover:not(:disabled) {
+  background: var(--color-hover);
+  color: var(--color-text);
+  border-color: color-mix(in srgb, var(--color-accent) 30%, var(--color-border));
+}
+
+.plot-shell__icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.plot-shell__icon-btn.is-active {
+  background: color-mix(in srgb, var(--color-accent) 12%, var(--color-panel));
+  border-color: color-mix(in srgb, var(--color-accent) 38%, var(--color-border));
+  color: var(--color-accent-text);
+}
+
+/* 新增事件（胶囊主按钮）。 */
+.plot-shell__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 14px 4px 5px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-panel));
+  color: var(--color-accent-text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.plot-shell__pill:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-accent) 18%, var(--color-panel));
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+
+.plot-shell__pill:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.plot-shell__pill-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-accent) 16%, var(--color-panel));
+  border: 1px solid color-mix(in srgb, var(--color-accent) 24%, transparent);
+}
+
+/* ===== 左侧悬浮工具栏 ===== */
+
+.plot-shell__toolrail {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: var(--color-panel);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--color-text) 10%, transparent);
+}
+
+.plot-shell__toolrail-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.plot-shell__toolrail-divider {
+  width: 22px;
+  height: 1px;
+  margin: 6px 0;
+  background: color-mix(in srgb, var(--color-text) 12%, transparent);
+}
+
+.plot-shell__toolrail-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.plot-shell__toolrail-btn:hover:not(:disabled) {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
+
+.plot-shell__toolrail-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 选中态：琥珀高亮（参考页 --btn-color 的主题化等价物）。 */
+.plot-shell__toolrail-btn.is-active {
+  background: color-mix(in srgb, var(--color-warning) 16%, transparent);
+  color: var(--color-warning-text);
+}
+
+.plot-shell__toolrail-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-focus-ring);
+}
+
+/* 右侧悬浮提示（参考项目的 data-tip）。 */
+.plot-shell__toolrail-btn::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%) translate(-4px);
+  padding: 3px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: var(--color-tooltip-bg);
+  color: var(--color-tooltip-text);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.18s ease 0.3s, transform 0.18s ease 0.3s;
+  z-index: 200;
+}
+
+.plot-shell__toolrail-btn:hover::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(-50%) translate(0);
+}
+
+.plot-shell__toolrail-collapse {
+  margin-top: 2px;
+  color: var(--color-text-muted);
+}
+
+/* ===== 左侧目录（PlotCanvasSidebar） ===== */
+
+.plot-canvas-sidebar {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.plot-canvas-sidebar__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 14px 10px;
+}
+
+.plot-canvas-sidebar__brand-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  /* 品牌方块：前景色反差生成深/浅自适应的实底。 */
+  background: color-mix(in srgb, var(--color-text) 88%, var(--color-bg));
+  color: var(--color-bg);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--color-text) 14%, transparent);
+}
+
+.plot-canvas-sidebar__brand-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.plot-canvas-sidebar__brand-title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--color-text);
+}
+
+.plot-canvas-sidebar__brand-subtitle {
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.plot-canvas-sidebar__collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.plot-canvas-sidebar__collapse:hover {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
+
+.plot-canvas-sidebar__collapse:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-focus-ring);
+}
+
+.plot-canvas-sidebar__tabs {
+  display: flex;
+  gap: 2px;
+  margin: 2px 14px 0;
+  padding: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-text) 4%, transparent);
+}
+
+.plot-canvas-sidebar__tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 6px 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.plot-canvas-sidebar__tab:hover {
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-panel) 70%, transparent);
+}
+
+.plot-canvas-sidebar__tab.is-active {
+  color: var(--color-text);
+  background: var(--color-panel);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--color-text) 8%, transparent);
+}
+
+.plot-canvas-sidebar__tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-focus-ring);
+}
+
+.plot-canvas-sidebar__actions {
+  padding: 10px 14px 0;
+}
+
+.plot-canvas-sidebar__create {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--color-success) 30%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-success) 11%, var(--color-panel));
+  color: var(--color-success-text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.plot-canvas-sidebar__create:hover {
+  background: color-mix(in srgb, var(--color-success) 18%, var(--color-panel));
+  border-color: color-mix(in srgb, var(--color-success) 42%, transparent);
+}
+
+.plot-canvas-sidebar__create:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.plot-canvas-sidebar__create:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-focus-ring);
+}
+
+.plot-canvas-sidebar__create-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.plot-canvas-sidebar__search {
+  position: relative;
+  padding: 8px 14px 0;
+}
+
+.plot-canvas-sidebar__search-icon {
+  position: absolute;
+  left: 24px;
+  top: 50%;
+  transform: translateY(calc(-50% + 4px));
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+.plot-canvas-sidebar__search-input {
+  width: 100%;
+  height: 32px;
+  padding: 0 28px 0 30px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-text) 3%, var(--color-panel));
+  color: var(--color-text);
+  font-size: 12px;
+  transition: border-color 0.15s ease;
+}
+
+.plot-canvas-sidebar__search-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.plot-canvas-sidebar__search-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+
+.plot-canvas-sidebar__search-clear {
+  position: absolute;
+  right: 20px;
+  top: 50%;
+  transform: translateY(calc(-50% + 4px));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.plot-canvas-sidebar__search-clear:hover {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
+
+.plot-canvas-sidebar__count-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 16px 8px;
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+.plot-canvas-sidebar__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 8px 10px;
+}
+
+.plot-canvas-sidebar__item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 0;
+}
+
+.plot-canvas-sidebar__item-btn {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.plot-canvas-sidebar__item-btn:hover {
+  background: color-mix(in srgb, var(--color-text) 5%, transparent);
+  border-color: var(--color-border);
+}
+
+.plot-canvas-sidebar__item-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-focus-ring);
+}
+
+.plot-canvas-sidebar__item-btn.is-selected {
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 28%, transparent);
+}
+
+.plot-canvas-sidebar__item-indent {
+  flex-shrink: 0;
+  width: 12px;
+}
+
+.plot-canvas-sidebar__item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+}
+
+.plot-canvas-sidebar__item-btn.is-selected .plot-canvas-sidebar__item-icon {
+  color: var(--color-accent-text);
+}
+
+.plot-canvas-sidebar__item-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.plot-canvas-sidebar__item-title {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plot-canvas-sidebar__item-btn.is-selected .plot-canvas-sidebar__item-title {
+  color: var(--color-accent-text);
+}
+
+.plot-canvas-sidebar__item-desc {
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plot-canvas-sidebar__item-arrow {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  opacity: 0.6;
+}
+
+.plot-canvas-sidebar__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 36px 16px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.plot-canvas-sidebar__empty-icon {
+  font-size: 26px;
+  line-height: 1;
+  opacity: 0.85;
+}
+
+/* ===== 空状态（PlotCanvasEmptyState） ===== */
+
+.plot-canvas-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.plot-canvas-empty__glow {
+  position: absolute;
+  width: 500px;
+  height: 500px;
+  border-radius: 50%;
+  background: radial-gradient(
+    ellipse at center,
+    color-mix(in srgb, var(--color-accent) 9%, transparent) 0%,
+    color-mix(in srgb, var(--color-warning) 6%, transparent) 30%,
+    transparent 70%
+  );
+  pointer-events: none;
+}
+
+.plot-canvas-empty__card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  max-width: 440px;
+  padding: 40px 48px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 20%, var(--color-border));
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--color-panel) 94%, transparent);
+  box-shadow: 0 18px 46px color-mix(in srgb, var(--color-text) 12%, transparent);
+  pointer-events: auto;
+  text-align: center;
+}
+
+.plot-canvas-empty__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 26%, transparent);
+  border-radius: 20px;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--color-accent) 12%, transparent),
+    color-mix(in srgb, var(--color-warning) 12%, transparent)
+  );
+  color: var(--color-accent-text);
+}
+
+.plot-canvas-empty__title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  /* 参考页标题的墨色→琥珀渐变，用主题 token 等价实现。 */
+  background: linear-gradient(135deg, var(--color-text), var(--color-warning-text));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.plot-canvas-empty__subtitle {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.plot-canvas-empty__actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.plot-canvas-empty__hint {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.plot-canvas-empty__slot {
+  display: contents;
+}
+
+/* ===== 画布信息面板（PlotCanvasInfoPanel） ===== */
+
+.plot-canvas-info {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.plot-canvas-info__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 14px 16px 8px;
+}
+
+.plot-canvas-info__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.plot-canvas-info__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.plot-canvas-info__close:hover {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
+
+.plot-canvas-info__close:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-focus-ring);
+}
+
+.plot-canvas-info__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 16px 16px;
+  overflow-y: auto;
+}
+
+.plot-canvas-info__canvas-name {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+.plot-canvas-info__desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.plot-canvas-info__desc--placeholder {
+  color: var(--color-text-muted);
+  font-style: normal;
+}
+
+.plot-canvas-info__stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.plot-canvas-info__stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-text) 3%, transparent);
+  color: var(--color-text-secondary);
+}
+
+.plot-canvas-info__empty {
+  padding: 22px 14px;
+  border: 1px dashed var(--color-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--color-text) 2%, transparent);
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+/* ===== 创建画布对话框 ===== */
+
+.plot-canvas-create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 0 2px;
+}
+
+.plot-canvas-create-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.plot-canvas-create-form__label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.plot-canvas-create-form__label-mark {
+  color: var(--color-error-text);
+}
+
+.plot-canvas-create-form__hint {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+.plot-canvas-create-form__hint--error {
+  color: var(--color-error-text);
+}
+
+.plot-canvas-create-form__input {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-panel);
+  color: var(--color-text);
+  font-size: 12px;
+  transition: border-color 0.15s ease;
+}
+
+.plot-canvas-create-form__input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.plot-canvas-create-form__input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 16%, transparent);
+}
+
+.plot-canvas-create-form__textarea {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-panel);
+  color: var(--color-text);
+  font-size: 12px;
+  font-family: inherit;
+  line-height: 1.6;
+  resize: vertical;
+  min-height: 64px;
+  transition: border-color 0.15s ease;
+}
+
+.plot-canvas-create-form__textarea::placeholder {
+  color: var(--color-text-muted);
+}
+
+.plot-canvas-create-form__textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 16%, transparent);
+}
+
+.plot-canvas-create-form__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.plot-canvas-create-form__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-panel);
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.plot-canvas-create-form__btn:hover:not(:disabled) {
+  background: var(--color-hover);
+}
+
+.plot-canvas-create-form__btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-focus-ring);
+}
+
+.plot-canvas-create-form__btn--primary {
+  border-color: transparent;
+  background: var(--color-accent);
+  color: var(--color-accent-foreground);
+}
+
+.plot-canvas-create-form__btn--primary:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.plot-canvas-create-form__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
