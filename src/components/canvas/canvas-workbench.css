@@ -128,6 +128,18 @@
   border-color: var(--color-accent);
 }
 
+.canvas-workbench__flow .plot-graph-card .react-flow__handle {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--color-accent);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--color-text) 16%, transparent);
+}
+
+.canvas-workbench__flow .plot-graph-card .react-flow__handle:hover {
+  background: var(--color-accent);
+  transform: scale(1.18);
+}
+
 .canvas-workbench__flow .react-flow__edge.selected .react-flow__edge-path,
 .canvas-workbench__flow .react-flow__edge:focus .react-flow__edge-path {
   stroke: var(--color-accent);

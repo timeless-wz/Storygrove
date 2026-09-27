@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import Database from 'better-sqlite3'
@@ -9,12 +10,13 @@ import { PlotCanvasRepository } from '../plot-canvas-repository'
 import { ChapterCanvasRepository } from '../chapter-canvas-repository'
 import {
   PLOT_CANVAS_NODE_KINDS,
+  createPlotCanvasEdgeId,
   createPlotCanvasNodeId,
   resolvePlotCanvasNodeKind,
 } from '../../../src/shared/plot-canvas'
 
 let projectRoot = ''
-const testRoot = path.resolve('.runtime/.cache/canvas-repositories-tests')
+const testRoot = path.join(os.tmpdir(), 'ai-novel-writer-canvas-repositories-tests')
 
 beforeAll(() => {
   fs.mkdirSync(testRoot, { recursive: true })
@@ -306,6 +308,44 @@ describe('PlotCanvasRepository', () => {
     const graph = PlotCanvasRepository.getGraph(canvas.id)
     expect(graph.nodes).toHaveLength(1)
     expect(graph.nodes[0]?.title).toBe('A2')
+  })
+
+  it('AI 预览整图提交在一个事务中完成，旧基线和无效连线均不写入', () => {
+    const canvas = PlotCanvasRepository.create('AI 画布', null)
+    const first = PlotCanvasRepository.nodeUpsert({ canvasId: canvas.id, title: '开端', summary: '', x: 0, y: 0 })
+    const baseline = PlotCanvasRepository.getGraph(canvas.id)
+    const second = { ...first, id: createPlotCanvasNodeId(), title: '转折', x: 320 }
+    const edge = {
+      id: createPlotCanvasEdgeId(), canvasId: canvas.id,
+      sourceNodeId: first.id, targetNodeId: second.id, label: '导致', kind: 'main' as const,
+    }
+    const applied = PlotCanvasRepository.applyGraph({
+      canvasId: canvas.id,
+      expectedNodes: baseline.nodes, expectedEdges: baseline.edges,
+      desiredNodes: [first, second], desiredEdges: [edge],
+    })
+    expect(applied.nodes.map(node => node.title)).toEqual(['开端', '转折'])
+    expect(applied.edges[0]?.label).toBe('导致')
+
+    expect(() => PlotCanvasRepository.applyGraph({
+      canvasId: canvas.id,
+      expectedNodes: baseline.nodes, expectedEdges: baseline.edges,
+      desiredNodes: [first], desiredEdges: [],
+    })).toThrow('画布在生成候选后发生了变化')
+
+    const current = PlotCanvasRepository.getGraph(canvas.id)
+    const third = { ...first, id: createPlotCanvasNodeId(), title: '尾声', x: 640 }
+    expect(() => PlotCanvasRepository.applyGraph({
+      canvasId: canvas.id,
+      expectedNodes: current.nodes, expectedEdges: current.edges,
+      desiredNodes: [...current.nodes, third],
+      desiredEdges: [...current.edges, {
+        id: createPlotCanvasEdgeId(), canvasId: canvas.id,
+        sourceNodeId: third.id, targetNodeId: third.id, label: '', kind: 'main',
+      }],
+    })).toThrow('剧情画布连线不能连接自身')
+    expect(PlotCanvasRepository.getGraph(canvas.id).nodes).toHaveLength(2)
+    expect(PlotCanvasRepository.getGraph(canvas.id).edges).toHaveLength(1)
   })
 })
 

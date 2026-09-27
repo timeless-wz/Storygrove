@@ -68,7 +68,7 @@ import { WorldMapRepository } from '../repositories/world-map-repository'
 import type { WorldMapNode, WorldMapEdge, WorldMap } from '../../src/shared/world-map'
 import { removeDeletedMapImages } from '../services/world-map-image-store'
 import { PlotCanvasRepository } from '../repositories/plot-canvas-repository'
-import type { PlotCanvasNodeUpsertPayload, PlotCanvasEdgeUpsertPayload, PlotCanvasNodesMergePayload, PlotCanvasUpdatePayload } from '../../src/shared/plot-canvas'
+import type { PlotCanvasNodeUpsertPayload, PlotCanvasEdgeUpsertPayload, PlotCanvasGraphApplyPayload, PlotCanvasNodesMergePayload, PlotCanvasUpdatePayload } from '../../src/shared/plot-canvas'
 import { ChapterCanvasRepository } from '../repositories/chapter-canvas-repository'
 import type { ChapterCanvasNodeUpsertPayload, ChapterCanvasEdgeUpsertPayload } from '../../src/shared/chapter-canvas'
 import { StoryTimelineRepository } from '../repositories/story-timeline-repository'
@@ -168,6 +168,7 @@ const MUTATING_DATABASE_CHANNELS = new Set([
   'db:plot-canvas-nodes-reposition',
   'db:plot-canvas-edge-upsert',
   'db:plot-canvas-edge-delete',
+  'db:plot-canvas-graph-apply',
   'db:plot-canvas-nodes-merge',
   'db:chapter-canvas-viewport-save',
   'db:chapter-canvas-node-upsert',
@@ -1709,6 +1710,15 @@ export function registerDatabaseController() {
       assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
       PlotCanvasRepository.edgeDelete(canvasId, edgeId)
       return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:plot-canvas-graph-apply', async (_event, input: PlotCanvasGraphApplyPayload, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, graph: PlotCanvasRepository.applyGraph(input) }
     } catch (error) {
       return { success: false, error: String(error) }
     }

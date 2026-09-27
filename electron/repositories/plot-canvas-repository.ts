@@ -17,6 +17,7 @@ import {
   type PlotCanvasColorKey,
   type PlotCanvasEdgeData,
   type PlotCanvasGraph,
+  type PlotCanvasGraphApplyPayload,
   type PlotCanvasNodeData,
   type PlotCanvasNodeEntityRef,
   type PlotCanvasSummary,
@@ -619,6 +620,60 @@ export class PlotCanvasRepository {
       db.prepare('DELETE FROM plot_canvas_edges WHERE id = ?').run(edgeId)
     })
     tx()
+  }
+
+  /** 将 AI 预览一次性应用；基线变化或任一步失败时整个事务回滚。 */
+  static applyGraph(input: PlotCanvasGraphApplyPayload): PlotCanvasGraph {
+    const db = requireDb()
+    if (!input || !Array.isArray(input.expectedNodes) || !Array.isArray(input.expectedEdges)
+      || !Array.isArray(input.desiredNodes) || !Array.isArray(input.desiredEdges)) {
+      throw new Error('剧情画布候选数据无效')
+    }
+    if (input.desiredNodes.length > MAX_PLOT_CANVAS_NODES || input.desiredEdges.length > 1000) {
+      throw new Error('剧情画布候选超过容量限制')
+    }
+    const nodeIds = new Set(input.desiredNodes.map(node => node.id))
+    const edgeIds = new Set(input.desiredEdges.map(edge => edge.id))
+    if (nodeIds.size !== input.desiredNodes.length || edgeIds.size !== input.desiredEdges.length
+      || input.desiredNodes.some(node => node.canvasId !== input.canvasId)
+      || input.desiredEdges.some(edge => edge.canvasId !== input.canvasId
+        || !nodeIds.has(edge.sourceNodeId) || !nodeIds.has(edge.targetNodeId))) {
+      throw new Error('剧情画布候选包含重复或无效的节点与连线')
+    }
+    const tx = db.transaction(() => {
+      const current = PlotCanvasRepository.getGraph(input.canvasId)
+      if (JSON.stringify(current.nodes) !== JSON.stringify(input.expectedNodes)
+        || JSON.stringify(current.edges) !== JSON.stringify(input.expectedEdges)) {
+        throw new Error('画布在生成候选后发生了变化，请重新生成')
+      }
+      const currentNodes = new Map(current.nodes.map(node => [node.id, node]))
+      const currentEdges = new Map(current.edges.map(edge => [edge.id, edge]))
+      for (const edge of current.edges) {
+        if (!edgeIds.has(edge.id)) PlotCanvasRepository.edgeDelete(input.canvasId, edge.id)
+      }
+      for (const node of current.nodes) {
+        if (!nodeIds.has(node.id)) PlotCanvasRepository.nodeDelete(input.canvasId, node.id)
+      }
+      const mutableNode = (node: PlotCanvasNodeData) => ({
+        kind: node.kind, title: node.title, summary: node.summary, colorKey: node.colorKey,
+        tags: node.tags, entityRefs: node.entityRefs, chapterRefs: node.chapterRefs,
+        planId: node.planId, subCanvasId: node.subCanvasId, x: node.x, y: node.y,
+      })
+      for (const node of input.desiredNodes) {
+        const previous = currentNodes.get(node.id)
+        if (!previous || JSON.stringify(mutableNode(previous)) !== JSON.stringify(mutableNode(node))) {
+          PlotCanvasRepository.nodeUpsert(node)
+        }
+      }
+      for (const edge of input.desiredEdges) {
+        const previous = currentEdges.get(edge.id)
+        if (!previous || previous.label !== edge.label || previous.kind !== edge.kind) {
+          PlotCanvasRepository.edgeUpsert(edge)
+        }
+      }
+      return PlotCanvasRepository.getGraph(input.canvasId)
+    })
+    return tx()
   }
 
   /**

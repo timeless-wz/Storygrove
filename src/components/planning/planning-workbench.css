@@ -36,10 +36,20 @@
 .planning-page__breadcrumb {
   display: flex;
   align-items: center;
-  gap: 3px;
+  flex-wrap: wrap;
+  column-gap: 8px;
+  row-gap: 4px;
   font-size: 10px;
   line-height: 1.4;
   color: var(--color-text-muted);
+}
+
+.planning-page__crumb-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 18px;
+  white-space: nowrap;
 }
 
 .planning-page__crumb {
@@ -66,6 +76,7 @@
 }
 
 .planning-page__crumb-sep {
+  flex: none;
   color: var(--color-text-muted);
   opacity: 0.6;
 }
@@ -80,7 +91,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 2px;
+  margin-top: 8px;
 }
 
 .planning-page__title {

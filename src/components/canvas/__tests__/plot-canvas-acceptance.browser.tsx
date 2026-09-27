@@ -31,6 +31,7 @@ import {
 } from '../../../shared/plot-canvas'
 import { setActiveProjectSessionContext } from '../../../shared/project-session-context'
 import { useProjectStore } from '../../../stores/project-store'
+import { useLLMStore } from '../../../stores/llm-store'
 import { useLocaleStore } from '../../../stores/locale-store'
 import PlotCanvasWorkbench from '../PlotCanvasWorkbench'
 
@@ -47,9 +48,11 @@ interface FixtureDb {
 let db: FixtureDb
 let container: HTMLDivElement
 let root: Root
+let aiReply = ''
 
 beforeEach(() => {
   db = { canvases: [], graphs: new Map() }
+  aiReply = ''
   useLocaleStore.setState({ locale: 'zh-CN' })
   const project: ProjectData = {
     id: 'plot-acceptance', sessionLease: 'plot-acceptance-lease', name: '验收项目', path: PROJECT_PATH,
@@ -97,6 +100,22 @@ beforeEach(() => {
         db.graphs.set(input.canvasId, graph)
         return { success: true, node: input }
       }
+      case 'db:plot-canvas-graph-apply': {
+        const [input] = args as [{ canvasId: string; expectedNodes: PlotCanvasNodeData[]; expectedEdges: PlotCanvasEdgeData[]; desiredNodes: PlotCanvasNodeData[]; desiredEdges: PlotCanvasEdgeData[] }]
+        const current = db.graphs.get(input.canvasId)
+        if (!current || JSON.stringify(current.nodes) !== JSON.stringify(input.expectedNodes)
+          || JSON.stringify(current.edges) !== JSON.stringify(input.expectedEdges)) {
+          return { success: false, error: '画布在生成候选后发生了变化' }
+        }
+        const next = { nodes: structuredClone(input.desiredNodes), edges: structuredClone(input.desiredEdges) }
+        db.graphs.set(input.canvasId, next)
+        return { success: true, graph: {
+          canvas: db.canvases.find(item => item.id === input.canvasId), viewport: null,
+          nodes: next.nodes, edges: next.edges,
+        } }
+      }
+      case 'llm:generate':
+        return { success: true, content: aiReply, finishReason: 'stop' }
       case 'db:blueprint-get-all':
         return [{
           chapterNumber: 2, title: '验牌', role: '发展', purpose: '', keyEvents: '',
@@ -132,6 +151,7 @@ afterEach(async () => {
   document.documentElement.removeAttribute('data-theme')
   document.documentElement.className = ''
   Reflect.deleteProperty(window, 'velaAPI')
+  useLLMStore.setState({ models: [], defaultModelId: null, loaded: false })
 })
 
 async function clickButton(matcher: (button: HTMLButtonElement) => boolean) {
@@ -168,6 +188,44 @@ async function shoot(name: string) {
 }
 
 describe('plot canvas integration acceptance', () => {
+  it('offers both AI modes and only writes an approved proposal', async () => {
+    const canvasId = createPlotCanvasId()
+    db.canvases.push({ id: canvasId, name: 'AI 主线', description: '', parentCanvasId: null, sortOrder: 1 })
+    db.graphs.set(canvasId, { nodes: [], edges: [] })
+    useLLMStore.setState({
+      loaded: true, defaultModelId: 'test-generation',
+      models: [{ id: 'test-generation', name: '测试外部模型', modelName: 'test-generation', purposes: ['generation'] }] as ReturnType<typeof useLLMStore.getState>['models'],
+    })
+    aiReply = JSON.stringify({ explanation: '建立开端与转折', operations: [
+      { action: 'add_node', key: 'start', title: '开端', chapterRefs: [2] },
+      { action: 'add_node', key: 'turn', title: '转折' },
+      { action: 'add_edge', source: 'start', target: 'turn', label: '引出' },
+    ] })
+    await act(async () => { root.render(<PlotCanvasWorkbench projectKey={PROJECT_PATH} />) })
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="plot-canvas-ai-initialize"]')).toBeTruthy())
+    await clickButton(button => button.getAttribute('data-testid') === 'plot-canvas-ai-initialize')
+    await clickButton(findButton('生成候选'))
+    await vi.waitFor(() => expect(document.body.querySelector('[data-testid="plot-canvas-ai-preview"]')).toBeTruthy())
+    expect(db.graphs.get(canvasId)?.nodes).toHaveLength(0)
+    await shoot('10-ai-initialize-preview')
+    await clickButton(findButton('确认并应用'))
+    await vi.waitFor(() => expect(db.graphs.get(canvasId)?.nodes).toHaveLength(2))
+    expect(db.graphs.get(canvasId)?.edges).toHaveLength(1)
+    await clickButton(button => button.textContent?.trim() === '关闭')
+
+    const firstId = db.graphs.get(canvasId)!.nodes[0].id
+    aiReply = JSON.stringify({ explanation: '调整开端', operations: [
+      { action: 'update_node', id: firstId, title: '新的开端' },
+    ] })
+    await clickButton(button => button.getAttribute('data-testid') === 'plot-canvas-ai-discuss')
+    await setInput('#plot-canvas-ai-instruction', '修改第一个事件的标题')
+    await clickButton(findButton('生成候选'))
+    await vi.waitFor(() => expect(document.body.querySelector('[data-testid="plot-canvas-ai-preview"]')).toBeTruthy())
+    expect(db.graphs.get(canvasId)?.nodes[0]?.title).toBe('开端')
+    await clickButton(findButton('确认并应用'))
+    await vi.waitFor(() => expect(db.graphs.get(canvasId)?.nodes[0]?.title).toBe('新的开端'))
+  })
+
   it('keeps the newly selected canvas when the previous graph read resolves late', async () => {
     const alphaId = createPlotCanvasId()
     const betaId = createPlotCanvasId()

@@ -4,10 +4,8 @@
  * 两种模式（文字与视觉贴近参考页面）：
  * - no-canvas   尚无任何画布：参考页的“选择一个剧情画布”引导，主操作
  *               是新建画布。
- * - empty-canvas 已选中空画布：参考页的“开始构建剧情”引导卡片。本轮
- *               AI 能力排除，主操作是手动新增剧情事件；`aiSlot` 预留
- *               未来 AI 初始化区域的扩展位，不传则不渲染任何 AI 入口，
- *               也不显示假的“AI 智能初始化”按钮。
+ * - empty-canvas 已选中空画布：参考页的“开始构建剧情”引导卡片；主操作是
+ *               手动新增事件，集成方可通过 `aiSlot` 注入真实 AI 入口。
  */
 
 import { Clapperboard, Layers, Plus } from 'lucide-react'
@@ -24,7 +22,7 @@ export interface PlotCanvasEmptyStateProps {
   /** empty-canvas 模式的主操作：手动新增剧情事件。 */
   onAddEvent?: () => void
   addEventDisabled?: boolean
-  /** 未来 AI 初始化区域的扩展位（例如占位说明或真实入口）。 */
+  /** 集成方提供的 AI 初始化入口。 */
   aiSlot?: ReactNode
   className?: string
 }

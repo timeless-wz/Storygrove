@@ -126,6 +126,23 @@ describe('planning area visual contract', () => {
     expect(text).toContain('埋设/开始 1 · 预计回收/结束 8')
   })
 
+  it('chapter thread breadcrumb keeps arrows beside text and clear of the title', async () => {
+    installApi({ withData: true })
+    await mount(<NarrativeThreadEditor projectKey={PROJECT_PATH} initialView="canvas" />)
+    const breadcrumb = container().querySelector<HTMLElement>('.planning-page__breadcrumb')!
+    const title = container().querySelector<HTMLElement>('.planning-page__title-row')!
+    expect(title.getBoundingClientRect().top - breadcrumb.getBoundingClientRect().bottom).toBeGreaterThanOrEqual(6)
+    for (const item of breadcrumb.querySelectorAll<HTMLElement>('.planning-page__crumb-item')) {
+      const arrow = item.querySelector<SVGElement>('.planning-page__crumb-sep')
+      const label = item.querySelector<HTMLElement>('.planning-page__crumb')
+      if (!arrow || !label) continue
+      const arrowRect = arrow.getBoundingClientRect()
+      const labelRect = label.getBoundingClientRect()
+      expect(labelRect.left - arrowRect.right).toBeGreaterThanOrEqual(4)
+      expect(Math.abs((arrowRect.top + arrowRect.bottom) / 2 - (labelRect.top + labelRect.bottom) / 2)).toBeLessThan(3)
+    }
+  })
+
   it('story timeline: empty state then a populated canvas', async () => {
     installApi({ withData: false })
     await mount(<StoryTimelineView projectKey={PROJECT_PATH} />)

@@ -30,7 +30,9 @@ import {
   Eye,
   EyeOff,
   FolderPlus,
+  MessageCircle,
   Pencil,
+  Sparkles,
   Trash2,
   X,
 } from 'lucide-react'
@@ -73,6 +75,8 @@ import { Textarea } from '../ui/Textarea'
 import { toast } from '../ui/Toast'
 import { confirm } from '../ui/Confirm'
 import { useCanvasPersistence } from './canvas-persistence'
+import { PlotCanvasAIDialog } from './PlotCanvasAIDialog'
+import type { PlotCanvasAIMode } from './plot-canvas-ai-proposal'
 import {
   CanvasLabeledEdge,
   CanvasLabeledEdgeViewMemo,
@@ -202,6 +206,7 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
   const [filter, setFilter] = useState<PlotGraphFilterState>({ searchQuery: '', selectedKinds: new Set() })
   const [matchIndex, setMatchIndex] = useState(-1)
   const [interactionMode, setInteractionMode] = useState<CanvasInteractionMode>('pan')
+  const [connectSourceId, setConnectSourceId] = useState<string | null>(null)
   const [showGrid, setShowGrid] = useState(true)
   const [pickerOpen, setPickerOpen] = useState(false)
   const filterBarRef = useRef<HTMLDivElement | null>(null)
@@ -219,6 +224,7 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
   const [subCanvasDialog, setSubCanvasDialog] = useState<{ nodeId: string; defaultName: string } | null>(null)
   const [subCanvasName, setSubCanvasName] = useState('')
   const [detail, setDetail] = useState<DetailState | null>(null)
+  const [aiMode, setAiMode] = useState<PlotCanvasAIMode | null>(null)
 
   const graphRef = useRef<PlotCanvasGraph | null>(null)
   const activeCanvasIdRef = useRef<string | null>(null)
@@ -236,6 +242,8 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
     graphLoadRequestRef.current += 1
     setGraph(null)
     setDetail(null)
+    setConnectSourceId(null)
+    setAiMode(null)
     setActiveCanvasId(canvasId)
   }, [])
 
@@ -622,6 +630,12 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
   const onConnect = useCallback((connection: Connection) => {
     const canvasId = activeCanvasIdRef.current
     if (!canvasId || !connection.source || !connection.target || connection.source === connection.target) return
+    if (graphRef.current?.edges.some(edge =>
+      (edge.sourceNodeId === connection.source && edge.targetNodeId === connection.target)
+      || (edge.sourceNodeId === connection.target && edge.targetNodeId === connection.source))) {
+      toast.error(text('这两个剧情事件之间已有连线', 'These plot events are already connected'))
+      return
+    }
     const edge: PlotCanvasEdgeData = {
       id: createPlotCanvasEdgeId(),
       canvasId,
@@ -630,9 +644,31 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
       label: '',
       kind: 'main',
     }
-    setGraph(previous => previous ? { ...previous, edges: [...previous.edges, edge] } : previous)
+    setGraph(previous => {
+      if (!previous || previous.edges.some(item => item.id === edge.id)) return previous
+      return { ...previous, edges: [...previous.edges, edge] }
+    })
     persistEdge(edge, canvasId)
-  }, [persistEdge])
+  }, [persistEdge, text])
+
+  const handleNodeConnectClick = useCallback((nodeId: string) => {
+    if (interactionMode !== 'connect') return
+    if (!connectSourceId) {
+      setConnectSourceId(nodeId)
+      return
+    }
+    if (connectSourceId === nodeId) {
+      setConnectSourceId(null)
+      return
+    }
+    onConnect({ source: connectSourceId, target: nodeId, sourceHandle: null, targetHandle: null })
+    setConnectSourceId(null)
+  }, [interactionMode, connectSourceId, onConnect])
+
+  const changeInteractionMode = useCallback((mode: CanvasInteractionMode) => {
+    setInteractionMode(mode)
+    setConnectSourceId(null)
+  }, [])
 
   const onNodeDragStop = useCallback(() => {
     const canvasId = activeCanvasIdRef.current
@@ -1521,17 +1557,33 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
               onOpenInfo={() => setInfoOpen(previous => !previous)}
               infoDisabled={!activeCanvas}
               extraActions={
-                <button
-                  type="button"
-                  className={`plot-shell__icon-btn${showProjection ? ' is-active' : ''}`}
-                  onClick={() => setShowProjection(previous => !previous)}
-                  disabled={!activeCanvas}
-                  title={text('对照层：把蓝图/定稿投影画成只读幽灵节点', 'Overlay the read-only blueprint/finalized projection as ghost nodes')}
-                  aria-pressed={showProjection}
-                  data-testid="plot-canvas-projection-toggle"
-                >
-                  {showProjection ? <EyeOff size={17} /> : <Eye size={17} />}
-                </button>
+                <>
+                  <button type="button" className="plot-shell__icon-btn" disabled={!activeCanvas || !graph}
+                    onClick={() => setAiMode('initialize')}
+                    title={text('AI 生成初始剧情事件与连线', 'AI: generate plot events and links')}
+                    aria-label={text('AI 构建剧情', 'Build plot with AI')}
+                    data-testid="plot-canvas-ai-initialize">
+                    <Sparkles size={17} />
+                  </button>
+                  <button type="button" className="plot-shell__icon-btn" disabled={!activeCanvas || !graph}
+                    onClick={() => setAiMode('discuss')}
+                    title={text('与画布对话，提出事件和连线修改', 'Talk to the canvas about event and link changes')}
+                    aria-label={text('与画布对话', 'Talk to the canvas')}
+                    data-testid="plot-canvas-ai-discuss">
+                    <MessageCircle size={17} />
+                  </button>
+                  <button
+                    type="button"
+                    className={`plot-shell__icon-btn${showProjection ? ' is-active' : ''}`}
+                    onClick={() => setShowProjection(previous => !previous)}
+                    disabled={!activeCanvas}
+                    title={text('对照层：把蓝图/定稿投影画成只读幽灵节点', 'Overlay the read-only blueprint/finalized projection as ghost nodes')}
+                    aria-pressed={showProjection}
+                    data-testid="plot-canvas-projection-toggle"
+                  >
+                    {showProjection ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
+                </>
               }
             />
             {pickerOpen && (
@@ -1608,12 +1660,19 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
                 {text(`合并所选（${selectedNodeIds.length}）`, `Merge selected (${selectedNodeIds.length})`)}
               </button>
             )}
+            {activeCanvas && interactionMode === 'connect' && (
+              <div className="plot-shell__connect-hint" role="status" data-testid="plot-canvas-connect-hint">
+                {connectSourceId
+                  ? text('点击另一个事件完成连线；再点起点取消', 'Click another event to connect; click the source again to cancel')
+                  : text('依次点击两个事件建立连线，也可拖动卡片边缘的连接点', 'Click two events to connect, or drag a card handle')}
+              </div>
+            )}
           </>
         }
         toolRail={
           <PlotGraphToolbar
             interactionMode={interactionMode}
-            onInteractionModeChange={setInteractionMode}
+            onInteractionModeChange={changeInteractionMode}
             showGrid={showGrid}
             onToggleGrid={() => setShowGrid(previous => !previous)}
             onFitView={fitView}
@@ -1648,6 +1707,9 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
+                onNodeClick={(_, node) => handleNodeConnectClick(node.id)}
+                onPaneClick={() => setConnectSourceId(null)}
+                nodesDraggable={interactionMode !== 'connect'}
                 onNodeDragStop={onNodeDragStop}
                 onMoveEnd={onMoveEnd}
                 onInit={instance => { flowRef.current = instance }}
@@ -1676,7 +1738,10 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
           !activeCanvas ? (
             <PlotCanvasEmptyState mode="no-canvas" onCreateCanvas={openCreateDialog} />
           ) : graph && !hasNodes ? (
-            <PlotCanvasEmptyState mode="empty-canvas" onAddEvent={addNodeAtCenter} />
+            <PlotCanvasEmptyState mode="empty-canvas" onAddEvent={addNodeAtCenter}
+              aiSlot={<Button variant="ai" size="sm" onClick={() => setAiMode('initialize')} data-testid="plot-canvas-empty-ai-initialize">
+                <Sparkles size={15} />{text('AI 构建剧情', 'Build plot with AI')}
+              </Button>} />
           ) : null
         }
         rightPanel={rightPanel}
@@ -1696,6 +1761,21 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
           if (canvasDialog?.mode === 'rename') void renameCanvas(canvasDialog.canvas, values)
         }}
       />
+
+      {aiMode && graph && activeCanvas && <PlotCanvasAIDialog
+        key={`${activeCanvas.id}:${aiMode}`}
+        mode={aiMode}
+        graph={graph}
+        blueprints={blueprints}
+        projectKey={projectKey}
+        hasPendingWrites={persist.pendingCount > 0}
+        onClose={() => setAiMode(null)}
+        onApplied={next => {
+          setGraph(next)
+          setDetail(null)
+          flowRef.current?.fitView({ padding: 0.2, maxZoom: 1.1, duration: 250 })
+        }}
+      />}
 
       {/* 删除画布（含子画布策略） */}
       <Dialog open={deleteCanvasTarget !== null} onOpenChange={open => { if (!open) setDeleteCanvasTarget(null) }}>

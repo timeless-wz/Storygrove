@@ -92,7 +92,8 @@ function installIpc() {
         const canvas = db.canvases.find(item => item.id === canvasId)
         if (!canvas) throw new Error('剧情画布不存在')
         const graph = db.graphs.get(canvasId) ?? { nodes: [], edges: [] }
-        const result: PlotCanvasGraph = { canvas, viewport: null, nodes: graph.nodes, edges: graph.edges }
+        // IPC returns a structured clone; keep fixture mutations from changing React state by reference.
+        const result: PlotCanvasGraph = { canvas: { ...canvas }, viewport: null, nodes: structuredClone(graph.nodes), edges: structuredClone(graph.edges) }
         return result
       }
       case 'db:plot-canvas-node-upsert': {
@@ -318,6 +319,17 @@ describe('PlotCanvasWorkbench', () => {
     await vi.waitFor(() => expect(container!.querySelectorAll('[data-testid="plot-graph-card"]')).toHaveLength(2))
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('db:plot-canvas-node-upsert', expect.anything(), PROJECT_PATH, expect.anything()))
 
+    // 连线模式：点起点、点终点，真实 edge-upsert 并保存。
+    await clickButton(button => button.getAttribute('data-testid') === 'plot-canvas-connect-tool')
+    await vi.waitFor(() => expect(container!.querySelector('[data-testid="plot-canvas-connect-hint"]')).toBeTruthy())
+    const connectNodes = container!.querySelectorAll<HTMLElement>('.react-flow__node')
+    await act(async () => { connectNodes[0].click() })
+    await act(async () => { connectNodes[1].click() })
+    await vi.waitFor(() => expect(db.graphs.get(db.canvases[0].id)?.edges).toHaveLength(1))
+    await vi.waitFor(() => expect(container!.querySelectorAll('.react-flow__edge')).toHaveLength(1))
+    expect(invoke).toHaveBeenCalledWith('db:plot-canvas-edge-upsert', expect.anything(), PROJECT_PATH, expect.anything())
+    await clickButton(button => button.getAttribute('aria-label') === '框选/选择模式')
+
     // 编辑第一个节点的标题并保存。
     await setInput('#plot-node-title', '发现刻痕')
     await clickButton(findButton('保存修改'))
@@ -359,6 +371,7 @@ describe('PlotCanvasWorkbench', () => {
       expect(container!.textContent).toContain('发现刻痕')
       const saved = db.graphs.get(db.canvases[0].id)?.nodes.find(node => node.title === '发现刻痕')
       expect(saved?.chapterRefs).toEqual([2])
+      expect(db.graphs.get(db.canvases[0].id)?.edges).toHaveLength(1)
     })
   })
 

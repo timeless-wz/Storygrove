@@ -223,6 +223,15 @@ export interface PlotCanvasEdgeUpsertPayload {
   kind?: PlotCanvasEdgeKind
 }
 
+/** AI 候选预览确认后的整图变更；仓储会核对基线并在同一事务内应用。 */
+export interface PlotCanvasGraphApplyPayload {
+  canvasId: string
+  expectedNodes: PlotCanvasNodeData[]
+  expectedEdges: PlotCanvasEdgeData[]
+  desiredNodes: PlotCanvasNodeData[]
+  desiredEdges: PlotCanvasEdgeData[]
+}
+
 /** IPC 载荷：把多个剧情事件合并为一个新事件（事务）。 */
 export interface PlotCanvasNodesMergePayload {
   canvasId: string

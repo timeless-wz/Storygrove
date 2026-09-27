@@ -131,7 +131,7 @@ export interface PlotGraphFilterState {
 }
 
 /** 画布交互模式 */
-export type CanvasInteractionMode = 'pan' | 'select'
+export type CanvasInteractionMode = 'pan' | 'select' | 'connect'
 
 /** 工具栏状态配置 */
 export interface PlotGraphToolbarState {

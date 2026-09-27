@@ -17,6 +17,7 @@ import {
   Crosshair,
   Grid3X3,
   Hand,
+  Link2,
   Maximize2,
   MousePointer,
   Search,
@@ -109,6 +110,9 @@ export function PlotGraphToolbar({
       } else if (key === 'v') {
         e.preventDefault()
         onInteractionModeChange('select')
+      } else if (key === 'l') {
+        e.preventDefault()
+        onInteractionModeChange('connect')
       } else if (key === 'g') {
         e.preventDefault()
         onToggleGrid()
@@ -179,6 +183,18 @@ export function PlotGraphToolbar({
         aria-label={text('框选/选择模式', 'Box selection mode')}
       >
         <MousePointer size={16} />
+      </button>
+
+      <button
+        type="button"
+        className={`plot-graph-toolbar__btn ${interactionMode === 'connect' ? 'is-active' : ''}`}
+        onClick={() => onInteractionModeChange('connect')}
+        title={text('连线模式：依次点击起点和终点 (L)', 'Connect mode: click a source, then a target (L)')}
+        aria-label={text('连线模式', 'Connect mode')}
+        aria-pressed={interactionMode === 'connect'}
+        data-testid="plot-canvas-connect-tool"
+      >
+        <Link2 size={16} />
       </button>
 
       <div className="plot-graph-toolbar__divider" />

@@ -47,6 +47,7 @@ import type {
   PlotCanvasViewport,
   PlotCanvasNodeUpsertPayload,
   PlotCanvasEdgeUpsertPayload,
+  PlotCanvasGraphApplyPayload,
   PlotCanvasNodesMergePayload,
   PlotCanvasUpdatePayload,
 } from './plot-canvas'
@@ -1295,6 +1296,7 @@ export interface DatabaseChannels {
   'db:plot-canvas-nodes-reposition': { args: [canvasId: string, positions: Array<{ nodeId: string; x: number; y: number }>, expectedProjectPath: string]; return: { success: boolean; error?: string } }
   'db:plot-canvas-edge-upsert': { args: [input: PlotCanvasEdgeUpsertPayload, expectedProjectPath: string]; return: { success: boolean; edge?: PlotCanvasEdgeData; error?: string } }
   'db:plot-canvas-edge-delete': { args: [canvasId: string, edgeId: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:plot-canvas-graph-apply': { args: [input: PlotCanvasGraphApplyPayload, expectedProjectPath: string]; return: { success: boolean; graph?: PlotCanvasGraph; error?: string } }
   'db:plot-canvas-nodes-merge': { args: [input: PlotCanvasNodesMergePayload, expectedProjectPath: string]; return: { success: boolean; node?: PlotCanvasNodeData; error?: string } }
 
   // 9. chapter_canvas — 每章一张的章内场景编排画布

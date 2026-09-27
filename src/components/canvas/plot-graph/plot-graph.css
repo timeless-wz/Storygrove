@@ -15,7 +15,7 @@
   color: var(--color-text);
   box-shadow: 0 1px 4px color-mix(in srgb, var(--color-text) 8%, transparent);
   font-size: 12px;
-  overflow: hidden;
+  overflow: visible;
   position: relative;
   transition: border-color 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease;
   user-select: none;
@@ -47,6 +47,7 @@
 /* 顶部色彩标条 */
 .plot-graph-card__accent-bar {
   height: 4px;
+  border-radius: var(--radius-lg, 10px) var(--radius-lg, 10px) 0 0;
   background: var(--node-accent-color, var(--color-accent));
   flex-shrink: 0;
   transition: background 0.16s ease;
