@@ -2,7 +2,7 @@
  * plot-canvas-acceptance.browser.tsx — 剧情画布集成验收流程与截图存证。
  *
  * 在真实组件树上走完验收链路：新建画布 → 新增事件 → 编辑（种类/标签）→
- * 筛选 → 查看详情 → 卸载重装后读回。所有数据经 fixture IPC 真实落库，
+ * 筛选 → 查看详情 → 卸载重装后读回。数据经 fixture IPC 写入内存数据集，
  * 断言同时校验 IPC 调用与 DOM；截图输出到 output/plot-canvas-integration/，
  * 覆盖 1264×900 / 2516×1289 与深色主题。
  *
@@ -21,6 +21,9 @@ import '../../../styles/literary-workbench.css'
 
 import type { ProjectData } from '../../../shared/ipc-channels'
 import {
+  createPlotCanvasEdgeId,
+  createPlotCanvasId,
+  createPlotCanvasNodeId,
   type PlotCanvasEdgeData,
   type PlotCanvasGraph,
   type PlotCanvasNodeData,
@@ -61,9 +64,10 @@ beforeEach(() => {
         return [...db.canvases].sort((a, b) => a.sortOrder - b.sortOrder)
       case 'db:plot-canvas-create': {
         const [name, parentCanvasId] = args as [string, string | null]
+        const description = args.length >= 4 ? String(args[2] ?? '') : ''
         const canvas: PlotCanvasSummary = {
           id: `pca-${Math.random().toString(16).slice(2, 10)}-0000-4000-8000-000000000000`,
-          name, description: '', parentCanvasId, sortOrder: db.canvases.length + 1,
+          name, description: description ?? '', parentCanvasId, sortOrder: db.canvases.length + 1,
         }
         db.canvases.push(canvas)
         db.graphs.set(canvas.id, { nodes: [], edges: [] })
@@ -164,6 +168,44 @@ async function shoot(name: string) {
 }
 
 describe('plot canvas integration acceptance', () => {
+  it('keeps the newly selected canvas when the previous graph read resolves late', async () => {
+    const alphaId = createPlotCanvasId()
+    const betaId = createPlotCanvasId()
+    const makeNode = (canvasId: string, title: string): PlotCanvasNodeData => ({
+      id: createPlotCanvasNodeId(), canvasId, kind: 'plot', title, summary: '',
+      colorKey: 'default', tags: [], entityRefs: [], chapterRefs: [],
+      planId: null, subCanvasId: null, x: 120, y: 160,
+    })
+    db.canvases.push(
+      { id: alphaId, name: '先打开的画布', description: '', parentCanvasId: null, sortOrder: 1 },
+      { id: betaId, name: '后选择的画布', description: '', parentCanvasId: null, sortOrder: 2 },
+    )
+    db.graphs.set(alphaId, { nodes: [makeNode(alphaId, '旧画布节点')], edges: [] })
+    db.graphs.set(betaId, { nodes: [makeNode(betaId, '新画布节点')], edges: [] })
+
+    let releaseOldRead!: (graph: PlotCanvasGraph) => void
+    const delayedOldRead = new Promise<PlotCanvasGraph>(resolve => { releaseOldRead = resolve })
+    const api = (window as unknown as { velaAPI: { invoke: (channel: string, ...args: unknown[]) => Promise<unknown> } }).velaAPI
+    const baseInvoke = api.invoke
+    api.invoke = vi.fn((channel: string, ...args: unknown[]) => (
+      channel === 'db:plot-canvas-graph-get' && args[0] === alphaId
+        ? delayedOldRead
+        : baseInvoke(channel, ...args)
+    ))
+
+    await act(async () => { root.render(<PlotCanvasWorkbench projectKey={PROJECT_PATH} />) })
+    await vi.waitFor(() => expect(container.textContent).toContain('后选择的画布'))
+    await clickButton(button => button.title === '后选择的画布')
+    await vi.waitFor(() => expect(container.textContent).toContain('新画布节点'))
+    releaseOldRead({
+      canvas: db.canvases[0], viewport: null,
+      nodes: db.graphs.get(alphaId)!.nodes, edges: [],
+    })
+    await settle(100)
+    expect(container.textContent).toContain('新画布节点')
+    expect(container.textContent).not.toContain('旧画布节点')
+  })
+
   it('新建画布 → 新增/编辑节点 → 筛选 → 查看详情 → 重开读回（含双尺寸双主题截图）', async () => {
     document.documentElement.setAttribute('data-theme', 'storyforge')
     document.documentElement.className = ''
@@ -175,7 +217,7 @@ describe('plot canvas integration acceptance', () => {
     await settle()
     await shoot('01-light-1264-no-canvas')
 
-    // 2) 新建画布（真实 IPC：create + update 描述）
+    // 2) 新建画布：标题与说明由单次 create IPC 一起写入。
     await clickButton(findButton('新增剧情画布'))
     await setInput('#plot-canvas-create-title', '第一卷 · 归墟主线')
     await setInput('#plot-canvas-create-description', '渔村灭门到归墟之门的主线编排')
@@ -190,7 +232,16 @@ describe('plot canvas integration acceptance', () => {
 
     await clickButton(findButton('新增剧情事件'))
     await vi.waitFor(() => expect(container.querySelectorAll('[data-testid="plot-graph-card"]')).toHaveLength(1))
-    await clickButton(findButton('新增剧情事件'))
+    const pane = container.querySelector<HTMLElement>('.react-flow__pane')
+    expect(pane).not.toBeNull()
+    const paneBounds = pane!.getBoundingClientRect()
+    await act(async () => {
+      pane!.dispatchEvent(new MouseEvent('dblclick', {
+        bubbles: true,
+        clientX: paneBounds.left + 110,
+        clientY: paneBounds.top + paneBounds.height / 2,
+      }))
+    })
     await vi.waitFor(() => expect(container.querySelectorAll('[data-testid="plot-graph-card"]')).toHaveLength(2))
     await vi.waitFor(() => expect(db.graphs.get(db.canvases[0].id)?.nodes).toHaveLength(2))
 
@@ -208,7 +259,32 @@ describe('plot canvas integration acceptance', () => {
     // 5) 查看详情（选中节点 → 右侧详情；含章节跳转区）
     await vi.waitFor(() => expect(container.querySelector('[data-testid="plot-canvas-detail"]')).toBeTruthy())
     await settle()
+    const selectedCard = container.querySelector<HTMLElement>('[data-kind="foreshadow"]')
+    const flowPane = container.querySelector<HTMLElement>('.react-flow')
+    expect(selectedCard).not.toBeNull()
+    expect(flowPane).not.toBeNull()
+    for (const card of container.querySelectorAll<HTMLElement>('[data-testid="plot-graph-card"]')) {
+      const cardRect = card.getBoundingClientRect()
+      const paneRect = flowPane!.getBoundingClientRect()
+      expect(cardRect.left).toBeGreaterThanOrEqual(paneRect.left + 8)
+      expect(cardRect.right).toBeLessThanOrEqual(paneRect.right - 8)
+    }
     await shoot('03-light-1264-detail-and-nodes')
+
+    // The fixture has one persisted edge so the filter assertion checks an
+    // actual React Flow connection rather than a graph with no edges.
+    const canvasId = db.canvases[0].id
+    const storedGraph = db.graphs.get(canvasId)!
+    storedGraph.edges.push({
+      id: createPlotCanvasEdgeId(), canvasId,
+      sourceNodeId: storedGraph.nodes[0].id,
+      targetNodeId: storedGraph.nodes[1].id,
+      label: '承接', kind: 'main',
+    })
+    await act(async () => { root.unmount() })
+    root = createRoot(container)
+    await act(async () => { root.render(<PlotCanvasWorkbench projectKey={PROJECT_PATH} />) })
+    await vi.waitFor(() => expect(container.querySelector('.react-flow__edge')).toBeTruthy())
 
     // 6) 筛选：打开筛选条，搜索定位 + 种类筛选只改视图
     await clickButton(button => button.getAttribute('data-testid') === 'plot-canvas-topbar-search')
@@ -237,9 +313,10 @@ describe('plot canvas integration acceptance', () => {
     await vi.waitFor(() => {
       expect(container.querySelector('[data-kind="plot"]')).toBeNull()
       expect(container.querySelector('[data-kind="foreshadow"]')).toBeTruthy()
-      expect(container.querySelector('.react-flow__edge') ?? (db.graphs.get(db.canvases[0].id)?.nodes.length === 2 ? null : null)).toBeNull()
+      expect(container.querySelector('.react-flow__edge')).toBeNull()
     })
     expect(db.graphs.get(db.canvases[0].id)?.nodes).toHaveLength(2)
+    expect(db.graphs.get(db.canvases[0].id)?.edges).toHaveLength(1)
     await settle()
     await shoot('06-light-1264-kind-filtered')
     // 重置筛选恢复视图
@@ -247,11 +324,13 @@ describe('plot canvas integration acceptance', () => {
     await vi.waitFor(() => {
       expect(container.querySelector('[data-kind="plot"]')).toBeTruthy()
       expect(container.querySelector('[data-kind="foreshadow"]')).toBeTruthy()
+      expect(container.querySelector('.react-flow__edge')).toBeTruthy()
     })
 
     // 7) 宽屏 2516×1289（信息面板展开；先关详情，右栏让位给信息面板）
     await page.viewport(2516, 1289)
-    await clickButton(button => button.getAttribute('aria-label') === '关闭详情')
+    const closeDetail = container.querySelector<HTMLButtonElement>('button[aria-label="关闭详情"]')
+    if (closeDetail) await act(async () => { closeDetail.click() })
     await vi.waitFor(() => expect(container.querySelector('[data-testid="plot-canvas-detail"]')).toBeNull())
     await clickButton(button => button.getAttribute('data-testid') === 'plot-canvas-topbar-info')
     await vi.waitFor(() => expect(container.querySelector('[data-testid="plot-canvas-info-panel"]')).toBeTruthy())

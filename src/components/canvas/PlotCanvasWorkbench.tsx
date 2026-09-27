@@ -222,12 +222,21 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
 
   const graphRef = useRef<PlotCanvasGraph | null>(null)
   const activeCanvasIdRef = useRef<string | null>(null)
+  const graphLoadRequestRef = useRef(0)
   // ref 只能在 effect 中同步（react-hooks/refs）；交互回调读到的都是已提交值。
   useEffect(() => { graphRef.current = graph }, [graph])
   useEffect(() => { activeCanvasIdRef.current = activeCanvasId }, [activeCanvasId])
 
   const openCreateDialog = useCallback(() => {
     setCanvasDialog({ mode: 'create', parentCanvasId: null })
+  }, [])
+
+  const selectCanvas = useCallback((canvasId: string) => {
+    // Invalidate an in-flight read before the next effect starts its request.
+    graphLoadRequestRef.current += 1
+    setGraph(null)
+    setDetail(null)
+    setActiveCanvasId(canvasId)
   }, [])
 
   // ===== 数据加载 =====
@@ -238,11 +247,17 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
     const list = await ipc.invokeWithProjectSession(session, 'db:plot-canvas-list', projectKey)
     if (!isProjectSessionCurrent(session)) return
     setCanvases(list)
-    setActiveCanvasId(previous => {
-      if (preferredId && list.some(canvas => canvas.id === preferredId)) return preferredId
-      if (previous && list.some(canvas => canvas.id === previous)) return previous
-      return list[0]?.id ?? null
-    })
+    const previous = activeCanvasIdRef.current
+    const nextId = preferredId && list.some(canvas => canvas.id === preferredId)
+      ? preferredId
+      : previous && list.some(canvas => canvas.id === previous)
+        ? previous
+        : list[0]?.id ?? null
+    if (nextId !== previous) {
+      graphLoadRequestRef.current += 1
+      setGraph(null)
+    }
+    setActiveCanvasId(nextId)
   }, [projectKey])
 
   const loadReferences = useCallback(async () => {
@@ -264,8 +279,17 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
   const loadGraph = useCallback(async (canvasId: string) => {
     const session = captureProjectSession(useProjectStore.getState().currentProject)
     if (!session) return
-    const next = await ipc.invokeWithProjectSession(session, 'db:plot-canvas-graph-get', canvasId, projectKey)
-    if (!isProjectSessionCurrent(session)) return
+    const requestId = ++graphLoadRequestRef.current
+    let next: PlotCanvasGraph
+    try {
+      next = await ipc.invokeWithProjectSession(session, 'db:plot-canvas-graph-get', canvasId, projectKey)
+    } catch (error) {
+      if (requestId !== graphLoadRequestRef.current || activeCanvasIdRef.current !== canvasId) return
+      throw error
+    }
+    if (!isProjectSessionCurrent(session)
+      || requestId !== graphLoadRequestRef.current
+      || activeCanvasIdRef.current !== canvasId) return
     setGraph(next)
     setSelectedNodeIds([])
     setDetail(null)
@@ -296,6 +320,7 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
   useEffect(() => {
     queueMicrotask(() => {
       if (!activeCanvasId) {
+        graphLoadRequestRef.current += 1
         setGraph(null)
         return
       }
@@ -469,10 +494,10 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
       enterSubCanvas: (nodeId, subCanvasId) => {
         const target = subCanvasId
           ?? graphRef.current?.nodes.find(item => item.id === nodeId)?.subCanvasId
-        if (target) setActiveCanvasId(target)
+        if (target) selectCanvas(target)
       },
     }
-  }, [splitNode, deleteNode])
+  }, [splitNode, deleteNode, selectCanvas])
 
   // ===== graph → 基础 Flow 模型（视图标志由筛选派生，不在此写入） =====
 
@@ -534,8 +559,10 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
   const searchHitIdSet = useMemo(() => new Set(filterResult.searchHits.map(node => node.id)), [filterResult])
   const searchHits = filterResult.searchHits
 
-  // 搜索词或筛选集合变化后，定位序号回到未聚焦状态。
-  useEffect(() => { setMatchIndex(-1) }, [filter.searchQuery, filter.selectedKinds])
+  const changeFilter = useCallback((next: PlotGraphFilterState) => {
+    setFilter(next)
+    setMatchIndex(-1)
+  }, [])
 
   const focusMatch = useCallback((index: number) => {
     if (searchHits.length === 0) return
@@ -663,14 +690,30 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
     })
   }, [persist, projectKey])
 
-  const addNodeAtCenter = useCallback(() => {
+  const addNodeAt = useCallback((screenPoint?: { x: number; y: number }) => {
     const canvasId = activeCanvasIdRef.current
     const current = graphRef.current
     if (!canvasId) return
+    const pane = shellRef.current?.querySelector('.react-flow')
+    const bounds = pane?.getBoundingClientRect()
     const viewport = flowRef.current?.getViewport() ?? { x: 0, y: 0, zoom: 1 }
-    const centerX = (window.innerWidth / 2 - viewport.x) / viewport.zoom
-    const centerY = (window.innerHeight / 2 - viewport.y) / viewport.zoom
-    const offset = (current?.nodes.length ?? 0) % 5 * 28
+    const point = screenPoint ?? {
+      x: bounds ? bounds.left + bounds.width / 2 : window.innerWidth / 2,
+      y: bounds ? bounds.top + bounds.height / 2 : window.innerHeight / 2,
+    }
+    const position = flowRef.current?.screenToFlowPosition(point) ?? {
+      x: (point.x - (bounds?.left ?? 0) - viewport.x) / viewport.zoom,
+      y: (point.y - (bounds?.top ?? 0) - viewport.y) / viewport.zoom,
+    }
+    const baseX = Math.round(position.x - NODE_WIDTH / 2)
+    const baseY = Math.round(position.y - NODE_HEIGHT_ESTIMATE / 2)
+    const candidateOffsets = screenPoint
+      ? [[0, 0]]
+      : [[0, 0], [NODE_WIDTH + 40, 0], [-(NODE_WIDTH + 40), 0], [0, NODE_HEIGHT_ESTIMATE + 40], [0, -(NODE_HEIGHT_ESTIMATE + 40)]]
+    const freeOffset = candidateOffsets.find(([dx, dy]) => !(current?.nodes ?? []).some(node => (
+      Math.abs(node.x - (baseX + dx)) < NODE_WIDTH + 24
+      && Math.abs(node.y - (baseY + dy)) < NODE_HEIGHT_ESTIMATE + 24
+    ))) ?? [((current?.nodes.length ?? 0) + 1) * 40, ((current?.nodes.length ?? 0) + 1) * 40]
     const newNode: PlotCanvasNodeData = {
       id: createPlotCanvasNodeId(),
       canvasId,
@@ -683,8 +726,8 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
       chapterRefs: [],
       planId: null,
       subCanvasId: null,
-      x: Math.round(centerX - NODE_WIDTH / 2 + offset),
-      y: Math.round(centerY - NODE_HEIGHT_ESTIMATE / 2 + offset),
+      x: baseX + freeOffset[0],
+      y: baseY + freeOffset[1],
     }
     setGraph(previous => previous ? { ...previous, nodes: [...previous.nodes, newNode] } : previous)
     persistNode(newNode, canvasId)
@@ -692,9 +735,47 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
     setDetail(detailFromNode(newNode))
   }, [persistNode, text])
 
+  const addNodeAtCenter = useCallback(() => addNodeAt(), [addNodeAt])
+
   const fitView = useCallback(() => {
     flowRef.current?.fitView({ padding: 0.2, duration: 300, maxZoom: 1.2 })
   }, [])
+
+  // Opening the detail panel reduces the pane width. Keep the selected card
+  // reachable if it would otherwise be clipped by that resize.
+  useEffect(() => {
+    if (detail?.kind !== 'node' || !activeCanvasId) return
+    const timer = window.setTimeout(() => {
+      const pane = shellRef.current?.querySelector('.react-flow')
+      const card = Array.from(shellRef.current?.querySelectorAll<HTMLElement>('[data-node-id]') ?? [])
+        .find(element => element.dataset.nodeId === detail.id)
+      if (!pane || !card) return
+      const paneRect = pane.getBoundingClientRect()
+      const cardRect = card.getBoundingClientRect()
+      if (cardRect.left < paneRect.left + 16 || cardRect.right > paneRect.right - 16
+        || cardRect.top < paneRect.top + 16 || cardRect.bottom > paneRect.bottom - 16) {
+        const node = graphRef.current?.nodes.find(item => item.id === detail.id)
+        if (node) {
+          const visibleNodes = graphRef.current?.nodes ?? []
+          if (visibleNodes.length <= 3) {
+            void flowRef.current?.fitView({
+              nodes: visibleNodes.map(item => ({ id: item.id })),
+              padding: 0.18,
+              maxZoom: 1,
+              duration: 180,
+            })
+          } else {
+            void flowRef.current?.setCenter(
+              node.x + NODE_WIDTH / 2,
+              node.y + NODE_HEIGHT_ESTIMATE / 2,
+              { zoom: Math.min(flowRef.current.getZoom(), 1.2), duration: 180 },
+            )
+          }
+        }
+      }
+    }, 120)
+    return () => window.clearTimeout(timer)
+  }, [detail?.id, detail?.kind, activeCanvasId])
 
   // 选择变化处理器必须保持稳定身份：React Flow 会把 onSelectionChange 写进
   // 内部 store（useEffect 中 setState），每次渲染换新函数都会让写入立刻以
@@ -836,16 +917,17 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
         ))
         return
       }
+      const savedTitle = detail.title.trim() || text('新剧情事件', 'New plot event')
       patchSelectedNode({
         id: detail.id,
-        title: detail.title.trim() || text('新剧情事件', 'New plot event'),
+        title: savedTitle,
         summary: detail.summary.trim(),
         colorKey: detail.colorKey,
         kind: detail.nodeKind,
         tags,
       })
       setDetail(previous => previous?.kind === 'node'
-        ? { ...previous, title: detail.title.trim() || previous.title, summary: detail.summary.trim() }
+        ? { ...previous, title: savedTitle, summary: detail.summary.trim() }
         : previous)
       return
     }
@@ -918,21 +1000,11 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
     if (!session) return
     setCanvasDialogBusy(true)
     try {
-      const result = await ipc.invokeWithProjectSession(session, 'db:plot-canvas-create', values.title, parentCanvasId, projectKey)
+      const result = await ipc.invokeWithProjectSession(session, 'db:plot-canvas-create', values.title, parentCanvasId, values.description, projectKey)
       if (!isProjectSessionCurrent(session)) return
       if (!result.success || !result.canvas) {
         toast.error(result.error ?? text('创建剧情画布失败', 'Could not create the plot canvas'))
         return
-      }
-      if (values.description) {
-        const updated = await ipc.invokeWithProjectSession(session, 'db:plot-canvas-update', {
-          canvasId: result.canvas.id,
-          description: values.description,
-        }, projectKey)
-        if (!isProjectSessionCurrent(session)) return
-        if (!updated.success) {
-          toast.error(updated.error ?? text('保存画布说明失败', 'Could not save the canvas description'))
-        }
       }
       setCanvasDialog(null)
       await loadCanvases(result.canvas.id)
@@ -948,17 +1020,10 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
     if (!session) return
     setCanvasDialogBusy(true)
     try {
-      if (canvas.name !== values.title) {
-        const renamed = await ipc.invokeWithProjectSession(session, 'db:plot-canvas-rename', canvas.id, values.title, projectKey)
-        if (!isProjectSessionCurrent(session)) return
-        if (!renamed.success || !renamed.canvas) {
-          toast.error(renamed.error ?? text('重命名剧情画布失败', 'Could not rename the plot canvas'))
-          return
-        }
-      }
-      if (canvas.description !== values.description) {
+      if (canvas.name !== values.title || canvas.description !== values.description) {
         const updated = await ipc.invokeWithProjectSession(session, 'db:plot-canvas-update', {
           canvasId: canvas.id,
+          name: values.title,
           description: values.description,
         }, projectKey)
         if (!isProjectSessionCurrent(session)) return
@@ -989,7 +1054,8 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
       setDeleteCanvasTarget(null)
       // 画布删除可能让现存节点的 subCanvasId 被 SET NULL：重载当前画布。
       const activeId = activeCanvasIdRef.current
-      await Promise.all([loadCanvases(), activeId ? loadGraph(activeId) : Promise.resolve()])
+      await loadCanvases()
+      if (activeId && !result.removedCanvasIds?.includes(activeId)) await loadGraph(activeId)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error))
     }
@@ -1323,7 +1389,7 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
                   variant="outline"
                   size="sm"
                   className="self-start"
-                  onClick={() => setActiveCanvasId(detailNode.subCanvasId as string)}
+                  onClick={() => selectCanvas(detailNode.subCanvasId as string)}
                 >
                   {text('进入子画布', 'Enter sub-canvas')}
                 </Button>
@@ -1417,7 +1483,7 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
             searchValue={sidebarSearch}
             onSearchChange={setSidebarSearch}
             selectedCanvasId={activeCanvasId}
-            onSelectCanvas={setActiveCanvasId}
+            onSelectCanvas={selectCanvas}
             onCreateCanvas={openCreateDialog}
             createDisabled={sidebarTab !== 'plot'}
             onCollapse={() => setSidebarCollapsed(true)}
@@ -1440,7 +1506,7 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
             <PlotCanvasTopbar
               canvasName={activeCanvas?.name ?? null}
               breadcrumb={breadcrumb.map(crumb => ({ id: crumb.id, name: crumb.name }))}
-              onBreadcrumbSelect={setActiveCanvasId}
+              onBreadcrumbSelect={selectCanvas}
               onOpenCanvasSelector={() => setPickerOpen(previous => !previous)}
               addEventLabel={text('新增剧情事件', 'Add plot event')}
               onAddEvent={addNodeAtCenter}
@@ -1481,7 +1547,7 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
                         type="button"
                         className={`plot-shell__picker-menu-item${canvas.id === activeCanvasId ? ' is-selected' : ''}`}
                         style={{ paddingLeft: 9 + level * 14 }}
-                        onClick={() => { setActiveCanvasId(canvas.id); setPickerOpen(false) }}
+                        onClick={() => { selectCanvas(canvas.id); setPickerOpen(false) }}
                       >
                         <span className="plot-shell__picker-menu-item-title">{canvas.name}</span>
                       </button>
@@ -1494,7 +1560,7 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
               <div className="plot-shell__filter-float" ref={filterBarRef} data-testid="plot-canvas-filter-bar">
                 <PlotGraphFilter
                   filter={filter}
-                  onFilterChange={setFilter}
+                  onFilterChange={changeFilter}
                   kindCounts={filterResult.kindCounts}
                   matchCount={filterResult.matchCount}
                   currentMatchIndex={matchIndex >= 0 ? matchIndex + 1 : 0}
@@ -1560,7 +1626,17 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
         }
         canvas={
           activeCanvas ? (
-            <div className="canvas-workbench__flow" style={{ height: '100%' }} data-testid="plot-canvas-flow">
+            <div
+              className="canvas-workbench__flow"
+              style={{ height: '100%' }}
+              data-testid="plot-canvas-flow"
+              onDoubleClickCapture={event => {
+                const target = event.target as Element
+                if (!target.closest('.react-flow__pane')
+                  || target.closest('.react-flow__node, .react-flow__edge, .react-flow__controls')) return
+                addNodeAt({ x: event.clientX, y: event.clientY })
+              }}
+            >
               <ReactFlow<FlowNode, FlowEdge>
                 nodes={flowNodes}
                 edges={flowEdges}
@@ -1577,6 +1653,7 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
                 onInit={instance => { flowRef.current = instance }}
                 panOnDrag={interactionMode === 'pan'}
                 selectionOnDrag={interactionMode === 'select'}
+                zoomOnDoubleClick={false}
                 onSelectionChange={handleSelectionChange}
                 onNodeDoubleClick={(_, node) => {
                   const found = graph?.nodes.find(item => item.id === node.id)
