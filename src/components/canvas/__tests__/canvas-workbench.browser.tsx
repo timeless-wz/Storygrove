@@ -58,6 +58,7 @@ function installIpc() {
         const canvas: PlotCanvasSummary = {
           id: `pca-${Math.random().toString(16).slice(2, 10)}-0000-4000-8000-000000000000`,
           name,
+          description: '',
           parentCanvasId,
           sortOrder: db.canvases.length + 1,
         }

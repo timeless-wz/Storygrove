@@ -4,7 +4,11 @@ import {
   createPlotCanvasEdgeId,
   createPlotCanvasId,
   createPlotCanvasNodeId,
+  isPlotCanvasNodeKind,
   MAX_PLOT_CANVAS_NODES,
+  normalizePlotCanvasDescription,
+  normalizePlotCanvasEntityRefs,
+  normalizePlotCanvasTags,
   PLOT_CANVAS_ID_PREFIX,
   parsePlotCanvasNodeText,
   normalizePlotCanvasChapterRefs,
@@ -14,6 +18,7 @@ import {
   type PlotCanvasEdgeData,
   type PlotCanvasGraph,
   type PlotCanvasNodeData,
+  type PlotCanvasNodeEntityRef,
   type PlotCanvasSummary,
   type PlotCanvasViewport,
 } from '../../src/shared/plot-canvas'
@@ -30,6 +35,7 @@ export type PlotCanvasDeleteStrategy = 'promote-children' | 'cascade'
 interface CanvasRow {
   id: string
   name: string
+  description: string
   parent_canvas_id: string | null
   sort_order: number
   viewport_json: string
@@ -40,9 +46,12 @@ interface CanvasRow {
 interface NodeRow {
   id: string
   canvas_id: string
+  kind: string | null
   title: string
   summary: string
   color_key: string
+  tags: string | null
+  entity_refs: string | null
   chapter_refs: string
   plan_id: number | null
   sub_canvas_id: string | null
@@ -65,10 +74,32 @@ interface EdgeRow {
 
 const COLOR_KEYS = ['default', 'accent', 'success', 'warning', 'danger'] as const
 
+/** 存量行上的迁移字段解析失败时回落迁移默认值，旧行永远可读。 */
+function parseStoredTags(raw: string | null): string[] {
+  if (!raw) return []
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return normalizePlotCanvasTags(parsed) ?? []
+  } catch {
+    return []
+  }
+}
+
+function parseStoredEntityRefs(raw: string | null): PlotCanvasNodeEntityRef[] {
+  if (!raw) return []
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return normalizePlotCanvasEntityRefs(parsed) ?? []
+  } catch {
+    return []
+  }
+}
+
 function toSummary(row: CanvasRow): PlotCanvasSummary {
   return {
     id: row.id,
     name: row.name,
+    description: row.description ?? '',
     parentCanvasId: row.parent_canvas_id,
     sortOrder: row.sort_order,
     createdAt: row.created_at,
@@ -87,11 +118,14 @@ function toNode(row: NodeRow): PlotCanvasNodeData {
   return {
     id: row.id,
     canvasId: row.canvas_id,
+    kind: row.kind && isPlotCanvasNodeKind(row.kind) ? row.kind : 'plot',
     title: row.title,
     summary: row.summary,
     colorKey: (COLOR_KEYS as readonly string[]).includes(row.color_key)
       ? row.color_key as PlotCanvasColorKey
       : 'default',
+    tags: parseStoredTags(row.tags),
+    entityRefs: parseStoredEntityRefs(row.entity_refs),
     chapterRefs,
     planId: row.plan_id,
     subCanvasId: row.sub_canvas_id,
@@ -155,12 +189,42 @@ function assertNoCanvasCycle(
   }
 }
 
+function parseCanvasName(name: unknown): string {
+  const trimmed = typeof name === 'string' ? name.trim() : ''
+  if (!trimmed) throw new Error('剧情画布名称不能为空')
+  if (trimmed.length > 120) throw new Error('剧情画布名称超出 120 字上限')
+  return trimmed
+}
+
 function parseColorKey(value: unknown): PlotCanvasColorKey {
   const key = value === undefined || value === null ? 'default' : value
   if (typeof key !== 'string' || !(COLOR_KEYS as readonly string[]).includes(key)) {
     throw new Error('剧情画布节点颜色无效')
   }
   return key as PlotCanvasColorKey
+}
+
+function parseNodeKind(value: unknown): PlotCanvasNodeData['kind'] | undefined {
+  if (value === undefined) return undefined
+  if (value === null) return undefined
+  if (!isPlotCanvasNodeKind(value)) throw new Error('剧情画布节点种类无效')
+  return value
+}
+
+function parseNodeTags(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined
+  if (value === null) return []
+  const tags = normalizePlotCanvasTags(value)
+  if (!tags) throw new Error('剧情画布节点标签无效')
+  return tags
+}
+
+function parseNodeEntityRefs(value: unknown): PlotCanvasNodeEntityRef[] | undefined {
+  if (value === undefined) return undefined
+  if (value === null) return []
+  const refs = normalizePlotCanvasEntityRefs(value)
+  if (!refs) throw new Error('剧情画布节点实体引用无效')
+  return refs
 }
 
 function parseEdgeKind(value: unknown): 'main' | 'aux' {
@@ -178,9 +242,15 @@ export interface PlotCanvasNodeUpsertInput {
   /** 有 id 视为整体更新，无 id 视为新建；渲染层始终生成 id 以便幂等重试。 */
   id?: string
   canvasId: string
+  /** 省略时新建回落 'plot'，更新保留原值（旧调用方不丢 kind）。 */
+  kind?: unknown
   title: unknown
   summary: unknown
   colorKey?: unknown
+  /** 省略时新建为空数组，更新保留原值（旧调用方不丢标签）。 */
+  tags?: unknown
+  /** 省略时新建为空数组，更新保留原值（旧调用方不丢实体引用）。 */
+  entityRefs?: unknown
   chapterRefs?: unknown
   planId?: unknown
   subCanvasId?: unknown
@@ -188,16 +258,28 @@ export interface PlotCanvasNodeUpsertInput {
   y: unknown
 }
 
+export interface PlotCanvasUpdateInput {
+  canvasId: string
+  /** 省略表示不修改名称。 */
+  name?: unknown
+  /** 省略表示不修改说明；显式传空串即清空。 */
+  description?: unknown
+}
+
 export class PlotCanvasRepository {
   static list(): PlotCanvasSummary[] {
     return listCanvases(requireDb())
   }
 
-  static create(name: string, parentCanvasId: string | null): PlotCanvasSummary {
+  static create(name: string, parentCanvasId: string | null, description?: unknown): PlotCanvasSummary {
     const db = requireDb()
-    const trimmed = typeof name === 'string' ? name.trim() : ''
-    if (!trimmed) throw new Error('剧情画布名称不能为空')
-    if (trimmed.length > 120) throw new Error('剧情画布名称超出 120 字上限')
+    const trimmedName = parseCanvasName(name)
+    let parsedDescription = ''
+    if (description !== undefined && description !== null) {
+      const normalized = normalizePlotCanvasDescription(description)
+      if (normalized === null) throw new Error('剧情画布说明超出 2000 字上限')
+      parsedDescription = normalized
+    }
     const tx = db.transaction(() => {
       assertNoCanvasCycle(db, null, parentCanvasId)
       const maxOrder = (db.prepare(
@@ -205,9 +287,9 @@ export class PlotCanvasRepository {
       ).get() as { max_order: number }).max_order
       const id = createPlotCanvasId()
       db.prepare(`
-        INSERT INTO plot_canvases (id, name, parent_canvas_id, sort_order)
-        VALUES (?, ?, ?, ?)
-      `).run(id, trimmed, parentCanvasId, maxOrder + 1)
+        INSERT INTO plot_canvases (id, name, description, parent_canvas_id, sort_order)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(id, trimmedName, parsedDescription, parentCanvasId, maxOrder + 1)
       return requireCanvas(db, id)
     })
     return toSummary(tx())
@@ -215,14 +297,42 @@ export class PlotCanvasRepository {
 
   static rename(canvasId: string, name: string): PlotCanvasSummary {
     const db = requireDb()
-    const trimmed = typeof name === 'string' ? name.trim() : ''
-    if (!trimmed) throw new Error('剧情画布名称不能为空')
-    if (trimmed.length > 120) throw new Error('剧情画布名称超出 120 字上限')
+    const trimmed = parseCanvasName(name)
     const tx = db.transaction(() => {
       requireCanvas(db, canvasId)
       db.prepare(`
         UPDATE plot_canvases SET name = ?, updated_at = datetime('now') WHERE id = ?
       `).run(trimmed, canvasId)
+      return requireCanvas(db, canvasId)
+    })
+    return toSummary(tx())
+  }
+
+  /**
+   * 部分更新画布元数据。省略的字段保持原值；说明支持显式清空（空串）。
+   * 名称校验与 rename 完全一致。
+   */
+  static update(input: PlotCanvasUpdateInput): PlotCanvasSummary {
+    const db = requireDb()
+    const canvasId = input.canvasId
+    let nextName: string | undefined
+    if (input.name !== undefined && input.name !== null) nextName = parseCanvasName(input.name)
+    let nextDescription: string | undefined
+    if (input.description !== undefined && input.description !== null) {
+      const normalized = normalizePlotCanvasDescription(input.description)
+      if (normalized === null) throw new Error('剧情画布说明超出 2000 字上限')
+      nextDescription = normalized
+    }
+    const tx = db.transaction(() => {
+      requireCanvas(db, canvasId)
+      if (nextName !== undefined) {
+        db.prepare("UPDATE plot_canvases SET name = ?, updated_at = datetime('now') WHERE id = ?")
+          .run(nextName, canvasId)
+      }
+      if (nextDescription !== undefined) {
+        db.prepare("UPDATE plot_canvases SET description = ?, updated_at = datetime('now') WHERE id = ?")
+          .run(nextDescription, canvasId)
+      }
       return requireCanvas(db, canvasId)
     })
     return toSummary(tx())
@@ -348,6 +458,11 @@ export class PlotCanvasRepository {
     if (subCanvasId !== null && !isCanvasIdWithPrefix(PLOT_CANVAS_ID_PREFIX, subCanvasId)) {
       throw new Error('剧情画布节点子画布引用无效')
     }
+    // 增量字段：undefined = 新建回落默认 / 更新保留原值；显式传值 = 覆盖
+    // （tags / entityRefs 允许传 [] 表示清空）。
+    const parsedKind = parseNodeKind(input.kind)
+    const parsedTags = parseNodeTags(input.tags)
+    const parsedEntityRefs = parseNodeEntityRefs(input.entityRefs)
 
     const tx = db.transaction(() => {
       requireCanvas(db, input.canvasId)
@@ -364,13 +479,18 @@ export class PlotCanvasRepository {
           throw new Error('剧情事件归属画布不匹配')
         }
         if (existing) {
+          const current = db.prepare('SELECT * FROM plot_canvas_nodes WHERE id = ?').get(input.id) as NodeRow
+          const nextKind = parsedKind ?? (isPlotCanvasNodeKind(current.kind) ? current.kind : 'plot')
+          const nextTags = JSON.stringify(parsedTags ?? parseStoredTags(current.tags))
+          const nextEntityRefs = JSON.stringify(parsedEntityRefs ?? parseStoredEntityRefs(current.entity_refs))
           db.prepare(`
             UPDATE plot_canvas_nodes
-            SET title = ?, summary = ?, color_key = ?, chapter_refs = ?, plan_id = ?, sub_canvas_id = ?,
-                x = ?, y = ?, updated_at = datetime('now')
+            SET kind = ?, title = ?, summary = ?, color_key = ?, tags = ?, entity_refs = ?,
+                chapter_refs = ?, plan_id = ?, sub_canvas_id = ?, x = ?, y = ?,
+                updated_at = datetime('now')
             WHERE id = ?
-          `).run(text.title, text.summary, colorKey, JSON.stringify(chapterRefs), planId, subCanvasId,
-            position.x, position.y, input.id)
+          `).run(nextKind, text.title, text.summary, colorKey, nextTags, nextEntityRefs,
+            JSON.stringify(chapterRefs), planId, subCanvasId, position.x, position.y, input.id)
           return db.prepare('SELECT * FROM plot_canvas_nodes WHERE id = ?').get(input.id) as NodeRow
         }
         // 带 id 但行不存在（首次写入或重试插入）：直接以此 id 落行，保证幂等。
@@ -384,10 +504,12 @@ export class PlotCanvasRepository {
       const id = input.id ?? createPlotCanvasNodeId()
       db.prepare(`
         INSERT INTO plot_canvas_nodes
-          (id, canvas_id, title, summary, color_key, chapter_refs, plan_id, sub_canvas_id, x, y)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(id, input.canvasId, text.title, text.summary, colorKey, JSON.stringify(chapterRefs),
-        planId, subCanvasId, position.x, position.y)
+          (id, canvas_id, kind, title, summary, color_key, tags, entity_refs,
+           chapter_refs, plan_id, sub_canvas_id, x, y)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, input.canvasId, parsedKind ?? 'plot', text.title, text.summary, colorKey,
+        JSON.stringify(parsedTags ?? []), JSON.stringify(parsedEntityRefs ?? []),
+        JSON.stringify(chapterRefs), planId, subCanvasId, position.x, position.y)
       return db.prepare('SELECT * FROM plot_canvas_nodes WHERE id = ?').get(id) as NodeRow
     })
     return toNode(tx())
@@ -503,6 +625,7 @@ export class PlotCanvasRepository {
    * 合并多个剧情事件为一个新事件（对应参考项目的 MERGE_PLOT_EVENT_CARDS）：
    * 新节点、改接连线与删除源节点在同一个事务内，失败即整体回滚。
    * 源节点上的外部连线按原方向改接到新节点；两端都属于源集合的连线消失。
+   * kind 取载荷覆盖值或首个源节点；标签与实体引用取并集（保持出现顺序）。
    */
   static mergeNodes(input: {
     canvasId: string
@@ -510,6 +633,9 @@ export class PlotCanvasRepository {
     title: unknown
     summary: unknown
     colorKey?: unknown
+    kind?: unknown
+    tags?: unknown
+    entityRefs?: unknown
   }): PlotCanvasNodeData {
     const db = requireDb()
     if (!Array.isArray(input.sourceNodeIds) || input.sourceNodeIds.length < 2) {
@@ -520,6 +646,9 @@ export class PlotCanvasRepository {
     }
     const text = parsePlotCanvasNodeText({ title: input.title, summary: input.summary })
     const colorKey = parseColorKey(input.colorKey)
+    const payloadKind = parseNodeKind(input.kind)
+    const payloadTags = parseNodeTags(input.tags)
+    const payloadEntityRefs = parseNodeEntityRefs(input.entityRefs)
     const tx = db.transaction(() => {
       requireCanvas(db, input.canvasId)
       const sources = input.sourceNodeIds.map(id => db.prepare(
@@ -535,17 +664,38 @@ export class PlotCanvasRepository {
       }
       const chapterRefs = normalizePlotCanvasChapterRefs([...chapterRefSet])
       if (!chapterRefs) throw new Error('合并后的章节引用无效')
+      const tagSet = new Set<string>()
+      for (const source of sources as NodeRow[]) {
+        for (const tag of parseStoredTags(source.tags)) tagSet.add(tag)
+      }
+      for (const tag of payloadTags ?? []) tagSet.add(tag)
+      const tags = normalizePlotCanvasTags([...tagSet])
+      if (!tags) throw new Error('合并后的标签无效')
+      const entityRefMap = new Map<string, PlotCanvasNodeEntityRef>()
+      for (const source of sources as NodeRow[]) {
+        for (const ref of parseStoredEntityRefs(source.entity_refs)) {
+          entityRefMap.set(`${ref.entityType}::${ref.entityId}`, ref)
+        }
+      }
+      for (const ref of payloadEntityRefs ?? []) {
+        entityRefMap.set(`${ref.entityType}::${ref.entityId}`, ref)
+      }
+      const entityRefs = normalizePlotCanvasEntityRefs([...entityRefMap.values()])
+      if (!entityRefs) throw new Error('合并后的实体引用无效')
       const planIds = new Set((sources as NodeRow[]).map(source => source.plan_id))
       const planId = planIds.size === 1 ? (sources[0] as NodeRow).plan_id : null
       const subCanvasIds = new Set((sources as NodeRow[]).map(source => source.sub_canvas_id))
       const subCanvasId = subCanvasIds.size === 1 ? (sources[0] as NodeRow).sub_canvas_id : null
       const anchor = sources[0] as NodeRow
+      const anchorKind = isPlotCanvasNodeKind(anchor.kind) ? anchor.kind : 'plot'
       const mergedId = createPlotCanvasNodeId()
       db.prepare(`
         INSERT INTO plot_canvas_nodes
-          (id, canvas_id, title, summary, color_key, chapter_refs, plan_id, sub_canvas_id, x, y)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(mergedId, input.canvasId, text.title, text.summary, colorKey,
+          (id, canvas_id, kind, title, summary, color_key, tags, entity_refs,
+           chapter_refs, plan_id, sub_canvas_id, x, y)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(mergedId, input.canvasId, payloadKind ?? anchorKind, text.title, text.summary, colorKey,
+        JSON.stringify(tags), JSON.stringify(entityRefs),
         JSON.stringify(chapterRefs), planId, subCanvasId, anchor.x, anchor.y)
       const sourceIdSet = new Set(input.sourceNodeIds)
       for (const nodeId of input.sourceNodeIds) {

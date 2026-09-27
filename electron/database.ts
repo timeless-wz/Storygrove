@@ -738,6 +738,7 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
     CREATE TABLE IF NOT EXISTS plot_canvases (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
       parent_canvas_id TEXT DEFAULT NULL,
       sort_order REAL NOT NULL DEFAULT 0,
       viewport_json TEXT NOT NULL DEFAULT '',
@@ -751,10 +752,15 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
     CREATE TABLE IF NOT EXISTS plot_canvas_nodes (
       id TEXT PRIMARY KEY,
       canvas_id TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'plot'
+        CHECK(kind IN ('plot', 'idea', 'foreshadow', 'character', 'location',
+                       'item', 'faction', 'skill', 'chapter', 'note')),
       title TEXT NOT NULL,
       summary TEXT NOT NULL DEFAULT '',
       color_key TEXT NOT NULL DEFAULT 'default'
         CHECK(color_key IN ('default', 'accent', 'success', 'warning', 'danger')),
+      tags TEXT NOT NULL DEFAULT '[]',
+      entity_refs TEXT NOT NULL DEFAULT '[]',
       chapter_refs TEXT NOT NULL DEFAULT '[]',
       plan_id INTEGER DEFAULT NULL,
       sub_canvas_id TEXT DEFAULT NULL REFERENCES plot_canvases(id) ON DELETE SET NULL,
@@ -2178,6 +2184,29 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
       ALTER TABLE plot_canvas_nodes
       ADD COLUMN sub_canvas_id TEXT DEFAULT NULL REFERENCES plot_canvases(id) ON DELETE SET NULL
     `)
+  }
+
+  // 剧情画布的说明与节点种类 / 标签 / 实体引用为增量字段：旧库升级后
+  // description 落空字符串、kind 落 'plot'、tags / entity_refs 落空数组，
+  // 既有画布与节点一行都不能丢。
+  const plotCanvasColumns = new Set(
+    (db.prepare('PRAGMA table_info(plot_canvases)').all() as Array<{ name: string }>).map(column => column.name),
+  )
+  if (plotCanvasColumns.size > 0 && !plotCanvasColumns.has('description')) {
+    db.exec("ALTER TABLE plot_canvases ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+  }
+  if (plotCanvasNodeColumns.size > 0 && !plotCanvasNodeColumns.has('kind')) {
+    db.exec(`
+      ALTER TABLE plot_canvas_nodes ADD COLUMN kind TEXT NOT NULL DEFAULT 'plot'
+        CHECK(kind IN ('plot', 'idea', 'foreshadow', 'character', 'location',
+                       'item', 'faction', 'skill', 'chapter', 'note'))
+    `)
+  }
+  if (plotCanvasNodeColumns.size > 0 && !plotCanvasNodeColumns.has('tags')) {
+    db.exec("ALTER TABLE plot_canvas_nodes ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'")
+  }
+  if (plotCanvasNodeColumns.size > 0 && !plotCanvasNodeColumns.has('entity_refs')) {
+    db.exec("ALTER TABLE plot_canvas_nodes ADD COLUMN entity_refs TEXT NOT NULL DEFAULT '[]'")
   }
 
   migrateDraftUnitCounts(db)

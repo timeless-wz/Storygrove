@@ -48,6 +48,7 @@ import type {
   PlotCanvasNodeUpsertPayload,
   PlotCanvasEdgeUpsertPayload,
   PlotCanvasNodesMergePayload,
+  PlotCanvasUpdatePayload,
 } from './plot-canvas'
 import type {
   ChapterCanvasMeta,
@@ -1274,7 +1275,15 @@ export interface DatabaseChannels {
 
   // 8. plot_canvas — 作者可编辑的剧情画布（与 plot-tree 只读投影严格分离）
   'db:plot-canvas-list': { args: [expectedProjectPath: string]; return: PlotCanvasSummary[] }
-  'db:plot-canvas-create': { args: [name: string, parentCanvasId: string | null, expectedProjectPath: string]; return: { success: boolean; canvas?: PlotCanvasSummary; error?: string } }
+  // 创建支持两种调用形态：旧调用（不带说明）与带说明的新调用；description
+  // 可选，缺省为空字符串。
+  'db:plot-canvas-create': {
+    args:
+      | [name: string, parentCanvasId: string | null, expectedProjectPath: string]
+      | [name: string, parentCanvasId: string | null, description: string, expectedProjectPath: string]
+    return: { success: boolean; canvas?: PlotCanvasSummary; error?: string }
+  }
+  'db:plot-canvas-update': { args: [input: PlotCanvasUpdatePayload, expectedProjectPath: string]; return: { success: boolean; canvas?: PlotCanvasSummary; error?: string } }
   'db:plot-canvas-rename': { args: [canvasId: string, name: string, expectedProjectPath: string]; return: { success: boolean; canvas?: PlotCanvasSummary; error?: string } }
   'db:plot-canvas-move': { args: [canvasId: string, parentCanvasId: string | null, expectedProjectPath: string]; return: { success: boolean; canvas?: PlotCanvasSummary; error?: string } }
   'db:plot-canvas-reorder': { args: [orderedIds: string[], expectedProjectPath: string]; return: { success: boolean; error?: string } }

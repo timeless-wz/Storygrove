@@ -50,7 +50,7 @@ function node(id: string, title: string, summary: string, x: number, y: number, 
 
 function plotGraphFixture(): PlotCanvasGraph {
   return {
-    canvas: { id: CANVAS_ID, name: '第一卷 · 归墟主线', parentCanvasId: null, sortOrder: 1 } satisfies PlotCanvasSummary,
+    canvas: { id: CANVAS_ID, name: '第一卷 · 归墟主线', description: '', parentCanvasId: null, sortOrder: 1 } satisfies PlotCanvasSummary,
     viewport: null,
     nodes: [
       node('a1000000-0000-4000-8000-000000000001', '渔村灭门', '苏砚回到渔村，全家被灭，只留一枚刻着归墟二字的铜牌。', 80, 240, { colorKey: 'danger', chapterRefs: [1] }),
@@ -78,7 +78,7 @@ function seedIpc() {
         const [canvasId] = args as [string]
         if (canvasId === SUB_CANVAS_ID) {
           return {
-            canvas: { id: SUB_CANVAS_ID, name: '藏书阁夜遇 · 子画布', parentCanvasId: CANVAS_ID, sortOrder: 2 },
+            canvas: { id: SUB_CANVAS_ID, name: '藏书阁夜遇 · 子画布', description: '', parentCanvasId: CANVAS_ID, sortOrder: 2 },
             viewport: null,
             nodes: [node('b1000000-0000-4000-8000-000000000001', '白衣少女的身份', '她袖口的潮纹与铜牌同源。', 200, 200, { colorKey: 'accent' })],
             edges: [],

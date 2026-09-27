@@ -1,12 +1,17 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import Database from 'better-sqlite3'
 
 import { closeProjectDatabase, initProjectDatabase } from '../../database'
 import { ProjectCoreRepository } from '../project-core-repository'
 import { PlotCanvasRepository } from '../plot-canvas-repository'
 import { ChapterCanvasRepository } from '../chapter-canvas-repository'
-import { createPlotCanvasNodeId } from '../../../src/shared/plot-canvas'
+import {
+  PLOT_CANVAS_NODE_KINDS,
+  createPlotCanvasNodeId,
+  resolvePlotCanvasNodeKind,
+} from '../../../src/shared/plot-canvas'
 
 let projectRoot = ''
 const testRoot = path.resolve('.runtime/.cache/canvas-repositories-tests')
@@ -25,6 +30,75 @@ afterEach(() => {
   closeProjectDatabase()
   fs.rmSync(projectRoot, { recursive: true, force: true })
 })
+
+/**
+ * 在项目目录里预建 d9575c9 时期的剧情画布旧表结构（没有 description /
+ * kind / tags / entity_refs），用于真实触发打开项目时的幂等增量迁移。
+ */
+function seedLegacyPlotCanvasSchema(projectPath: string): void {
+  const dbPath = path.join(projectPath, '.vela', 'vela.db')
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true })
+  const legacy = new Database(dbPath)
+  legacy.exec(`
+    CREATE TABLE plot_canvases (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      parent_canvas_id TEXT DEFAULT NULL,
+      sort_order REAL NOT NULL DEFAULT 0,
+      viewport_json TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE plot_canvas_nodes (
+      id TEXT PRIMARY KEY,
+      canvas_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      summary TEXT NOT NULL DEFAULT '',
+      color_key TEXT NOT NULL DEFAULT 'default',
+      chapter_refs TEXT NOT NULL DEFAULT '[]',
+      plan_id INTEGER DEFAULT NULL,
+      x REAL NOT NULL DEFAULT 0,
+      y REAL NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE plot_canvas_edges (
+      id TEXT PRIMARY KEY,
+      canvas_id TEXT NOT NULL,
+      source_node_id TEXT NOT NULL,
+      target_node_id TEXT NOT NULL,
+      label TEXT NOT NULL DEFAULT '',
+      kind TEXT NOT NULL DEFAULT 'main',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `)
+  legacy.prepare(`
+    INSERT INTO plot_canvases (id, name, parent_canvas_id, sort_order) VALUES (?, ?, NULL, 1)
+  `).run('pca-aaaaaaaa-0000-4000-8000-000000000001', '旧卷主线')
+  legacy.prepare(`
+    INSERT INTO plot_canvas_nodes
+      (id, canvas_id, title, summary, color_key, chapter_refs, plan_id, x, y)
+    VALUES (?, ?, ?, ?, 'accent', ?, NULL, 12, 34)
+  `).run(
+    'pcn-bbbbbbbb-0000-4000-8000-000000000001',
+    'pca-aaaaaaaa-0000-4000-8000-000000000001',
+    '旧节点：发现刻痕',
+    '旧摘要',
+    JSON.stringify([2, 5]),
+  )
+  legacy.close()
+}
+
+function plotCanvasColumns(dbPath: string, table: string): Set<string> {
+  const raw = new Database(dbPath)
+  try {
+    return new Set((raw.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
+      .map(column => column.name))
+  } finally {
+    raw.close()
+  }
+}
 
 describe('PlotCanvasRepository', () => {
   it('创建、列表、重命名、排序画布', () => {
@@ -313,5 +387,310 @@ describe('ChapterCanvasRepository', () => {
     expect(ChapterCanvasRepository.get(2).nodes[0]?.x).toBe(460)
     ChapterCanvasRepository.saveViewport(2, { x: 0, y: 0, zoom: 0.75 })
     expect(ChapterCanvasRepository.get(2).canvas?.viewport).toEqual({ x: 0, y: 0, zoom: 0.75 })
+  })
+})
+
+describe('PlotCanvasRepository 旧库升级与新增数据字段', () => {
+  it('d9575c9 旧库打开时幂等迁移：补列、旧画布与旧节点一行不丢、缺省回落', () => {
+    closeProjectDatabase()
+    fs.rmSync(projectRoot, { recursive: true, force: true })
+    projectRoot = fs.mkdtempSync(path.join(testRoot, 'legacy-'))
+    const legacyCanvasId = 'pca-aaaaaaaa-0000-4000-8000-000000000001'
+    const legacyNodeId = 'pcn-bbbbbbbb-0000-4000-8000-000000000001'
+    seedLegacyPlotCanvasSchema(projectRoot)
+    const dbPath = path.join(projectRoot, '.vela', 'vela.db')
+
+    // 迁移前：旧结构，没有 description / kind / tags / entity_refs。
+    expect(plotCanvasColumns(dbPath, 'plot_canvases').has('description')).toBe(false)
+    expect(plotCanvasColumns(dbPath, 'plot_canvas_nodes').has('kind')).toBe(false)
+    expect(plotCanvasColumns(dbPath, 'plot_canvas_nodes').has('tags')).toBe(false)
+    expect(plotCanvasColumns(dbPath, 'plot_canvas_nodes').has('entity_refs')).toBe(false)
+
+    initProjectDatabase(projectRoot)
+    ProjectCoreRepository.init('旧库升级', 'zh-CN')
+
+    // 迁移后：列存在。
+    expect(plotCanvasColumns(dbPath, 'plot_canvases').has('description')).toBe(true)
+    expect(plotCanvasColumns(dbPath, 'plot_canvas_nodes').has('kind')).toBe(true)
+    expect(plotCanvasColumns(dbPath, 'plot_canvas_nodes').has('tags')).toBe(true)
+    expect(plotCanvasColumns(dbPath, 'plot_canvas_nodes').has('entity_refs')).toBe(true)
+
+    // 旧画布与旧节点一行不丢，缺省回落迁移默认值。
+    const canvases = PlotCanvasRepository.list()
+    expect(canvases.map(canvas => canvas.id)).toEqual([legacyCanvasId])
+    expect(canvases[0]?.name).toBe('旧卷主线')
+    expect(canvases[0]?.description).toBe('')
+    const graph = PlotCanvasRepository.getGraph(legacyCanvasId)
+    expect(graph.nodes.map(node => node.id)).toEqual([legacyNodeId])
+    const legacyNode = graph.nodes[0]
+    expect(legacyNode?.title).toBe('旧节点：发现刻痕')
+    expect(legacyNode?.chapterRefs).toEqual([2, 5])
+    expect(resolvePlotCanvasNodeKind(legacyNode)).toBe('plot')
+    expect(legacyNode?.tags).toEqual([])
+    expect(legacyNode?.entityRefs).toEqual([])
+
+    // 再次打开项目：迁移幂等，数据仍完好。
+    closeProjectDatabase()
+    initProjectDatabase(projectRoot)
+    expect(plotCanvasColumns(dbPath, 'plot_canvases').has('description')).toBe(true)
+    expect(PlotCanvasRepository.list().map(canvas => canvas.id)).toEqual([legacyCanvasId])
+    expect(PlotCanvasRepository.getGraph(legacyCanvasId).nodes).toHaveLength(1)
+  })
+
+  it('旧调用方（不带 kind / tags / entityRefs）更新旧节点不丢新字段', () => {
+    const canvas = PlotCanvasRepository.create('主线', null)
+    const node = PlotCanvasRepository.nodeUpsert({
+      canvasId: canvas.id,
+      title: '伏笔节点',
+      summary: '',
+      kind: 'foreshadow',
+      tags: ['第一卷'],
+      entityRefs: [{ entityType: 'foreshadowing', entityId: 'fsh-1' }],
+      x: 0,
+      y: 0,
+    })
+    // 模拟旧 UI 的整体更新载荷：不含任何新字段。
+    const updated = PlotCanvasRepository.nodeUpsert({
+      id: node.id,
+      canvasId: canvas.id,
+      title: '伏笔节点（改动）',
+      summary: '新摘要',
+      x: 10,
+      y: 20,
+    })
+    expect(updated.title).toBe('伏笔节点（改动）')
+    expect(resolvePlotCanvasNodeKind(updated)).toBe('foreshadow')
+    expect(updated.tags).toEqual(['第一卷'])
+    expect(updated.entityRefs).toEqual([{ entityType: 'foreshadowing', entityId: 'fsh-1' }])
+  })
+})
+
+describe('PlotCanvasRepository 画布说明（description）', () => {
+  it('创建带说明、缺省为空、list / graph 可读', () => {
+    const withDescription = PlotCanvasRepository.create('带说明', null, '  第一卷的推进主线。  ')
+    expect(withDescription.description).toBe('第一卷的推进主线。')
+    expect(PlotCanvasRepository.list().find(canvas => canvas.id === withDescription.id)?.description)
+      .toBe('第一卷的推进主线。')
+    expect(PlotCanvasRepository.getGraph(withDescription.id).canvas.description).toBe('第一卷的推进主线。')
+
+    const withoutDescription = PlotCanvasRepository.create('不带说明', null)
+    expect(withoutDescription.description).toBe('')
+  })
+
+  it('update 部分更新：改说明不改名、改名不改说明、空串清空说明', () => {
+    const canvas = PlotCanvasRepository.create('主线', null, '初始说明')
+    const descriptionOnly = PlotCanvasRepository.update({ canvasId: canvas.id, description: '只改说明' })
+    expect(descriptionOnly.description).toBe('只改说明')
+    expect(descriptionOnly.name).toBe('主线')
+
+    const nameOnly = PlotCanvasRepository.update({ canvasId: canvas.id, name: ' 主线·修订 ' })
+    expect(nameOnly.name).toBe('主线·修订')
+    expect(nameOnly.description).toBe('只改说明')
+
+    const cleared = PlotCanvasRepository.update({ canvasId: canvas.id, description: '' })
+    expect(cleared.description).toBe('')
+
+    const both = PlotCanvasRepository.update({ canvasId: canvas.id, name: '终稿', description: '最终说明' })
+    expect(both.name).toBe('终稿')
+    expect(both.description).toBe('最终说明')
+
+    // 缺省载荷 = 不变更。
+    const untouched = PlotCanvasRepository.update({ canvasId: canvas.id })
+    expect(untouched.name).toBe('终稿')
+    expect(untouched.description).toBe('最终说明')
+
+    // rename 通道继续可用且不触碰说明。
+    const renamed = PlotCanvasRepository.rename(canvas.id, '只改名')
+    expect(renamed.name).toBe('只改名')
+    expect(renamed.description).toBe('最终说明')
+  })
+
+  it('说明超长被拒绝，画布保持原值', () => {
+    const canvas = PlotCanvasRepository.create('主线', null, '原始')
+    const tooLong = '超'.repeat(2001)
+    expect(() => PlotCanvasRepository.create('另一块', null, tooLong))
+      .toThrow('剧情画布说明超出 2000 字上限')
+    expect(() => PlotCanvasRepository.update({ canvasId: canvas.id, description: tooLong }))
+      .toThrow('剧情画布说明超出 2000 字上限')
+    expect(PlotCanvasRepository.list().find(item => item.id === canvas.id)?.description).toBe('原始')
+  })
+})
+
+describe('PlotCanvasRepository 节点 kind（十种）', () => {
+  it('十种 kind 全部可创建并原样读回；缺省为 plot', () => {
+    const canvas = PlotCanvasRepository.create('种类演练', null)
+    const kinds = [...PLOT_CANVAS_NODE_KINDS]
+    expect(kinds).toHaveLength(10)
+    const created = kinds.map((kind, index) => PlotCanvasRepository.nodeUpsert({
+      canvasId: canvas.id,
+      kind,
+      title: `节点-${kind}`,
+      summary: '',
+      x: index * 100,
+      y: 0,
+    }))
+    const graph = PlotCanvasRepository.getGraph(canvas.id)
+    for (const [index, node] of graph.nodes.entries()) {
+      expect(node.id).toBe(created[index]?.id)
+      expect(resolvePlotCanvasNodeKind(node)).toBe(kinds[index])
+      expect(node.kind).toBe(kinds[index])
+    }
+    // 缺省 kind：新建回落 plot。
+    const fallback = PlotCanvasRepository.nodeUpsert({
+      canvasId: canvas.id, title: '缺省种类', summary: '', x: 0, y: 999,
+    })
+    expect(resolvePlotCanvasNodeKind(fallback)).toBe('plot')
+  })
+
+  it('非法 kind 在写入时被拒绝（upsert 与 merge 均如此）', () => {
+    const canvas = PlotCanvasRepository.create('非法种类', null)
+    expect(() => PlotCanvasRepository.nodeUpsert({
+      canvasId: canvas.id, kind: 'dragon', title: 'x', summary: '', x: 0, y: 0,
+    })).toThrow('剧情画布节点种类无效')
+    const a = PlotCanvasRepository.nodeUpsert({ canvasId: canvas.id, title: 'A', summary: '', x: 0, y: 0 })
+    const b = PlotCanvasRepository.nodeUpsert({ canvasId: canvas.id, title: 'B', summary: '', x: 100, y: 0 })
+    expect(() => PlotCanvasRepository.mergeNodes({
+      canvasId: canvas.id, sourceNodeIds: [a.id, b.id],
+      title: '合并', summary: '', kind: 'creature',
+    })).toThrow('剧情画布节点种类无效')
+    // 非法写入没有留下任何节点。
+    expect(PlotCanvasRepository.getGraph(canvas.id).nodes).toHaveLength(2)
+  })
+
+  it('合并节点：kind 取载荷或首源，标签与实体引用取并集', () => {
+    const canvas = PlotCanvasRepository.create('合并演练', null)
+    const a = PlotCanvasRepository.nodeUpsert({
+      canvasId: canvas.id, kind: 'idea', title: 'A', summary: '甲',
+      tags: ['伏笔', '第一卷'],
+      entityRefs: [{ entityType: 'foreshadowing', entityId: 'fsh-1' }],
+      x: 0, y: 0,
+    })
+    const b = PlotCanvasRepository.nodeUpsert({
+      canvasId: canvas.id, kind: 'note', title: 'B', summary: '乙',
+      tags: ['第一卷', '回收'],
+      entityRefs: [
+        { entityType: 'foreshadowing', entityId: 'fsh-1' },
+        { entityType: 'world-map-node', entityId: 'node-map-1' },
+      ],
+      x: 200, y: 0,
+    })
+    const merged = PlotCanvasRepository.mergeNodes({
+      canvasId: canvas.id, sourceNodeIds: [a.id, b.id], title: '合并', summary: '甲乙',
+    })
+    expect(resolvePlotCanvasNodeKind(merged)).toBe('idea')
+    expect(merged.tags).toEqual(['伏笔', '第一卷', '回收'])
+    expect(merged.entityRefs).toEqual([
+      { entityType: 'foreshadowing', entityId: 'fsh-1' },
+      { entityType: 'world-map-node', entityId: 'node-map-1' },
+    ])
+    // 载荷显式覆盖 kind。
+    const c = PlotCanvasRepository.nodeUpsert({ canvasId: canvas.id, kind: 'item', title: 'C', summary: '', x: 400, y: 0 })
+    const d = PlotCanvasRepository.nodeUpsert({ canvasId: canvas.id, kind: 'skill', title: 'D', summary: '', x: 600, y: 0 })
+    const overridden = PlotCanvasRepository.mergeNodes({
+      canvasId: canvas.id, sourceNodeIds: [c.id, d.id], title: '再合并', summary: '', kind: 'faction',
+    })
+    expect(resolvePlotCanvasNodeKind(overridden)).toBe('faction')
+  })
+})
+
+describe('PlotCanvasRepository 节点标签与实体引用', () => {
+  it('标签：修剪、去空、去重并保持顺序；超限被拒绝', () => {
+    const canvas = PlotCanvasRepository.create('标签演练', null)
+    const node = PlotCanvasRepository.nodeUpsert({
+      canvasId: canvas.id, title: 'T', summary: '',
+      tags: [' 伏笔 ', '高潮', '', '伏笔', '高潮 '],
+      x: 0, y: 0,
+    })
+    expect(node.tags).toEqual(['伏笔', '高潮'])
+    expect(() => PlotCanvasRepository.nodeUpsert({
+      canvasId: canvas.id, title: 'T2', summary: '', tags: ['超'.repeat(41)], x: 0, y: 0,
+    })).toThrow('剧情画布节点标签无效')
+    expect(() => PlotCanvasRepository.nodeUpsert({
+      canvasId: canvas.id, title: 'T3', summary: '',
+      tags: Array.from({ length: 33 }, (_, index) => `t${index}`), x: 0, y: 0,
+    })).toThrow('剧情画布节点标签无效')
+    // 显式空数组清空标签；undefined 保留。
+    const cleared = PlotCanvasRepository.nodeUpsert({
+      id: node.id, canvasId: canvas.id, title: 'T', summary: '', tags: [], x: 0, y: 0,
+    })
+    expect(cleared.tags).toEqual([])
+  })
+
+  it('四种真实实体引用往返：伏笔 / 地图地点 / 时间线事件 / 正文草稿', () => {
+    const canvas = PlotCanvasRepository.create('引用演练', null)
+    const node = PlotCanvasRepository.nodeUpsert({
+      canvasId: canvas.id, title: '引用节点', summary: '',
+      entityRefs: [
+        { entityType: 'foreshadowing', entityId: 'fsh-1758000000000-ab12cd34' },
+        { entityType: 'world-map-node', entityId: 'node-00000000-1111-4000-8000-000000000000' },
+        { entityType: 'timeline-event', entityId: 'tle-00000000-1111-4000-8000-000000000000' },
+        { entityType: 'draft', entityId: 42 },
+      ],
+      x: 0, y: 0,
+    })
+    expect(node.entityRefs).toEqual([
+      { entityType: 'foreshadowing', entityId: 'fsh-1758000000000-ab12cd34' },
+      { entityType: 'world-map-node', entityId: 'node-00000000-1111-4000-8000-000000000000' },
+      { entityType: 'timeline-event', entityId: 'tle-00000000-1111-4000-8000-000000000000' },
+      { entityType: 'draft', entityId: 42 },
+    ])
+    expect(PlotCanvasRepository.getGraph(canvas.id).nodes[0]?.entityRefs).toHaveLength(4)
+  })
+
+  it('悬挂引用原样保留（引用失效由画布侧展示，写入不校验存在性）', () => {
+    const canvas = PlotCanvasRepository.create('悬挂引用', null)
+    // 两个 ID 都不指向任何真实记录：仍必须可写、可读。
+    const node = PlotCanvasRepository.nodeUpsert({
+      canvasId: canvas.id, title: '失效演练', summary: '',
+      entityRefs: [
+        { entityType: 'foreshadowing', entityId: 'fsh-gone' },
+        { entityType: 'world-map-node', entityId: 'node-gone' },
+      ],
+      x: 0, y: 0,
+    })
+    const reread = PlotCanvasRepository.getGraph(canvas.id).nodes[0]
+    expect(reread?.entityRefs).toEqual(node.entityRefs)
+    // 更新别的字段，悬挂引用不被静默清除。
+    const touched = PlotCanvasRepository.nodeUpsert({
+      id: node.id, canvasId: canvas.id, title: '失效演练·改', summary: '', x: 5, y: 5,
+    })
+    expect(touched.entityRefs).toEqual(node.entityRefs)
+  })
+
+  it('空引用与非法引用：空数组合法，未知类型 / 空 ID / 非法 draft ID 被拒绝', () => {
+    const canvas = PlotCanvasRepository.create('引用校验', null)
+    const empty = PlotCanvasRepository.nodeUpsert({
+      canvasId: canvas.id, title: '空引用', summary: '', entityRefs: [], x: 0, y: 0,
+    })
+    expect(empty.entityRefs).toEqual([])
+
+    expect(() => PlotCanvasRepository.nodeUpsert({
+      canvasId: canvas.id, title: 'x', summary: '',
+      entityRefs: [{ entityType: 'character', entityId: 'whoever' }], x: 0, y: 0,
+    })).toThrow('剧情画布节点实体引用无效')
+    expect(() => PlotCanvasRepository.nodeUpsert({
+      canvasId: canvas.id, title: 'x', summary: '',
+      entityRefs: [{ entityType: 'foreshadowing', entityId: '   ' }], x: 0, y: 0,
+    })).toThrow('剧情画布节点实体引用无效')
+    expect(() => PlotCanvasRepository.nodeUpsert({
+      canvasId: canvas.id, title: 'x', summary: '',
+      entityRefs: [{ entityType: 'draft', entityId: 0 }], x: 0, y: 0,
+    })).toThrow('剧情画布节点实体引用无效')
+    expect(() => PlotCanvasRepository.nodeUpsert({
+      canvasId: canvas.id, title: 'x', summary: '',
+      entityRefs: [{ entityType: 'draft', entityId: 1.5 }], x: 0, y: 0,
+    })).toThrow('剧情画布节点实体引用无效')
+    expect(() => PlotCanvasRepository.nodeUpsert({
+      canvasId: canvas.id, title: 'x', summary: '',
+      entityRefs: [{ entityType: 'foreshadowing', entityId: '长'.repeat(121) }], x: 0, y: 0,
+    })).toThrow('剧情画布节点实体引用无效')
+    expect(() => PlotCanvasRepository.nodeUpsert({
+      canvasId: canvas.id, title: 'x', summary: '',
+      entityRefs: Array.from({ length: 33 }, (_, index) => (
+        { entityType: 'foreshadowing', entityId: `fsh-${index}` })), x: 0, y: 0,
+    })).toThrow('剧情画布节点实体引用无效')
+    // 以上非法写入全部未落行。
+    expect(PlotCanvasRepository.getGraph(canvas.id).nodes.map(node => node.title))
+      .toEqual(['空引用'])
   })
 })

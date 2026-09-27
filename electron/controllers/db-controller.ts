@@ -68,7 +68,7 @@ import { WorldMapRepository } from '../repositories/world-map-repository'
 import type { WorldMapNode, WorldMapEdge, WorldMap } from '../../src/shared/world-map'
 import { removeDeletedMapImages } from '../services/world-map-image-store'
 import { PlotCanvasRepository } from '../repositories/plot-canvas-repository'
-import type { PlotCanvasNodeUpsertPayload, PlotCanvasEdgeUpsertPayload, PlotCanvasNodesMergePayload } from '../../src/shared/plot-canvas'
+import type { PlotCanvasNodeUpsertPayload, PlotCanvasEdgeUpsertPayload, PlotCanvasNodesMergePayload, PlotCanvasUpdatePayload } from '../../src/shared/plot-canvas'
 import { ChapterCanvasRepository } from '../repositories/chapter-canvas-repository'
 import type { ChapterCanvasNodeUpsertPayload, ChapterCanvasEdgeUpsertPayload } from '../../src/shared/chapter-canvas'
 import { StoryTimelineRepository } from '../repositories/story-timeline-repository'
@@ -157,6 +157,7 @@ const MUTATING_DATABASE_CHANNELS = new Set([
   'db:timeline-branch-upsert',
   'db:timeline-branch-delete',
   'db:plot-canvas-create',
+  'db:plot-canvas-update',
   'db:plot-canvas-rename',
   'db:plot-canvas-move',
   'db:plot-canvas-reorder',
@@ -1577,10 +1578,30 @@ export function registerDatabaseController() {
     return PlotCanvasRepository.list()
   })
 
-  ipcMain.handle('db:plot-canvas-create', async (_event, name: string, parentCanvasId: string | null, expectedProjectPath: string) => {
+  ipcMain.handle('db:plot-canvas-create', async (_event, ...args: unknown[]) => {
+    try {
+      // 两种调用形态（末位 expectedProjectPath 之前可带可选 description）：
+      //   [name, parentCanvasId, expectedProjectPath]
+      //   [name, parentCanvasId, description, expectedProjectPath]
+      const expectedProjectPath = String(args.at(-1) ?? '')
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      const hasDescription = args.length >= 4
+      const description = hasDescription ? args[2] : undefined
+      const name = args[0] as string
+      const parentCanvasId = (args[1] ?? null) as string | null
+      return { success: true, canvas: PlotCanvasRepository.create(name, parentCanvasId, description) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:plot-canvas-update', async (_event, input: PlotCanvasUpdatePayload, expectedProjectPath: string) => {
     try {
       assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
-      return { success: true, canvas: PlotCanvasRepository.create(name, parentCanvasId) }
+      if (typeof input !== 'object' || input === null || typeof input.canvasId !== 'string') {
+        throw new Error('剧情画布更新参数无效')
+      }
+      return { success: true, canvas: PlotCanvasRepository.update(input) }
     } catch (error) {
       return { success: false, error: String(error) }
     }
