@@ -2,13 +2,16 @@
  * PlotCanvasWorkbench — 作者可编辑的剧情画布（跨章节剧情组织）。
  *
  * 交互语义移植自参考项目的 PlotBuilderCanvas / PlotOutlineTree（编译产物
- * WorldStudio-D4YQGBkX.js）：画布树 + 子画布钻入与面包屑返回、节点/连线
- * 删除确认、搜索高亮与适应视图、“动作后即存”的持久化节奏。远程 API
- * （/plot/board/*、/world/canvas/*）全部改接本地 IPC；剧情事件不再有远端
- * 事件实体，画布节点就是唯一记录。
+ * WorldStudio-D4YQGBkX.js），并由 PlotCanvasShell 承载整体外壳：左侧目录、
+ * 顶部悬浮选择器/面包屑/新增事件、左侧 PlotGraphToolbar 工具条、右侧详情
+ * 或画布信息面板。React Flow 画布只有这一个实例，经 Shell 的 `canvas`
+ * ReactNode 插槽注入；节点统一渲染为 plot-graph 的十类卡片（旧数据缺省
+ * kind 回落 'plot'），投影对照层仍为只读幽灵节点。
  *
- * 与确定性剧情树（PlotTreeSnapshot）的关系：投影只读。对照层开关把快照
- * 事件画成幽灵节点供对照，任何画布操作都不会写回投影。
+ * 搜索与十类筛选只作用于视图（filter-utils 纯函数）：被筛选隐藏的节点其
+ * 连线一并隐藏，取消筛选即刻恢复；搜索命中可逐个定位。持久化仍走
+ * “动作后即存”的幂等队列（useCanvasPersistence），所有 IPC 都经过项目
+ * session 校验，项目切换后旧项目的异步结果不会写入新页面。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -24,15 +27,10 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import {
-  ChevronRight,
   Eye,
   EyeOff,
-  Film,
   FolderPlus,
-  Maximize2,
   Pencil,
-  Plus,
-  Search,
   Trash2,
   X,
 } from 'lucide-react'
@@ -41,10 +39,16 @@ import type { DatabaseChannels } from '../../shared/ipc-channels'
 import {
   createPlotCanvasEdgeId,
   createPlotCanvasNodeId,
+  normalizePlotCanvasTags,
+  PLOT_CANVAS_NODE_KINDS,
+  PLOT_CANVAS_NODE_KIND_LABELS,
+  resolvePlotCanvasNodeKind,
   type PlotCanvasColorKey,
   type PlotCanvasEdgeData,
   type PlotCanvasGraph,
   type PlotCanvasNodeData,
+  type PlotCanvasNodeEntityRef,
+  type PlotCanvasNodeKind,
   type PlotCanvasSummary,
 } from '../../shared/plot-canvas'
 import type { PlotTreeSnapshot } from '../../shared/plot-tree'
@@ -72,18 +76,38 @@ import { useCanvasPersistence } from './canvas-persistence'
 import {
   CanvasLabeledEdge,
   CanvasLabeledEdgeViewMemo,
-  PlotEventCardNode,
-  PlotEventCardNodeData,
-  PlotEventCardNodeViewMemo,
   PlotProjectionGhostNode,
   PlotProjectionGhostNodeData,
   PlotProjectionGhostNodeViewMemo,
 } from './CanvasVisuals'
+import {
+  CreatePlotCanvasDialog,
+  PlotCanvasEmptyState,
+  PlotCanvasInfoPanel,
+  PlotCanvasShell,
+  PlotCanvasSidebar,
+  PlotCanvasTopbar,
+  type PlotCanvasDraftValues,
+  type PlotCanvasSidebarEntry,
+  type PlotCanvasSidebarTab,
+} from './plot-shell'
+import {
+  filterPlotGraphNodes,
+  PlotGraphCardNode,
+  PlotGraphFilter,
+  PlotGraphToolbar,
+  resolvePlotGraphEdgeVisibility,
+  type CanvasInteractionMode,
+  type PlotGraphFilterState,
+  type PlotGraphNode,
+  type PlotGraphNodeData,
+} from './plot-graph'
 import './canvas-workbench.css'
 
 type BlueprintRow = DatabaseChannels['db:blueprint-get-all']['return'][number]
 type DraftRow = DatabaseChannels['db:draft-list-all']['return'][number]
 type ThreadRow = DatabaseChannels['db:narrative-thread-list']['return'][number]
+type ForeshadowingRow = DatabaseChannels['db:foreshadowing-list']['return'][number]
 
 const NODE_COLOR_KEYS: PlotCanvasColorKey[] = ['default', 'accent', 'success', 'warning', 'danger']
 
@@ -98,18 +122,50 @@ const COLOR_LABELS: Record<PlotCanvasColorKey, [string, string]> = {
 const NODE_WIDTH = 240
 const NODE_HEIGHT_ESTIMATE = 150
 
+const ENTITY_REF_TYPE_LABELS: Record<PlotCanvasNodeEntityRef['entityType'], [string, string]> = {
+  foreshadowing: ['伏笔记录', 'Foreshadowing'],
+  'world-map-node': ['地图地点', 'Map node'],
+  'timeline-event': ['时间线事件', 'Timeline event'],
+  draft: ['正文草稿', 'Draft'],
+}
+
 interface PlotCanvasWorkbenchProps {
   projectKey: string
   /** 从画布节点跳到线索计划（切换到计划清单视图并定位）。 */
   onOpenPlan?: (planId: number) => void
 }
 
-type FlowNode = PlotEventCardNode | PlotProjectionGhostNode
+type FlowNode = PlotGraphNode | PlotProjectionGhostNode
 type FlowEdge = CanvasLabeledEdge
 
 type DetailState =
-  | { kind: 'node'; id: string; title: string; summary: string; colorKey: PlotCanvasColorKey }
+  | {
+    kind: 'node'
+    id: string
+    title: string
+    summary: string
+    colorKey: PlotCanvasColorKey
+    nodeKind: PlotCanvasNodeKind
+    tagsText: string
+  }
   | { kind: 'edge'; id: string; label: string; edgeKind: 'main' | 'aux' }
+
+function detailFromNode(node: PlotCanvasNodeData): DetailState {
+  return {
+    kind: 'node',
+    id: node.id,
+    title: node.title,
+    summary: node.summary,
+    colorKey: node.colorKey,
+    nodeKind: resolvePlotCanvasNodeKind(node),
+    tagsText: (node.tags ?? []).join(', '),
+  }
+}
+
+/** 作者输入的标签串 → 归一化数组；整体非法（超长/超量）返回 null。 */
+function parseTagsInput(raw: string): string[] | null {
+  return normalizePlotCanvasTags(raw.split(/[,，、;；\n]/))
+}
 
 export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanvasWorkbenchProps) {
   const text = useLocaleStore(s => s.text)
@@ -122,6 +178,7 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
   const [blueprints, setBlueprints] = useState<BlueprintRow[]>([])
   const [drafts, setDrafts] = useState<DraftRow[]>([])
   const [threads, setThreads] = useState<ThreadRow[]>([])
+  const [foreshadowings, setForeshadowings] = useState<ForeshadowingRow[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [projection, setProjection] = useState<PlotTreeSnapshot | null>(null)
@@ -133,8 +190,22 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<FlowEdge>([])
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([])
-  const [search, setSearch] = useState('')
   const flowRef = useRef<ReactFlowInstance<FlowNode, FlowEdge> | null>(null)
+  const shellRef = useRef<HTMLDivElement | null>(null)
+
+  // ===== 外壳状态 =====
+  const [sidebarTab, setSidebarTab] = useState<PlotCanvasSidebarTab>('plot')
+  const [sidebarSearch, setSidebarSearch] = useState('')
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [infoOpen, setInfoOpen] = useState(false)
+  const [filterBarOpen, setFilterBarOpen] = useState(false)
+  const [filter, setFilter] = useState<PlotGraphFilterState>({ searchQuery: '', selectedKinds: new Set() })
+  const [matchIndex, setMatchIndex] = useState(-1)
+  const [interactionMode, setInteractionMode] = useState<CanvasInteractionMode>('pan')
+  const [showGrid, setShowGrid] = useState(true)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const filterBarRef = useRef<HTMLDivElement | null>(null)
+  const pickerMenuRef = useRef<HTMLDivElement | null>(null)
 
   // ===== 对话框 =====
   const [canvasDialog, setCanvasDialog] = useState<
@@ -142,7 +213,6 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
     | { mode: 'rename'; canvas: PlotCanvasSummary }
     | null
   >(null)
-  const [canvasDialogName, setCanvasDialogName] = useState('')
   const [canvasDialogBusy, setCanvasDialogBusy] = useState(false)
   const [deleteCanvasTarget, setDeleteCanvasTarget] = useState<PlotCanvasSummary | null>(null)
   const [mergeDialog, setMergeDialog] = useState<{ title: string; summary: string } | null>(null)
@@ -155,6 +225,10 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
   // ref 只能在 effect 中同步（react-hooks/refs）；交互回调读到的都是已提交值。
   useEffect(() => { graphRef.current = graph }, [graph])
   useEffect(() => { activeCanvasIdRef.current = activeCanvasId }, [activeCanvasId])
+
+  const openCreateDialog = useCallback(() => {
+    setCanvasDialog({ mode: 'create', parentCanvasId: null })
+  }, [])
 
   // ===== 数据加载 =====
 
@@ -174,15 +248,17 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
   const loadReferences = useCallback(async () => {
     const session = captureProjectSession(useProjectStore.getState().currentProject)
     if (!session) return
-    const [nextBlueprints, nextDrafts, nextThreads] = await Promise.all([
+    const [nextBlueprints, nextDrafts, nextThreads, nextForeshadowings] = await Promise.all([
       ipc.invokeWithProjectSession(session, 'db:blueprint-get-all', projectKey),
       ipc.invokeWithProjectSession(session, 'db:draft-list-all', projectKey),
       ipc.invokeWithProjectSession(session, 'db:narrative-thread-list', projectKey),
+      ipc.invokeWithProjectSession(session, 'db:foreshadowing-list', 'all', projectKey),
     ])
     if (!isProjectSessionCurrent(session)) return
     setBlueprints(nextBlueprints)
     setDrafts(nextDrafts)
     setThreads(nextThreads)
+    setForeshadowings(nextForeshadowings)
   }, [projectKey])
 
   const loadGraph = useCallback(async (canvasId: string) => {
@@ -193,6 +269,8 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
     setGraph(next)
     setSelectedNodeIds([])
     setDetail(null)
+    setFilter({ searchQuery: '', selectedKinds: new Set() })
+    setMatchIndex(-1)
   }, [projectKey])
 
   useEffect(() => {
@@ -254,10 +332,16 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
   // ===== 画布操作回调（经 ref 供给节点数据，避免闭包过期） =====
 
   const actionsRef = useRef<{
+    editNode: (nodeId: string) => void
     splitNode: (nodeId: string) => void
     deleteNode: (nodeId: string) => void
-    enterSubCanvas: (nodeId: string) => void
-  }>({ splitNode: () => {}, deleteNode: () => {}, enterSubCanvas: () => {} })
+    enterSubCanvas: (nodeId: string, subCanvasId?: string) => void
+  }>({
+    editNode: () => {},
+    splitNode: () => {},
+    deleteNode: () => {},
+    enterSubCanvas: () => {},
+  })
 
   const persistNode = useCallback((node: PlotCanvasNodeData, canvasId: string) => {
     persist.schedule({
@@ -269,9 +353,12 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
           const result = await ipc.invokeWithProjectSession(session, 'db:plot-canvas-node-upsert', {
             id: node.id,
             canvasId,
+            kind: node.kind,
             title: node.title,
             summary: node.summary,
             colorKey: node.colorKey,
+            tags: node.tags,
+            entityRefs: node.entityRefs,
             chapterRefs: node.chapterRefs,
             planId: node.planId,
             subCanvasId: node.subCanvasId,
@@ -348,14 +435,16 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
     const node = current.nodes.find(item => item.id === nodeId)
     if (!node) return
     // 参考项目拆分语义的本地化：原节点保留第一段，后续段作为新节点接在
-    // 右下方；压缩产物中拆分文本由 AI 侧给出，本地改为作者在详情面板
-    // 自行搬运两段文本。
+    // 右下方；种类与颜色随源节点，正文由作者在详情面板自行搬运。
     const newNode: PlotCanvasNodeData = {
       id: createPlotCanvasNodeId(),
       canvasId,
+      kind: node.kind,
       title: `${node.title} · ${text('续', 'cont.')}`,
       summary: '',
       colorKey: node.colorKey,
+      tags: [],
+      entityRefs: [],
       chapterRefs: [],
       planId: null,
       subCanvasId: null,
@@ -365,22 +454,27 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
     setGraph(previous => previous ? { ...previous, nodes: [...previous.nodes, newNode] } : previous)
     persistNode(newNode, canvasId)
     setSelectedNodeIds([newNode.id])
-    setDetail({ kind: 'node', id: newNode.id, title: newNode.title, summary: '', colorKey: newNode.colorKey })
+    setDetail(detailFromNode(newNode))
   }, [persistNode, text])
 
   // ref 只能在 effect 中赋值；节点数据回调经 ref 转发，避免闭包过期。
   useEffect(() => {
     actionsRef.current = {
+      editNode: nodeId => {
+        const node = graphRef.current?.nodes.find(item => item.id === nodeId)
+        if (node) setDetail(detailFromNode(node))
+      },
       splitNode,
       deleteNode: nodeId => { void deleteNode(nodeId) },
-      enterSubCanvas: nodeId => {
-        const target = graphRef.current?.nodes.find(item => item.id === nodeId)?.subCanvasId
+      enterSubCanvas: (nodeId, subCanvasId) => {
+        const target = subCanvasId
+          ?? graphRef.current?.nodes.find(item => item.id === nodeId)?.subCanvasId
         if (target) setActiveCanvasId(target)
       },
     }
   }, [splitNode, deleteNode])
 
-  // ===== 投影 → Flow 模型 =====
+  // ===== graph → 基础 Flow 模型（视图标志由筛选派生，不在此写入） =====
 
   const subCanvasTitles = useMemo(() => new Map(canvases.map(canvas => [canvas.id, canvas.name])), [canvases])
 
@@ -390,50 +484,93 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
       setEdges([])
       return
     }
-    const query = search.trim().toLowerCase()
-    // 注意：这里绝不把 selected 写回节点/连线对象——选中态由 React Flow
-    // 内部通过 onNodesChange/onSelectionChange 管理；一旦从派生数据回写
-    // selected，就会与 RF 的选择上报互相触发，形成无限循环。
-    setNodes(graph.nodes.map(node => {
-      const haystack = `${node.title}\n${node.summary}`.toLowerCase()
-      const searchHit = query.length > 0 && haystack.includes(query)
-      const data: PlotEventCardNodeData = {
+    // 重建时保留 RF 已上报的选中态；detail 面板不依赖它，这里只为视觉连续。
+    setNodes(previous => graph.nodes.map(node => {
+      const data: PlotGraphNodeData = {
+        kind: resolvePlotCanvasNodeKind(node),
         title: node.title,
         summary: node.summary,
+        tags: node.tags,
         colorKey: node.colorKey,
         chapterRefs: node.chapterRefs,
         hasPlan: node.planId !== null,
+        planId: node.planId,
         subCanvasTitle: node.subCanvasId ? subCanvasTitles.get(node.subCanvasId) ?? null : null,
-        dimmed: query.length > 0 && !searchHit,
-        searchHit,
+        subCanvasId: node.subCanvasId,
+        entityRefs: node.entityRefs,
+        onEdit: id => actionsRef.current.editNode(id),
         onSplit: id => actionsRef.current.splitNode(id),
         onDelete: id => actionsRef.current.deleteNode(id),
-        onEnterSubCanvas: id => actionsRef.current.enterSubCanvas(id),
+        onEnterSubCanvas: (id, subCanvasId) => actionsRef.current.enterSubCanvas(id, subCanvasId),
       }
+      const previousNode = previous.find(item => item.id === node.id)
       return {
         id: node.id,
-        type: 'plot-event-card' as const,
+        type: 'plot-graph-card' as const,
         position: { x: node.x, y: node.y },
+        ...(previousNode?.selected ? { selected: true } : {}),
         data,
       }
     }))
-    const nodeById = new Map(graph.nodes.map(node => [node.id, node]))
-    setEdges(graph.edges.map(edge => {
-      const source = nodeById.get(edge.sourceNodeId)
-      const target = nodeById.get(edge.targetNodeId)
-      const endpointHit = (node: PlotCanvasNodeData | undefined) => node
-        && query.length > 0
-        && `${node.title}\n${node.summary}`.toLowerCase().includes(query)
-      const match = Boolean(endpointHit(source) || endpointHit(target))
-      return {
-        id: edge.id,
-        source: edge.sourceNodeId,
-        target: edge.targetNodeId,
-        type: 'canvas-labeled' as const,
-        data: { label: edge.label, kind: edge.kind, dimmed: query.length > 0 && !match },
-      }
-    }))
-  }, [graph, search, subCanvasTitles, setNodes, setEdges])
+    setEdges(previous => graph.edges.map(edge => ({
+      id: edge.id,
+      source: edge.sourceNodeId,
+      target: edge.targetNodeId,
+      type: 'canvas-labeled' as const,
+      ...(previous.find(item => item.id === edge.id)?.selected ? { selected: true } : {}),
+      data: { label: edge.label, kind: edge.kind },
+    })))
+  }, [graph, subCanvasTitles, setNodes, setEdges])
+
+  // ===== 搜索 / 筛选派生（纯视图，不改持久化数据） =====
+
+  const baseNodes = useMemo<PlotGraphNode[]>(
+    () => nodes.filter((node): node is PlotGraphNode => node.type === 'plot-graph-card'),
+    [nodes],
+  )
+  const filterResult = useMemo(() => filterPlotGraphNodes(baseNodes, filter), [baseNodes, filter])
+  const isSearchActive = filter.searchQuery.trim().length > 0
+  const visibleIdSet = useMemo(() => new Set(filterResult.visibleNodes.map(node => node.id)), [filterResult])
+  const searchHitIdSet = useMemo(() => new Set(filterResult.searchHits.map(node => node.id)), [filterResult])
+  const searchHits = filterResult.searchHits
+
+  // 搜索词或筛选集合变化后，定位序号回到未聚焦状态。
+  useEffect(() => { setMatchIndex(-1) }, [filter.searchQuery, filter.selectedKinds])
+
+  const focusMatch = useCallback((index: number) => {
+    if (searchHits.length === 0) return
+    const wrapped = ((index % searchHits.length) + searchHits.length) % searchHits.length
+    setMatchIndex(wrapped)
+    flowRef.current?.fitView({ nodes: [{ id: searchHits[wrapped].id }], padding: 0.35, duration: 280, maxZoom: 1.2 })
+  }, [searchHits])
+
+  useEffect(() => {
+    if (!filterBarOpen) return
+    const timer = window.setTimeout(() => {
+      filterBarRef.current?.querySelector<HTMLInputElement>('input')?.focus()
+    }, 40)
+    return () => window.clearTimeout(timer)
+  }, [filterBarOpen])
+
+  // 画布选择器下拉：点击菜单外（含顶栏按钮以外区域）关闭。
+  useEffect(() => {
+    if (!pickerOpen) return
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Element | null
+      if (pickerMenuRef.current?.contains(target as Node)) return
+      if (target?.closest?.('[data-testid="plot-canvas-picker"]')) return
+      setPickerOpen(false)
+    }
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') setPickerOpen(false)
+    }
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [pickerOpen])
 
   // 已保存的视口只在进入画布时应用一次；没有保存过则适应视图。
   // fitView 必须等 React Flow 完成节点测量后再执行，否则边界按 0 尺寸计算，
@@ -537,9 +674,12 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
     const newNode: PlotCanvasNodeData = {
       id: createPlotCanvasNodeId(),
       canvasId,
+      kind: 'plot',
       title: text('新剧情事件', 'New plot event'),
       summary: '',
       colorKey: 'default',
+      tags: [],
+      entityRefs: [],
       chapterRefs: [],
       planId: null,
       subCanvasId: null,
@@ -549,11 +689,45 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
     setGraph(previous => previous ? { ...previous, nodes: [...previous.nodes, newNode] } : previous)
     persistNode(newNode, canvasId)
     setSelectedNodeIds([newNode.id])
-    setDetail({ kind: 'node', id: newNode.id, title: newNode.title, summary: '', colorKey: 'default' })
+    setDetail(detailFromNode(newNode))
   }, [persistNode, text])
 
   const fitView = useCallback(() => {
     flowRef.current?.fitView({ padding: 0.2, duration: 300, maxZoom: 1.2 })
+  }, [])
+
+  // 选择变化处理器必须保持稳定身份：React Flow 会把 onSelectionChange 写进
+  // 内部 store（useEffect 中 setState），每次渲染换新函数都会让写入立刻以
+  // 当前选择回调一次；若回调再触发渲染就形成无限更新循环。这里用
+  // useCallback + graphRef 取数据，并对 setDetail 做同值短路。
+  const handleSelectionChange = useCallback((selection: { nodes: FlowNode[]; edges: FlowEdge[] }) => {
+    const nextNodeIds = selection.nodes.map(node => node.id)
+    const nextEdgeId = selection.edges[0]?.id ?? null
+    // React Flow 会在节点对象重建后再次上报同一份选择；内容相同
+    // 时必须保持原数组/原值，否则与重建 effect 互相触发死循环。
+    setSelectedNodeIds(previous => (
+      previous.length === nextNodeIds.length
+      && previous.every(id => nextNodeIds.includes(id))
+        ? previous
+        : nextNodeIds
+    ))
+    const current = graphRef.current
+    if (nextEdgeId) {
+      const edge = current?.edges.find(item => item.id === nextEdgeId)
+      if (edge) {
+        setDetail(previous => previous?.kind === 'edge' && previous.id === edge.id
+          ? previous
+          : { kind: 'edge', id: edge.id, label: edge.label, edgeKind: edge.kind })
+      }
+    } else {
+      const firstNode = selection.nodes[0]
+      const node = firstNode ? current?.nodes.find(item => item.id === firstNode.id) : null
+      if (node) {
+        setDetail(previous => previous?.kind === 'node' && previous.id === node.id
+          ? previous
+          : detailFromNode(node))
+      }
+    }
   }, [])
 
   // 对照层：把确定性投影事件摆成只读幽灵节点（按章节网格排布，避开作者节点）。
@@ -591,17 +765,11 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
     return ghosts
   }, [projection, showProjection])
 
-  const flowNodes = useMemo(() => [...nodes, ...ghostNodes], [nodes, ghostNodes])
-
-  const fitToSearch = useCallback(() => {
-    const query = search.trim().toLowerCase()
-    if (!query) return
-    const hitIds = (graphRef.current?.nodes ?? [])
-      .filter(node => `${node.title}\n${node.summary}`.toLowerCase().includes(query))
-      .map(node => node.id)
-    if (hitIds.length === 0) return
-    flowRef.current?.fitView({ nodes: hitIds.map(id => ({ id })), padding: 0.35, duration: 280, maxZoom: 1.2 })
-  }, [search])
+  const flowNodes = useMemo(() => [...filterResult.processedNodes, ...ghostNodes], [filterResult, ghostNodes])
+  const flowEdges = useMemo(
+    () => resolvePlotGraphEdgeVisibility(edges, visibleIdSet, searchHitIdSet, isSearchActive),
+    [edges, visibleIdSet, searchHitIdSet, isSearchActive],
+  )
 
   const deleteEdgeById = useCallback(async (edgeId: string) => {
     const canvasId = activeCanvasIdRef.current
@@ -660,11 +828,21 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
   const detailSave = () => {
     if (!detail) return
     if (detail.kind === 'node') {
+      const tags = parseTagsInput(detail.tagsText)
+      if (tags === null) {
+        toast.error(text(
+          `标签无效：最多 ${32} 个且单个不超过 ${40} 字。`,
+          `Invalid tags: at most 32 tags, 40 characters each.`,
+        ))
+        return
+      }
       patchSelectedNode({
         id: detail.id,
         title: detail.title.trim() || text('新剧情事件', 'New plot event'),
         summary: detail.summary.trim(),
         colorKey: detail.colorKey,
+        kind: detail.nodeKind,
+        tags,
       })
       setDetail(previous => previous?.kind === 'node'
         ? { ...previous, title: detail.title.trim() || previous.title, summary: detail.summary.trim() }
@@ -727,7 +905,7 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
       await loadGraph(canvasId)
       setMergeDialog(null)
       setSelectedNodeIds([result.node.id])
-      setDetail({ kind: 'node', id: result.node.id, title: result.node.title, summary: result.node.summary, colorKey: result.node.colorKey })
+      setDetail(detailFromNode(result.node))
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error))
     }
@@ -735,16 +913,26 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
 
   // ===== 画布列表操作 =====
 
-  const createCanvas = async (name: string, parentCanvasId: string | null) => {
+  const createCanvas = async (values: PlotCanvasDraftValues, parentCanvasId: string | null) => {
     const session = captureProjectSession(useProjectStore.getState().currentProject)
     if (!session) return
     setCanvasDialogBusy(true)
     try {
-      const result = await ipc.invokeWithProjectSession(session, 'db:plot-canvas-create', name, parentCanvasId, projectKey)
+      const result = await ipc.invokeWithProjectSession(session, 'db:plot-canvas-create', values.title, parentCanvasId, projectKey)
       if (!isProjectSessionCurrent(session)) return
       if (!result.success || !result.canvas) {
         toast.error(result.error ?? text('创建剧情画布失败', 'Could not create the plot canvas'))
         return
+      }
+      if (values.description) {
+        const updated = await ipc.invokeWithProjectSession(session, 'db:plot-canvas-update', {
+          canvasId: result.canvas.id,
+          description: values.description,
+        }, projectKey)
+        if (!isProjectSessionCurrent(session)) return
+        if (!updated.success) {
+          toast.error(updated.error ?? text('保存画布说明失败', 'Could not save the canvas description'))
+        }
       }
       setCanvasDialog(null)
       await loadCanvases(result.canvas.id)
@@ -755,16 +943,29 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
     }
   }
 
-  const renameCanvas = async (canvas: PlotCanvasSummary, name: string) => {
+  const renameCanvas = async (canvas: PlotCanvasSummary, values: PlotCanvasDraftValues) => {
     const session = captureProjectSession(useProjectStore.getState().currentProject)
     if (!session) return
     setCanvasDialogBusy(true)
     try {
-      const result = await ipc.invokeWithProjectSession(session, 'db:plot-canvas-rename', canvas.id, name, projectKey)
-      if (!isProjectSessionCurrent(session)) return
-      if (!result.success || !result.canvas) {
-        toast.error(result.error ?? text('重命名剧情画布失败', 'Could not rename the plot canvas'))
-        return
+      if (canvas.name !== values.title) {
+        const renamed = await ipc.invokeWithProjectSession(session, 'db:plot-canvas-rename', canvas.id, values.title, projectKey)
+        if (!isProjectSessionCurrent(session)) return
+        if (!renamed.success || !renamed.canvas) {
+          toast.error(renamed.error ?? text('重命名剧情画布失败', 'Could not rename the plot canvas'))
+          return
+        }
+      }
+      if (canvas.description !== values.description) {
+        const updated = await ipc.invokeWithProjectSession(session, 'db:plot-canvas-update', {
+          canvasId: canvas.id,
+          description: values.description,
+        }, projectKey)
+        if (!isProjectSessionCurrent(session)) return
+        if (!updated.success) {
+          toast.error(updated.error ?? text('保存画布说明失败', 'Could not save the canvas description'))
+          return
+        }
       }
       setCanvasDialog(null)
       await loadCanvases()
@@ -797,6 +998,8 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
   // ===== 渲染 =====
 
   const activeCanvas = canvases.find(canvas => canvas.id === activeCanvasId) ?? null
+
+  // 面包屑：只含祖先链（当前画布名显示在选择器胶囊里）。
   const breadcrumb = useMemo(() => {
     const trail: PlotCanvasSummary[] = []
     const byId = new Map(canvases.map(canvas => [canvas.id, canvas]))
@@ -807,8 +1010,39 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
       trail.unshift(cursor)
       cursor = cursor.parentCanvasId ? byId.get(cursor.parentCanvasId) : null
     }
-    return trail
+    return trail.slice(0, -1)
   }, [activeCanvas, canvases])
+
+  const canvasesById = useMemo(() => new Map(canvases.map(canvas => [canvas.id, canvas])), [canvases])
+
+  const levelOf = useCallback((canvas: PlotCanvasSummary): number => {
+    let level = 0
+    let cursor: PlotCanvasSummary | undefined = canvas
+    const seen = new Set<string>()
+    while (cursor?.parentCanvasId && !seen.has(cursor.id)) {
+      seen.add(cursor.id)
+      cursor = canvasesById.get(cursor.parentCanvasId)
+      level += 1
+    }
+    return level
+  }, [canvasesById])
+
+  const sidebarEntries = useMemo<PlotCanvasSidebarEntry[]>(() => {
+    if (sidebarTab !== 'plot') return []
+    const query = sidebarSearch.trim().toLowerCase()
+    return canvases
+      .filter(canvas => !query || canvas.name.toLowerCase().includes(query))
+      .map(canvas => {
+        const level = levelOf(canvas)
+        return {
+          id: canvas.id,
+          name: canvas.name,
+          description: canvas.description || (level > 0 ? text('子画布', 'Sub-canvas') : null),
+          level,
+          hasChildren: canvases.some(item => item.parentCanvasId === canvas.id),
+        }
+      })
+  }, [canvases, levelOf, sidebarSearch, sidebarTab, text])
 
   const childCount = (canvasId: string) => canvases.filter(canvas => canvas.parentCanvasId === canvasId).length
 
@@ -846,150 +1080,457 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
     )
   }
 
-  return (
-    <div className="flex h-full min-h-0" data-testid="plot-canvas-workbench">
-      {/* 左侧画布目录 */}
-      <aside className="flex w-60 flex-shrink-0 flex-col border-r" style={{ borderColor: 'var(--color-border)', background: 'var(--color-panel)' }}>
-        <div className="flex items-center justify-between px-3 py-2">
-          <span className="text-xs font-semibold" style={{ color: 'var(--color-text)' }}>{text('剧情画布', 'Plot canvases')}</span>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6"
-            onClick={() => { setCanvasDialogName(''); setCanvasDialog({ mode: 'create', parentCanvasId: null }) }}
-            title={text('新增剧情画布', 'New plot canvas')}
-            aria-label={text('新增剧情画布', 'New plot canvas')}
-          >
-            <Plus size={13} />
-          </Button>
-        </div>
-        <div className="px-3 pb-2">
-          <div className="planning-pane__search">
-            <Input
-              type="search"
-              value={search}
-              onChange={event => setSearch(event.target.value)}
-              placeholder={text('搜索剧情画布…', 'Search canvases…')}
-              aria-label={text('搜索剧情画布', 'Search canvases')}
-            />
-          </div>
-        </div>
-        <div className="flex-1 overflow-y-auto px-2 pb-3" data-testid="plot-canvas-list">
-          {canvases.length === 0 && (
-            <p className="px-2 py-6 text-center text-xs" style={{ color: 'var(--color-text-muted)' }}>
-              {text('暂无剧情画布', 'No plot canvases yet')}
-            </p>
-          )}
-          {canvases
-            .filter(canvas => {
-              const query = search.trim().toLowerCase()
-              if (!query) return true
-              return canvas.name.toLowerCase().includes(query)
-            })
-            .map(canvas => {
-              const depth = (() => {
-                let level = 0
-                const byId = new Map(canvases.map(item => [item.id, item]))
-                let cursor: PlotCanvasSummary | undefined = canvas
-                const seen = new Set<string>()
-                while (cursor?.parentCanvasId && !seen.has(cursor.id)) {
-                  seen.add(cursor.id)
-                  cursor = byId.get(cursor.parentCanvasId)
-                  level += 1
-                }
-                return level
-              })()
-              return (
-                <div key={canvas.id} className="canvas-list-row">
-                  {Array.from({ length: depth }).map((_, index) => (
-                    <span key={index} className="canvas-list-row__indent" aria-hidden="true" />
-                  ))}
-                  <button
-                    type="button"
-                    className={`planning-row flex-1${activeCanvasId === canvas.id ? ' is-selected' : ''}`}
-                    aria-current={activeCanvasId === canvas.id ? 'true' : undefined}
-                    onClick={() => setActiveCanvasId(canvas.id)}
-                    title={canvas.name}
-                  >
-                    <span className="planning-row__icon"><Film size={12} /></span>
-                    <span className="planning-row__content">
-                      <span className="planning-row__title">{canvas.name}</span>
-                      {depth > 0 && <span className="planning-row__subtitle">{text('子画布', 'Sub-canvas')}</span>}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className="canvas-node__hover-action"
-                    title={text('重命名', 'Rename')}
-                    aria-label={text('重命名画布', 'Rename canvas')}
-                    onClick={() => { setCanvasDialogName(canvas.name); setCanvasDialog({ mode: 'rename', canvas }) }}
-                  >
-                    <Pencil size={11} />
-                  </button>
-                  <button
-                    type="button"
-                    className="canvas-node__hover-action"
-                    title={text('新增子画布', 'New sub-canvas')}
-                    aria-label={text('新增子画布', 'New sub-canvas')}
-                    onClick={() => { setCanvasDialogName(''); setCanvasDialog({ mode: 'create', parentCanvasId: canvas.id }) }}
-                  >
-                    <FolderPlus size={11} />
-                  </button>
-                  <button
-                    type="button"
-                    className="canvas-node__hover-action"
-                    data-variant="danger"
-                    title={text('删除画布', 'Delete canvas')}
-                    aria-label={text('删除画布', 'Delete canvas')}
-                    onClick={() => setDeleteCanvasTarget(canvas)}
-                  >
-                    <Trash2 size={11} />
-                  </button>
-                </div>
-              )
-            })}
-        </div>
-      </aside>
+  const sidebarItemActions = (entry: PlotCanvasSidebarEntry) => {
+    const canvas = canvasesById.get(entry.id)
+    if (!canvas) return null
+    return (
+      <>
+        <button
+          type="button"
+          className="canvas-node__hover-action"
+          title={text('重命名', 'Rename')}
+          aria-label={text('重命名画布', 'Rename canvas')}
+          onClick={() => setCanvasDialog({ mode: 'rename', canvas })}
+        >
+          <Pencil size={11} />
+        </button>
+        <button
+          type="button"
+          className="canvas-node__hover-action"
+          title={text('新增子画布', 'New sub-canvas')}
+          aria-label={text('新增子画布', 'New sub-canvas')}
+          onClick={() => setCanvasDialog({ mode: 'create', parentCanvasId: canvas.id })}
+        >
+          <FolderPlus size={11} />
+        </button>
+        <button
+          type="button"
+          className="canvas-node__hover-action"
+          data-variant="danger"
+          title={text('删除画布', 'Delete canvas')}
+          aria-label={text('删除画布', 'Delete canvas')}
+          onClick={() => setDeleteCanvasTarget(canvas)}
+        >
+          <Trash2 size={11} />
+        </button>
+      </>
+    )
+  }
 
-      {/* 主画布区 */}
-      <div className="flex min-w-0 flex-1 flex-col">
-        {activeCanvas ? (
+  const hasNodes = (graph?.nodes.length ?? 0) > 0
+  const floatStackTop = filterBarOpen ? 104 : 58
+
+  const rightPanel = detail && activeCanvas ? (
+    <div className="plot-shell__detail" data-testid="plot-canvas-detail">
+      <div className="canvas-detail__header">
+        <span className="canvas-detail__title">
+          {detail.kind === 'node'
+            ? text('剧情事件详情', 'Plot event details')
+            : text('连线详情', 'Connection details')}
+        </span>
+        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setDetail(null)} aria-label={text('关闭详情', 'Close details')}>
+          <X size={12} />
+        </Button>
+      </div>
+      <div className="plot-shell__detail__body">
+        {detail.kind === 'node' && detailNode && (
           <>
-            {persist.pendingCount > 0 && (
-              <div className="canvas-unsaved-banner" role="status" data-testid="canvas-unsaved-banner">
-                <span>{text(
-                  `${persist.pendingCount} 项更改未保存${persist.lastError ? `（${persist.lastError}）` : ''}`,
-                  `${persist.pendingCount} unsaved change(s)${persist.lastError ? ` (${persist.lastError})` : ''}`,
-                )}</span>
-                <button type="button" onClick={persist.retry}>{text('重试保存', 'Retry save')}</button>
+            <div className="canvas-detail__section">
+              <Label htmlFor="plot-node-title">{text('标题', 'Title')}</Label>
+              <Input
+                id="plot-node-title"
+                value={detail.title}
+                onChange={event => setDetail(previous => previous?.kind === 'node' ? { ...previous, title: event.target.value } : previous)}
+              />
+            </div>
+            <div className="canvas-detail__section">
+              <Label htmlFor="plot-node-summary">{text('摘要', 'Summary')}</Label>
+              <Textarea
+                id="plot-node-summary"
+                rows={5}
+                value={detail.summary}
+                onChange={event => setDetail(previous => previous?.kind === 'node' ? { ...previous, summary: event.target.value } : previous)}
+              />
+            </div>
+            <div className="canvas-detail__section">
+              <Label>{text('种类', 'Kind')}</Label>
+              <div className="flex flex-wrap gap-1.5">
+                {PLOT_CANVAS_NODE_KINDS.map(kind => (
+                  <button
+                    key={kind}
+                    type="button"
+                    className={`planning-chip${detail.nodeKind === kind ? ' is-active' : ''}`}
+                    aria-pressed={detail.nodeKind === kind}
+                    onClick={() => setDetail(previous => previous?.kind === 'node' ? { ...previous, nodeKind: kind } : previous)}
+                  >
+                    {text(PLOT_CANVAS_NODE_KIND_LABELS[kind].zh, PLOT_CANVAS_NODE_KIND_LABELS[kind].en)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="canvas-detail__section">
+              <Label htmlFor="plot-node-tags">{text('标签（逗号分隔）', 'Tags (comma separated)')}</Label>
+              <Input
+                id="plot-node-tags"
+                value={detail.tagsText}
+                onChange={event => setDetail(previous => previous?.kind === 'node' ? { ...previous, tagsText: event.target.value } : previous)}
+                placeholder={text('例如：主线, 悬念', 'e.g. main line, suspense')}
+              />
+            </div>
+            <div className="canvas-detail__section">
+              <Label>{text('颜色', 'Color')}</Label>
+              <div className="flex flex-wrap gap-1.5">
+                {NODE_COLOR_KEYS.map(key => (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`planning-chip${detail.colorKey === key ? ' is-active' : ''}`}
+                    aria-pressed={detail.colorKey === key}
+                    onClick={() => setDetail(previous => previous?.kind === 'node' ? { ...previous, colorKey: key } : previous)}
+                  >
+                    {text(...COLOR_LABELS[key])}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="canvas-detail__section">
+              <Label>{text('关联章节（点击切换）', 'Linked chapters (click to toggle)')}</Label>
+              <div className="flex flex-wrap gap-1.5">
+                {(() => {
+                  const chapterNumbers = new Set<number>(detailNode.chapterRefs)
+                  for (const bp of blueprints) chapterNumbers.add(bp.chapterNumber)
+                  for (const draft of drafts) chapterNumbers.add(draft.chapterNumber)
+                  return [...chapterNumbers].sort((a, b) => a - b).slice(0, 60).map(chapter => (
+                    <button
+                      key={chapter}
+                      type="button"
+                      className={`planning-chip${detailNode.chapterRefs.includes(chapter) ? ' is-active' : ''}`}
+                      aria-pressed={detailNode.chapterRefs.includes(chapter)}
+                      onClick={() => patchSelectedNode({
+                        id: detailNode.id,
+                        chapterRefs: detailNode.chapterRefs.includes(chapter)
+                          ? detailNode.chapterRefs.filter(item => item !== chapter)
+                          : [...detailNode.chapterRefs, chapter].sort((a, b) => a - b),
+                      })}
+                    >
+                      {text(`第${chapter}章`, `Ch ${chapter}`)}
+                    </button>
+                  ))
+                })()}
+              </div>
+            </div>
+            <div className="canvas-detail__section">
+              <Label htmlFor="plot-node-plan">{text('关联线索计划', 'Linked thread plan')}</Label>
+              <NativeSelect
+                id="plot-node-plan"
+                value={detailNode.planId ?? ''}
+                onChange={event => patchSelectedNode({
+                  id: detailNode.id,
+                  planId: event.target.value === '' ? null : Number(event.target.value),
+                })}
+              >
+                <option value="">{text('未关联', 'Not linked')}</option>
+                {threads.map(thread => (
+                  <option key={thread.id} value={thread.id}>{thread.title}</option>
+                ))}
+              </NativeSelect>
+              {detailNode.planId !== null && (
+                <Button variant="outline" size="sm" className="self-start" onClick={() => onOpenPlan?.(detailNode.planId as number)}>
+                  {text('查看线索计划', 'Open thread plan')}
+                </Button>
+              )}
+            </div>
+            <div className="canvas-detail__section">
+              <Label>{text('章节跳转', 'Chapter jumps')}</Label>
+              <div className="canvas-detail__links">
+                {detailNode.chapterRefs.length === 0 && (
+                  <span className="canvas-detail__text">{text('尚未关联章节。', 'No chapters linked yet.')}</span>
+                )}
+                {[...chapterLinkInfo.entries()].map(([chapter, info]) => (
+                  <div key={chapter} className="flex flex-col gap-1">
+                    <span className="canvas-detail__label">{text(`第 ${chapter} 章`, `Chapter ${chapter}`)}</span>
+                    <div className="flex gap-1.5">
+                      <button
+                        type="button"
+                        className={`canvas-detail__link${!info.hasBlueprint ? ' is-broken' : ''}`}
+                        disabled={!info.hasBlueprint}
+                        title={info.hasBlueprint
+                          ? text('打开该章蓝图', 'Open this chapter blueprint')
+                          : text('该章还没有蓝图', 'No blueprint for this chapter yet')}
+                        onClick={() => openBlueprint(chapter)}
+                      >
+                        <span>{info.hasBlueprint ? text('打开蓝图', 'Open blueprint') : text('暂无蓝图', 'No blueprint')}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`canvas-detail__link${!info.draftId ? ' is-broken' : ''}`}
+                        disabled={!info.draftId}
+                        title={info.draftId
+                          ? text('打开该章正文', 'Open this chapter draft')
+                          : text('该章还没有正文', 'No draft for this chapter yet')}
+                        onClick={() => info.draftId && openDraft(info.draftId, chapter)}
+                      >
+                        <span>{info.draftId
+                          ? text(info.finalized ? '打开定稿' : '打开草稿', info.finalized ? 'Open finalized' : 'Open draft')
+                          : text('暂无正文', 'No draft')}</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+                <div className="canvas-detail__section">
+                  <Label>{text('关联实体（引用可能失效）', 'Linked entities (references may dangle)')}</Label>
+                  {(detailNode.entityRefs?.length ?? 0) === 0 ? (
+                    <span className="canvas-detail__text">{text('尚未关联实体记录。', 'No entity records linked yet.')}</span>
+                  ) : (
+                    <div className="canvas-detail__links">
+                      {(detailNode.entityRefs ?? []).map((ref, index) => {
+                        const labelPair = ENTITY_REF_TYPE_LABELS[ref.entityType]
+                        // 只有加载了权威列表的引用类型才做失效判定（draft 与
+                        // 伏笔记录）；地图/时间线引用仅展示，不虚构状态。
+                        const draftMissing = ref.entityType === 'draft'
+                          && !drafts.some(draft => draft.id === ref.entityId)
+                        const foreshadowMissing = ref.entityType === 'foreshadowing'
+                          && !foreshadowings.some(item => item.id === ref.entityId)
+                        const isMissing = draftMissing || foreshadowMissing
+                        return (
+                          <div key={`${ref.entityType}-${ref.entityId}-${index}`} className="flex flex-col gap-1">
+                            <span className="canvas-detail__label">
+                              {text(labelPair[0], labelPair[1])} · {String(ref.entityId)}
+                              {isMissing ? text('（引用失效）', ' (missing)') : ''}
+                            </span>
+                            {ref.entityType === 'draft' && !draftMissing && (
+                              <button
+                                type="button"
+                                className="canvas-detail__link"
+                                title={text('打开该正文草稿', 'Open this draft')}
+                                onClick={() => openDraftRef(ref)}
+                              >
+                                <span>{text('打开正文', 'Open draft')}</span>
+                              </button>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+            <div className="canvas-detail__section">
+              <Label>{text('子画布', 'Sub-canvas')}</Label>
+              {detailNode.subCanvasId ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="self-start"
+                  onClick={() => setActiveCanvasId(detailNode.subCanvasId as string)}
+                >
+                  {text('进入子画布', 'Enter sub-canvas')}
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="self-start"
+                  onClick={() => {
+                    const defaultName = `${detailNode.title} · ${text('子画布', 'Sub-canvas')}`
+                    setSubCanvasName(defaultName)
+                    setSubCanvasDialog({ nodeId: detailNode.id, defaultName })
+                  }}
+                >
+                  <FolderPlus size={12} />{text('创建子画布并关联', 'Create and link sub-canvas')}
+                </Button>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={detailSave} data-testid="plot-node-save">{text('保存修改', 'Save changes')}</Button>
+              <Button variant="ghost" size="sm" onClick={() => void deleteNode(detailNode.id)} data-testid="plot-node-delete">
+                <Trash2 size={12} />{text('删除节点', 'Delete node')}
+              </Button>
+            </div>
+          </>
+        )}
+        {detail.kind === 'edge' && detailEdge && (
+          <>
+            <div className="canvas-detail__section">
+              <Label htmlFor="plot-edge-label">{text('关系标签（如：承接 / 埋下 / 回收）', 'Relation label (e.g. follows / plants / pays off)')}</Label>
+              <Input
+                id="plot-edge-label"
+                value={detail.label}
+                onChange={event => setDetail(previous => previous?.kind === 'edge' ? { ...previous, label: event.target.value } : previous)}
+              />
+            </div>
+            <div className="canvas-detail__section">
+              <Label>{text('连线种类', 'Connection kind')}</Label>
+              <NativeSelect
+                value={detail.edgeKind}
+                onChange={event => setDetail(previous => previous?.kind === 'edge'
+                  ? { ...previous, edgeKind: event.target.value as 'main' | 'aux' }
+                  : previous)}
+              >
+                <option value="main">{text('主线（实线）', 'Main (solid)')}</option>
+                <option value="aux">{text('次要（虚线）', 'Secondary (dashed)')}</option>
+              </NativeSelect>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={detailSave}>{text('保存修改', 'Save changes')}</Button>
+              <Button variant="ghost" size="sm" onClick={() => void deleteEdgeById(detailEdge.id)}>
+                <Trash2 size={12} />{text('删除连线', 'Delete connection')}
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  ) : infoOpen ? (
+    <PlotCanvasInfoPanel
+      canvasName={activeCanvas?.name ?? null}
+      description={activeCanvas?.description ?? null}
+      nodeCount={graph?.nodes.length ?? 0}
+      edgeCount={graph?.edges.length ?? 0}
+      onClose={() => setInfoOpen(false)}
+    >
+      {activeCanvas && (
+        <button
+          type="button"
+          className="canvas-detail__link"
+          onClick={() => setCanvasDialog({ mode: 'rename', canvas: activeCanvas })}
+          data-testid="plot-canvas-info-edit"
+        >
+          <span>{text('编辑标题与说明', 'Edit title & description')}</span>
+        </button>
+      )}
+    </PlotCanvasInfoPanel>
+  ) : null
+
+  return (
+    <div ref={shellRef} className="h-full min-h-0" data-testid="plot-canvas-workbench">
+      <PlotCanvasShell
+        sidebarCollapsed={sidebarCollapsed}
+        onSidebarExpand={() => setSidebarCollapsed(false)}
+        sidebar={
+          <PlotCanvasSidebar
+            activeTab={sidebarTab}
+            onTabChange={setSidebarTab}
+            canvases={sidebarEntries}
+            totalCount={sidebarTab === 'plot' ? canvases.length : 0}
+            searchValue={sidebarSearch}
+            onSearchChange={setSidebarSearch}
+            selectedCanvasId={activeCanvasId}
+            onSelectCanvas={setActiveCanvasId}
+            onCreateCanvas={openCreateDialog}
+            createDisabled={sidebarTab !== 'plot'}
+            onCollapse={() => setSidebarCollapsed(true)}
+            itemActions={sidebarItemActions}
+            emptyStateNode={sidebarTab === 'chapter' ? (
+              <div className="plot-canvas-sidebar__empty" data-testid="plot-canvas-sidebar-chapter-note">
+                <span className="plot-canvas-sidebar__empty-icon" aria-hidden="true">📖</span>
+                <span>
+                  {text(
+                    '章节结构在「章节蓝图」与章节画布中维护；此目录管理跨章节剧情画布。',
+                    'Chapter structure lives in chapter blueprints and chapter canvases; this panel manages cross-chapter plot canvases.',
+                  )}
+                </span>
+              </div>
+            ) : undefined}
+          />
+        }
+        topbar={
+          <>
+            <PlotCanvasTopbar
+              canvasName={activeCanvas?.name ?? null}
+              breadcrumb={breadcrumb.map(crumb => ({ id: crumb.id, name: crumb.name }))}
+              onBreadcrumbSelect={setActiveCanvasId}
+              onOpenCanvasSelector={() => setPickerOpen(previous => !previous)}
+              addEventLabel={text('新增剧情事件', 'Add plot event')}
+              onAddEvent={addNodeAtCenter}
+              addEventDisabled={!activeCanvas}
+              searchActive={filterBarOpen}
+              onToggleSearch={() => setFilterBarOpen(previous => !previous)}
+              searchDisabled={!activeCanvas}
+              filtersActive={filterBarOpen}
+              onOpenFilters={() => setFilterBarOpen(previous => !previous)}
+              filtersDisabled={!activeCanvas}
+              infoActive={infoOpen}
+              onOpenInfo={() => setInfoOpen(previous => !previous)}
+              infoDisabled={!activeCanvas}
+              extraActions={
+                <button
+                  type="button"
+                  className={`plot-shell__icon-btn${showProjection ? ' is-active' : ''}`}
+                  onClick={() => setShowProjection(previous => !previous)}
+                  disabled={!activeCanvas}
+                  title={text('对照层：把蓝图/定稿投影画成只读幽灵节点', 'Overlay the read-only blueprint/finalized projection as ghost nodes')}
+                  aria-pressed={showProjection}
+                  data-testid="plot-canvas-projection-toggle"
+                >
+                  {showProjection ? <EyeOff size={17} /> : <Eye size={17} />}
+                </button>
+              }
+            />
+            {pickerOpen && (
+              <div className="plot-shell__picker-menu" ref={pickerMenuRef} data-testid="plot-canvas-picker-menu">
+                {canvases.length === 0 ? (
+                  <p className="plot-shell__picker-menu-empty">{text('暂无剧情画布', 'No plot canvases yet')}</p>
+                ) : (
+                  canvases.map(canvas => {
+                    const level = levelOf(canvas)
+                    return (
+                      <button
+                        key={canvas.id}
+                        type="button"
+                        className={`plot-shell__picker-menu-item${canvas.id === activeCanvasId ? ' is-selected' : ''}`}
+                        style={{ paddingLeft: 9 + level * 14 }}
+                        onClick={() => { setActiveCanvasId(canvas.id); setPickerOpen(false) }}
+                      >
+                        <span className="plot-shell__picker-menu-item-title">{canvas.name}</span>
+                      </button>
+                    )
+                  })
+                )}
               </div>
             )}
-            <div className="canvas-toolbar">
-              <nav className="canvas-breadcrumb" aria-label={text('画布层级', 'Canvas hierarchy')}>
-                {breadcrumb.map((crumb, index) => (
-                  <span key={crumb.id} className="contents">
-                    {index > 0 && <ChevronRight size={10} className="canvas-breadcrumb__sep" aria-hidden="true" />}
-                    <button
-                      type="button"
-                      className={`canvas-breadcrumb__crumb${index === breadcrumb.length - 1 ? ' is-current' : ''}`}
-                      onClick={() => setActiveCanvasId(crumb.id)}
-                    >
-                      {crumb.name}
-                    </button>
-                  </span>
-                ))}
-              </nav>
-              <span className="canvas-toolbar__spacer" />
-              <span className="canvas-toolbar__meta">
-                {text(`${graph?.nodes.length ?? 0} 个节点 · ${graph?.edges.length ?? 0} 条连线`, `${graph?.nodes.length ?? 0} nodes · ${graph?.edges.length ?? 0} edges`)}
-              </span>
-              <Button variant="outline" size="sm" onClick={addNodeAtCenter} data-testid="plot-canvas-add-node">
-                <Plus size={12} />{text('新增剧情事件', 'Add plot event')}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={selectedNodeIds.length < 2}
+            {filterBarOpen && activeCanvas && (
+              <div className="plot-shell__filter-float" ref={filterBarRef} data-testid="plot-canvas-filter-bar">
+                <PlotGraphFilter
+                  filter={filter}
+                  onFilterChange={setFilter}
+                  kindCounts={filterResult.kindCounts}
+                  matchCount={filterResult.matchCount}
+                  currentMatchIndex={matchIndex >= 0 ? matchIndex + 1 : 0}
+                  onPrevMatch={() => focusMatch(matchIndex - 1)}
+                  onNextMatch={() => focusMatch(matchIndex + 1)}
+                />
+              </div>
+            )}
+            {(persist.pendingCount > 0 || (showProjection && (projectionStale || !projection))) && (
+              <div className="plot-shell__float-stack" style={{ top: floatStackTop }}>
+                {persist.pendingCount > 0 && (
+                  <div className="plot-shell__unsaved-float" role="status" data-testid="canvas-unsaved-banner">
+                    <span>{text(
+                      `${persist.pendingCount} 项更改未保存${persist.lastError ? `（${persist.lastError}）` : ''}`,
+                      `${persist.pendingCount} unsaved change(s)${persist.lastError ? ` (${persist.lastError})` : ''}`,
+                    )}</span>
+                    <button type="button" onClick={persist.retry}>{text('重试保存', 'Retry save')}</button>
+                  </div>
+                )}
+                {showProjection && projectionStale && (
+                  <p className="plot-shell__notice-pill" data-variant="warning" role="status">
+                    {text('蓝图或定稿已更新，对照层显示的是旧投影；可回到「章节脉络图」重建。', 'Blueprints or finalized drafts changed; the overlay shows the previous projection. Rebuild it in the Thread graph view.')}
+                  </p>
+                )}
+                {showProjection && !projection && (
+                  <p className="plot-shell__notice-pill" role="status">
+                    {text('尚未生成剧情树投影；可回到「章节脉络图」先生成，再回到这里对照。', 'No projection built yet; build it in the Thread graph view first, then come back to compare.')}
+                  </p>
+                )}
+              </div>
+            )}
+            {activeCanvas && selectedNodeIds.length >= 2 && (
+              <button
+                type="button"
+                className="plot-shell__merge-float"
+                data-testid="plot-canvas-merge-selected"
                 onClick={() => setMergeDialog({
                   title: graph?.nodes.find(node => node.id === selectedNodeIds[0])?.title ?? '',
                   summary: selectedNodeIds
@@ -997,42 +1538,34 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
                     .filter(Boolean)
                     .join('\n\n'),
                 })}
-                title={text('把选中的两个以上节点合并为一个', 'Merge two or more selected nodes into one')}
               >
-                {text('合并所选', 'Merge selected')}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowProjection(previous => !previous)}
-                title={text('把蓝图/定稿投影画成只读幽灵节点对照', 'Overlay the read-only blueprint/finalized projection as ghost nodes')}
-              >
-                {showProjection ? <EyeOff size={12} /> : <Eye size={12} />}
-                {text('对照层', 'Projection')}
-              </Button>
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={fitToSearch} title={text('适应搜索结果', 'Fit search results')}>
-                <Search size={12} />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={fitView} title={text('适应视图', 'Fit view')}>
-                <Maximize2 size={12} />
-              </Button>
-            </div>
-            {showProjection && projectionStale && (
-              <p className="px-3 py-1 text-xs" role="status" style={{ color: 'var(--color-warning-text)', background: 'var(--color-panel)' }}>
-                {text('蓝图或定稿已更新，对照层显示的是旧投影；可回到「章节脉络图」重建。', 'Blueprints or finalized drafts changed; the overlay shows the previous projection. Rebuild it in the Thread graph view.')}
-              </p>
+                {text(`合并所选（${selectedNodeIds.length}）`, `Merge selected (${selectedNodeIds.length})`)}
+              </button>
             )}
-            {showProjection && !projection && (
-              <p className="px-3 py-1 text-xs" role="status" style={{ color: 'var(--color-text-muted)', background: 'var(--color-panel)' }}>
-                {text('尚未生成剧情树投影；可回到「章节脉络图」先生成，再回到这里对照。', 'No projection built yet; build it in the Thread graph view first, then come back to compare.')}
-              </p>
-            )}
-            <div className="canvas-workbench__flow" data-testid="plot-canvas-flow">
+          </>
+        }
+        toolRail={
+          <PlotGraphToolbar
+            interactionMode={interactionMode}
+            onInteractionModeChange={setInteractionMode}
+            showGrid={showGrid}
+            onToggleGrid={() => setShowGrid(previous => !previous)}
+            onFitView={fitView}
+            onZoomIn={() => flowRef.current?.zoomIn({ duration: 200 })}
+            onZoomOut={() => flowRef.current?.zoomOut({ duration: 200 })}
+            onFocusSearch={() => setFilterBarOpen(true)}
+            enableShortcuts
+            shortcutScopeRef={shellRef}
+          />
+        }
+        canvas={
+          activeCanvas ? (
+            <div className="canvas-workbench__flow" style={{ height: '100%' }} data-testid="plot-canvas-flow">
               <ReactFlow<FlowNode, FlowEdge>
                 nodes={flowNodes}
-                edges={edges}
+                edges={flowEdges}
                 nodeTypes={{
-                  'plot-event-card': PlotEventCardNodeViewMemo,
+                  'plot-graph-card': PlotGraphCardNode,
                   'plot-projection-ghost': PlotProjectionGhostNodeViewMemo,
                 }}
                 edgeTypes={{ 'canvas-labeled': CanvasLabeledEdgeViewMemo }}
@@ -1042,298 +1575,50 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
                 onNodeDragStop={onNodeDragStop}
                 onMoveEnd={onMoveEnd}
                 onInit={instance => { flowRef.current = instance }}
-                onSelectionChange={selection => {
-                  const nextNodeIds = selection.nodes.map(node => node.id)
-                  const nextEdgeId = selection.edges[0]?.id ?? null
-                  // React Flow 会在节点对象重建后再次上报同一份选择；内容相同
-                  // 时必须保持原数组/原值，否则与重建 effect 互相触发死循环。
-                  setSelectedNodeIds(previous => (
-                    previous.length === nextNodeIds.length
-                    && previous.every(id => nextNodeIds.includes(id))
-                      ? previous
-                      : nextNodeIds
-                  ))
-                  if (nextEdgeId) {
-                    const edge = graph?.edges.find(item => item.id === nextEdgeId)
-                    if (edge) setDetail({ kind: 'edge', id: edge.id, label: edge.label, edgeKind: edge.kind })
-                  } else {
-                    const firstNode = selection.nodes[0]
-                    const node = firstNode ? graph?.nodes.find(item => item.id === firstNode.id) : null
-                    if (node) setDetail({ kind: 'node', id: node.id, title: node.title, summary: node.summary, colorKey: node.colorKey })
-                  }
-                }}
+                panOnDrag={interactionMode === 'pan'}
+                selectionOnDrag={interactionMode === 'select'}
+                onSelectionChange={handleSelectionChange}
                 onNodeDoubleClick={(_, node) => {
                   const found = graph?.nodes.find(item => item.id === node.id)
-                  if (found) setDetail({ kind: 'node', id: found.id, title: found.title, summary: found.summary, colorKey: found.colorKey })
+                  if (found) setDetail(detailFromNode(found))
                 }}
                 minZoom={0.2}
                 maxZoom={2}
                 deleteKeyCode={null}
                 proOptions={{ hideAttribution: true }}
               >
-                <Background variant={BackgroundVariant.Dots} gap={18} size={1.4} color="var(--color-border)" />
+                {showGrid && (
+                  <Background variant={BackgroundVariant.Dots} gap={18} size={1.4} color="var(--color-border)" />
+                )}
                 <Controls showInteractive={false} position="bottom-right" />
               </ReactFlow>
             </div>
-          </>
-        ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-3 text-sm" style={{ color: 'var(--color-text-muted)' }} data-testid="plot-canvas-empty">
-            <Film size={34} className="opacity-40" />
-            <p className="font-medium" style={{ color: 'var(--color-text)' }}>{text('选择一个剧情画布', 'Select a plot canvas')}</p>
-            <p className="text-xs">{text('从左侧目录选择一个剧情画布，或创建新的剧情画布', 'Pick a canvas from the list, or create a new one')}</p>
-            <Button
-              variant="default"
-              size="sm"
-              onClick={() => { setCanvasDialogName(''); setCanvasDialog({ mode: 'create', parentCanvasId: null }) }}
-            >
-              <Plus size={13} />{text('新增剧情画布', 'New plot canvas')}
-            </Button>
-          </div>
-        )}
-      </div>
+          ) : null
+        }
+        emptyOverlay={
+          !activeCanvas ? (
+            <PlotCanvasEmptyState mode="no-canvas" onCreateCanvas={openCreateDialog} />
+          ) : graph && !hasNodes ? (
+            <PlotCanvasEmptyState mode="empty-canvas" onAddEvent={addNodeAtCenter} />
+          ) : null
+        }
+        rightPanel={rightPanel}
+      />
 
-      {/* 详情面板 */}
-      {detail && activeCanvas && (
-        <aside className="canvas-detail" data-testid="plot-canvas-detail">
-          <div className="canvas-detail__header">
-            <span className="canvas-detail__title">
-              {detail.kind === 'node'
-                ? text('剧情事件详情', 'Plot event details')
-                : text('连线详情', 'Connection details')}
-            </span>
-            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setDetail(null)} aria-label={text('关闭详情', 'Close details')}>
-              <X size={12} />
-            </Button>
-          </div>
-          <div className="canvas-detail__body">
-            {detail.kind === 'node' && detailNode && (
-              <>
-                <div className="canvas-detail__section">
-                  <Label htmlFor="plot-node-title">{text('标题', 'Title')}</Label>
-                  <Input
-                    id="plot-node-title"
-                    value={detail.title}
-                    onChange={event => setDetail(previous => previous?.kind === 'node' ? { ...previous, title: event.target.value } : previous)}
-                  />
-                </div>
-                <div className="canvas-detail__section">
-                  <Label htmlFor="plot-node-summary">{text('摘要', 'Summary')}</Label>
-                  <Textarea
-                    id="plot-node-summary"
-                    rows={5}
-                    value={detail.summary}
-                    onChange={event => setDetail(previous => previous?.kind === 'node' ? { ...previous, summary: event.target.value } : previous)}
-                  />
-                </div>
-                <div className="canvas-detail__section">
-                  <Label>{text('颜色', 'Color')}</Label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {NODE_COLOR_KEYS.map(key => (
-                      <button
-                        key={key}
-                        type="button"
-                        className={`planning-chip${detail.colorKey === key ? ' is-active' : ''}`}
-                        aria-pressed={detail.colorKey === key}
-                        onClick={() => setDetail(previous => previous?.kind === 'node' ? { ...previous, colorKey: key } : previous)}
-                      >
-                        {text(...COLOR_LABELS[key])}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="canvas-detail__section">
-                  <Label>{text('关联章节（点击切换）', 'Linked chapters (click to toggle)')}</Label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {(() => {
-                      const chapterNumbers = new Set<number>(detailNode.chapterRefs)
-                      for (const bp of blueprints) chapterNumbers.add(bp.chapterNumber)
-                      for (const draft of drafts) chapterNumbers.add(draft.chapterNumber)
-                      return [...chapterNumbers].sort((a, b) => a - b).slice(0, 60).map(chapter => (
-                        <button
-                          key={chapter}
-                          type="button"
-                          className={`planning-chip${detailNode.chapterRefs.includes(chapter) ? ' is-active' : ''}`}
-                          aria-pressed={detailNode.chapterRefs.includes(chapter)}
-                          onClick={() => patchSelectedNode({
-                            id: detailNode.id,
-                            chapterRefs: detailNode.chapterRefs.includes(chapter)
-                              ? detailNode.chapterRefs.filter(item => item !== chapter)
-                              : [...detailNode.chapterRefs, chapter].sort((a, b) => a - b),
-                          })}
-                        >
-                          {text(`第${chapter}章`, `Ch ${chapter}`)}
-                        </button>
-                      ))
-                    })()}
-                  </div>
-                </div>
-                <div className="canvas-detail__section">
-                  <Label htmlFor="plot-node-plan">{text('关联线索计划', 'Linked thread plan')}</Label>
-                  <NativeSelect
-                    id="plot-node-plan"
-                    value={detailNode.planId ?? ''}
-                    onChange={event => patchSelectedNode({
-                      id: detailNode.id,
-                      planId: event.target.value === '' ? null : Number(event.target.value),
-                    })}
-                  >
-                    <option value="">{text('未关联', 'Not linked')}</option>
-                    {threads.map(thread => (
-                      <option key={thread.id} value={thread.id}>{thread.title}</option>
-                    ))}
-                  </NativeSelect>
-                  {detailNode.planId !== null && (
-                    <Button variant="outline" size="sm" className="self-start" onClick={() => onOpenPlan?.(detailNode.planId as number)}>
-                      {text('查看线索计划', 'Open thread plan')}
-                    </Button>
-                  )}
-                </div>
-                <div className="canvas-detail__section">
-                  <Label>{text('章节跳转', 'Chapter jumps')}</Label>
-                  <div className="canvas-detail__links">
-                    {detailNode.chapterRefs.length === 0 && (
-                      <span className="canvas-detail__text">{text('尚未关联章节。', 'No chapters linked yet.')}</span>
-                    )}
-                    {[...chapterLinkInfo.entries()].map(([chapter, info]) => (
-                      <div key={chapter} className="flex flex-col gap-1">
-                        <span className="canvas-detail__label">{text(`第 ${chapter} 章`, `Chapter ${chapter}`)}</span>
-                        <div className="flex gap-1.5">
-                          <button
-                            type="button"
-                            className={`canvas-detail__link${!info.hasBlueprint ? ' is-broken' : ''}`}
-                            disabled={!info.hasBlueprint}
-                            title={info.hasBlueprint
-                              ? text('打开该章蓝图', 'Open this chapter blueprint')
-                              : text('该章还没有蓝图', 'No blueprint for this chapter yet')}
-                            onClick={() => openBlueprint(chapter)}
-                          >
-                            <span>{info.hasBlueprint ? text('打开蓝图', 'Open blueprint') : text('暂无蓝图', 'No blueprint')}</span>
-                          </button>
-                          <button
-                            type="button"
-                            className={`canvas-detail__link${!info.draftId ? ' is-broken' : ''}`}
-                            disabled={!info.draftId}
-                            title={info.draftId
-                              ? text('打开该章正文', 'Open this chapter draft')
-                              : text('该章还没有正文', 'No draft for this chapter yet')}
-                            onClick={() => info.draftId && openDraft(info.draftId, chapter)}
-                          >
-                            <span>{info.draftId
-                              ? text(info.finalized ? '打开定稿' : '打开草稿', info.finalized ? 'Open finalized' : 'Open draft')
-                              : text('暂无正文', 'No draft')}</span>
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="canvas-detail__section">
-                  <Label>{text('子画布', 'Sub-canvas')}</Label>
-                  {detailNode.subCanvasId ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="self-start"
-                      onClick={() => setActiveCanvasId(detailNode.subCanvasId as string)}
-                    >
-                      {text('进入子画布', 'Enter sub-canvas')}
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="self-start"
-                      onClick={() => {
-                        const defaultName = `${detailNode.title} · ${text('子画布', 'Sub-canvas')}`
-                        setSubCanvasName(defaultName)
-                        setSubCanvasDialog({ nodeId: detailNode.id, defaultName })
-                      }}
-                    >
-                      <FolderPlus size={12} />{text('创建子画布并关联', 'Create and link sub-canvas')}
-                    </Button>
-                  )}
-                </div>
-                <div className="flex gap-2">
-                  <Button size="sm" onClick={detailSave} data-testid="plot-node-save">{text('保存修改', 'Save changes')}</Button>
-                  <Button variant="ghost" size="sm" onClick={() => void deleteNode(detailNode.id)} data-testid="plot-node-delete">
-                    <Trash2 size={12} />{text('删除节点', 'Delete node')}
-                  </Button>
-                </div>
-              </>
-            )}
-            {detail.kind === 'edge' && detailEdge && (
-              <>
-                <div className="canvas-detail__section">
-                  <Label htmlFor="plot-edge-label">{text('关系标签（如：承接 / 埋下 / 回收）', 'Relation label (e.g. follows / plants / pays off)')}</Label>
-                  <Input
-                    id="plot-edge-label"
-                    value={detail.label}
-                    onChange={event => setDetail(previous => previous?.kind === 'edge' ? { ...previous, label: event.target.value } : previous)}
-                  />
-                </div>
-                <div className="canvas-detail__section">
-                  <Label>{text('连线种类', 'Connection kind')}</Label>
-                  <NativeSelect
-                    value={detail.edgeKind}
-                    onChange={event => setDetail(previous => previous?.kind === 'edge'
-                      ? { ...previous, edgeKind: event.target.value as 'main' | 'aux' }
-                      : previous)}
-                  >
-                    <option value="main">{text('主线（实线）', 'Main (solid)')}</option>
-                    <option value="aux">{text('次要（虚线）', 'Secondary (dashed)')}</option>
-                  </NativeSelect>
-                </div>
-                <div className="flex gap-2">
-                  <Button size="sm" onClick={detailSave}>{text('保存修改', 'Save changes')}</Button>
-                  <Button variant="ghost" size="sm" onClick={() => void deleteEdgeById(detailEdge.id)}>
-                    <Trash2 size={12} />{text('删除连线', 'Delete connection')}
-                  </Button>
-                </div>
-              </>
-            )}
-          </div>
-        </aside>
-      )}
-
-      {/* 新建 / 重命名画布对话框 */}
-      <Dialog open={canvasDialog !== null} onOpenChange={open => { if (!open) setCanvasDialog(null) }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>
-              {canvasDialog?.mode === 'create' ? text('新增剧情画布', 'New plot canvas') : text('重命名剧情画布', 'Rename plot canvas')}
-            </DialogTitle>
-            <DialogDescription>
-              {canvasDialog?.mode === 'create' && canvasDialog.parentCanvasId
-                ? text('子画布会挂在所选画布下，用于收纳一个剧情事件的展开。', 'The sub-canvas hangs under the chosen canvas to expand one plot event.')
-                : text('画布标题用于左侧目录与面包屑。', 'The canvas title appears in the list and breadcrumb.')}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="px-6 py-3">
-            <Label htmlFor="plot-canvas-name">{text('画布标题', 'Canvas title')}</Label>
-            <Input
-              id="plot-canvas-name"
-              value={canvasDialogName}
-              onChange={event => setCanvasDialogName(event.target.value)}
-              placeholder={text('例如：第一卷主线', 'e.g. Volume 1 main line')}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setCanvasDialog(null)}>{text('取消', 'Cancel')}</Button>
-            <Button
-              disabled={canvasDialogBusy || !canvasDialogName.trim()}
-              onClick={() => {
-                if (canvasDialog?.mode === 'create') void createCanvas(canvasDialogName.trim(), canvasDialog.parentCanvasId)
-                if (canvasDialog?.mode === 'rename') {
-                  if (canvasDialog.canvas.name === canvasDialogName.trim()) setCanvasDialog(null)
-                  else void renameCanvas(canvasDialog.canvas, canvasDialogName.trim())
-                }
-              }}
-            >
-              {text('保存', 'Save')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* 新建 / 重命名画布对话框（标题必填，描述选填并持久化） */}
+      <CreatePlotCanvasDialog
+        open={canvasDialog !== null}
+        onOpenChange={open => { if (!open) setCanvasDialog(null) }}
+        initialTitle={canvasDialog?.mode === 'rename' ? canvasDialog.canvas.name : ''}
+        initialDescription={canvasDialog?.mode === 'rename' ? canvasDialog.canvas.description : ''}
+        heading={canvasDialog?.mode === 'rename' ? text('重命名剧情画布', 'Rename plot canvas') : undefined}
+        submitLabel={canvasDialog?.mode === 'rename' ? text('保存', 'Save') : undefined}
+        submitting={canvasDialogBusy}
+        onSubmit={values => {
+          if (canvasDialog?.mode === 'create') void createCanvas(values, canvasDialog.parentCanvasId)
+          if (canvasDialog?.mode === 'rename') void renameCanvas(canvasDialog.canvas, values)
+        }}
+      />
 
       {/* 删除画布（含子画布策略） */}
       <Dialog open={deleteCanvasTarget !== null} onOpenChange={open => { if (!open) setDeleteCanvasTarget(null) }}>
@@ -1370,8 +1655,8 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
           <DialogHeader>
             <DialogTitle>{text('合并剧情事件', 'Merge plot events')}</DialogTitle>
             <DialogDescription>{text(
-              '所选节点将合并为一个新节点：章节引用取并集，外部连线按原方向改接，源节点删除。',
-              'Selected nodes merge into one new node: chapter refs union, external connections re-attached, sources removed.',
+              '所选节点将合并为一个新节点：种类、标签与实体引用取并集，章节引用取并集，外部连线按原方向改接，源节点删除。',
+              'Selected nodes merge into one new node: kind, tags, entity refs and chapter refs are unioned, external connections re-attached, sources removed.',
             )}</DialogDescription>
           </DialogHeader>
           <div className="space-y-3 px-6 py-3">
@@ -1441,4 +1726,10 @@ function openBlueprint(chapter: number): void {
 function openDraft(draftId: number, chapter: number): void {
   const text = useLocaleStore.getState().text
   void openChapterFile(`vela://draft/${draftId}`, text(`第 ${chapter} 章草稿`, `Chapter ${chapter} draft`))
+}
+
+function openDraftRef(ref: PlotCanvasNodeEntityRef): void {
+  if (ref.entityType !== 'draft') return
+  const text = useLocaleStore.getState().text
+  void openChapterFile(`vela://draft/${ref.entityId}`, text(`正文草稿 #${ref.entityId}`, `Draft #${ref.entityId}`))
 }

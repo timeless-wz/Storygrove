@@ -12,6 +12,7 @@
  */
 
 import { Clapperboard, Film, Search, X, ChevronsLeft } from 'lucide-react'
+import type { ReactNode } from 'react'
 
 import { useLocaleStore } from '../../../stores/locale-store'
 import type { PlotCanvasSidebarEntry, PlotCanvasSidebarTab } from './types'
@@ -32,6 +33,13 @@ export interface PlotCanvasSidebarProps {
   onCreateCanvas?: () => void
   createDisabled?: boolean
   onCollapse?: () => void
+  /**
+   * 行级悬浮操作（重命名 / 新增子画布 / 删除等），由集成方注入；
+   * 悬停或选中该行时显示，不传则不渲染操作区。
+   */
+  itemActions?: (entry: PlotCanvasSidebarEntry) => ReactNode
+  /** 覆盖内置空列表状态（例如“章节”页签的引导说明）。 */
+  emptyStateNode?: ReactNode
   className?: string
 }
 
@@ -52,6 +60,8 @@ export function PlotCanvasSidebar({
   onCreateCanvas,
   createDisabled,
   onCollapse,
+  itemActions,
+  emptyStateNode,
   className,
 }: PlotCanvasSidebarProps) {
   const text = useLocaleStore(s => s.text)
@@ -148,10 +158,12 @@ export function PlotCanvasSidebar({
 
       <div className="plot-canvas-sidebar__list" data-testid="plot-canvas-sidebar-list" role="list" aria-label={text('剧情画布列表', 'Plot canvas list')}>
         {canvases.length === 0 ? (
-          <div className="plot-canvas-sidebar__empty" data-testid="plot-canvas-sidebar-empty">
-            <span className="plot-canvas-sidebar__empty-icon" aria-hidden="true">📭</span>
-            <span>{isSearching ? text('未找到匹配的画布', 'No matching canvases') : text('暂无剧情画布', 'No plot canvases yet')}</span>
-          </div>
+          emptyStateNode ?? (
+            <div className="plot-canvas-sidebar__empty" data-testid="plot-canvas-sidebar-empty">
+              <span className="plot-canvas-sidebar__empty-icon" aria-hidden="true">📭</span>
+              <span>{isSearching ? text('未找到匹配的画布', 'No matching canvases') : text('暂无剧情画布', 'No plot canvases yet')}</span>
+            </div>
+          )
         ) : (
           canvases.map(canvas => {
             const level = canvas.level ?? 0
@@ -188,6 +200,9 @@ export function PlotCanvasSidebar({
                     <span className="plot-canvas-sidebar__item-arrow" aria-hidden="true">›</span>
                   )}
                 </button>
+                {itemActions && (
+                  <div className="plot-canvas-sidebar__item-actions">{itemActions(canvas)}</div>
+                )}
               </div>
             )
           })

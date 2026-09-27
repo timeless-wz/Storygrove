@@ -12,7 +12,7 @@
  *    - 连线若连接了至少一个搜索命中节点，则保持高亮，否则连线也灰显。
  */
 
-import type { PlotGraphEdgeData, PlotGraphFilterState, PlotGraphNodeData, PlotNodeKind } from './types'
+import type { PlotGraphFilterState, PlotGraphNodeData, PlotNodeKind } from './types'
 import { ALL_PLOT_NODE_KINDS } from './types'
 
 export interface FilterResult<TNode = PlotGraphNodeData> {
@@ -142,8 +142,12 @@ export function filterPlotGraphNodes<TNode extends { id: string; data: PlotGraph
  * - 当且仅当 source 与 target 两个节点 ID 都在 visibleNodeIdSet 中时，边才可见 (hidden: false)。
  * - 只要任意一端节点不存在或不可见，该边必须 hidden: true。
  * - 当有活跃搜索时，若边的任一端节点命中搜索，则该边保持清晰 (dimmed: false)；否则 dimmed: true。
+ *
+ * 泛型只约束端点字段：React Flow 的 Edge 顶层 label 是 ReactNode，与
+ * PlotGraphEdgeData.label: string 不兼容，但本函数只读写端点与视图标志，
+ * 其余字段经展开原样保留，因此放宽约束即可同时服务两种边类型。
  */
-export function resolvePlotGraphEdgeVisibility<TEdge extends PlotGraphEdgeData>(
+export function resolvePlotGraphEdgeVisibility<TEdge extends { source: string; target: string }>(
   edges: TEdge[],
   visibleNodeIdSet: Set<string>,
   searchHitNodeIdSet: Set<string>,

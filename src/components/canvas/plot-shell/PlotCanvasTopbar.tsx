@@ -8,6 +8,7 @@
  */
 
 import { useLayoutEffect, useRef } from 'react'
+import type { ReactNode } from 'react'
 import { ChevronDown, ChevronRight, FileText, Filter, Plus, Search, Workflow } from 'lucide-react'
 
 import { useLocaleStore } from '../../../stores/locale-store'
@@ -34,6 +35,8 @@ export interface PlotCanvasTopbarProps {
   infoActive?: boolean
   onOpenInfo?: () => void
   infoDisabled?: boolean
+  /** 右侧竖排图标区顶部的扩展位（如“对照层”开关），由集成方注入。 */
+  extraActions?: ReactNode
   className?: string
 }
 
@@ -54,6 +57,7 @@ export function PlotCanvasTopbar({
   infoActive,
   onOpenInfo,
   infoDisabled,
+  extraActions,
   className,
 }: PlotCanvasTopbarProps) {
   const text = useLocaleStore(s => s.text)
@@ -122,6 +126,7 @@ export function PlotCanvasTopbar({
       </div>
 
       <div className="plot-shell__topbar-right">
+        {extraActions}
         <button
           type="button"
           className={`plot-shell__icon-btn${searchActive ? ' is-active' : ''}`}

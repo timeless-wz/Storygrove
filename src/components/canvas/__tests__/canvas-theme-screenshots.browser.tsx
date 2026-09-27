@@ -192,7 +192,7 @@ afterEach(async () => {
 
 async function waitPlotCanvasReady() {
   await vi.waitFor(() => {
-    if (container.querySelectorAll('[data-testid="plot-canvas-node"]').length < 4) throw new Error('nodes not ready')
+    if (container.querySelectorAll('[data-testid="plot-graph-card"]').length < 4) throw new Error('nodes not ready')
   }, { timeout: 15000 })
   await new Promise(resolve => setTimeout(resolve, 700))
 }

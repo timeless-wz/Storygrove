@@ -73,6 +73,14 @@ function installIpc() {
         canvas.name = name
         return { success: true, canvas }
       }
+      case 'db:plot-canvas-update': {
+        const [input] = args as [{ canvasId: string; name?: string; description?: string }]
+        const canvas = db.canvases.find(item => item.id === input.canvasId)
+        if (!canvas) return { success: false, error: '画布不存在' }
+        if (input.name !== undefined) canvas.name = input.name
+        if (input.description !== undefined) canvas.description = input.description
+        return { success: true, canvas }
+      }
       case 'db:plot-canvas-delete': {
         const [canvasId] = args as [string]
         db.canvases = db.canvases.filter(canvas => canvas.id !== canvasId)
@@ -296,18 +304,18 @@ describe('PlotCanvasWorkbench', () => {
     await act(async () => { root?.render(<PlotCanvasWorkbench projectKey={PROJECT_PATH} />) })
     await vi.waitFor(() => expect(container!.textContent).toContain('暂无剧情画布'))
 
-    // 新建画布（对话框 → 输入标题 → 保存）。
+    // 新建画布（对话框 → 输入标题 → 创建）。
     await clickButton(findButton('新增剧情画布'))
-    await setInput('#plot-canvas-name', '第一卷主线')
-    await clickButton(findButton('保存'))
+    await setInput('#plot-canvas-create-title', '第一卷主线')
+    await clickButton(findButton('创建'))
     await vi.waitFor(() => expect(container!.textContent).toContain('第一卷主线'))
     expect(db.canvases).toHaveLength(1)
 
     // 添加两个剧情事件。
     await clickButton(findButton('新增剧情事件'))
-    await vi.waitFor(() => expect(container!.querySelectorAll('[data-testid="plot-canvas-node"]')).toHaveLength(1))
+    await vi.waitFor(() => expect(container!.querySelectorAll('[data-testid="plot-graph-card"]')).toHaveLength(1))
     await clickButton(findButton('新增剧情事件'))
-    await vi.waitFor(() => expect(container!.querySelectorAll('[data-testid="plot-canvas-node"]')).toHaveLength(2))
+    await vi.waitFor(() => expect(container!.querySelectorAll('[data-testid="plot-graph-card"]')).toHaveLength(2))
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('db:plot-canvas-node-upsert', expect.anything(), PROJECT_PATH, expect.anything()))
 
     // 编辑第一个节点的标题并保存。
@@ -336,10 +344,10 @@ describe('PlotCanvasWorkbench', () => {
 
     // 新增第三个节点（详情自动切到它）并删除，验证删除确认与级联清理。
     await clickButton(findButton('新增剧情事件'))
-    await vi.waitFor(() => expect(container!.querySelectorAll('[data-testid="plot-canvas-node"]')).toHaveLength(3))
+    await vi.waitFor(() => expect(container!.querySelectorAll('[data-testid="plot-graph-card"]')).toHaveLength(3))
     await clickButton(findButton('删除节点'))
     await clickButton(button => button.textContent === '删除')
-    await vi.waitFor(() => expect(container!.querySelectorAll('[data-testid="plot-canvas-node"]')).toHaveLength(2))
+    await vi.waitFor(() => expect(container!.querySelectorAll('[data-testid="plot-graph-card"]')).toHaveLength(2))
     expect(db.graphs.get(db.canvases[0].id)?.nodes).toHaveLength(2)
 
     // 重挂载：改名节点与章节引用仍在（持久化而非组件状态）。
@@ -347,7 +355,7 @@ describe('PlotCanvasWorkbench', () => {
     root = createRoot(container!)
     await act(async () => { root?.render(<PlotCanvasWorkbench projectKey={PROJECT_PATH} />) })
     await vi.waitFor(() => {
-      expect(container!.querySelectorAll('[data-testid="plot-canvas-node"]')).toHaveLength(2)
+      expect(container!.querySelectorAll('[data-testid="plot-graph-card"]')).toHaveLength(2)
       expect(container!.textContent).toContain('发现刻痕')
       const saved = db.graphs.get(db.canvases[0].id)?.nodes.find(node => node.title === '发现刻痕')
       expect(saved?.chapterRefs).toEqual([2])
@@ -358,8 +366,8 @@ describe('PlotCanvasWorkbench', () => {
     db.failChannel = 'db:plot-canvas-node-upsert'
     await act(async () => { root?.render(<PlotCanvasWorkbench projectKey={PROJECT_PATH} />) })
     await clickButton(findButton('新增剧情画布'))
-    await setInput('#plot-canvas-name', '失败演练')
-    await clickButton(findButton('保存'))
+    await setInput('#plot-canvas-create-title', '失败演练')
+    await clickButton(findButton('创建'))
     await vi.waitFor(() => expect(container!.textContent).toContain('失败演练'))
 
     await clickButton(findButton('新增剧情事件'))
@@ -373,19 +381,182 @@ describe('PlotCanvasWorkbench', () => {
     expect(db.graphs.get(db.canvases[0].id)?.nodes).toHaveLength(1)
   })
 
-  it('搜索命中高亮、未命中变暗', async () => {
+  it('搜索命中高亮、未命中变暗（画布节点搜索在筛选条中）', async () => {
     await act(async () => { root?.render(<PlotCanvasWorkbench projectKey={PROJECT_PATH} />) })
     await clickButton(findButton('新增剧情画布'))
-    await setInput('#plot-canvas-name', '搜索演练')
-    await clickButton(findButton('保存'))
+    await setInput('#plot-canvas-create-title', '搜索演练')
+    await clickButton(findButton('创建'))
     await vi.waitFor(() => expect(container!.textContent).toContain('搜索演练'))
     await clickButton(findButton('新增剧情事件'))
-    await vi.waitFor(() => expect(container!.querySelectorAll('[data-testid="plot-canvas-node"]')).toHaveLength(1))
+    await vi.waitFor(() => expect(container!.querySelectorAll('[data-testid="plot-graph-card"]')).toHaveLength(1))
 
-    await setInput('input[type="search"]', '不存在的关键词')
+    // 顶栏搜索入口打开筛选条，节点搜索在其中。
+    await clickButton(button => button.getAttribute('data-testid') === 'plot-canvas-topbar-search')
+    await vi.waitFor(() => expect(container!.querySelector('.plot-graph-search-input')).toBeTruthy())
+    await setInput('.plot-graph-search-input', '不存在的关键词')
     await vi.waitFor(() => {
-      const node = container!.querySelector('[data-testid="plot-canvas-node"]')
+      const node = container!.querySelector('[data-testid="plot-graph-card"]')
       expect(node?.className).toContain('is-dimmed')
+    })
+  })
+
+  it('集成：描述持久化、entityRefs 展示、种类/标签编辑、筛选只改视图', async () => {
+    // 直接种子：带描述的画布 + 两个节点（伏笔带实体引用）与一条连线。
+    const canvas: PlotCanvasSummary = {
+      id: 'pca-70000000-0000-4000-8000-000000000001',
+      name: '集成演练',
+      description: '铜牌与归墟之门',
+      parentCanvasId: null,
+      sortOrder: 1,
+    }
+    db.canvases.push(canvas)
+    const foreshadowNode: PlotCanvasNodeData = {
+      id: 'pcn-70000000-0000-4000-8000-000000000001',
+      canvasId: canvas.id,
+      kind: 'foreshadow',
+      title: '潮纹铜牌',
+      summary: '铜牌在灵气激荡时显出潮纹。',
+      colorKey: 'default',
+      tags: ['暗线'],
+      entityRefs: [
+        { entityType: 'foreshadowing', entityId: 'fs-missing' },
+        { entityType: 'draft', entityId: 7 },
+      ],
+      chapterRefs: [2],
+      planId: null,
+      subCanvasId: null,
+      x: 100,
+      y: 120,
+    }
+    const plotNode: PlotCanvasNodeData = {
+      id: 'pcn-70000000-0000-4000-8000-000000000002',
+      canvasId: canvas.id,
+      kind: 'plot',
+      title: '渔村灭门',
+      summary: '苏砚回到渔村，全家被灭。',
+      colorKey: 'default',
+      tags: [],
+      entityRefs: [],
+      chapterRefs: [1],
+      planId: null,
+      subCanvasId: null,
+      x: 460,
+      y: 120,
+    }
+    db.graphs.set(canvas.id, {
+      nodes: [foreshadowNode, plotNode],
+      edges: [{
+        id: 'pce-70000000-0000-4000-8000-000000000001',
+        canvasId: canvas.id,
+        sourceNodeId: plotNode.id,
+        targetNodeId: foreshadowNode.id,
+        label: '埋下',
+        kind: 'main',
+      }],
+    })
+
+    await act(async () => { root?.render(<PlotCanvasWorkbench projectKey={PROJECT_PATH} />) })
+    await vi.waitFor(() => expect(container!.querySelectorAll('[data-testid="plot-graph-card"]')).toHaveLength(2))
+    // 左侧目录展示画布描述。
+    await vi.waitFor(() => expect(container!.textContent).toContain('铜牌与归墟之门'))
+    // 卡片按 kind 渲染种类徽章与标签。
+    const foreshadowCard = container!.querySelector('[data-kind="foreshadow"]')
+    expect(foreshadowCard?.textContent).toContain('伏笔')
+    expect(foreshadowCard?.textContent).toContain('#暗线')
+
+    // 点选伏笔节点 → 详情展示 entityRefs：悬挂引用标失效，draft 引用可打开。
+    // d3-drag 读取 event.view，合成事件必须带 view: window。
+    await act(async () => {
+      ;(foreshadowCard as HTMLElement).dispatchEvent(new MouseEvent('mousedown', { bubbles: true, view: window }))
+    })
+    await act(async () => { (foreshadowCard as HTMLElement).click() })
+    await vi.waitFor(() => expect(container!.querySelector('[data-testid="plot-canvas-detail"]')).toBeTruthy())
+    await vi.waitFor(() => {
+      expect(container!.textContent).toContain('关联实体')
+      expect(container!.textContent).toContain('fs-missing')
+      expect(container!.textContent).toContain('引用失效')
+      expect(container!.textContent).toContain('正文草稿')
+    })
+    const openDraftButton = Array.from(container!.querySelectorAll('button'))
+      .find(button => button.textContent?.includes('打开正文'))
+    expect(openDraftButton).toBeTruthy()
+    expect(openDraftButton!.disabled).toBe(false)
+
+    // 编辑标签与种类并保存 → 真实写库。
+    await setInput('#plot-node-tags', '暗线, 铜牌')
+    await clickButton(findButton('保存修改'))
+    await vi.waitFor(() => {
+      const saved = db.graphs.get(canvas.id)?.nodes.find(node => node.id === foreshadowNode.id)
+      expect(saved?.tags).toEqual(['暗线', '铜牌'])
+    })
+
+    // 种类筛选只改视图：隐藏“剧情”种类后，该节点与相连连线从视图消失，库不变。
+    await clickButton(button => button.getAttribute('data-testid') === 'plot-canvas-topbar-filters')
+    await vi.waitFor(() => expect(container!.querySelector('.plot-graph-filter-trigger')).toBeTruthy())
+    await act(async () => {
+      (container!.querySelector('.plot-graph-filter-trigger') as HTMLButtonElement).click()
+    })
+    await vi.waitFor(() => expect(container!.querySelector('.plot-graph-filter-chips-grid')).toBeTruthy())
+    const plotChip = await vi.waitFor(() => {
+      const found = Array.from(container!.querySelectorAll('.plot-graph-filter-chip'))
+        .find(chip => chip.textContent?.startsWith('剧情'))
+      if (!found) throw new Error('plot kind chip not found')
+      return found
+    })
+    await act(async () => { (plotChip as HTMLElement).click() })
+    // React Flow 不渲染 hidden 节点/连线：被筛掉的种类从画布 DOM 消失。
+    await vi.waitFor(() => {
+      expect(container!.querySelector('[data-kind="plot"]')).toBeNull()
+      expect(container!.querySelector('[data-kind="foreshadow"]')).toBeTruthy()
+      expect(container!.querySelector('.react-flow__edge')).toBeNull()
+    })
+    // 数据层不受筛选影响。
+    expect(db.graphs.get(canvas.id)?.nodes).toHaveLength(2)
+    expect(db.graphs.get(canvas.id)?.edges).toHaveLength(1)
+
+    // 重置筛选 → 节点与连线即刻恢复。
+    await clickButton(button => button.textContent === '重置')
+    await vi.waitFor(() => {
+      expect(container!.querySelector('[data-kind="plot"]')).toBeTruthy()
+      expect(container!.querySelector('.react-flow__edge')).toBeTruthy()
+    })
+  })
+
+  it('重命名与说明通过同一对话框保存，重开后仍存在', async () => {
+    const canvas: PlotCanvasSummary = {
+      id: 'pca-71000000-0000-4000-8000-000000000001',
+      name: '旧名画布',
+      description: '旧说明',
+      parentCanvasId: null,
+      sortOrder: 1,
+    }
+    db.canvases.push(canvas)
+    await act(async () => { root?.render(<PlotCanvasWorkbench projectKey={PROJECT_PATH} />) })
+    await vi.waitFor(() => expect(container!.textContent).toContain('旧名画布'))
+
+    // 悬停操作：重命名（对话框预填标题与说明）。
+    await clickButton(button => button.getAttribute('aria-label') === '重命名画布')
+    await vi.waitFor(() => {
+      const titleInput = document.body.querySelector<HTMLInputElement>('#plot-canvas-create-title')
+      expect(titleInput?.value).toBe('旧名画布')
+    })
+    const descriptionInput = document.body.querySelector<HTMLTextAreaElement>('#plot-canvas-create-description')
+    expect(descriptionInput?.value).toBe('旧说明')
+    await setInput('#plot-canvas-create-title', '新名画布')
+    await setInput('#plot-canvas-create-description', '新说明铜牌线')
+    await clickButton(findButton('保存'))
+    await vi.waitFor(() => {
+      expect(db.canvases[0]?.name).toBe('新名画布')
+      expect(db.canvases[0]?.description).toBe('新说明铜牌线')
+    })
+
+    // 重挂载读回：标题与描述都在。
+    await act(async () => { root?.unmount() })
+    root = createRoot(container!)
+    await act(async () => { root?.render(<PlotCanvasWorkbench projectKey={PROJECT_PATH} />) })
+    await vi.waitFor(() => {
+      expect(container!.textContent).toContain('新名画布')
+      expect(container!.textContent).toContain('新说明铜牌线')
     })
   })
 })

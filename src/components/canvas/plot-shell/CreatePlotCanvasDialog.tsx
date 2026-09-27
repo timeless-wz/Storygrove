@@ -24,6 +24,10 @@ export interface CreatePlotCanvasDialogProps {
   initialDescription?: string
   /** 提交进行中：禁用提交按钮，防止重复提交。 */
   submitting?: boolean
+  /** 对话框标题（默认“新增剧情画布”）；重命名等场景由集成方传入已本地化文案。 */
+  heading?: string
+  /** 提交按钮文案（默认“创建”）。 */
+  submitLabel?: string
   /** 提交回调；values.title 保证非空 trim，description 为 trim 后文本（可为空串）。 */
   onSubmit: (values: PlotCanvasDraftValues) => void | Promise<void>
   className?: string
@@ -35,6 +39,8 @@ export function CreatePlotCanvasDialog({
   initialTitle = '',
   initialDescription = '',
   submitting,
+  heading,
+  submitLabel,
   onSubmit,
   className,
 }: CreatePlotCanvasDialogProps) {
@@ -47,6 +53,8 @@ export function CreatePlotCanvasDialog({
           initialTitle={initialTitle}
           initialDescription={initialDescription}
           submitting={submitting}
+          heading={heading}
+          submitLabel={submitLabel}
           onSubmit={onSubmit}
           className={className}
         />
@@ -60,6 +68,8 @@ function CreatePlotCanvasDialogContent({
   initialTitle = '',
   initialDescription = '',
   submitting,
+  heading,
+  submitLabel,
   onSubmit,
   className,
 }: Omit<CreatePlotCanvasDialogProps, 'open'>) {
@@ -109,7 +119,7 @@ function CreatePlotCanvasDialogContent({
         data-testid="plot-canvas-create-dialog"
       >
         <DialogHeader className="!py-3">
-          <DialogTitle>{text('新增剧情画布', 'New plot canvas')}</DialogTitle>
+          <DialogTitle>{heading ?? text('新增剧情画布', 'New plot canvas')}</DialogTitle>
           <DialogDescription>
             {text('画布标题用于左侧目录与顶部选择器；描述可选。', 'The canvas title appears in the sidebar and top picker; the description is optional.')}
           </DialogDescription>
@@ -170,7 +180,7 @@ function CreatePlotCanvasDialogContent({
               disabled={!canSubmit}
               data-testid="plot-canvas-create-submit"
             >
-              {text('创建', 'Create')}
+              {submitLabel ?? text('创建', 'Create')}
             </button>
           </div>
         </form>
