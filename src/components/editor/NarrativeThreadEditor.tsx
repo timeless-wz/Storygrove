@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { CheckCircle2, Clock3, GitBranch, Loader2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
+import { CheckCircle2, Clock3, Film, GitBranch, Loader2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
 
 import type { DatabaseChannels, ModelProfile } from '../../shared/ipc-channels'
 import {
@@ -56,6 +56,7 @@ import {
 } from '../planning/PlanningPageShell'
 import { usePlanningBackPath } from '../planning/planning-navigation'
 import PlotTreeView from './PlotTreeView'
+import PlotCanvasWorkbench from '../canvas/PlotCanvasWorkbench'
 
 const EMPTY_PLAN: NarrativeThreadPlanInput = {
   title: '', type: '', targetStartChapter: 1, targetEndChapter: 1, authorIntent: '',
@@ -72,7 +73,7 @@ const STATUS_LABELS: Record<NarrativeThreadView['status'], [string, string]> = {
 interface NarrativeThreadEditorProps {
   projectKey: string
   candidateGenerator?: NarrativeThreadCandidateGenerator
-  initialView?: 'plot-tree' | 'plans'
+  initialView?: 'plot-tree' | 'canvas' | 'plans'
   viewRequest?: number
   plotTreeGenerator?: (request: GeneratePlotTreeInput) => Promise<PlotTreeSnapshot>
 }
@@ -224,7 +225,7 @@ export default function NarrativeThreadEditor({
   const [eventCandidates, setEventCandidates] = useState<BoundEventCandidate[]>([])
   const [aiBusy, setAiBusy] = useState(false)
   const [aiError, setAiError] = useState('')
-  const [view, setView] = useState<'plot-tree' | 'plans'>(initialView)
+  const [view, setView] = useState<'plot-tree' | 'canvas' | 'plans'>(initialView)
   // 左侧线索清单按状态筛选
   const [statusFilter, setStatusFilter] = useState<'all' | NarrativeThreadView['status']>('all')
   const [plotSources, setPlotSources] = useState<PlotTreeSourceBundle | null>(null)
@@ -688,6 +689,15 @@ export default function NarrativeThreadEditor({
               </button>
               <button
                 type="button"
+                aria-pressed={view === 'canvas'}
+                className={`planning-segmented__option${view === 'canvas' ? ' is-active' : ''}`}
+                onClick={() => setView('canvas')}
+              >
+                <Film size={12} />
+                {text('剧情画布', 'Plot canvas')}
+              </button>
+              <button
+                type="button"
                 aria-pressed={view === 'plans'}
                 className={`planning-segmented__option${view === 'plans' ? ' is-active' : ''}`}
                 onClick={() => setView('plans')}
@@ -723,6 +733,16 @@ export default function NarrativeThreadEditor({
               />
             </div>
           </main>
+        ) : view === 'canvas' ? (
+          <div className="planning-page__main" style={{ minHeight: 0 }}>
+            <PlotCanvasWorkbench
+              projectKey={projectKey}
+              onOpenPlan={planId => {
+                setSourcePlanId(planId)
+                setView('plans')
+              }}
+            />
+          </div>
         ) : (
           <>
             <PlanningPane

@@ -39,6 +39,23 @@ import type {
   NarrativeThreadView,
 } from './narrative-thread'
 import type { PlotTreeSnapshot, PlotTreeSourceBundle } from './plot-tree'
+import type {
+  PlotCanvasSummary,
+  PlotCanvasGraph,
+  PlotCanvasNodeData,
+  PlotCanvasEdgeData,
+  PlotCanvasViewport,
+  PlotCanvasNodeUpsertPayload,
+  PlotCanvasEdgeUpsertPayload,
+  PlotCanvasNodesMergePayload,
+} from './plot-canvas'
+import type {
+  ChapterCanvasMeta,
+  ChapterCanvasNodeData,
+  ChapterCanvasEdgeData,
+  ChapterCanvasNodeUpsertPayload,
+  ChapterCanvasEdgeUpsertPayload,
+} from './chapter-canvas'
 import type { WorldMapNode, WorldMapEdge, WorldMapCandidate, WorldMapImage, WorldMap, WorldMapAtlas } from './world-map'
 import type {
   StoryTimelineBranch,
@@ -1254,6 +1271,31 @@ export interface DatabaseChannels {
   'db:timeline-events-reorder': { args: [orderedIds: string[], expectedProjectPath: string]; return: { success: boolean; error?: string } }
   'db:timeline-branch-upsert': { args: [branch: StoryTimelineBranch, expectedProjectPath: string]; return: { success: boolean; branch?: StoryTimelineBranch; error?: string } }
   'db:timeline-branch-delete': { args: [id: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+
+  // 8. plot_canvas — 作者可编辑的剧情画布（与 plot-tree 只读投影严格分离）
+  'db:plot-canvas-list': { args: [expectedProjectPath: string]; return: PlotCanvasSummary[] }
+  'db:plot-canvas-create': { args: [name: string, parentCanvasId: string | null, expectedProjectPath: string]; return: { success: boolean; canvas?: PlotCanvasSummary; error?: string } }
+  'db:plot-canvas-rename': { args: [canvasId: string, name: string, expectedProjectPath: string]; return: { success: boolean; canvas?: PlotCanvasSummary; error?: string } }
+  'db:plot-canvas-move': { args: [canvasId: string, parentCanvasId: string | null, expectedProjectPath: string]; return: { success: boolean; canvas?: PlotCanvasSummary; error?: string } }
+  'db:plot-canvas-reorder': { args: [orderedIds: string[], expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:plot-canvas-delete': { args: [canvasId: string, strategy: 'promote-children' | 'cascade', expectedProjectPath: string]; return: { success: boolean; removedCanvasIds?: string[]; error?: string } }
+  'db:plot-canvas-graph-get': { args: [canvasId: string, expectedProjectPath: string]; return: PlotCanvasGraph }
+  'db:plot-canvas-viewport-save': { args: [canvasId: string, viewport: PlotCanvasViewport, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:plot-canvas-node-upsert': { args: [input: PlotCanvasNodeUpsertPayload, expectedProjectPath: string]; return: { success: boolean; node?: PlotCanvasNodeData; error?: string } }
+  'db:plot-canvas-node-delete': { args: [canvasId: string, nodeId: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:plot-canvas-nodes-reposition': { args: [canvasId: string, positions: Array<{ nodeId: string; x: number; y: number }>, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:plot-canvas-edge-upsert': { args: [input: PlotCanvasEdgeUpsertPayload, expectedProjectPath: string]; return: { success: boolean; edge?: PlotCanvasEdgeData; error?: string } }
+  'db:plot-canvas-edge-delete': { args: [canvasId: string, edgeId: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:plot-canvas-nodes-merge': { args: [input: PlotCanvasNodesMergePayload, expectedProjectPath: string]; return: { success: boolean; node?: PlotCanvasNodeData; error?: string } }
+
+  // 9. chapter_canvas — 每章一张的章内场景编排画布
+  'db:chapter-canvas-get': { args: [chapterNumber: number, expectedProjectPath: string]; return: { canvas: ChapterCanvasMeta | null; nodes: ChapterCanvasNodeData[]; edges: ChapterCanvasEdgeData[] } }
+  'db:chapter-canvas-viewport-save': { args: [chapterNumber: number, viewport: { x: number; y: number; zoom: number }, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:chapter-canvas-node-upsert': { args: [input: ChapterCanvasNodeUpsertPayload, expectedProjectPath: string]; return: { success: boolean; node?: ChapterCanvasNodeData; error?: string } }
+  'db:chapter-canvas-node-delete': { args: [chapterNumber: number, nodeId: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:chapter-canvas-nodes-reposition': { args: [chapterNumber: number, positions: Array<{ nodeId: string; x: number; y: number }>, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:chapter-canvas-edge-upsert': { args: [input: ChapterCanvasEdgeUpsertPayload, expectedProjectPath: string]; return: { success: boolean; edge?: ChapterCanvasEdgeData; error?: string } }
+  'db:chapter-canvas-edge-delete': { args: [chapterNumber: number, edgeId: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
 }
 
 export interface WorldMapImageChannels {

@@ -728,6 +728,115 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
     CREATE INDEX IF NOT EXISTS idx_story_timeline_events_branch
       ON story_timeline_events(branch_id, sort_order);
 
+    -- ============================================================
+    -- 12. plot_canvas — 作者可编辑的剧情画布（跨章节剧情组织）
+    --
+    -- 与 project_core.plot_tree_snapshot（确定性只读投影）严格分离：
+    -- 这里存的是作者自由编排的画布 / 节点 / 连线，绝不回写投影。
+    -- 画布树用 parent_canvas_id 表达“子画布”；节点与连线都归属唯一画布。
+    -- ============================================================
+    CREATE TABLE IF NOT EXISTS plot_canvases (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      parent_canvas_id TEXT DEFAULT NULL,
+      sort_order REAL NOT NULL DEFAULT 0,
+      viewport_json TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (parent_canvas_id) REFERENCES plot_canvases(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_plot_canvases_parent
+      ON plot_canvases(parent_canvas_id, sort_order, created_at);
+
+    CREATE TABLE IF NOT EXISTS plot_canvas_nodes (
+      id TEXT PRIMARY KEY,
+      canvas_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      summary TEXT NOT NULL DEFAULT '',
+      color_key TEXT NOT NULL DEFAULT 'default'
+        CHECK(color_key IN ('default', 'accent', 'success', 'warning', 'danger')),
+      chapter_refs TEXT NOT NULL DEFAULT '[]',
+      plan_id INTEGER DEFAULT NULL,
+      sub_canvas_id TEXT DEFAULT NULL REFERENCES plot_canvases(id) ON DELETE SET NULL,
+      x REAL NOT NULL DEFAULT 0,
+      y REAL NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (canvas_id) REFERENCES plot_canvases(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_plot_canvas_nodes_canvas
+      ON plot_canvas_nodes(canvas_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS plot_canvas_edges (
+      id TEXT PRIMARY KEY,
+      canvas_id TEXT NOT NULL,
+      source_node_id TEXT NOT NULL,
+      target_node_id TEXT NOT NULL,
+      label TEXT NOT NULL DEFAULT '',
+      kind TEXT NOT NULL DEFAULT 'main' CHECK(kind IN ('main', 'aux')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (canvas_id, source_node_id, target_node_id),
+      FOREIGN KEY (canvas_id) REFERENCES plot_canvases(id) ON DELETE CASCADE,
+      FOREIGN KEY (source_node_id) REFERENCES plot_canvas_nodes(id) ON DELETE CASCADE,
+      FOREIGN KEY (target_node_id) REFERENCES plot_canvas_nodes(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_plot_canvas_edges_canvas
+      ON plot_canvas_edges(canvas_id, created_at);
+
+    -- ============================================================
+    -- 13. chapter_canvas — 每章一张的章内场景编排画布
+    --
+    -- 画布 ID 确定性推导自章节号（cha-<n>），章节删除时按 ID 精确清理。
+    -- 场景 / 角色 / 伏笔 / 灵感 / 片段节点都在这里；对角色名单与伏笔记录
+    -- 只存引用，权威资料删除后画布侧仅显示失效，绝不反向改写。
+    -- ============================================================
+    CREATE TABLE IF NOT EXISTS chapter_canvases (
+      id TEXT PRIMARY KEY,
+      chapter_number INTEGER NOT NULL UNIQUE CHECK(chapter_number > 0),
+      viewport_json TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS chapter_canvas_nodes (
+      id TEXT PRIMARY KEY,
+      canvas_id TEXT NOT NULL,
+      type TEXT NOT NULL
+        CHECK(type IN ('scene', 'character', 'foreshadow', 'idea', 'snippet')),
+      title TEXT NOT NULL,
+      summary TEXT NOT NULL DEFAULT '',
+      color_key TEXT NOT NULL DEFAULT 'default'
+        CHECK(color_key IN ('default', 'accent', 'success', 'warning', 'danger')),
+      role TEXT NOT NULL DEFAULT '',
+      scene_order INTEGER DEFAULT NULL,
+      refs_json TEXT NOT NULL DEFAULT '{}',
+      x REAL NOT NULL DEFAULT 0,
+      y REAL NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (canvas_id) REFERENCES chapter_canvases(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_chapter_canvas_nodes_canvas
+      ON chapter_canvas_nodes(canvas_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS chapter_canvas_edges (
+      id TEXT PRIMARY KEY,
+      canvas_id TEXT NOT NULL,
+      source_node_id TEXT NOT NULL,
+      target_node_id TEXT NOT NULL,
+      label TEXT NOT NULL DEFAULT '',
+      kind TEXT NOT NULL DEFAULT 'main' CHECK(kind IN ('main', 'aux')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (canvas_id, source_node_id, target_node_id),
+      FOREIGN KEY (canvas_id) REFERENCES chapter_canvases(id) ON DELETE CASCADE,
+      FOREIGN KEY (source_node_id) REFERENCES chapter_canvas_nodes(id) ON DELETE CASCADE,
+      FOREIGN KEY (target_node_id) REFERENCES chapter_canvas_nodes(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_chapter_canvas_edges_canvas
+      ON chapter_canvas_edges(canvas_id, created_at);
+
     -- 人物关系与画布坐标的表结构由 ensureCharacterRelationshipSchema 统一创建（人物 ID 主键）。
 
     -- Reference imports are recoverable project facts, not generic workflow history.
@@ -2059,6 +2168,17 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
 
   ensureCharacterRelationshipSchema(db)
   ensureForeshadowingSchema(db)
+
+  // 画布表在早期预览版本创建时还没有子画布关联列；这里按 PRAGMA 增量补列。
+  const plotCanvasNodeColumns = new Set(
+    (db.prepare('PRAGMA table_info(plot_canvas_nodes)').all() as Array<{ name: string }>).map(column => column.name),
+  )
+  if (plotCanvasNodeColumns.size > 0 && !plotCanvasNodeColumns.has('sub_canvas_id')) {
+    db.exec(`
+      ALTER TABLE plot_canvas_nodes
+      ADD COLUMN sub_canvas_id TEXT DEFAULT NULL REFERENCES plot_canvases(id) ON DELETE SET NULL
+    `)
+  }
 
   migrateDraftUnitCounts(db)
 }

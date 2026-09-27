@@ -67,6 +67,10 @@ import { isPlotTreeSourceRevision } from '../../src/shared/plot-tree'
 import { WorldMapRepository } from '../repositories/world-map-repository'
 import type { WorldMapNode, WorldMapEdge, WorldMap } from '../../src/shared/world-map'
 import { removeDeletedMapImages } from '../services/world-map-image-store'
+import { PlotCanvasRepository } from '../repositories/plot-canvas-repository'
+import type { PlotCanvasNodeUpsertPayload, PlotCanvasEdgeUpsertPayload, PlotCanvasNodesMergePayload } from '../../src/shared/plot-canvas'
+import { ChapterCanvasRepository } from '../repositories/chapter-canvas-repository'
+import type { ChapterCanvasNodeUpsertPayload, ChapterCanvasEdgeUpsertPayload } from '../../src/shared/chapter-canvas'
 import { StoryTimelineRepository } from '../repositories/story-timeline-repository'
 import type { StoryTimelineBranch, StoryTimelineEvent, StoryTimelineSettings } from '../../src/shared/story-timeline'
 import { RecoveryCandidateRepository } from '../repositories/recovery-candidate-repository'
@@ -152,6 +156,24 @@ const MUTATING_DATABASE_CHANNELS = new Set([
   'db:timeline-events-reorder',
   'db:timeline-branch-upsert',
   'db:timeline-branch-delete',
+  'db:plot-canvas-create',
+  'db:plot-canvas-rename',
+  'db:plot-canvas-move',
+  'db:plot-canvas-reorder',
+  'db:plot-canvas-delete',
+  'db:plot-canvas-viewport-save',
+  'db:plot-canvas-node-upsert',
+  'db:plot-canvas-node-delete',
+  'db:plot-canvas-nodes-reposition',
+  'db:plot-canvas-edge-upsert',
+  'db:plot-canvas-edge-delete',
+  'db:plot-canvas-nodes-merge',
+  'db:chapter-canvas-viewport-save',
+  'db:chapter-canvas-node-upsert',
+  'db:chapter-canvas-node-delete',
+  'db:chapter-canvas-nodes-reposition',
+  'db:chapter-canvas-edge-upsert',
+  'db:chapter-canvas-edge-delete',
 ])
 
 function registerProjectDatabaseHandler(channel: string, handler: ProjectDatabaseHandler): void {
@@ -1541,6 +1563,205 @@ export function registerDatabaseController() {
     try {
       assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
       StoryTimelineRepository.deleteBranch(id)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  // ============================================================
+  // plot_canvas — 作者可编辑的剧情画布
+  // ============================================================
+  ipcMain.handle('db:plot-canvas-list', async (_event, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return PlotCanvasRepository.list()
+  })
+
+  ipcMain.handle('db:plot-canvas-create', async (_event, name: string, parentCanvasId: string | null, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, canvas: PlotCanvasRepository.create(name, parentCanvasId) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:plot-canvas-rename', async (_event, canvasId: string, name: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, canvas: PlotCanvasRepository.rename(canvasId, name) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:plot-canvas-move', async (_event, canvasId: string, parentCanvasId: string | null, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, canvas: PlotCanvasRepository.move(canvasId, parentCanvasId) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:plot-canvas-reorder', async (_event, orderedIds: string[], expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      PlotCanvasRepository.reorder(orderedIds)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:plot-canvas-delete', async (_event, canvasId: string, strategy: 'promote-children' | 'cascade', expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      if (strategy !== 'promote-children' && strategy !== 'cascade') {
+        throw new Error('剧情画布删除策略无效')
+      }
+      return { success: true, ...PlotCanvasRepository.delete(canvasId, strategy) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:plot-canvas-graph-get', async (_event, canvasId: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return PlotCanvasRepository.getGraph(canvasId)
+    } catch (error) {
+      throw new Error(`剧情画布数据读取失败：${String(error)}`)
+    }
+  })
+
+  ipcMain.handle('db:plot-canvas-viewport-save', async (_event, canvasId: string, viewport: { x: number; y: number; zoom: number }, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      PlotCanvasRepository.saveViewport(canvasId, viewport)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:plot-canvas-node-upsert', async (_event, input: PlotCanvasNodeUpsertPayload, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, node: PlotCanvasRepository.nodeUpsert(input) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:plot-canvas-node-delete', async (_event, canvasId: string, nodeId: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      PlotCanvasRepository.nodeDelete(canvasId, nodeId)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:plot-canvas-nodes-reposition', async (_event, canvasId: string, positions: Array<{ nodeId: string; x: number; y: number }>, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      PlotCanvasRepository.nodeReposition(canvasId, positions)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:plot-canvas-edge-upsert', async (_event, input: PlotCanvasEdgeUpsertPayload, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, edge: PlotCanvasRepository.edgeUpsert(input) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:plot-canvas-edge-delete', async (_event, canvasId: string, edgeId: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      PlotCanvasRepository.edgeDelete(canvasId, edgeId)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:plot-canvas-nodes-merge', async (_event, input: PlotCanvasNodesMergePayload, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, node: PlotCanvasRepository.mergeNodes(input) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  // ============================================================
+  // chapter_canvas — 每章一张的章内场景编排画布
+  // ============================================================
+  ipcMain.handle('db:chapter-canvas-get', async (_event, chapterNumber: number, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return ChapterCanvasRepository.get(chapterNumber)
+  })
+
+  ipcMain.handle('db:chapter-canvas-viewport-save', async (_event, chapterNumber: number, viewport: { x: number; y: number; zoom: number }, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      ChapterCanvasRepository.saveViewport(chapterNumber, viewport)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:chapter-canvas-node-upsert', async (_event, input: ChapterCanvasNodeUpsertPayload, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, node: ChapterCanvasRepository.nodeUpsert(input) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:chapter-canvas-node-delete', async (_event, chapterNumber: number, nodeId: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      ChapterCanvasRepository.nodeDelete(chapterNumber, nodeId)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:chapter-canvas-nodes-reposition', async (_event, chapterNumber: number, positions: Array<{ nodeId: string; x: number; y: number }>, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      ChapterCanvasRepository.nodeReposition(chapterNumber, positions)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:chapter-canvas-edge-upsert', async (_event, input: ChapterCanvasEdgeUpsertPayload, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, edge: ChapterCanvasRepository.edgeUpsert(input) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:chapter-canvas-edge-delete', async (_event, chapterNumber: number, edgeId: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      ChapterCanvasRepository.edgeDelete(chapterNumber, edgeId)
       return { success: true }
     } catch (error) {
       return { success: false, error: String(error) }

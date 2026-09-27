@@ -1,5 +1,6 @@
 import { getProjectDb } from '../database'
 import { invalidateContinuityProjectionFrom } from './summary-repository'
+import { ChapterCanvasRepository } from './chapter-canvas-repository'
 import type {
   ChapterDeletionOperation,
   ChapterDeletionProjectionStatus,
@@ -109,6 +110,12 @@ function deleteChapterFacts(
 
   for (const runId of postProcessRunIds) {
     db.prepare('DELETE FROM post_process_runs WHERE id = ?').run(runId)
+  }
+  // 章节画布按章节号确定性归属；章删除时一并清理，避免章号复用后旧场景复活。
+  try {
+    ChapterCanvasRepository.deleteByChapter(target.chapter_number)
+  } catch {
+    // 章节画布尚未建表（极端旧库）时跳过；删除操作本身不受影响。
   }
   db.prepare('DELETE FROM drafts WHERE id = ?').run(target.id)
   for (const contentId of contentIds) {

@@ -124,7 +124,7 @@ export function openBuiltinEditor(
   id: string,
   name: string,
   type: 'chapter-card' | 'character' | 'world-building' | 'narrative-thread' | 'world-map' | 'story-timeline' | 'overview' | 'config' | 'foreshadowing',
-  narrativeThreadView?: 'plot-tree' | 'plans',
+  narrativeThreadView?: 'plot-tree' | 'canvas' | 'plans',
   chapterNumber?: number,
 ): void {
   const projectKey = useProjectStore.getState().currentProject?.path

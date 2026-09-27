@@ -51,6 +51,7 @@ import {
   type EditableChapterBlueprintField,
 } from './chapter-card-draft-ledger'
 import { LatestRequestGate } from './latest-request-gate'
+import ChapterCanvasWorkbench from '../canvas/ChapterCanvasWorkbench'
 import {
   PlanningPageShell,
   PlanningPane,
@@ -152,6 +153,8 @@ export default function ChapterCardEditor({
   // 下一个可写的章节号
   const [nextWriteChapter, setNextWriteChapter] = useState<number | null>(null)
   const [authorityError, setAuthorityError] = useState<string | null>(null)
+  // 选中章的主区视图：蓝图表单 / 章内场景画布。切章后回到蓝图。
+  const [chapterView, setChapterView] = useState<'blueprint' | 'canvas'>('blueprint')
   // 旧版仿写导入可能造成“前章未写、后续正文已定稿”的异常状态；该状态只能由用户确认恢复。
   const [legacyImportedTextRecoveryChapter, setLegacyImportedTextRecoveryChapter] = useState<number | null>(null)
 
@@ -164,6 +167,14 @@ export default function ChapterCardEditor({
     )
     if (targetIndex >= 0) setSelectedIdx(targetIndex)
   }, [initialChapterNumber, loading])
+
+  // 切换选中章节时退出画布视图，避免把上一章的画布语境带进新章。
+  // React 推荐的「props/state 变化时调整状态」模式：渲染期比较并重置。
+  const [lastSelectedIdx, setLastSelectedIdx] = useState(selectedIdx)
+  if (lastSelectedIdx !== selectedIdx) {
+    setLastSelectedIdx(selectedIdx)
+    setChapterView('blueprint')
+  }
 
   const roleLabel = (role: string) => text(role, ({
     建置: 'Setup',
@@ -1101,8 +1112,47 @@ export default function ChapterCardEditor({
         )}
       </PlanningPane>
 
-      <main className="planning-page__main planning-page__scroll">
-          {selected ? (
+      <main className={cn('planning-page__main', chapterView === 'blueprint' && 'planning-page__scroll')}>
+          {selected && (
+            <div className="flex flex-shrink-0 items-center justify-between gap-3 px-5 pt-3">
+              <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                {text(`第 ${selected.chapterNumber} 章`, `Chapter ${selected.chapterNumber}`)}
+              </span>
+              <div className="planning-segmented" role="group" aria-label={text('章节视图', 'Chapter views')}>
+                <button
+                  type="button"
+                  aria-pressed={chapterView === 'blueprint'}
+                  className={`planning-segmented__option${chapterView === 'blueprint' ? ' is-active' : ''}`}
+                  onClick={() => setChapterView('blueprint')}
+                >
+                  <BookOpen size={12} />
+                  {text('蓝图', 'Blueprint')}
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={chapterView === 'canvas'}
+                  className={`planning-segmented__option${chapterView === 'canvas' ? ' is-active' : ''}`}
+                  onClick={() => setChapterView('canvas')}
+                  data-testid="chapter-canvas-toggle"
+                >
+                  <MapPin size={12} />
+                  {text('场景画布', 'Scene canvas')}
+                </button>
+              </div>
+            </div>
+          )}
+          {selected && chapterView === 'canvas' ? (
+            <ChapterCanvasWorkbench
+              projectKey={projectKey}
+              chapterNumber={selected.chapterNumber}
+              chapterTitle={selected.title}
+              canOpenDraft={canOpenOrCreateDraft(selected)}
+              openDraftLabel={hasDraftFor(selected)
+                ? text(`打开第${selected.chapterNumber}章正文`, `Open Chapter ${selected.chapterNumber}`)
+                : text(`新建第${selected.chapterNumber}章正文`, `New Chapter ${selected.chapterNumber}`)}
+              onOpenDraft={() => void handleOpenOrNewDraft(selected)}
+            />
+          ) : selected ? (
             <div className="max-w-2xl mx-auto px-5 py-4">
               {/* 编辑区头部 */}
               <div className="flex items-center justify-between mb-4">

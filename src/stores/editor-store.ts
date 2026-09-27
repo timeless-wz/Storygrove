@@ -55,7 +55,7 @@ export interface EditorTab {
   /** 原始 AI 审稿报告的数据库标识；人工确认快照与审稿修稿均以此为来源。 */
   reviewId?: number
   /** 叙事线编辑器本次打开的视图。 */
-  narrativeThreadView?: 'plot-tree' | 'plans'
+  narrativeThreadView?: 'plot-tree' | 'canvas' | 'plans'
   /** 重复打开同一叙事线 Tab 时递增，确保本次视图请求生效。 */
   narrativeThreadViewRequest?: number
 }
