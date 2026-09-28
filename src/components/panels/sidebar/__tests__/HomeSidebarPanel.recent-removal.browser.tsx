@@ -5,10 +5,12 @@ import { createRoot, type Root } from 'react-dom/client'
 
 import { useLocaleStore } from '../../../../stores/locale-store'
 import { useProjectStore } from '../../../../stores/project-store'
+import { useHomeSurfaceStore } from '../../../../stores/home-surface-store'
 import HomeSidebarPanel from '../HomeSidebarPanel'
 
 const originalLocaleState = useLocaleStore.getState()
 const originalProjectState = useProjectStore.getState()
+const originalHomeState = useHomeSurfaceStore.getState()
 const movedProject = {
   name: '已移动的项目',
   path: 'C:\\novels\\moved-away',
@@ -24,6 +26,7 @@ let invoke: ReturnType<typeof vi.fn>
 beforeEach(async () => {
   invoke = vi.fn(async (channel: string) => {
     if (channel === 'project:recent-remove') return { success: true }
+    if (channel === 'official-homepage:open') return { success: true }
     throw new Error(`unexpected channel ${channel}`)
   })
   Object.defineProperty(window, 'velaAPI', {
@@ -40,6 +43,7 @@ beforeEach(async () => {
   })
   useLocaleStore.setState({ locale: 'zh-CN' })
   useProjectStore.setState({ currentProject: null, recentProjects: [movedProject] })
+  useHomeSurfaceStore.setState({ surface: 'home', category: 'notes' })
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -52,6 +56,7 @@ afterEach(async () => {
   Reflect.deleteProperty(window, 'velaAPI')
   useLocaleStore.setState(originalLocaleState)
   useProjectStore.setState(originalProjectState)
+  useHomeSurfaceStore.setState(originalHomeState)
 })
 
 describe('HomeSidebarPanel recent project removal', () => {
@@ -67,5 +72,14 @@ describe('HomeSidebarPanel recent project removal', () => {
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith('project:recent-remove', movedProject.path))
     expect(useProjectStore.getState().recentProjects).toEqual([])
     expect(invoke.mock.calls.some(([channel]) => channel === 'project:delete')).toBe(false)
+  })
+
+  it('switches global home surfaces and opens the fixed help destination', async () => {
+    await act(async () => { await page.getByRole('button', { name: '全局素材库' }).click() })
+    expect(useHomeSurfaceStore.getState().surface).toBe('library')
+    await act(async () => { await page.getByRole('button', { name: '对标作品' }).click() })
+    expect(useHomeSurfaceStore.getState().surface).toBe('references')
+    await act(async () => { await page.getByRole('button', { name: '帮助与反馈' }).click() })
+    expect(invoke).toHaveBeenCalledWith('official-homepage:open')
   })
 })

@@ -357,6 +357,7 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       chapter_number INTEGER NOT NULL,            -- 归属章节
       blueprint_chapter_number INTEGER DEFAULT NULL, -- 作者显式绑定的章节蓝图
+      imported_title TEXT NOT NULL DEFAULT '',     -- 导入草稿携带的标题，不改写章节蓝图
       version INTEGER NOT NULL,                   -- v1, v2...
       status TEXT DEFAULT 'draft',                -- draft/revised/finalized/archived
       source TEXT DEFAULT 'write',                -- write/rewrite
@@ -1272,6 +1273,9 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
   }
   if (!draftColumns.some(column => column.name === 'blueprint_chapter_number')) {
     db.exec('ALTER TABLE drafts ADD COLUMN blueprint_chapter_number INTEGER DEFAULT NULL')
+  }
+  if (!draftColumns.some(column => column.name === 'imported_title')) {
+    db.exec("ALTER TABLE drafts ADD COLUMN imported_title TEXT NOT NULL DEFAULT ''")
   }
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_drafts_blueprint_chapter

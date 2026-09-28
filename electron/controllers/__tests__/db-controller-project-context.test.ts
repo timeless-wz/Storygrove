@@ -43,6 +43,7 @@ const mocks = vi.hoisted(() => ({
   characterGraphPositionsSave: vi.fn(),
   finalizedDraftImportCommit: vi.fn(),
   finalizedDraftImportPreview: vi.fn(),
+  finalizationListAuthoritativeForExport: vi.fn(() => []),
   importGlobalFactsCommit: vi.fn(),
   importInspectionPeek: vi.fn(),
   importInspectionConsume: vi.fn(),
@@ -181,6 +182,12 @@ vi.mock('../../repositories/draft-repository', () => ({
   },
 }))
 
+vi.mock('../../repositories/finalization-repository', () => ({
+  FinalizationRepository: {
+    listAuthoritativeForExport: mocks.finalizationListAuthoritativeForExport,
+  },
+}))
+
 vi.mock('../../repositories/finalized-draft-import-repository', () => ({
   FinalizedDraftImportRepository: {
     commit: mocks.finalizedDraftImportCommit,
@@ -297,6 +304,26 @@ beforeEach(() => {
 })
 
 describe('database controller project context guard', () => {
+  it('rejects selecting two draft versions for the same chapter at the database boundary', async () => {
+    const draft = (id: number, version: number) => ({
+      id,
+      chapterNumber: 1,
+      version,
+      status: 'draft',
+      chapterTitle: '同一章',
+      content: `版本 ${version} 正文`,
+    })
+    mocks.draftGetFull
+      .mockReturnValueOnce(draft(10, 1) as never)
+      .mockReturnValueOnce(draft(11, 2) as never)
+
+    await expect(handler('db:draft-export-selection')(
+      {},
+      [{ draftId: 10, kind: 'draft' }, { draftId: 11, kind: 'draft' }],
+      'C:/projects/A',
+    )).rejects.toThrow('第 1 章选中了多个版本')
+  })
+
   it('commits a synopsis only through the active project session', async () => {
     const request = synopsisCommitRequest()
     mocks.projectCoreCommitSynopsis.mockReturnValueOnce(true)

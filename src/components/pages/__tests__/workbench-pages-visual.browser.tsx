@@ -18,6 +18,7 @@ import { useWorldMapStore } from '../../../stores/world-map-store'
 import { useStoryTimelineStore } from '../../../stores/story-timeline-store'
 import { useCharacterStore } from '../../../stores/character-store'
 import { useEditorStore } from '../../../stores/editor-store'
+import { useHomeSurfaceStore } from '../../../stores/home-surface-store'
 import { setActiveProjectSessionContext } from '../../../shared/project-session-context'
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -30,6 +31,7 @@ let container: HTMLDivElement | undefined
 beforeEach(async () => {
   await page.viewport(1280, 860)
   useLocaleStore.setState({ locale: 'zh-CN', initialized: true })
+  useHomeSurfaceStore.setState({ surface: 'home', category: 'notes', notes: [] })
   document.documentElement.setAttribute('data-theme', 'storyforge')
   document.documentElement.className = ''
 
@@ -95,7 +97,7 @@ afterEach(() => {
 })
 
 describe('工作台首页与项目总览视觉渲染与截图', () => {
-  it('渲染并截图书斋首页（含最近项目、新书插槽与焦点作品）', async () => {
+  it('渲染并截图书斋首页（含最近项目、双入口与焦点作品）', async () => {
     useProjectStore.setState({
       currentProject: {
         id: 'proj-unwritten-book',
@@ -165,7 +167,7 @@ describe('工作台首页与项目总览视觉渲染与截图', () => {
     // 等待渲染稳定
     await new Promise((r) => setTimeout(r, 100))
     expect(container?.textContent).toContain('继续创作')
-    await page.screenshot({ path: 'screenshots/welcome-page.png' })
+    await page.screenshot({ path: 'screenshots/codex-home-redesign-welcome.png' })
 
     const heroTitle = container?.querySelector('#welcome-hero-title') as HTMLElement
     const inkProbe = document.createElement('span')
@@ -181,9 +183,9 @@ describe('工作台首页与项目总览视觉渲染与截图', () => {
     inkProbe.remove()
     document.documentElement.setAttribute('data-theme', 'storyforge')
 
-    const heroSecondary = container?.querySelector<HTMLButtonElement>('.literary-hero-actions button:not(.literary-hero-primary-btn)')
-    expect(getComputedStyle(heroSecondary!).color).toBe('rgb(236, 240, 220)')
-    expect(getComputedStyle(heroSecondary!).backgroundColor).not.toBe('rgba(0, 0, 0, 0)')
+    expect(container?.querySelector('.literary-deconstruct-card')).not.toBeNull()
+    expect(container?.querySelectorAll('.literary-project-card')).toHaveLength(3)
+    expect(container?.querySelector('.literary-tip-card')).toBeNull()
 
     await act(async () => {
       (container?.querySelector('.literary-hero-primary-btn') as HTMLButtonElement).click()
@@ -213,7 +215,68 @@ describe('工作台首页与项目总览视觉渲染与截图', () => {
     })
 
     await new Promise((r) => setTimeout(r, 100))
-    await page.screenshot({ path: 'screenshots/welcome-empty.png' })
+    await page.screenshot({ path: 'screenshots/codex-home-redesign-empty.png' })
+  })
+
+  it('灵感便签可在本次会话保存并从全局素材库查看，拆书入口调用既有向导', async () => {
+    useProjectStore.setState({ currentProject: null, recentProjects: [] })
+    const onImportNovel = vi.fn()
+    await act(async () => {
+      root?.render(<WelcomePage onNewProject={vi.fn()} onOpenProject={vi.fn()} onImportNovel={onImportNovel} />)
+    })
+    await act(async () => { await page.getByRole('button', { name: '记下一条灵感' }).click() })
+    await act(async () => { await page.getByPlaceholder('写下灵感……').fill('雨夜里无人认得归来的主角') })
+    await act(async () => { await page.getByPlaceholder('标签，用逗号分隔').fill('主角, 场景') })
+    await act(async () => { await page.getByRole('button', { name: '保存到本次会话' }).click() })
+    expect(useHomeSurfaceStore.getState().notes).toMatchObject([{ content: '雨夜里无人认得归来的主角', tags: ['主角', '场景'] }])
+    await act(async () => { await page.getByRole('button', { name: '打开素材库' }).click() })
+    expect(container?.textContent).toContain('雨夜里无人认得归来的主角')
+    await act(async () => { await page.getByRole('button', { name: '对标作品' }).click() })
+    await act(async () => { await page.getByRole('button', { name: '导入到项目' }).click() })
+    expect(onImportNovel).toHaveBeenCalledOnce()
+  })
+
+  it('窄容器把双入口和素材区按阅读顺序排列', async () => {
+    await page.viewport(720, 860)
+    useProjectStore.setState({ currentProject: null, recentProjects: [] })
+    await act(async () => {
+      root?.render(<WelcomePage onNewProject={vi.fn()} onOpenProject={vi.fn()} onImportNovel={vi.fn()} />)
+    })
+    const continueCard = container?.querySelector('.literary-continue-card')?.getBoundingClientRect()
+    const deconstructCard = container?.querySelector('.literary-deconstruct-card')?.getBoundingClientRect()
+    const inspiration = container?.querySelector('.literary-inspiration-section')?.getBoundingClientRect()
+    const library = container?.querySelector('.literary-resource-library-card')?.getBoundingClientRect()
+    expect(deconstructCard!.top).toBeGreaterThanOrEqual(continueCard!.bottom - 1)
+    expect(library!.top).toBeGreaterThanOrEqual(inspiration!.bottom - 1)
+  })
+
+  it('14 套文学主题都为拆书标题提供可读的面板对比度', async () => {
+    useProjectStore.setState({ currentProject: null, recentProjects: [] })
+    await act(async () => {
+      root?.render(<WelcomePage onNewProject={vi.fn()} onOpenProject={vi.fn()} onImportNovel={vi.fn()} />)
+    })
+    const panel = container?.querySelector<HTMLElement>('.literary-deconstruct-card')
+    const title = container?.querySelector<HTMLElement>('#deconstruct-title')
+    const action = container?.querySelector<HTMLElement>('.literary-deconstruct-card button')
+    const luminance = (color: string) => {
+      const channels = color.match(/[\d.]+/g)?.slice(0, 3).map(Number) ?? [0, 0, 0]
+      const linear = channels.map(value => {
+        const channel = value / 255
+        return channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4
+      })
+      return linear[0] * .2126 + linear[1] * .7152 + linear[2] * .0722
+    }
+    for (const theme of ['storyforge', 'inkwash', 'mist', 'paper-ink', 'apricot', 'vellum', 'gilded', 'verdant', 'silver-blue', 'dusk', 'ember', 'starlight', 'starlight-dark', 'cosmic-glass']) {
+      document.documentElement.setAttribute('data-theme', theme)
+      const foreground = luminance(getComputedStyle(title!).color)
+      const background = luminance(getComputedStyle(panel!).backgroundColor)
+      const ratio = (Math.max(foreground, background) + .05) / (Math.min(foreground, background) + .05)
+      expect(ratio, theme).toBeGreaterThanOrEqual(3)
+      const actionForeground = luminance(getComputedStyle(action!).color)
+      const actionBackground = luminance(getComputedStyle(action!).backgroundColor)
+      const actionRatio = (Math.max(actionForeground, actionBackground) + .05) / (Math.min(actionForeground, actionBackground) + .05)
+      expect(actionRatio, theme).toBeGreaterThanOrEqual(4.5)
+    }
   })
 
   it('渲染并截图项目总览（含 4 步创作阶梯、真实指标与阶段分组）', async () => {

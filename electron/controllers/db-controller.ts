@@ -75,6 +75,13 @@ import { StoryTimelineRepository } from '../repositories/story-timeline-reposito
 import type { StoryTimelineBranch, StoryTimelineEvent, StoryTimelineSettings } from '../../src/shared/story-timeline'
 import { RecoveryCandidateRepository } from '../repositories/recovery-candidate-repository'
 import type { RecoveryCandidateRecordInput } from '../../src/shared/recovery-candidate'
+import type {
+  DraftMarkdownSelectionRequest,
+  DraftMarkdownSelectionReceiptItem,
+  DraftMarkdownSelectionSnapshot,
+} from '../../src/shared/markdown-exchange'
+import { chapterDraftImportInspectionStore } from '../services/chapter-draft-import'
+import { createHash } from 'node:crypto'
 
 type ProjectDatabaseHandler = (event: unknown, ...args: never[]) => unknown
 
@@ -112,6 +119,7 @@ const MUTATING_DATABASE_CHANNELS = new Set([
   'db:character-graph-positions-save',
   'db:draft-import-finalized-batch',
   'db:draft-create',
+  'db:draft-import-markdown',
   'db:draft-update-status',
   'db:draft-update-content',
   'db:draft-set-blueprint',
@@ -844,6 +852,126 @@ export function registerDatabaseController() {
   ipcMain.handle('db:draft-export-authority-current', async (_event, receipt, expectedProjectPath: string) => {
     assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
     return FinalizationRepository.matchesAuthoritativeExportReceipt(receipt)
+  })
+
+  const readMarkdownSelection = (selection: DraftMarkdownSelectionRequest[]): DraftMarkdownSelectionSnapshot => {
+    if (!Array.isArray(selection) || selection.length === 0 || selection.length > 5_000) {
+      throw new Error('导出章节选择无效')
+    }
+    const finals = new Map(FinalizationRepository.listAuthoritativeForExport().map(item => [item.draftId, item]))
+    const seenIds = new Set<number>()
+    const seenChapters = new Set<number>()
+    const chapters = selection.map(item => {
+      if (!item || !Number.isSafeInteger(item.draftId) || item.draftId < 1
+        || (item.kind !== 'draft' && item.kind !== 'finalized') || seenIds.has(item.draftId)) {
+        throw new Error('导出章节选择身份无效')
+      }
+      seenIds.add(item.draftId)
+      let value: DraftMarkdownSelectionSnapshot['chapters'][number]
+      if (item.kind === 'finalized') {
+        const final = finals.get(item.draftId)
+        if (!final) throw new Error(`所选定稿已变化或不是当前正文：${item.draftId}`)
+        value = {
+          draftId: final.draftId,
+          kind: 'finalized',
+          chapterNumber: final.chapterNumber,
+          version: final.version,
+          status: 'finalized',
+          contentHash: final.contentHash,
+          titleHash: createHash('sha256').update(final.title, 'utf8').digest('hex'),
+          finalizationId: final.finalizationId,
+          title: final.title,
+          content: final.content,
+        }
+      } else {
+        const draft = DraftRepository.getFull(item.draftId)
+        if (!draft) throw new Error(`所选草稿已不存在：${item.draftId}`)
+        if (!['draft', 'revised', 'reviewed'].includes(draft.status)) {
+          throw new Error(`第 ${draft.chapterNumber} 章所选版本状态为 ${draft.status}，请选择草稿版本或当前正文`)
+        }
+        if (!draft.content.trim()) throw new Error(`第 ${draft.chapterNumber} 章所选草稿正文为空`)
+        value = {
+          draftId: draft.id,
+          kind: 'draft',
+          chapterNumber: draft.chapterNumber,
+          version: draft.version,
+          status: draft.status,
+          contentHash: createHash('sha256').update(draft.content, 'utf8').digest('hex'),
+          titleHash: createHash('sha256').update(draft.chapterTitle ?? '', 'utf8').digest('hex'),
+          finalizationId: null,
+          title: draft.chapterTitle ?? '',
+          content: draft.content,
+        }
+      }
+      if (seenChapters.has(value.chapterNumber)) throw new Error(`第 ${value.chapterNumber} 章选中了多个版本，请每章只选一个`)
+      seenChapters.add(value.chapterNumber)
+      return value
+    }).sort((left, right) => left.chapterNumber - right.chapterNumber)
+    const receipt = chapters.map(({ draftId, kind, chapterNumber, version, status, contentHash, titleHash, finalizationId }) => ({
+      draftId,
+      kind,
+      chapterNumber,
+      version,
+      status,
+      contentHash,
+      titleHash,
+      finalizationId,
+    }))
+    return { chapters, receipt }
+  }
+
+  ipcMain.handle('db:draft-export-selection', async (_event, selection: DraftMarkdownSelectionRequest[], expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return readMarkdownSelection(selection)
+  })
+
+  ipcMain.handle('db:draft-export-selection-current', async (
+    _event,
+    receipt: DraftMarkdownSelectionReceiptItem[],
+    expectedProjectPath: string,
+  ) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    try {
+      const current = readMarkdownSelection(receipt.map(({ draftId, kind }) => ({ draftId, kind }))).receipt
+      return Array.isArray(receipt) && current.length === receipt.length && current.every((item, index) => (
+        item.draftId === receipt[index]?.draftId
+        && item.kind === receipt[index]?.kind
+        && item.chapterNumber === receipt[index]?.chapterNumber
+        && item.version === receipt[index]?.version
+        && item.status === receipt[index]?.status
+        && item.contentHash === receipt[index]?.contentHash
+        && item.titleHash === receipt[index]?.titleHash
+        && item.finalizationId === receipt[index]?.finalizationId
+      ))
+    } catch {
+      return false
+    }
+  })
+
+  ipcMain.handle('db:draft-import-markdown', async (
+    event,
+    inspectionId: string,
+    projectSession: import('../../src/shared/ipc-channels').ProjectSessionContext,
+    expectedProjectPath: string,
+  ) => {
+    try {
+      const active = projectAccess.assertCurrentProjectContext(projectSession, getCurrentProjectPath())
+      assertRequiredExpectedProjectPath(active.rootPath, expectedProjectPath)
+      const chapters = chapterDraftImportInspectionStore.consume(
+        inspectionId,
+        (event as IpcMainInvokeEvent).sender.id,
+        projectSession,
+      )
+      const created = DraftRepository.createImportedBatch(chapters.map(chapter => ({
+        chapterNumber: chapter.number,
+        title: chapter.title,
+        content: chapter.content,
+        wordCount: chapter.wordCount,
+      })))
+      return { success: true, created }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
   })
 
   // ============================================================

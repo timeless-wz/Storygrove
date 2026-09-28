@@ -17,6 +17,6 @@ describe('import novel imitation entry copy', () => {
     expect(dialog).toContain('结构拆解、文风提取、蓝图反推')
     expect(zhCatalog).toContain('拆解仿写')
     expect(enCatalog).toContain('Analyze & imitate')
-    expect(welcome).toContain('拆解仿写')
+    expect(welcome).toContain("t('home.deconstructAction')")
   })
 })

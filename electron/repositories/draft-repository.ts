@@ -281,9 +281,11 @@ function rowToMeta(
 ): DraftMeta {
     const chapterTitle = typeof row.chapter_title === 'string' && row.chapter_title.trim()
         ? row.chapter_title
-        : typeof row.blueprint_title === 'string' && row.blueprint_title.trim()
-            ? row.blueprint_title
-            : undefined
+        : typeof row.imported_title === 'string' && row.imported_title.trim()
+            ? row.imported_title
+            : typeof row.blueprint_title === 'string' && row.blueprint_title.trim()
+                ? row.blueprint_title
+                : undefined
     return {
         id: row.id as number,
         chapterNumber: row.chapter_number as number,
@@ -304,6 +306,41 @@ function rowToMeta(
 }
 
 export class DraftRepository {
+    /** Atomically append imported Markdown chapters as new draft versions. */
+    static createImportedBatch(chapters: ReadonlyArray<{
+        chapterNumber: number
+        title: string
+        content: string
+        wordCount: number
+    }>): Array<{ id: number; chapterNumber: number; version: number }> {
+        const db = getProjectDb()
+        if (!db) throw new Error('[DraftRepository] 数据库未连接')
+        if (chapters.length === 0 || chapters.length > 5_000) throw new Error('导入章节数无效')
+        const seen = new Set<number>()
+        for (const chapter of chapters) {
+            if (!Number.isSafeInteger(chapter.chapterNumber) || chapter.chapterNumber < 1
+                || seen.has(chapter.chapterNumber) || typeof chapter.content !== 'string'
+                || typeof chapter.title !== 'string' || chapter.title.length > 500
+                || !chapter.content.trim() || !Number.isSafeInteger(chapter.wordCount) || chapter.wordCount < 0) {
+                throw new Error('导入草稿章节无效或章号重复')
+            }
+            seen.add(chapter.chapterNumber)
+        }
+
+        return db.transaction(() => chapters.map(chapter => {
+            const row = db.prepare(`
+              SELECT MAX(version) AS maxVersion FROM drafts WHERE chapter_number = ?
+            `).get(chapter.chapterNumber) as { maxVersion: number | null }
+            const version = (row.maxVersion ?? 0) + 1
+            const contentId = ContentRepository.create(chapter.content)
+            const inserted = db.prepare(`
+              INSERT INTO drafts (chapter_number, imported_title, version, status, source, content_id, word_count, source_dependencies)
+              VALUES (?, ?, ?, 'draft', 'write', ?, ?, '[]')
+            `).run(chapter.chapterNumber, chapter.title.trim(), version, contentId, chapter.wordCount)
+            return { id: Number(inserted.lastInsertRowid), chapterNumber: chapter.chapterNumber, version }
+        }))()
+    }
+
     /**
      * 创建草稿（先写 contents 再建 draft 记录）
      * 返回新建的 draft ID

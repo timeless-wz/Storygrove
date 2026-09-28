@@ -24,9 +24,35 @@ import {
 import type { WritingLanguage } from '../shared/writing-language'
 import { randomUUID } from '../utils/id'
 import { createDocxBase64 } from './docx-export'
+import type {
+  DraftMarkdownSelectionRequest,
+  DraftMarkdownSelectionReceiptItem,
+  DraftMarkdownSelectionSnapshot,
+} from '../shared/markdown-exchange'
+import type { ProjectCoreData } from '../../electron/repositories/project-core-repository'
+import type { CharacterData } from '../../electron/repositories/character-repository'
+import type { CharacterRosterSnapshot } from '../shared/character-roster'
 
 
 export type ExportFormat = 'merged-md' | 'split-md' | 'txt' | 'word'
+export type MarkdownExportSettingKey = 'premise' | 'worldview' | 'character-graph' | 'character-profiles'
+
+export interface BasicSettingsExportSnapshot {
+  core: ProjectCoreData | null
+  roster: CharacterRosterSnapshot
+  characters: CharacterData[]
+}
+
+export interface SelectedMarkdownExportOptions {
+  range: 'chapter' | 'volume' | 'settings'
+  format: 'merged-md' | 'split-md'
+  grantId: string
+  selections: DraftMarkdownSelectionRequest[]
+  settings?: MarkdownExportSettingKey[]
+  scopeName?: string
+  volumeId?: string
+  expectedChapterNumbers?: number[]
+}
 
 interface ExportOptions {
   format: ExportFormat
@@ -512,4 +538,258 @@ function formatLabel(format: ExportFormat, locale: Locale): string {
     'word': ['Word 文档', 'Word document'],
   }
   return labels[format][locale === 'en-US' ? 1 : 0]
+}
+
+/** Read the four user-confirmed basic setting sources from their authoritative project records. */
+export async function loadBasicSettingsExportSnapshot(
+  projectSession: ProjectSessionContext,
+): Promise<BasicSettingsExportSnapshot> {
+  const [core, roster, characters] = await Promise.all([
+    ipc.invokeWithProjectSession(projectSession, 'db:project-core-get', projectSession.projectPath),
+    ipc.invokeWithProjectSession(projectSession, 'db:character-roster-read', projectSession.projectPath),
+    ipc.invokeWithProjectSession(projectSession, 'db:character-get-all', projectSession.projectPath),
+  ])
+  return { core, roster, characters }
+}
+
+function textFor(locale: Locale, zh: string, en: string): string {
+  return locale === 'en-US' ? en : zh
+}
+
+function settingSection(
+  key: MarkdownExportSettingKey,
+  snapshot: BasicSettingsExportSnapshot,
+  locale: Locale,
+): { title: string; body: string } {
+  const empty = textFor(locale, '（暂无内容）', '(No content)')
+  switch (key) {
+    case 'premise':
+      return {
+        title: textFor(locale, '故事前提', 'Story premise'),
+        body: snapshot.core?.premise?.trim() || empty,
+      }
+    case 'worldview': {
+      const parts = [snapshot.core?.worldSetting?.trim(), snapshot.core?.worldbuilding?.trim()]
+        .filter((value): value is string => Boolean(value))
+      return {
+        title: textFor(locale, '世界观', 'Worldview'),
+        body: parts.length ? [...new Set(parts)].join('\n\n') : empty,
+      }
+    }
+    case 'character-graph': {
+      const body = snapshot.roster.renderedMarkdown?.trim() || snapshot.roster.legacyMarkdown?.trim() || ''
+      return {
+        title: textFor(locale, '角色图谱', 'Character graph'),
+        body: body || empty,
+      }
+    }
+    case 'character-profiles': {
+      const roleLabels: Record<string, string> = locale === 'en-US'
+        ? { protagonist: 'Protagonist', supporting: 'Supporting', antagonist: 'Antagonist', minor: 'Minor', unassigned: 'Unassigned' }
+        : { protagonist: '主角', supporting: '配角', antagonist: '反派', minor: '次要角色', unassigned: '暂未设定' }
+      const fields: Array<[keyof CharacterData, string, string]> = [
+        ['gender', '性别', 'Gender'], ['age', '年龄', 'Age'], ['appearance', '外貌', 'Appearance'],
+        ['personality', '性格', 'Personality'], ['background', '背景', 'Background'],
+        ['abilities', '能力', 'Abilities'], ['motivation', '动机', 'Motivation'],
+        ['relationships', '关系', 'Relationships'], ['arc', '角色弧光', 'Character arc'], ['notes', '备注', 'Notes'],
+      ]
+      const profiles = snapshot.characters.map(character => {
+        const lines = [`## ${character.name} · ${roleLabels[character.role] ?? character.role}`]
+        for (const [field, zhLabel, enLabel] of fields) {
+          const value = character[field]
+          if (typeof value === 'string' && value.trim()) lines.push(`- ${textFor(locale, zhLabel, enLabel)}: ${value.trim()}`)
+        }
+        if (character.currentState) {
+          lines.push(`- ${textFor(locale, '当前状态', 'Current state')}:`)
+          for (const [field, zhLabel, enLabel] of [
+            ['location', '所在位置', 'Location'], ['powerLevel', '能力状态', 'Power level'],
+            ['physicalState', '身体状态', 'Physical state'], ['mentalState', '心理状态', 'Mental state'],
+            ['keyItems', '关键物品', 'Key items'], ['recentEvents', '近期事件', 'Recent events'],
+          ] as const) {
+            const value = character.currentState[field]
+            if (value.trim()) lines.push(`  - ${textFor(locale, zhLabel, enLabel)}: ${value.trim()}`)
+          }
+        }
+        return lines.join('\n')
+      })
+      return {
+        title: textFor(locale, '角色档案', 'Character profiles'),
+        body: profiles.length ? profiles.join('\n\n') : empty,
+      }
+    }
+  }
+}
+
+export function renderBasicSettingsMarkdown(
+  snapshot: BasicSettingsExportSnapshot,
+  keys: readonly MarkdownExportSettingKey[],
+  locale: Locale,
+): Array<{ key: MarkdownExportSettingKey; title: string; content: string }> {
+  return keys.map(key => {
+    const section = settingSection(key, snapshot, locale)
+    return { key, title: section.title, content: `# ${section.title}\n\n${section.body}\n` }
+  })
+}
+
+function receiptsEqual(
+  current: readonly DraftMarkdownSelectionReceiptItem[],
+  previewed: readonly DraftMarkdownSelectionReceiptItem[],
+): boolean {
+  return current.length === previewed.length && current.every((item, index) => {
+    const old = previewed[index]
+    return old !== undefined
+      && item.draftId === old.draftId
+      && item.kind === old.kind
+      && item.chapterNumber === old.chapterNumber
+      && item.version === old.version
+      && item.status === old.status
+      && item.contentHash === old.contentHash
+      && item.titleHash === old.titleHash
+      && item.finalizationId === old.finalizationId
+  })
+}
+
+function exportSelectionChanged(locale: Locale): { success: false; error: string } {
+  return {
+    success: false,
+    error: textFor(locale, '预览后所选章节数据已变化，请重新载入预览再导出。', 'The selected chapter data changed after preview. Reload the preview before exporting.'),
+  }
+}
+
+/** Export one chapter, one volume, or selected basic settings under a fresh, isolated subdirectory. */
+export async function exportSelectedMarkdown(
+  options: SelectedMarkdownExportOptions,
+  project: ExportProjectSnapshot,
+  projectSession: ProjectSessionContext,
+  previewReceipt: readonly DraftMarkdownSelectionReceiptItem[],
+  previewSettings?: BasicSettingsExportSnapshot,
+): Promise<{ success: boolean; path?: string; error?: string }> {
+  const locale = useLocaleStore.getState().locale
+  const confirmedFiles: string[] = []
+  let activeWritePath: string | undefined
+  if (!isMatchingProjectSnapshot(project, projectSession) || !isProjectSessionCurrent(projectSession)) return staleExportResult(locale)
+  if (options.range === 'settings' && (!options.settings?.length || options.selections.length)) {
+    return { success: false, error: textFor(locale, '請選擇至少一項基礎設定。', 'Choose at least one basic setting.') }
+  }
+  if (options.range !== 'settings' && (!options.selections.length || options.settings?.length)) {
+    return { success: false, error: textFor(locale, '請為範圍內每章明確選擇一個草稿版本或正文。', 'Choose exactly one draft version or finalized text for every chapter in this range.') }
+  }
+
+  try {
+    const snapshot = options.selections.length
+      ? await ipc.invokeWithProjectSession(projectSession, 'db:draft-export-selection', options.selections, projectSession.projectPath)
+      : { chapters: [], receipt: [] } satisfies DraftMarkdownSelectionSnapshot
+    if (!isProjectSessionCurrent(projectSession)) return staleExportResult(locale)
+    if (!receiptsEqual(snapshot.receipt, previewReceipt)) return exportSelectionChanged(locale)
+
+    let settingsSnapshot: BasicSettingsExportSnapshot | undefined
+    let settingsFiles: Array<{ key: MarkdownExportSettingKey; title: string; content: string }> = []
+    if (options.range === 'settings') {
+      settingsSnapshot = await loadBasicSettingsExportSnapshot(projectSession)
+      if (!isProjectSessionCurrent(projectSession)) return staleExportResult(locale)
+      if (previewSettings && JSON.stringify(settingsSnapshot) !== JSON.stringify(previewSettings)) return exportSelectionChanged(locale)
+      settingsFiles = renderBasicSettingsMarkdown(settingsSnapshot, options.settings ?? [], locale)
+    }
+
+    if (options.range === 'volume') {
+      if (!options.volumeId || !options.expectedChapterNumbers?.length) {
+        return { success: false, error: textFor(locale, '缺少卷和卷内章节清单；请重新预览。', 'The volume and chapter manifest is missing. Reload the preview.') }
+      }
+      const [volumes, blueprints] = await Promise.all([
+        ipc.invokeWithProjectSession(projectSession, 'db:blueprint-volume-list', projectSession.projectPath),
+        ipc.invokeWithProjectSession(projectSession, 'db:blueprint-get-all', projectSession.projectPath),
+      ])
+      if (!isProjectSessionCurrent(projectSession)) return staleExportResult(locale)
+      if (!volumes.some(volume => volume.id === options.volumeId)) return exportSelectionChanged(locale)
+      const expected = [...options.expectedChapterNumbers].sort((left, right) => left - right)
+      const currentNumbers = [...new Set(blueprints
+        .filter(blueprint => (blueprint.volumeId ?? 'volume-1') === options.volumeId)
+        .map(blueprint => blueprint.chapterNumber))].sort((left, right) => left - right)
+      const selectedNumbers = snapshot.chapters.map(chapter => chapter.chapterNumber)
+      if (JSON.stringify(expected) !== JSON.stringify(currentNumbers)
+        || JSON.stringify(expected) !== JSON.stringify(selectedNumbers)) return exportSelectionChanged(locale)
+    }
+
+    const chapters = snapshot.chapters.map(chapter => ({
+      ...chapter,
+      markdownContent: renderMarkdownChapter(
+        chapter.chapterNumber,
+        chapter.title.trim(),
+        chapter.content,
+        project.novelConfig.writingLanguage,
+      ),
+    }))
+    const hasFiles = options.range === 'settings' ? settingsFiles.length > 0 : chapters.length > 0
+    if (!hasFiles) return { success: false, error: textFor(locale, '没有可导出的内容。', 'There is no content to export.') }
+
+    if (snapshot.receipt.length) {
+      const current = await ipc.invokeWithProjectSession(
+        projectSession,
+        'db:draft-export-selection-current',
+        snapshot.receipt,
+        projectSession.projectPath,
+      )
+      if (!isProjectSessionCurrent(projectSession)) return staleExportResult(locale)
+      if (!current) return exportSelectionChanged(locale)
+    }
+
+    const folder = `${exportFileStem(project.name)}-export-${randomUUID()}`
+    const mkdir = await ipc.invoke('fs:grant-mkdir', options.grantId, folder)
+    if (!isProjectSessionCurrent(projectSession)) return staleExportResult(locale)
+    requireIpcSuccess(mkdir, textFor(locale, '创建导出目录', 'Create export directory'), textFor(locale, '创建导出目录失败', 'Could not create export directory.'))
+
+    const writeText = async (name: string, content: string) => {
+      if (!isProjectSessionCurrent(projectSession)) throw new Error(staleExportResult(locale).error)
+      if (snapshot.receipt.length) {
+        const stillCurrent = await ipc.invokeWithProjectSession(projectSession, 'db:draft-export-selection-current', snapshot.receipt, projectSession.projectPath)
+        if (!isProjectSessionCurrent(projectSession)) throw new Error(staleExportResult(locale).error)
+        if (!stillCurrent) throw new Error(exportSelectionChanged(locale).error)
+      }
+      const relativePath = `${folder}/${name}`
+      activeWritePath = relativePath
+      const written = await ipc.invoke('fs:grant-write-file', options.grantId, relativePath, content)
+      requireExportWriteSuccess(written, textFor(locale, `写入 ${name}`, `Write ${name}`), textFor(locale, `导出 ${name} 失败`, `Could not write ${name}.`))
+      activeWritePath = undefined
+      confirmedFiles.push(relativePath)
+      if (!isProjectSessionCurrent(projectSession)) throw new Error(staleExportResult(locale).error)
+    }
+
+    if (options.range === 'settings') {
+      if (options.format === 'merged-md') {
+        const content = `# ${project.name} · ${textFor(locale, '基础设定', 'Basic settings')}\n\n${settingsFiles.map(file => `## ${file.title}\n\n${file.content.replace(/^# .+\n\n/u, '')}`).join('\n---\n\n')}`
+        await writeText('basic-settings.md', content)
+      } else {
+        for (const [index, file] of settingsFiles.entries()) {
+          const names: Record<MarkdownExportSettingKey, string> = {
+            premise: 'story-premise', worldview: 'worldview', 'character-graph': 'character-graph', 'character-profiles': 'character-profiles',
+          }
+          await writeText(`${String(index + 1).padStart(2, '0')}-${names[file.key]}.md`, file.content)
+        }
+      }
+    } else if (options.range === 'chapter') {
+      const chapter = chapters[0]
+      if (!chapter) throw new Error('所选章节缺少版本')
+      const name = `chapter-${chapter.chapterNumber}${chapter.title ? `-${exportFileStem(chapter.title)}` : ''}.md`
+      await writeText(name, chapter.markdownContent)
+    } else if (options.format === 'merged-md') {
+      const heading = options.scopeName?.trim() || textFor(locale, '所选卷', 'Selected volume')
+      const content = `# ${heading}\n\n${chapters.map(chapter => `${chapter.markdownContent}\n`).join('\n---\n\n')}`
+      await writeText(`${exportFileStem(heading)}.md`, content)
+    } else {
+      for (const chapter of chapters) {
+        const name = `chapter-${chapter.chapterNumber}${chapter.title ? `-${exportFileStem(chapter.title)}` : ''}.md`
+        await writeText(name, chapter.markdownContent)
+      }
+    }
+
+    if (!isProjectSessionCurrent(projectSession)) return staleSplitExportResult(locale, confirmedFiles)
+    return { success: true, path: confirmedFiles.length === 1 ? confirmedFiles[0] : folder }
+  } catch (error) {
+    const commitState = activeWritePath ? exportWriteFailureCommitState(error) : undefined
+    const possiblyWritten = activeWritePath && commitState === 'unknown' ? [activeWritePath] : []
+    const failed = activeWritePath && commitState === 'not_committed' ? activeWritePath : undefined
+    const detail = splitWriteDetail(locale, confirmedFiles, possiblyWritten, failed)
+    if (!isProjectSessionCurrent(projectSession)) return staleSplitExportResult(locale, confirmedFiles, possiblyWritten, failed)
+    return { success: false, error: `${error instanceof Error ? error.message : String(error)}${detail}` }
+  }
 }

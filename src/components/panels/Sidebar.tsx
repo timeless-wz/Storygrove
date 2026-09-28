@@ -28,6 +28,7 @@ export default function Sidebar() {
   const openProject = useProjectStore(s => s.openProject)
   const setSidebarView = useLayoutStore(s => s.setSidebarView)
   const text = useLocaleStore(s => s.text)
+  const t = useLocaleStore(s => s.t)
   // 全局右键菜单状态
   const [sidebarMenu, setSidebarMenu] = useState<SidebarMenuState | null>(null)
 
@@ -137,7 +138,7 @@ export default function Sidebar() {
                 <Home size={13} />
               </span>
               <span className="text-xs font-semibold tracking-wide truncate" style={{ color: 'var(--color-text)' }}>
-                {text('工作台首页', 'Home')}
+                {t('home.brand')}
               </span>
             </div>
             {currentProject && (

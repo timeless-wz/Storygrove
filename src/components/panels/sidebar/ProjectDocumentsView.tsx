@@ -417,7 +417,7 @@ export default function ProjectDocumentsView() {
             className="h-6 w-6"
             onClick={handleImport}
             disabled={busy}
-            title={text('导入 Markdown 文档（只复制，不修改来源）', 'Import Markdown documents (copy only; sources are untouched)')}
+            title={text('复制为项目自由文档；不会加入章节草稿或正文数据库', 'Copy as a free project document; this does not add chapter drafts or prose to the database')}
           >
             {busy ? <Loader2 size={14} className="animate-spin" /> : <FolderDown size={14} strokeWidth={2} />}
           </Button>
@@ -457,7 +457,7 @@ export default function ProjectDocumentsView() {
                       <FilePlus2 size={13} /> {text('新建文档', 'New document')}
                     </Button>
                     <Button variant="outline" className="w-full" onClick={handleImport} disabled={busy}>
-                      <FolderDown size={13} /> {text('导入 Markdown', 'Import Markdown')}
+                      <FolderDown size={13} /> {text('导入为项目文档', 'Import as project document')}
                     </Button>
                   </div>
                 </div>

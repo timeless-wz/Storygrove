@@ -14,11 +14,11 @@ describe('AI Novel Writer 首页、项目总览与新项目创作路径规范', 
 
   describe('WelcomePage (书斋首页)', () => {
     it('保留品牌与真实回调，支持新建、打开与拆解仿写', () => {
-      expect(welcomeSource).toContain('APP_BRAND')
+      expect(welcomeSource).toContain("t('home.brand')")
       expect(welcomeSource).toContain('onNewProject')
       expect(welcomeSource).toContain('onOpenProject')
       expect(welcomeSource).toContain('onImportNovel')
-      expect(welcomeSource).toContain('拆解仿写')
+      expect(welcomeSource).toContain("t('home.deconstructAction')")
       expect(welcomeSource).toContain('useProjectStore')
       expect(welcomeSource).toContain('recentProjects')
       expect(welcomeSource).toContain('openProject')
@@ -31,12 +31,14 @@ describe('AI Novel Writer 首页、项目总览与新项目创作路径规范', 
       expect(welcomeSource).not.toContain('literary-action-card')
     })
 
-    it('书架具备拟物书册封面、新书立项插槽与真实资料检索提示', () => {
+    it('书架显示真实项目，首页提供灵感和全局资源入口', () => {
       expect(welcomeSource).toContain('literary-book-cover')
-      expect(welcomeSource).toContain('literary-new-book-slot')
+      expect(welcomeSource).toContain('literary-bookshelf-actions')
       expect(welcomeSource).toContain('新书立项')
-      expect(welcomeSource).toContain('项目资料检索')
-      expect(welcomeSource).toContain('已明确加入知识库的资料')
+      expect(welcomeSource).toContain('InspirationNotes compact')
+      expect(welcomeSource).toContain('literary-resource-library-card')
+      expect(welcomeSource).not.toContain('literary-tip-card')
+      expect(welcomeSource).not.toContain('literary-footprint-strip')
       expect(welcomeSource).not.toContain('Ctrl + F')
     })
 
@@ -151,9 +153,10 @@ describe('AI Novel Writer 首页、项目总览与新项目创作路径规范', 
       expect(cssSource).toContain('var(--color-text-muted)')
     })
 
-    it('具备书脊、新书插槽、阶梯导航与工作站卡片样式', () => {
+    it('具备书脊、双引擎、阶梯导航与工作站卡片样式', () => {
       expect(cssSource).toContain('.literary-book-cover')
-      expect(cssSource).toContain('.literary-new-book-slot')
+      expect(cssSource).toContain('.literary-hero-engines')
+      expect(cssSource).toContain('.literary-deconstruct-card')
       expect(cssSource).toContain('.literary-stepper-card')
       expect(cssSource).toContain('.literary-stage-section')
       expect(cssSource).toContain('.literary-workstation-card')

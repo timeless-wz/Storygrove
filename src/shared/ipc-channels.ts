@@ -870,6 +870,13 @@ import type {
 } from '../../electron/repositories/character-repository'
 import type { DraftMeta, DraftFull } from '../../electron/repositories/draft-repository'
 import type {
+  DraftMarkdownSelectionRequest,
+  DraftMarkdownSelectionReceiptItem,
+  DraftMarkdownSelectionSnapshot,
+  MarkdownChapterDraftCommitResult,
+  MarkdownChapterDraftInspection,
+} from './markdown-exchange'
+import type {
   FinalizedDraftExportAuthorityReceipt,
   FinalizedDraftExportSnapshot,
 } from '../../electron/repositories/finalization-repository'
@@ -1075,6 +1082,18 @@ export interface DatabaseChannels {
   'db:draft-export-authority-current': {
     args: [receipt: FinalizedDraftExportAuthorityReceipt, expectedProjectPath: string]
     return: boolean
+  }
+  'db:draft-export-selection': {
+    args: [selection: DraftMarkdownSelectionRequest[], expectedProjectPath: string]
+    return: DraftMarkdownSelectionSnapshot
+  }
+  'db:draft-export-selection-current': {
+    args: [receipt: DraftMarkdownSelectionReceiptItem[], expectedProjectPath: string]
+    return: boolean
+  }
+  'db:draft-import-markdown': {
+    args: [inspectionId: string, projectSession: ProjectSessionContext, expectedProjectPath: string]
+    return: MarkdownChapterDraftCommitResult
   }
   'db:foreshadowing-list': {
     args: [filter: 'all' | 'pending' | 'completed' | undefined, expectedProjectPath: string]
@@ -1375,6 +1394,10 @@ export interface ImportChannels {
       preparation?: ImportRunPreparationResult
       error?: string
     } | null
+  }
+  'dialog:select-chapter-markdown-files': {
+    args: [projectSession: ProjectSessionContext]
+    return: MarkdownChapterDraftInspection | { success: false; error: string } | null
   }
 }
 

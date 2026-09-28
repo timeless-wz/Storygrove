@@ -316,7 +316,7 @@ export default function App() {
 
 
       {/* 状态栏（全宽） */}
-      <StatusBar />
+      {currentProject && sidebarView !== 'home' && <StatusBar />}
 
       {/* 全局对话框 — 由 layout-store 控制开关，不再依赖 window.dispatchEvent */}
       <NewProjectDialog

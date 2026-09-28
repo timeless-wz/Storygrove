@@ -2,14 +2,17 @@
  * HomeSidebarPanel — 主页侧边栏：项目管理入口 + 最近项目列表
  */
 
-import { ArrowRight, BookOpen, FolderOpen, Plus, Trash2 } from 'lucide-react'
+import { useState } from 'react'
+import { ArrowRight, BookOpen, ChevronDown, FileText, FolderOpen, Home, Layers, Plus, Settings, CircleHelp, Trash2 } from 'lucide-react'
 import { useProjectStore } from '../../../stores/project-store'
 import { useLayoutStore } from '../../../stores/layout-store'
+import { useHomeSurfaceStore } from '../../../stores/home-surface-store'
 import { ipc } from '../../../services/ipc-client'
 import { Button } from '../../ui/Button'
 import { confirm } from '../../ui/Confirm'
 import { toast } from '../../ui/Toast'
 import { useLocaleStore } from '../../../stores/locale-store'
+import { getOfficialHomepageOpenError } from '../../../shared/official-homepage'
 
 export default function HomeSidebarPanel() {
   const currentProject = useProjectStore(s => s.currentProject)
@@ -18,6 +21,20 @@ export default function HomeSidebarPanel() {
   const removeRecentProject = useProjectStore(s => s.removeRecentProject)
   const deleteProject = useProjectStore(s => s.deleteProject)
   const text = useLocaleStore(s => s.text)
+  const t = useLocaleStore(s => s.t)
+  const locale = useLocaleStore(s => s.locale)
+  const surface = useHomeSurfaceStore(s => s.surface)
+  const setSurface = useHomeSurfaceStore(s => s.setSurface)
+  const [showAllProjects, setShowAllProjects] = useState(false)
+  const otherProjects = recentProjects.filter(project => project.path !== currentProject?.path)
+  const handleHelpFeedback = async () => {
+    try {
+      const result = await ipc.invoke('official-homepage:open')
+      if (!result.success) toast.error(getOfficialHomepageOpenError(locale))
+    } catch {
+      toast.error(getOfficialHomepageOpenError(locale))
+    }
+  }
 
   const handleDeleteProject = async (project: { name: string; path: string }) => {
     const ok = await confirm(
@@ -56,7 +73,13 @@ export default function HomeSidebarPanel() {
   }
 
   return (
-    <div className="px-3 py-2 text-sm flex flex-col h-full">
+    <div className="literary-home-sidebar px-3 py-2 text-sm flex flex-col h-full">
+      <nav className="literary-home-sidebar-nav" aria-label={t('home.globalNavigation')}>
+        <button type="button" className={surface === 'home' ? 'is-active' : ''} aria-current={surface === 'home' ? 'page' : undefined} onClick={() => setSurface('home')}><Home size={16} />{text('工作台首页', 'Home')}</button>
+        <button type="button" className={surface === 'library' ? 'is-active' : ''} aria-current={surface === 'library' ? 'page' : undefined} onClick={() => setSurface('library', 'notes')}><Layers size={16} />{t('home.libraryTitle')}</button>
+        <button type="button" className={surface === 'references' ? 'is-active' : ''} aria-current={surface === 'references' ? 'page' : undefined} onClick={() => setSurface('references', 'references')}><FileText size={16} />{t('home.libraryReferences')}</button>
+      </nav>
+      <div className="literary-home-sidebar-section"><span>{t('home.projectNavigation')}</span><button type="button" aria-label={text('新建项目', 'New project')} title={text('新建项目', 'New project')} onClick={() => useLayoutStore.getState().openNewProject()}><Plus size={16} /></button></div>
       {/* 当前项目信息：可交互卡片，点击直接进入创作 */}
       {currentProject && (
         <div
@@ -145,24 +168,9 @@ export default function HomeSidebarPanel() {
       {/* 最近项目列表 */}
       {recentProjects.length > 0 && (
         <div className="flex-1 min-h-0 flex flex-col">
-          <div
-            className="flex items-center justify-between mb-2 pt-2"
-            style={{ borderTop: '1px solid var(--color-border)' }}
-          >
-            <span className="text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}>
-              {text('最近项目', 'Recent projects')}
-            </span>
-            <span
-              className="text-[0.65rem] px-1.5 py-0.5 rounded"
-              style={{ backgroundColor: 'var(--color-hover)', color: 'var(--color-text-muted)' }}
-            >
-              {recentProjects.filter(p => p.path !== currentProject?.path).length}
-            </span>
-          </div>
           <div className="space-y-1 overflow-y-auto flex-1 pr-0.5" style={{ scrollbarWidth: 'thin' }}>
-            {recentProjects
-              .filter(p => p.path !== currentProject?.path)
-              .slice(0, 10)
+            {otherProjects
+              .slice(0, showAllProjects ? undefined : currentProject ? 3 : 4)
               .map((p, i) => (
                 <div
                   key={i}
@@ -196,14 +204,21 @@ export default function HomeSidebarPanel() {
                   </button>
                 </div>
               ))}
-            {recentProjects.filter(p => p.path !== currentProject?.path).length === 0 && (
+            {otherProjects.length === 0 && (
               <p className="text-xs px-2 py-2 opacity-50 text-center" style={{ color: 'var(--color-text-muted)' }}>
                 {text('暂无其他最近项目', 'No other recent projects')}
               </p>
             )}
+            {otherProjects.length > (currentProject ? 3 : 4) && (
+              <button type="button" className="literary-home-sidebar-more" aria-expanded={showAllProjects} onClick={() => setShowAllProjects(value => !value)}><ChevronDown size={14} className={showAllProjects ? 'rotate-180' : ''} />{showAllProjects ? t('home.fewerProjects') : t('home.moreProjects')}</button>
+            )}
           </div>
         </div>
       )}
+      <div className="literary-home-sidebar-bottom">
+        <button type="button" onClick={() => useLayoutStore.getState().openSettings('editor')}><Settings size={16} />{text('设置', 'Settings')}</button>
+        <button type="button" onClick={() => void handleHelpFeedback()}><CircleHelp size={16} />{t('home.helpFeedback')}</button>
+      </div>
     </div>
   )
 }

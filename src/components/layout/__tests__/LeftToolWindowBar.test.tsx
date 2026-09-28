@@ -11,6 +11,7 @@ describe('Codex-style workbench shell', () => {
     expect(appSource).not.toContain("from './components/layout/RightToolWindowBar'")
     expect(appSource).not.toContain("from './components/panels/BottomPanel'")
     expect(appSource).toContain('<StatusBar />')
+    expect(appSource).toContain("currentProject && sidebarView !== 'home' && <StatusBar />")
   })
 
   it('keeps the task popover closed by default so the editor owns the available height', () => {

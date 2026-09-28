@@ -27,6 +27,7 @@ import { Label } from '../ui/Label'
 import { useLocaleStore } from '../../stores/locale-store'
 import { captureProjectSession, isProjectSessionCurrent } from '../project-session-gate'
 import { randomUUID } from '../../utils/id'
+import ImportChapterDraftDialog from './ImportChapterDraftDialog'
 
 interface ImportNovelDialogProps {
   open: boolean
@@ -47,6 +48,7 @@ export default function ImportNovelDialog({ open, onClose }: ImportNovelDialogPr
   const [savePath, setSavePath] = useState('')
   const [targetMode, setTargetMode] = useState<'new' | 'current'>('new')
   const [purpose, setPurpose] = useState<ImportPurpose>('reference')
+  const [chapterDraftOpen, setChapterDraftOpen] = useState(false)
 
   // 拆章结果
   const [inspection, setInspection] = useState<ImportInspectionSummary | null>(null)
@@ -516,6 +518,7 @@ export default function ImportNovelDialog({ open, onClose }: ImportNovelDialogPr
     : null
 
   return (
+    <>
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-w-[560px]">
         <DialogHeader>
@@ -567,6 +570,20 @@ export default function ImportNovelDialog({ open, onClose }: ImportNovelDialogPr
               {purpose === 'reference'
                 ? text('用于知识库、结构与文风拆解，不会写入草稿箱或正文章节。', 'Used for knowledge, structure, and style analysis. It never becomes a draft or manuscript chapter.')
                 : text('按章节号导入为不可变权威定稿，用于连续性与后续写作；不会进入参考语料或生成仿写拆解。', 'Imported by chapter number as immutable authoritative finalized text for continuity and future writing. It is not added to reference corpus or imitation analysis.')}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="mt-3 w-full"
+              data-testid="import-as-chapter-drafts"
+              disabled={!currentProject}
+              onClick={() => setChapterDraftOpen(true)}
+            >
+              <FileText size={14} className="mr-2" />
+              {text('作为章节内容导入数据库（新增草稿）', 'Import as chapter content (new drafts)')}
+            </Button>
+            <div className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+              {text('适用于把 Markdown 章节加入当前项目草稿；与上方参考拆解、连续追加权威原稿是不同流程。', 'Adds Markdown chapters as new drafts in the current project. This is separate from reference analysis and continuous authoritative-manuscript import.')}
             </div>
           </div>
 
@@ -935,5 +952,7 @@ export default function ImportNovelDialog({ open, onClose }: ImportNovelDialogPr
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <ImportChapterDraftDialog open={chapterDraftOpen} onClose={() => setChapterDraftOpen(false)} />
+    </>
   )
 }

@@ -35,6 +35,10 @@ import { projectAccess } from '../services/project-access'
 import { assertRequiredExpectedProjectPath } from '../utils/project-context'
 import { ImportRunRepository } from '../repositories/import-run-repository'
 import {
+  chapterDraftImportInspectionStore,
+  parseChapterMarkdownFiles,
+} from '../services/chapter-draft-import'
+import {
   EPUB_MAX_ARCHIVE_ENTRIES,
   EPUB_MAX_ENTRY_BYTES,
   EPUB_MAX_EXTRACTED_BYTES,
@@ -315,6 +319,78 @@ export function registerImportController(
   }
   // Selection, bounded reading, and inspection are one main-process operation.
   // The renderer receives only the final inspection token and safe display facts.
+  ipcMain.handle('dialog:select-chapter-markdown-files', async (event, projectSession: ProjectSessionContext) => {
+    event.sender.once('destroyed', () => {
+      grantService.revokeWebContents(event.sender.id)
+      chapterDraftImportInspectionStore.revokeForWebContents(event.sender.id)
+    })
+    try {
+      const active = projectAccess.assertCurrentProjectContext(projectSession, getCurrentProjectPath())
+      const expectedProjectPath = active.rootPath
+      const result = await dialog.showOpenDialog({
+        title: text('选择要作为章节草稿导入的 Markdown 文件', 'Choose Markdown files to import as chapter drafts'),
+        properties: ['openFile', 'multiSelections'],
+        filters: [{ name: text('Markdown 文档', 'Markdown documents'), extensions: ['md', 'markdown'] }],
+      })
+      projectAccess.assertCurrentProjectContext(projectSession, getCurrentProjectPath())
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      if (result.canceled || result.filePaths.length === 0) return null
+      if (result.filePaths.length > limits.maxSourceFiles) throw new Error(`所选文件数量超过上限 ${limits.maxSourceFiles}`)
+
+      const sources: Array<{ fileName: string; content: string }> = []
+      let totalBytes = 0
+      for (const filePath of result.filePaths) {
+        const fileName = path.basename(filePath)
+        if (!/\.(md|markdown)$/iu.test(fileName)) throw new Error(`仅支持 .md / .markdown：${fileName}`)
+        const size = statSync(filePath).size
+        if (!Number.isSafeInteger(size) || size < 0 || size > limits.maxTotalBytes - totalBytes) {
+          throw new Error(`所选 Markdown 文件总大小超过上限 ${limits.maxTotalBytes} 字节`)
+        }
+        const grant = grantService.issueFile({
+          webContentsId: event.sender.id,
+          filePath,
+          operations: ['read'],
+          ttlMs: IMPORT_GRANT_TTL_MS,
+          maxUses: 1,
+        })
+        try {
+          const capability = grantService.resolve({
+            grantId: grant.grantId,
+            webContentsId: event.sender.id,
+            operation: 'read',
+          })
+          const content = await fileSystem.readText(capability, limits.maxTotalBytes - totalBytes)
+          projectAccess.assertCurrentProjectContext(projectSession, getCurrentProjectPath())
+          totalBytes += size
+          sources.push({ fileName, content })
+        } finally {
+          grantService.revoke(grant.grantId)
+        }
+      }
+
+      const chapters = parseChapterMarkdownFiles(sources)
+      projectAccess.assertCurrentProjectContext(projectSession, getCurrentProjectPath())
+      return chapterDraftImportInspectionStore.create({
+        webContentsId: event.sender.id,
+        projectSession,
+        sourceNames: sources.map(source => source.fileName),
+        totalBytes,
+        chapters,
+      })
+    } catch (error) {
+      chapterDraftImportInspectionStore.revokeForWebContents(event.sender.id)
+      const code = error instanceof Error ? error.message : String(error)
+      return {
+        success: false as const,
+        error: code === 'SECURE_FS_INVALID_TEXT'
+          ? text('文件不是有效的 UTF-8 文本；请转换编码后重新选择。', 'The file is not valid UTF-8 text. Convert its encoding and choose it again.')
+          : code === 'SECURE_FS_FILE_TOO_LARGE'
+            ? text('所选文件超过导入大小上限。', 'A selected file exceeds the import size limit.')
+            : code,
+      }
+    }
+  })
+
   ipcMain.handle('dialog:select-novel-files', async (
     event,
     request?: ImportPurpose | ImportNovelFileSelectionRequest,

@@ -371,60 +371,6 @@
     color: var(--color-accent-text);
   }
 
-  /* 新书立项槽位 */
-  .literary-new-book-slot {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    min-height: 158px;
-    padding: 20px;
-    border: 1.5px dashed var(--color-border);
-    border-radius: 12px;
-    background: color-mix(in srgb, var(--color-panel) 60%, transparent);
-    color: var(--color-text-secondary);
-    text-align: center;
-    transition: border-color .2s, background-color .2s, transform .2s, box-shadow .2s;
-    cursor: pointer;
-  }
-
-  .literary-new-book-slot:hover {
-    border-color: var(--color-accent);
-    background-color: var(--color-hover);
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-sm);
-  }
-
-  .literary-new-book-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 38px;
-    height: 38px;
-    border-radius: 50%;
-    border: 1px solid var(--color-border);
-    background: var(--color-panel);
-    color: var(--color-accent-text);
-    transition: transform .2s;
-  }
-
-  .literary-new-book-slot:hover .literary-new-book-icon {
-    transform: scale(1.08);
-  }
-
-  .literary-new-book-slot strong {
-    font-family: var(--literary-serif);
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--color-text);
-  }
-
-  .literary-new-book-slot small {
-    font-size: 11px;
-    color: var(--color-text-muted);
-  }
-
   /* 空书架状态 */
   .literary-empty-shelf {
     display: flex;
@@ -459,35 +405,6 @@
     color: var(--color-text-secondary);
   }
 
-  /* 提示卡片 */
-  .literary-tip-card {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    margin-top: 24px;
-    padding: 14px 18px;
-    border: 1px solid var(--color-border);
-    border-radius: 10px;
-    background: var(--color-panel);
-    font-size: 12px;
-    color: var(--color-text-secondary);
-  }
-
-  .literary-tip-card strong {
-    color: var(--color-text);
-    font-weight: 600;
-  }
-
-  .literary-home-footer {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding-top: 36px;
-    color: var(--color-text-muted);
-    font-size: 11px;
-  }
 
   /* ===== 项目总览专区 ===== */
   .literary-overview-hero {
@@ -855,5 +772,137 @@
       transition: none !important;
       transform: none !important;
     }
+  }
+
+  /* Home composition: the left panel retains the active literary theme image. */
+  .literary-home-heading {
+    border-bottom: 0;
+    margin-bottom: 20px;
+    padding-bottom: 0;
+  }
+  .literary-home-brand { display: flex; align-items: center; gap: 18px; color: var(--color-text); }
+  .literary-home-brand > svg { color: var(--color-accent); flex: none; }
+  .literary-home-brand strong { display: block; font: 600 clamp(26px, 2.7vw, 38px)/1.25 var(--literary-serif); }
+  .literary-home-brand p { margin-top: 2px; font: 500 16px/1.5 var(--literary-serif); color: var(--color-text-secondary); }
+  .literary-hero-engines { display: grid; grid-template-columns: minmax(0, 1.06fr) minmax(0, 1fr); min-height: 310px; isolation: isolate; }
+  .literary-hero-engines--single { grid-template-columns: 1fr; }
+  .literary-continue-card, .literary-deconstruct-card { min-width: 0; min-height: 310px; border: 1px solid var(--color-border); }
+  .literary-continue-card {
+    --literary-hero-ink: var(--sample-ink, var(--color-text));
+    position: relative; z-index: 1; display: flex; padding: 36px 46px 36px 36px;
+    border-radius: 16px 0 0 16px; color: var(--literary-hero-ink);
+    background: var(--hero-background, var(--literary-hero-bg));
+  }
+  .literary-continue-card::before {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    border-radius: inherit;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--color-panel) 24%, transparent), transparent 82%);
+  }
+  .literary-hero-engines--single .literary-continue-card { border-radius: 16px; }
+  .literary-continue-copy { display: flex; flex-direction: column; justify-content: space-between; position: relative; z-index: 2; width: 100%; }
+  .literary-continue-card h1 { margin: 30px 0 14px; font: 600 clamp(30px, 3.1vw, 46px)/1.25 var(--literary-serif); color: var(--literary-hero-ink); overflow-wrap: anywhere; }
+  .literary-continue-card p { max-width: 48ch; margin: 0 0 24px; font-size: 14px; line-height: 1.85; color: var(--literary-hero-ink); overflow-wrap: anywhere; }
+  .literary-continue-card .literary-hero-actions { margin-top: auto; }
+  .literary-continue-card .literary-hero-text-link { border: 0 !important; background: none !important; color: var(--literary-hero-ink) !important; padding: 8px 4px; min-height: 36px; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--literary-hero-ink) 55%, transparent); text-underline-offset: 5px; }
+  .literary-deconstruct-card {
+    position: relative; z-index: 2; margin-left: -18px; padding: 32px 30px 24px 54px;
+    border-radius: 0 16px 16px 0; overflow: hidden; color: var(--color-text);
+    background: var(--color-panel);
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 8% 100%);
+  }
+  .literary-deconstruct-card::before {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(130deg, color-mix(in srgb, var(--color-accent) 7%, transparent), transparent 48%);
+  }
+  .literary-deconstruct-art { position: absolute; inset: 0; pointer-events: none; background-image: var(--home-deconstruct-art, none); background-repeat: no-repeat; background-size: contain; background-position: right bottom; opacity: .65; }
+  .literary-deconstruct-card.is-dragging { outline: 2px solid var(--color-accent); outline-offset: -3px; background: var(--color-hover); }
+  .literary-deconstruct-content { position: relative; z-index: 1; max-width: 390px; }
+  .literary-deconstruct-eyebrow { color: var(--color-text-secondary); font: 600 14px/1.4 var(--literary-serif); }
+  .literary-deconstruct-card h2 { margin: 14px 0 12px; font: 600 clamp(25px, 2.45vw, 34px)/1.35 var(--literary-serif); color: var(--color-text); }
+  .literary-deconstruct-card p { margin-bottom: 20px; max-width: 35ch; font-size: 14px; line-height: 1.7; color: var(--color-text-secondary); }
+  .literary-deconstruct-card button { min-height: 44px; padding: 9px 18px; border-radius: 8px; font-size: 14px; }
+  .literary-drop-zone { display: flex; align-items: center; gap: 10px; min-height: 46px; margin-top: 16px; padding: 8px 12px; border: 1px dashed var(--color-border); border-radius: 8px; color: var(--color-text-secondary); font-size: 12px; }
+  .literary-bookshelf-section { margin-top: 24px; }
+  .literary-section-heading { margin-bottom: 14px; }
+  .literary-section-caption { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .literary-section-caption > svg { color: var(--color-accent); flex: none; }
+  .literary-section-caption h2 { margin: 0; font: 600 22px/1.4 var(--literary-serif); color: var(--color-text); }
+  .literary-section-caption span, .literary-section-caption p { color: var(--color-text-secondary); font-size: 12px; }
+  .literary-bookshelf-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .literary-bookshelf-actions button { border-radius: 8px; }
+  .literary-bookshelf { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .literary-project-card { min-height: 174px; gap: 14px; padding: 14px; }
+  .literary-book-cover { width: 78px; height: 144px; align-items: center; padding: 12px 10px; }
+  .literary-book-cover strong { font-size: 15px; }
+  .literary-book-cover > svg { color: var(--color-accent); }
+  .literary-project-info { gap: 10px; }
+  .literary-project-info-title { font-size: 18px; }
+  .literary-project-current { display: inline-block; margin: 5px 0; padding: 2px 7px; border-radius: 999px; background: color-mix(in srgb, var(--color-accent) 15%, var(--color-panel)); color: var(--color-accent-text); font-size: 11px; }
+  .literary-project-info .literary-project-path { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; }
+  .literary-project-info time { font-size: 11px; color: var(--color-text-muted); }
+  .literary-empty-shelf { border-radius: 12px; }
+  .literary-home-lower { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(245px, .8fr); gap: 18px; align-items: start; margin-top: 18px; }
+  .literary-inspiration-section { min-width: 0; }
+  .literary-inspiration-section .literary-section-heading { align-items: center; }
+  .literary-session-notice { margin: -2px 0 12px; color: var(--color-text-muted); font-size: 11px; }
+  .literary-inspiration-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .literary-inspiration-card { display: flex; flex-direction: column; min-height: 145px; padding: 15px; border: 1px solid var(--color-border); border-radius: 12px; background: color-mix(in srgb, var(--color-panel) 90%, var(--color-accent)); }
+  .literary-inspiration-card:nth-child(3n + 2) { background: color-mix(in srgb, var(--color-panel) 93%, var(--color-hover)); }
+  .literary-inspiration-card p { flex: 1; margin-bottom: 12px; color: var(--color-text); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+  .literary-note-tags { display: flex; gap: 5px; flex-wrap: wrap; }
+  .literary-note-tags span { border-radius: 999px; padding: 2px 7px; background: var(--color-hover); color: var(--color-text-secondary); font-size: 10px; }
+  .literary-note-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; color: var(--color-text-muted); font-size: 11px; }
+  .literary-note-footer button { display: inline-flex; padding: 4px; border-radius: 6px; color: var(--color-text-secondary); }
+  .literary-note-footer button:hover { background: var(--color-hover); }
+  .literary-notes-empty { min-height: 145px; display: flex; align-items: center; justify-content: center; padding: 18px; border: 1px dashed var(--color-border); border-radius: 12px; color: var(--color-text-secondary); font-size: 13px; text-align: center; }
+  .literary-note-composer { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; padding: 12px; border: 1px solid var(--color-border); border-radius: 12px; background: var(--color-panel); }
+  .literary-note-composer textarea, .literary-note-composer input { width: 100%; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-bg); color: var(--color-text); }
+  .literary-note-composer textarea { min-height: 82px; resize: vertical; }
+  .literary-note-composer-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .literary-resource-library-card { display: flex; flex-direction: column; gap: 14px; min-height: 214px; padding: 18px; border: 1px solid var(--color-border); border-radius: 12px; background: var(--color-panel); }
+  .literary-resource-library-card > div:first-child > svg { color: var(--color-accent); float: left; margin-right: 12px; }
+  .literary-resource-library-card h2 { font: 600 22px/1.4 var(--literary-serif); color: var(--color-text); }
+  .literary-resource-library-card p { clear: both; margin-top: 8px; color: var(--color-text-secondary); font-size: 12px; line-height: 1.6; }
+  .literary-resource-types { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .literary-resource-types button { padding: 9px 4px; border-radius: 8px; background: var(--color-hover); color: var(--color-text-secondary); font-size: 11px; }
+  .literary-resource-types button:hover { color: var(--color-text); background: var(--color-raised); }
+  .literary-library-open { display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: auto; color: var(--color-accent-text); font-size: 12px; }
+  .literary-library-page { min-height: 100%; }
+  .literary-back-link { display: inline-flex; align-items: center; gap: 7px; color: var(--color-accent-text); font-size: 13px; }
+  .literary-library-heading { margin: 20px 0 26px; }
+  .literary-library-heading h1 { font: 600 34px/1.3 var(--literary-serif); color: var(--color-text); }
+  .literary-library-heading p { margin-top: 8px; color: var(--color-text-secondary); font-size: 14px; }
+  .literary-library-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 24px; border-bottom: 1px solid var(--color-border); }
+  .literary-library-tabs button { padding: 8px 12px; color: var(--color-text-secondary); border-bottom: 2px solid transparent; }
+  .literary-library-tabs button[aria-current="page"] { color: var(--color-accent-text); border-color: var(--color-accent); }
+  .literary-library-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 15px; min-height: 240px; border: 1px dashed var(--color-border); border-radius: 12px; color: var(--color-text-secondary); }
+  .literary-home button:focus-visible, .literary-home textarea:focus-visible, .literary-home input:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+  .literary-home-sidebar-nav { display: flex; flex-direction: column; gap: 3px; margin-bottom: 16px; }
+  .literary-home-sidebar-nav button, .literary-home-sidebar-bottom button { display: flex; align-items: center; gap: 11px; width: 100%; padding: 9px 10px; border-radius: 8px; color: var(--color-text-secondary); text-align: left; }
+  .literary-home-sidebar-nav button:hover, .literary-home-sidebar-bottom button:hover, .literary-home-sidebar-nav button.is-active { background: var(--color-hover); color: var(--color-text); }
+  .literary-home-sidebar-nav button.is-active { font-weight: 600; }
+  .literary-home-sidebar-section { display: flex; align-items: center; justify-content: space-between; margin: 0 4px 10px; padding-top: 12px; border-top: 1px solid var(--color-border); color: var(--color-text-secondary); font-size: 12px; }
+  .literary-home-sidebar-section button { display: inline-flex; align-items: center; justify-content: center; width: 25px; height: 25px; border-radius: 6px; }
+  .literary-home-sidebar-section button:hover { background: var(--color-hover); color: var(--color-text); }
+  .literary-home-sidebar-more { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; color: var(--color-text-secondary); font-size: 12px; }
+  .literary-home-sidebar-bottom { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--color-border); }
+  .literary-home-sidebar button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+  @container (max-width: 900px) {
+    .literary-hero-engines { grid-template-columns: 1fr; }
+    .literary-continue-card { border-radius: 16px 16px 0 0; }
+    .literary-deconstruct-card { margin-left: 0; padding: 28px; border-radius: 0 0 16px 16px; clip-path: none; }
+    .literary-home-lower { grid-template-columns: 1fr; }
+  }
+  @container (max-width: 760px) {
+    .literary-bookshelf { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .literary-inspiration-grid { grid-template-columns: 1fr; }
+    .literary-section-caption { flex-wrap: wrap; }
+  }
+  @container (max-width: 540px) {
+    .literary-bookshelf { grid-template-columns: 1fr; }
+    .literary-continue-card { padding: 24px; min-height: 260px; }
+    .literary-deconstruct-card { min-height: 250px; padding: 24px; }
+    .literary-home-brand strong { font-size: 26px; }
+    .literary-home-brand p { font-size: 13px; }
   }
 }

@@ -151,7 +151,7 @@ describe('plot-tree left rail navigation', () => {
     // 项目首次打开应先落在总览，而不是小说配置。
     expect(selectedTab('项目总览')).toBe(true)
 
-    await act(async () => button('章节细纲').click())
+    await act(async () => button('章节蓝图').click())
     await vi.waitFor(() => expect(useEditorStore.getState().tabs)
       .toContainEqual(expect.objectContaining({ type: 'chapter-card', projectKey: PROJECT_PATH })))
 
@@ -172,7 +172,7 @@ describe('plot-tree left rail navigation', () => {
       })
     })
 
-    await act(async () => button('章节细纲').click())
+    await act(async () => button('章节蓝图').click())
     await vi.waitFor(() => {
       const state = useEditorStore.getState()
       expect(state.tabs.find(tab => tab.id === state.activeTabId))
