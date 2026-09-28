@@ -21,26 +21,22 @@
 @layer components {
   /* ===== 基础布局容器 ===== */
   .literary-home {
-    background: linear-gradient(var(--shell-wash-effective, var(--shell-wash, transparent)), var(--shell-wash-effective, var(--shell-wash, transparent))), var(--shell-background, var(--color-bg));
-    background-attachment: fixed;
-    background-size: cover;
-    background-position: center top;
+    background: transparent;
     container-type: inline-size;
   }
 
   .literary-overview {
-    background: linear-gradient(var(--shell-wash-effective, var(--shell-wash, transparent)), var(--shell-wash-effective, var(--shell-wash, transparent))), var(--shell-background, var(--color-bg));
-    background-attachment: fixed;
-    background-size: cover;
-    background-position: center top;
+    background: transparent;
     container-type: inline-size;
   }
 
   .literary-home-inner {
+    position: relative;
     max-width: 1240px;
     margin: 0 auto;
-    padding: 28px clamp(16px, 4%, 48px) 36px;
+    padding: 28px clamp(52px, 7vw, 108px) 36px clamp(16px, 4%, 48px);
   }
+
 
   .literary-home-heading,
   .literary-section-heading {
@@ -774,56 +770,68 @@
     }
   }
 
-  /* Home composition: the left panel retains the active literary theme image. */
+  /* Home composition: the full-window theme wallpaper sits below the hero pair. */
   .literary-home-heading {
     border-bottom: 0;
     margin-bottom: 20px;
-    padding-bottom: 0;
+    margin-left: -14px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--color-panel) 94%, transparent), color-mix(in srgb, var(--color-panel) 65%, transparent) 48%, transparent 78%);
   }
   .literary-home-brand { display: flex; align-items: center; gap: 18px; color: var(--color-text); }
   .literary-home-brand > svg { color: var(--color-accent); flex: none; }
   .literary-home-brand strong { display: block; font: 600 clamp(26px, 2.7vw, 38px)/1.25 var(--literary-serif); }
   .literary-home-brand p { margin-top: 2px; font: 500 16px/1.5 var(--literary-serif); color: var(--color-text-secondary); }
-  .literary-hero-engines { display: grid; grid-template-columns: minmax(0, 1.06fr) minmax(0, 1fr); min-height: 310px; isolation: isolate; }
+  .literary-hero-engines { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: 310px; isolation: isolate; }
   .literary-hero-engines--single { grid-template-columns: 1fr; }
+  .literary-hero-clips { position: absolute; width: 0; height: 0; overflow: hidden; }
   .literary-continue-card, .literary-deconstruct-card { min-width: 0; min-height: 310px; border: 1px solid var(--color-border); }
   .literary-continue-card {
-    --literary-hero-ink: var(--sample-ink, var(--color-text));
-    position: relative; z-index: 1; display: flex; padding: 36px 46px 36px 36px;
-    border-radius: 16px 0 0 16px; color: var(--literary-hero-ink);
-    background: var(--hero-background, var(--literary-hero-bg));
+    --literary-hero-ink: #f3f6ef;
+    position: relative; z-index: 1; display: flex; padding: 36px 58px 36px 36px;
+    color: var(--literary-hero-ink);
+    background: var(--color-panel);
+    clip-path: url(#literary-hero-left-clip);
   }
   .literary-continue-card::before {
     content: ''; position: absolute; inset: 0; pointer-events: none;
-    border-radius: inherit;
-    background: linear-gradient(90deg, color-mix(in srgb, var(--color-panel) 24%, transparent), transparent 82%);
+    background: linear-gradient(var(--color-accent), var(--color-accent)), url('../assets/home/inkwash-hero-panorama.png') left center / 200% 100% no-repeat;
+    background-blend-mode: color;
+    opacity: .95;
   }
-  .literary-hero-engines--single .literary-continue-card { border-radius: 16px; }
+  .literary-continue-card::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--color-accent) 27%, #061012) 0%, color-mix(in srgb, var(--color-accent) 20%, #101819) 55%, transparent 100%);
+  }
+  .literary-hero-engines--single .literary-continue-card { clip-path: none; border-radius: 16px; padding-right: 36px; }
   .literary-continue-copy { display: flex; flex-direction: column; justify-content: space-between; position: relative; z-index: 2; width: 100%; }
   .literary-continue-card h1 { margin: 30px 0 14px; font: 600 clamp(30px, 3.1vw, 46px)/1.25 var(--literary-serif); color: var(--literary-hero-ink); overflow-wrap: anywhere; }
   .literary-continue-card p { max-width: 48ch; margin: 0 0 24px; font-size: 14px; line-height: 1.85; color: var(--literary-hero-ink); overflow-wrap: anywhere; }
   .literary-continue-card .literary-hero-actions { margin-top: auto; }
   .literary-continue-card .literary-hero-text-link { border: 0 !important; background: none !important; color: var(--literary-hero-ink) !important; padding: 8px 4px; min-height: 36px; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--literary-hero-ink) 55%, transparent); text-underline-offset: 5px; }
   .literary-deconstruct-card {
-    position: relative; z-index: 2; margin-left: -18px; padding: 32px 30px 24px 54px;
-    border-radius: 0 16px 16px 0; overflow: hidden; color: var(--color-text);
-    background: var(--color-panel);
-    clip-path: polygon(0 0, 100% 0, 100% 100%, 8% 100%);
+    --home-paper-base: color-mix(in srgb, var(--color-accent) 8%, #fffdf7);
+    position: relative; z-index: 2; margin-left: calc(-10px - 4.5%); padding: 32px 30px 24px 60px;
+    overflow: hidden; color: color-mix(in srgb, var(--color-accent) 22%, #263438);
+    background: var(--home-paper-base);
+    clip-path: url(#literary-hero-right-clip);
   }
   .literary-deconstruct-card::before {
     content: ''; position: absolute; inset: 0; pointer-events: none;
-    background: linear-gradient(130deg, color-mix(in srgb, var(--color-accent) 7%, transparent), transparent 48%);
+    z-index: 1;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--home-paper-base) 94%, transparent), color-mix(in srgb, var(--home-paper-base) 60%, transparent) 70%, transparent);
   }
-  .literary-deconstruct-art { position: absolute; inset: 0; pointer-events: none; background-image: var(--home-deconstruct-art, none); background-repeat: no-repeat; background-size: contain; background-position: right bottom; opacity: .65; }
+  .literary-deconstruct-art { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(color-mix(in srgb, var(--color-accent) 34%, var(--home-paper-base)), color-mix(in srgb, var(--color-accent) 34%, var(--home-paper-base))), url('../assets/home/inkwash-hero-panorama.png') right center / 200% 100% no-repeat; background-blend-mode: color; opacity: .91; }
   .literary-deconstruct-card.is-dragging { outline: 2px solid var(--color-accent); outline-offset: -3px; background: var(--color-hover); }
-  .literary-deconstruct-content { position: relative; z-index: 1; max-width: 390px; }
-  .literary-deconstruct-eyebrow { color: var(--color-text-secondary); font: 600 14px/1.4 var(--literary-serif); }
-  .literary-deconstruct-card h2 { margin: 14px 0 12px; font: 600 clamp(25px, 2.45vw, 34px)/1.35 var(--literary-serif); color: var(--color-text); }
-  .literary-deconstruct-card p { margin-bottom: 20px; max-width: 35ch; font-size: 14px; line-height: 1.7; color: var(--color-text-secondary); }
+  .literary-deconstruct-content { position: relative; z-index: 2; max-width: 390px; }
+  .literary-deconstruct-eyebrow { color: color-mix(in srgb, var(--color-accent) 18%, #536063); font: 600 14px/1.4 var(--literary-serif); }
+  .literary-deconstruct-card h2 { margin: 14px 0 12px; font: 600 clamp(25px, 2.45vw, 34px)/1.35 var(--literary-serif); color: color-mix(in srgb, var(--color-accent) 22%, #263438); }
+  .literary-deconstruct-card p { margin-bottom: 20px; max-width: 35ch; font-size: 14px; line-height: 1.7; color: color-mix(in srgb, var(--color-accent) 15%, #536063); }
   .literary-deconstruct-card button { min-height: 44px; padding: 9px 18px; border-radius: 8px; font-size: 14px; }
-  .literary-drop-zone { display: flex; align-items: center; gap: 10px; min-height: 46px; margin-top: 16px; padding: 8px 12px; border: 1px dashed var(--color-border); border-radius: 8px; color: var(--color-text-secondary); font-size: 12px; }
+  .literary-drop-zone { display: flex; align-items: center; gap: 10px; min-height: 46px; margin-top: 16px; padding: 8px 12px; border: 1px dashed color-mix(in srgb, var(--color-accent) 32%, var(--color-border)); border-radius: 8px; color: color-mix(in srgb, var(--color-accent) 22%, #3e5153); font-size: 12px; }
   .literary-bookshelf-section { margin-top: 24px; }
-  .literary-section-heading { margin-bottom: 14px; }
+  .literary-section-heading { margin-bottom: 14px; padding: 7px 10px; border-radius: 10px; background: color-mix(in srgb, var(--color-panel) 86%, transparent); }
   .literary-section-caption { display: flex; align-items: center; gap: 12px; min-width: 0; }
   .literary-section-caption > svg { color: var(--color-accent); flex: none; }
   .literary-section-caption h2 { margin: 0; font: 600 22px/1.4 var(--literary-serif); color: var(--color-text); }
@@ -831,8 +839,8 @@
   .literary-bookshelf-actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .literary-bookshelf-actions button { border-radius: 8px; }
   .literary-bookshelf { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
-  .literary-project-card { min-height: 174px; gap: 14px; padding: 14px; }
-  .literary-book-cover { width: 78px; height: 144px; align-items: center; padding: 12px 10px; }
+  .literary-project-card { min-height: 174px; gap: 14px; padding: 14px; background: color-mix(in srgb, var(--color-accent) 4%, var(--color-panel)); }
+  .literary-book-cover { width: 78px; height: 144px; align-items: center; padding: 12px 10px; background: linear-gradient(90deg, color-mix(in srgb, var(--color-text) 10%, transparent) 0 4px, transparent 6px), color-mix(in srgb, var(--color-accent) 18%, var(--color-panel)); border-color: color-mix(in srgb, var(--color-accent) 28%, var(--color-border)); }
   .literary-book-cover strong { font-size: 15px; }
   .literary-book-cover > svg { color: var(--color-accent); }
   .literary-project-info { gap: 10px; }
@@ -844,7 +852,7 @@
   .literary-home-lower { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(245px, .8fr); gap: 18px; align-items: start; margin-top: 18px; }
   .literary-inspiration-section { min-width: 0; }
   .literary-inspiration-section .literary-section-heading { align-items: center; }
-  .literary-session-notice { margin: -2px 0 12px; color: var(--color-text-muted); font-size: 11px; }
+  .literary-session-notice { width: fit-content; margin: -2px 0 12px; padding: 4px 8px; border-radius: 6px; background: color-mix(in srgb, var(--color-panel) 86%, transparent); color: var(--color-text-muted); font-size: 11px; }
   .literary-inspiration-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
   .literary-inspiration-card { display: flex; flex-direction: column; min-height: 145px; padding: 15px; border: 1px solid var(--color-border); border-radius: 12px; background: color-mix(in srgb, var(--color-panel) 90%, var(--color-accent)); }
   .literary-inspiration-card:nth-child(3n + 2) { background: color-mix(in srgb, var(--color-panel) 93%, var(--color-hover)); }
@@ -854,7 +862,7 @@
   .literary-note-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; color: var(--color-text-muted); font-size: 11px; }
   .literary-note-footer button { display: inline-flex; padding: 4px; border-radius: 6px; color: var(--color-text-secondary); }
   .literary-note-footer button:hover { background: var(--color-hover); }
-  .literary-notes-empty { min-height: 145px; display: flex; align-items: center; justify-content: center; padding: 18px; border: 1px dashed var(--color-border); border-radius: 12px; color: var(--color-text-secondary); font-size: 13px; text-align: center; }
+  .literary-notes-empty { min-height: 145px; display: flex; align-items: center; justify-content: center; padding: 18px; border: 1px dashed var(--color-border); border-radius: 12px; background: color-mix(in srgb, var(--color-panel) 86%, transparent); color: var(--color-text-secondary); font-size: 13px; text-align: center; }
   .literary-note-composer { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; padding: 12px; border: 1px solid var(--color-border); border-radius: 12px; background: var(--color-panel); }
   .literary-note-composer textarea, .literary-note-composer input { width: 100%; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-bg); color: var(--color-text); }
   .literary-note-composer textarea { min-height: 82px; resize: vertical; }
@@ -864,7 +872,7 @@
   .literary-resource-library-card h2 { font: 600 22px/1.4 var(--literary-serif); color: var(--color-text); }
   .literary-resource-library-card p { clear: both; margin-top: 8px; color: var(--color-text-secondary); font-size: 12px; line-height: 1.6; }
   .literary-resource-types { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
-  .literary-resource-types button { padding: 9px 4px; border-radius: 8px; background: var(--color-hover); color: var(--color-text-secondary); font-size: 11px; }
+  .literary-resource-types button { padding: 9px 4px; border-radius: 8px; background: color-mix(in srgb, var(--color-accent) 13%, var(--color-panel)); color: var(--color-text-secondary); font-size: 11px; }
   .literary-resource-types button:hover { color: var(--color-text); background: var(--color-raised); }
   .literary-library-open { display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: auto; color: var(--color-accent-text); font-size: 12px; }
   .literary-library-page { min-height: 100%; }
@@ -879,7 +887,7 @@
   .literary-home button:focus-visible, .literary-home textarea:focus-visible, .literary-home input:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
   .literary-home-sidebar-nav { display: flex; flex-direction: column; gap: 3px; margin-bottom: 16px; }
   .literary-home-sidebar-nav button, .literary-home-sidebar-bottom button { display: flex; align-items: center; gap: 11px; width: 100%; padding: 9px 10px; border-radius: 8px; color: var(--color-text-secondary); text-align: left; }
-  .literary-home-sidebar-nav button:hover, .literary-home-sidebar-bottom button:hover, .literary-home-sidebar-nav button.is-active { background: var(--color-hover); color: var(--color-text); }
+  .literary-home-sidebar-nav button:hover, .literary-home-sidebar-bottom button:hover, .literary-home-sidebar-nav button.is-active { background: color-mix(in srgb, var(--color-accent) 15%, var(--color-sidebar)); color: var(--color-text); }
   .literary-home-sidebar-nav button.is-active { font-weight: 600; }
   .literary-home-sidebar-section { display: flex; align-items: center; justify-content: space-between; margin: 0 4px 10px; padding-top: 12px; border-top: 1px solid var(--color-border); color: var(--color-text-secondary); font-size: 12px; }
   .literary-home-sidebar-section button { display: inline-flex; align-items: center; justify-content: center; width: 25px; height: 25px; border-radius: 6px; }
@@ -888,9 +896,9 @@
   .literary-home-sidebar-bottom { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--color-border); }
   .literary-home-sidebar button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
   @container (max-width: 900px) {
-    .literary-hero-engines { grid-template-columns: 1fr; }
-    .literary-continue-card { border-radius: 16px 16px 0 0; }
-    .literary-deconstruct-card { margin-left: 0; padding: 28px; border-radius: 0 0 16px 16px; clip-path: none; }
+    .literary-hero-engines { grid-template-columns: 1fr; gap: 10px; }
+    .literary-continue-card { clip-path: none; border-radius: 16px; padding-right: 36px; }
+    .literary-deconstruct-card { margin-left: 0; padding: 28px; border-radius: 16px; clip-path: none; }
     .literary-home-lower { grid-template-columns: 1fr; }
   }
   @container (max-width: 760px) {
@@ -898,7 +906,11 @@
     .literary-inspiration-grid { grid-template-columns: 1fr; }
     .literary-section-caption { flex-wrap: wrap; }
   }
+  @media (max-width: 1300px) {
+    .literary-home-inner { padding-right: 42px; }
+  }
   @container (max-width: 540px) {
+    .literary-home-inner { padding: 16px 12px 28px; }
     .literary-bookshelf { grid-template-columns: 1fr; }
     .literary-continue-card { padding: 24px; min-height: 260px; }
     .literary-deconstruct-card { min-height: 250px; padding: 24px; }

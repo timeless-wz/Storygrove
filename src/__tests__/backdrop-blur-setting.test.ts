@@ -7,9 +7,9 @@ import { describe, expect, it } from 'vitest'
  *
  * 经典皮肤的外壳磨砂原本是硬编码的（backdrop-filter: blur(12px/16px) + 40~82% 不透明度），
  * 主题里为此准备的 --surface-blur / --navigation-blur 从未被引用。此处守住三条：
- *   1. 模糊与不透明度都必须经令牌，且回退值等于接入设置前的原值；
+ *   1. 模糊与不透明度都必须经令牌，且四档能覆盖整窗背景；
  *   2. 不得再出现硬编码的固定模糊值；
- *   3. 「标准」档不写变量，从而与历史观感逐像素一致。
+ *   3. 「标准」档不写变量，使用主题定义的默认观感。
  */
 
 const themeCss = readFileSync(resolve(process.cwd(), 'src/styles/literary-themes.css'), 'utf8')
@@ -36,10 +36,10 @@ describe('background frost setting contract', () => {
 
   it('routes all four translucent chrome surfaces through the opacity token', () => {
     const expected = [
-      'color-mix(in srgb, var(--color-titlebar) var(--chrome-surface-opacity, 80%), transparent)',
+      'color-mix(in srgb, var(--color-titlebar) var(--chrome-surface-opacity, 66%), transparent)',
       'color-mix(in srgb, var(--color-statusbar) var(--chrome-surface-opacity, 85%), transparent)',
-      'color-mix(in srgb, var(--color-sidebar) var(--chrome-surface-opacity, 82%), transparent)',
-      'color-mix(in srgb, var(--color-sidebar) var(--chrome-surface-opacity, 85%), transparent)',
+      'color-mix(in srgb, var(--color-sidebar) var(--chrome-surface-opacity, 66%), transparent)',
+      'color-mix(in srgb, var(--color-sidebar) var(--chrome-surface-opacity, 66%), transparent)',
     ]
     for (const declaration of expected) {
       expect(themeCss, declaration).toContain(declaration)
@@ -48,27 +48,31 @@ describe('background frost setting contract', () => {
     expect(themeCss).not.toMatch(/color-mix\(in srgb, var\(--color-(?:titlebar|statusbar|sidebar)\)\s+\d+%, transparent\)/)
   })
 
-  it('exposes four levels and treats the standard level as the pre-setting appearance', () => {
+  it('exposes four levels and makes off clear without hiding the wallpaper', () => {
     expect(storeSource).toContain("export type BackdropBlurLevel = 'off' | 'light' | 'standard' | 'strong'")
     expect(storeSource).toContain(
       "export const BACKDROP_BLUR_LEVELS: readonly BackdropBlurLevel[] = ['off', 'light', 'standard', 'strong']",
     )
-    // standard 为 null ⇒ 移除覆盖、走 CSS 回退值，等于接入本设置前的观感
+    // standard 为 null ⇒ 移除覆盖、走 CSS 回退值
     expect(storeSource).toContain('standard: null')
     // 关闭档必须同时处理外壳与薄纱，否则仍会留下雾感
     expect(storeSource).toContain(
-      "off: { navigationBlur: 'none', surfaceBlur: 'none', surfaceOpacity: '100%', washScale: '0%' }",
+      "off: { navigationBlur: 'none', surfaceBlur: 'none', surfaceOpacity: '32%', washScale: '0%' }",
     )
   })
 
   it('controls the page veil but never the wallpaper image from the frost level', () => {
-    // 页面背景的洗色必须用可缩放的 effective 值，而非直接引用主题原始洗色
-    expect(literaryWorkbenchCss).toContain('var(--shell-wash-effective, var(--shell-wash, transparent))')
-    expect(literaryWorkbenchCss).not.toMatch(/linear-gradient\(var\(--shell-wash, transparent\)/)
-    // effective 值由桥接层统一定义一次
+    // 整窗壁纸只绘在底层；首页与项目总览不能再重复绘制或覆盖它。
+    expect(literaryWorkbenchCss).toMatch(/\.literary-home\s*\{\s*background: transparent;/)
+    expect(literaryWorkbenchCss).toMatch(/\.literary-overview\s*\{\s*background: transparent;/)
+    expect(themeCss).toContain("[data-page-wallpaper='visible'] .app-skin-root[data-skin='classic'][data-theme] .app-skin-background")
+    expect(themeCss).toContain('background: var(--shell-art, none) center top / cover no-repeat var(--color-bg) !important;')
+    expect(themeCss).toContain('background: var(--shell-wash-effective, transparent);')
+    // effective 值由桥接层统一定义，四档只调节它的强度。
     expect(themeCss).toContain(
-      '--shell-wash-effective: color-mix(in srgb, var(--shell-wash, transparent) var(--shell-wash-scale, 100%), transparent);',
+      '--shell-wash-effective: color-mix(in srgb, var(--shell-wash, transparent) var(--shell-wash-scale), transparent);',
     )
+    expect(themeCss).toContain('--shell-wash-scale: 40%;')
     // 洗色经缩放令牌，关闭时为 0%
     expect(storeSource).toContain("style.setProperty('--shell-wash-scale', tokens.washScale)")
     expect(storeSource).toContain("style.removeProperty('--shell-wash-scale')")
@@ -76,6 +80,9 @@ describe('background frost setting contract', () => {
     const blurTokenNames = storeSource.match(/const BACKDROP_BLUR_TOKEN_NAMES = \[([\s\S]*?)\] as const/)?.[1] ?? ''
     expect(blurTokenNames).not.toContain('--shell-background')
     expect(storeSource).not.toContain('flattenWallpaper')
+    expect(storeSource).toContain("washScale: '20%'")
+    expect(storeSource).toContain("washScale: '80%'")
+    expect(storeSource).toContain("root?.setAttribute?.('data-backdrop-blur', level)")
   })
 
   it('keeps the wallpaper image on its own switch', () => {

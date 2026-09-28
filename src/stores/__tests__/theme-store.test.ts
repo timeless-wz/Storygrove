@@ -154,7 +154,7 @@ describe('theme store branding defaults', () => {
     expect(useThemeStore.getState().resolvedTheme).toBe('dark')
     expect(JSON.parse(localStorage.getItem('ai-novel-writer-theme') ?? '{}')).toMatchObject({
       state: { theme: 'dark' },
-      version: 1,
+      version: 2,
     })
     expect(localStorage.getItem('ai-novel-writer-theme-migrated')).toBeNull()
   })
@@ -168,7 +168,7 @@ describe('theme store branding defaults', () => {
     expect(useThemeStore.getState().theme).toBe('dark')
     expect(JSON.parse(localStorage.getItem('ai-novel-writer-theme') ?? '{}')).toMatchObject({
       state: { theme: 'dark' },
-      version: 1,
+      version: 2,
     })
   })
 
@@ -184,4 +184,18 @@ describe('theme store branding defaults', () => {
     expect(useThemeStore.getState().resolvedTheme).toBe('dark')
     expect(localStorage.getItem('ai-novel-writer-theme')).toBe(firstPersistedState)
   })
+
+  it('preserves the wallpaper switch when moving an existing profile to v2', async () => {
+    seedPersistedState({ theme: 'storyforge', pageWallpaper: 'hidden' }, 1)
+    const { useThemeStore } = await import('../theme-store')
+
+    useThemeStore.getState().initTheme()
+
+    expect(useThemeStore.getState().pageWallpaper).toBe('hidden')
+    expect(JSON.parse(localStorage.getItem('ai-novel-writer-theme') ?? '{}')).toMatchObject({
+      state: { theme: 'storyforge', pageWallpaper: 'hidden' },
+      version: 2,
+    })
+  })
+
 })

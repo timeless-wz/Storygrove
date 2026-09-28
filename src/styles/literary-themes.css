@@ -654,7 +654,8 @@
   --color-input-bg: var(--color-bg);
   /* 页面背景的洗色（壁纸上那层薄纱）。经 --shell-wash-scale 缩放，
      使「背景雾化」设置能减弱或去除它；未设置时等于该主题原始洗色。 */
-  --shell-wash-effective: color-mix(in srgb, var(--shell-wash, transparent) var(--shell-wash-scale, 100%), transparent);
+  --shell-wash-scale: 40%;
+  --shell-wash-effective: color-mix(in srgb, var(--shell-wash, transparent) var(--shell-wash-scale), transparent);
   --literary-hero-bg: var(--hero-background);
   --literary-hero-ink: var(--accent-foreground, #ffffff);
   --literary-hero-muted: var(--text-secondary);
@@ -771,10 +772,7 @@
   [data-theme='starlight-dark'],
   [data-theme='cosmic-glass']
 ) {
-  background: var(--shell-background) !important;
-  background-attachment: fixed !important;
-  background-size: cover !important;
-  background-position: center top !important;
+  background: var(--shell-base, var(--color-bg)) !important;
 }
 
 .app-skin-root[data-skin='classic']:is(
@@ -835,7 +833,7 @@
   [data-theme='cosmic-glass']
 ) .writer-topbar {
   /* 不透明度与模糊由「背景雾化」设置驱动；未设置时回退到各元素的原有取值。 */
-  background: color-mix(in srgb, var(--color-titlebar) var(--chrome-surface-opacity, 80%), transparent);
+  background: color-mix(in srgb, var(--color-titlebar) var(--chrome-surface-opacity, 66%), transparent);
   backdrop-filter: var(--navigation-blur, blur(12px));
   -webkit-backdrop-filter: var(--navigation-blur, blur(12px));
 }
@@ -877,7 +875,7 @@
   [data-theme='starlight-dark'],
   [data-theme='cosmic-glass']
 ) :is(.literary-sidebar, .writer-project-tree) {
-  background: color-mix(in srgb, var(--color-sidebar) var(--chrome-surface-opacity, 82%), transparent);
+  background: color-mix(in srgb, var(--color-sidebar) var(--chrome-surface-opacity, 66%), transparent);
   backdrop-filter: var(--surface-blur, blur(16px));
   -webkit-backdrop-filter: var(--surface-blur, blur(16px));
 }
@@ -898,7 +896,21 @@
   [data-theme='starlight-dark'],
   [data-theme='cosmic-glass']
 ) .writer-project-sidebar-header {
-  background: color-mix(in srgb, var(--color-sidebar) var(--chrome-surface-opacity, 85%), transparent);
+  background: color-mix(in srgb, var(--color-sidebar) var(--chrome-surface-opacity, 66%), transparent);
+}
+
+/* The theme artwork is drawn once behind the complete window. Frost is a separate veil. */
+:root[data-page-wallpaper='visible'] .app-skin-root[data-skin='classic'][data-theme] .app-skin-background {
+  background: var(--shell-art, none) center top / cover no-repeat var(--color-bg) !important;
+}
+:root[data-page-wallpaper='visible'] .app-skin-root[data-skin='classic'][data-theme] .app-skin-background::after {
+  background: var(--shell-wash-effective, transparent);
+}
+
+/* WelcomePage also has writer-shell-surface; its opaque component background
+   otherwise covers the loaded wallpaper across the entire main region. */
+.app-skin-root[data-skin='classic'][data-theme] .writer-shell-surface.literary-home {
+  background: transparent;
 }
 
 /* ========================================================================

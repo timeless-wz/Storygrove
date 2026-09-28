@@ -118,10 +118,10 @@ interface BackdropBlurTokens {
  * （例如「关闭雾化 + 保留壁纸」= 背景图清晰可见且没有薄纱）。
  */
 export const BACKDROP_BLUR_TOKENS: Record<BackdropBlurLevel, BackdropBlurTokens | null> = {
-  off: { navigationBlur: 'none', surfaceBlur: 'none', surfaceOpacity: '100%', washScale: '0%' },
-  light: { navigationBlur: 'blur(6px)', surfaceBlur: 'blur(8px)', surfaceOpacity: '92%', washScale: '50%' },
+  off: { navigationBlur: 'none', surfaceBlur: 'none', surfaceOpacity: '32%', washScale: '0%' },
+  light: { navigationBlur: 'blur(6px)', surfaceBlur: 'blur(8px)', surfaceOpacity: '54%', washScale: '20%' },
   standard: null,
-  strong: { navigationBlur: 'blur(20px)', surfaceBlur: 'blur(26px)', surfaceOpacity: '74%', washScale: null },
+  strong: { navigationBlur: 'blur(20px)', surfaceBlur: 'blur(26px)', surfaceOpacity: '82%', washScale: '80%' },
 }
 
 /** 页面背景壁纸。与雾化档位解耦，单独控制 --shell-background。 */
@@ -272,7 +272,7 @@ export const useThemeStore = create<ThemeState>()(
         backdropBlur: state.backdropBlur,
         pageWallpaper: state.pageWallpaper,
       }),
-      version: 1,
+      version: 2,
       migrate: (persistedState, version) => {
         const state = persistedState as { theme?: string }
         if (version < 1 && state.theme === 'night') {
@@ -352,6 +352,7 @@ const BACKDROP_BLUR_TOKEN_NAMES = [
  */
 function applyBackdropBlur(level: BackdropBlurLevel) {
   const root = document.documentElement
+  root?.setAttribute?.('data-backdrop-blur', level)
   const style = root?.style
   // 与 applyTheme 一致：逐个方法判可用性，避免非浏览器环境（测试桩）缺少某个方法时抛出。
   if (typeof style?.setProperty !== 'function' || typeof style?.removeProperty !== 'function') return
@@ -373,7 +374,9 @@ function applyBackdropBlur(level: BackdropBlurLevel) {
  * 显示时移除覆盖，回到各主题原始的壁纸定义。
  */
 function applyPageWallpaper(mode: PageWallpaperMode) {
-  const style = document.documentElement?.style
+  const root = document.documentElement
+  root?.setAttribute?.('data-page-wallpaper', mode)
+  const style = root?.style
   if (typeof style?.setProperty !== 'function' || typeof style?.removeProperty !== 'function') return
 
   if (mode === 'hidden') style.setProperty('--shell-background', 'var(--color-bg)')

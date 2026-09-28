@@ -10,6 +10,8 @@ import '../../../styles/literary-workbench.css'
 import WelcomePage from '../WelcomePage'
 import ProjectOverviewPage from '../ProjectOverviewPage'
 import NewProjectDialog from '../../dialogs/NewProjectDialog'
+import TitleBar from '../../layout/TitleBar'
+import HomeSidebarPanel from '../../panels/sidebar/HomeSidebarPanel'
 
 import { useLocaleStore } from '../../../stores/locale-store'
 import { useProjectStore } from '../../../stores/project-store'
@@ -19,6 +21,7 @@ import { useStoryTimelineStore } from '../../../stores/story-timeline-store'
 import { useCharacterStore } from '../../../stores/character-store'
 import { useEditorStore } from '../../../stores/editor-store'
 import { useHomeSurfaceStore } from '../../../stores/home-surface-store'
+import { useLayoutStore } from '../../../stores/layout-store'
 import { setActiveProjectSessionContext } from '../../../shared/project-session-context'
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -32,8 +35,11 @@ beforeEach(async () => {
   await page.viewport(1280, 860)
   useLocaleStore.setState({ locale: 'zh-CN', initialized: true })
   useHomeSurfaceStore.setState({ surface: 'home', category: 'notes', notes: [] })
+  useLayoutStore.setState({ sidebarView: 'home' })
   document.documentElement.setAttribute('data-theme', 'storyforge')
   document.documentElement.className = ''
+  document.documentElement.removeAttribute('data-backdrop-blur')
+  document.documentElement.removeAttribute('data-page-wallpaper')
 
   container = document.createElement('div')
   container.style.width = '100%'
@@ -98,6 +104,9 @@ afterEach(() => {
 
 describe('工作台首页与项目总览视觉渲染与截图', () => {
   it('渲染并截图书斋首页（含最近项目、双入口与焦点作品）', async () => {
+    document.documentElement.setAttribute('data-theme', 'inkwash')
+    document.documentElement.setAttribute('data-backdrop-blur', 'standard')
+    document.documentElement.setAttribute('data-page-wallpaper', 'visible')
     useProjectStore.setState({
       currentProject: {
         id: 'proj-unwritten-book',
@@ -156,31 +165,57 @@ describe('工作台首页与项目总览视觉渲染与截图', () => {
 
     await act(async () => {
       root?.render(
-        <WelcomePage
-          onNewProject={() => {}}
-          onOpenProject={() => {}}
-          onImportNovel={() => {}}
-        />,
+        <div className="app-skin-root flex flex-col w-full h-full overflow-hidden" data-skin="classic" data-theme="inkwash">
+          <div className="app-skin-background" aria-hidden="true" />
+          <TitleBar />
+          <div className="writer-desktop-shell flex flex-1 min-h-0 overflow-hidden">
+            <div className="literary-sidebar w-[260px] shrink-0"><HomeSidebarPanel /></div>
+            <WelcomePage onNewProject={() => {}} onOpenProject={() => {}} onImportNovel={() => {}} />
+          </div>
+        </div>,
       )
     })
 
     // 等待渲染稳定
     await new Promise((r) => setTimeout(r, 100))
     expect(container?.textContent).toContain('继续创作')
-    await page.screenshot({ path: 'screenshots/codex-home-redesign-welcome.png' })
+    await page.screenshot({ path: '../../../../output/playwright/hero-home-desktop.png' })
+    await page.viewport(1600, 960)
+    await page.screenshot({ path: '../../../../output/playwright/hero-home-wide-wallpaper.png' })
+    await page.viewport(1280, 860)
 
     const heroTitle = container?.querySelector('#welcome-hero-title') as HTMLElement
-    const inkProbe = document.createElement('span')
-    document.body.append(inkProbe)
-    for (const theme of ['inkwash', 'starlight', 'storyforge']) {
+    const wallpaper = container?.querySelector('.app-skin-background') as HTMLElement
+    const homeSurface = container?.querySelector('.writer-shell-surface.literary-home') as HTMLElement
+    expect(getComputedStyle(homeSurface).backgroundColor).toBe('rgba(0, 0, 0, 0)')
+    let inkwashBackground = ''
+    for (const theme of ['inkwash', 'starlight', 'storyforge', 'paper']) {
       document.documentElement.setAttribute('data-theme', theme)
-      inkProbe.style.color = 'var(--sample-ink)'
-      expect(getComputedStyle(heroTitle).color).toBe(getComputedStyle(inkProbe).color)
+      expect(getComputedStyle(heroTitle).color).toBe('rgb(243, 246, 239)')
+      if (theme === 'inkwash') inkwashBackground = getComputedStyle(wallpaper).backgroundImage
+      if (theme === 'storyforge') expect(getComputedStyle(wallpaper).backgroundImage).not.toBe(inkwashBackground)
     }
-    document.documentElement.setAttribute('data-theme', 'paper')
-    inkProbe.style.color = 'var(--color-text)'
-    expect(getComputedStyle(heroTitle).color).toBe(getComputedStyle(inkProbe).color)
-    inkProbe.remove()
+    document.documentElement.style.setProperty('--shell-background', 'var(--color-bg)')
+    expect(getComputedStyle(wallpaper).backgroundImage).toBe('none')
+    document.documentElement.style.removeProperty('--shell-background')
+    document.documentElement.setAttribute('data-theme', 'storyforge')
+
+    document.documentElement.setAttribute('data-backdrop-blur', 'off')
+    document.documentElement.setAttribute('data-page-wallpaper', 'visible')
+    const shell = container?.querySelector('.app-skin-root') as HTMLElement
+    for (const theme of ['storyforge', 'gilded', 'verdant']) {
+      document.documentElement.setAttribute('data-theme', theme)
+      shell.setAttribute('data-theme', theme)
+      expect(getComputedStyle(wallpaper).backgroundImage).toContain('url(')
+      await page.screenshot({ path: `../../../../output/playwright/home-${theme}-clear.png` })
+    }
+    document.documentElement.setAttribute('data-page-wallpaper', 'hidden')
+    document.documentElement.style.setProperty('--shell-background', 'var(--color-bg)')
+    expect(getComputedStyle(wallpaper).backgroundImage).toBe('none')
+    document.documentElement.style.removeProperty('--shell-background')
+    document.documentElement.removeAttribute('data-backdrop-blur')
+    document.documentElement.removeAttribute('data-page-wallpaper')
+    shell.setAttribute('data-theme', 'inkwash')
     document.documentElement.setAttribute('data-theme', 'storyforge')
 
     expect(container?.querySelector('.literary-deconstruct-card')).not.toBeNull()
@@ -261,7 +296,7 @@ describe('工作台首页与项目总览视觉渲染与截图', () => {
     const luminance = (color: string) => {
       const channels = color.match(/[\d.]+/g)?.slice(0, 3).map(Number) ?? [0, 0, 0]
       const linear = channels.map(value => {
-        const channel = value / 255
+        const channel = color.startsWith('color(srgb ') ? value : value / 255
         return channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4
       })
       return linear[0] * .2126 + linear[1] * .7152 + linear[2] * .0722

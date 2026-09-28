@@ -764,7 +764,7 @@
   .writer-topbar {
     background: var(--writer-surface-topbar);
     color: var(--writer-topbar-text);
-    border-bottom: 1px solid var(--writer-chrome-border);
+    border-bottom: 0;
     box-shadow: var(--writer-topbar-shadow);
   }
 
