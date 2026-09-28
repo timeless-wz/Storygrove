@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Bot, CheckCircle2, FolderOpen, Languages, ListTodo, Minus, PanelLeft,
   PanelRight, Plus, Settings,
@@ -14,7 +15,7 @@ import { useLocaleStore } from '../../stores/locale-store'
 import BottomPanel from '../panels/BottomPanel'
 
 /**
- * 工作台状态栏：承接项目上下文和低频控制；任务采用绝对定位的浮层，关闭后不占高度。
+ * 工作台顶栏状态：承接项目上下文和低频控制；任务详情从顶栏向下弹出。
  */
 export default function StatusBar() {
   const currentProject = useProjectStore(s => s.currentProject)
@@ -49,8 +50,8 @@ export default function StatusBar() {
 
   return (
     <div
-      className="writer-statusbar no-select flex items-center justify-between"
-      style={{ height: 'var(--height-statusbar)', fontSize: '0.75rem', flexShrink: 0 }}
+      className="writer-topbar-status no-select flex items-center justify-between"
+      style={{ height: '100%', fontSize: '0.75rem' }}
     >
       <div className="flex min-w-0 items-center h-full">
         <StatusBarSegment title={text('显示或隐藏项目资源树', 'Show or hide project resources')} onClick={toggleSidebar}>
@@ -104,10 +105,11 @@ export default function StatusBar() {
           <Settings size={12} />
         </StatusBarSegment>
 
-        {bottomPanelOpen && bottomTab === 'tasks' && (
+        {bottomPanelOpen && bottomTab === 'tasks' && createPortal(
           <div className="writer-task-popover" role="dialog" aria-label={text('任务进度', 'Task progress')}>
             <BottomPanel />
-          </div>
+          </div>,
+          document.body,
         )}
       </div>
     </div>
@@ -162,7 +164,7 @@ function AITaskCapsule() {
 
 function StatusBarSegment({ children, title, onClick }: { children: ReactNode; title?: string; onClick?: () => void }) {
   return (
-    <button type="button" className="writer-statusbar-segment flex items-center gap-1 px-2 h-full transition-colors" title={title} onClick={onClick} disabled={!onClick}>
+    <button type="button" className="writer-topbar-segment flex items-center gap-1 px-2 h-full transition-colors" title={title} onClick={onClick} disabled={!onClick}>
       {children}
     </button>
   )

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 describe('language controls', () => {
-  it('keeps the language switch only in the status bar', () => {
+  it('keeps the language switch in the project controls mounted inside the title bar', () => {
     const titleBar = readFileSync('src/components/layout/TitleBar.tsx', 'utf8')
     const statusBar = readFileSync('src/components/layout/StatusBar.tsx', 'utf8')
 
@@ -10,6 +10,7 @@ describe('language controls', () => {
     expect(titleBar).not.toContain('toggleLocale')
     expect(statusBar).toMatch(/import[\s\S]*Languages[\s\S]*from 'lucide-react'/)
     expect(statusBar).toContain('toggleLocale')
+    expect(titleBar).toContain('<StatusBar />')
   })
 
   it('keeps model configuration inside settings instead of the status bar', () => {

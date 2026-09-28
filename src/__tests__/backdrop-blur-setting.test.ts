@@ -65,7 +65,8 @@ describe('background frost setting contract', () => {
     // 整窗壁纸只绘在底层；首页与项目总览不能再重复绘制或覆盖它。
     expect(literaryWorkbenchCss).toMatch(/\.literary-home\s*\{\s*background: transparent;/)
     expect(literaryWorkbenchCss).toMatch(/\.literary-overview\s*\{\s*background: transparent;/)
-    expect(themeCss).toContain("[data-page-wallpaper='visible'] .app-skin-root[data-skin='classic'][data-theme] .app-skin-background")
+    expect(themeCss).toContain("[data-page-wallpaper='visible'] .app-skin-root[data-theme] .app-skin-background")
+    expect(themeCss).not.toContain("[data-page-wallpaper='visible'] .app-skin-root[data-skin='classic']")
     expect(themeCss).toContain('background: var(--shell-art, none) center top / cover no-repeat var(--color-bg) !important;')
     expect(themeCss).toContain('background: var(--shell-wash-effective, transparent);')
     // effective 值由桥接层统一定义，四档只调节它的强度。

@@ -2,7 +2,7 @@ import type { MessageKey } from './en-US'
 
 export const zhCN = {
   'appearance.anime': '手绘幻想',
-  'appearance.animeDescription': '原创日系动画氛围，兼顾背景层次与文字可读性。',
+  'appearance.animeDescription': '在主题壁纸左侧叠加日系插画，右上角仍显示主题风景。',
   'appearance.change': '更换图片',
   'appearance.choose': '选择图片',
   'appearance.classic': '经典',
@@ -14,7 +14,7 @@ export const zhCN = {
   'appearance.remove': '移除',
   'appearance.section': '外观',
   'appearance.skins': '界面皮肤',
-  'appearance.skinsDescription': '皮肤与颜色主题彼此独立，且不会改变可读性设置。',
+  'appearance.skinsDescription': '颜色主题决定整窗壁纸与配色；图片皮肤叠加在壁纸上，背景雾化单独调节。',
   'appearance.theme': '主题',
   'appearance.themeDescription': '选择标题栏和界面控件使用的颜色主题。',
   'app.windowTitle': 'AI小说作家 — AI Novel Writer',

@@ -209,9 +209,26 @@ describe('工作台首页与项目总览视觉渲染与截图', () => {
       expect(getComputedStyle(wallpaper).backgroundImage).toContain('url(')
       await page.screenshot({ path: `../../../../output/playwright/home-${theme}-clear.png` })
     }
+    // Simulate the persisted anime skin arriving after the initial classic render.
+    // The theme wallpaper must not blink away when the async skin state resolves.
+    document.documentElement.setAttribute('data-theme', 'storyforge')
+    shell.setAttribute('data-theme', 'storyforge')
+    const themeWallpaperBeforeSkinRestore = getComputedStyle(wallpaper).backgroundImage
+    shell.setAttribute('data-skin', 'anime')
+    shell.setAttribute('data-skin-readability', 'high-contrast')
+    const animeArt = document.createElement('img')
+    animeArt.className = 'app-skin-background-image'
+    animeArt.src = './skins/anime-night.webp'
+    wallpaper.appendChild(animeArt)
+    expect(getComputedStyle(wallpaper).backgroundImage).toBe(themeWallpaperBeforeSkinRestore)
+    expect(getComputedStyle(homeSurface).backgroundColor).toBe('rgba(0, 0, 0, 0)')
+    expect(getComputedStyle(animeArt).maskImage).toContain('linear-gradient')
+    expect(getComputedStyle(animeArt).mixBlendMode).toBe('luminosity')
+    await page.screenshot({ path: '../../../../output/playwright/home-storyforge-anime-restored.png' })
     document.documentElement.setAttribute('data-page-wallpaper', 'hidden')
     document.documentElement.style.setProperty('--shell-background', 'var(--color-bg)')
     expect(getComputedStyle(wallpaper).backgroundImage).toBe('none')
+    expect(getComputedStyle(animeArt).display).toBe('none')
     document.documentElement.style.removeProperty('--shell-background')
     document.documentElement.removeAttribute('data-backdrop-blur')
     document.documentElement.removeAttribute('data-page-wallpaper')

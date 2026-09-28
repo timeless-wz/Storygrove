@@ -964,11 +964,51 @@
     cursor: default;
   }
 
+  /* Project status now shares the draggable title row with the brand. */
+  .writer-topbar-workspace {
+    height: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -webkit-app-region: no-drag;
+  }
+
+  .writer-topbar-workspace::-webkit-scrollbar {
+    display: none;
+  }
+
+  .writer-topbar-status {
+    width: max-content;
+    min-width: 100%;
+    color: var(--writer-topbar-text);
+    white-space: nowrap;
+  }
+
+  .writer-topbar-segment {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    white-space: nowrap;
+    -webkit-app-region: no-drag;
+  }
+
+  .writer-topbar-segment:hover:not(:disabled) {
+    background: var(--writer-command-hover-surface);
+  }
+
+  .writer-topbar-segment:disabled {
+    cursor: default;
+  }
+
+  .writer-topbar-status .ai-task-capsule:not(.ai-task-capsule--complete) {
+    color: inherit;
+  }
+
   .writer-task-popover {
-    position: absolute;
-    right: 8px;
-    bottom: calc(100% + 8px);
-    z-index: 50;
+    position: fixed;
+    right: 12px;
+    top: calc(var(--height-titlebar) + 8px);
+    z-index: 70;
     width: min(480px, calc(100vw - 24px));
     height: min(440px, calc(100vh - 96px));
     overflow: hidden;
@@ -1808,10 +1848,25 @@
 }
 
 .app-skin-background-image {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
   object-position: center;
+  opacity: 0.48;
+  /* Preserve the theme landscape in the upper-right and along the right edge. */
+  -webkit-mask-image: linear-gradient(90deg, #000 0%, transparent 66%);
+  mask-image: linear-gradient(90deg, #000 0%, transparent 66%);
+}
+
+/* Built-in art inherits the selected theme's hue; personal photos retain their colors. */
+.app-skin-root[data-skin='anime'] .app-skin-background-image {
+  mix-blend-mode: luminosity;
+}
+
+:root[data-page-wallpaper='hidden'] .app-skin-background-image {
+  display: none;
 }
 
 /* 图片皮肤采用独立的可读性语义，而不是沿用主题默认文本色与不透明面板。 */
@@ -1821,12 +1876,11 @@
   --skin-text-primary: var(--text-primary, var(--color-text));
   --skin-text-secondary: var(--text-secondary, var(--color-text-secondary));
   --skin-border: var(--border, var(--color-border));
-  --skin-welcome-surface: color-mix(in srgb, var(--color-bg) 84%, transparent);
-  --skin-panel-surface: color-mix(in srgb, var(--color-panel) 78%, transparent);
+  --skin-welcome-surface: color-mix(in srgb, var(--color-bg) var(--chrome-surface-opacity, 66%), transparent);
+  --skin-panel-surface: color-mix(in srgb, var(--color-panel) var(--chrome-surface-opacity, 66%), transparent);
   --skin-main-surface: color-mix(in srgb, var(--skin-editor-base) 78%, transparent);
-  --skin-workspace-panel-surface: color-mix(in srgb, var(--color-sidebar) 84%, transparent);
-  --skin-workspace-page-surface: color-mix(in srgb, var(--skin-editor-base) 84%, transparent);
-  --skin-background-scrim: color-mix(in srgb, var(--color-bg) 12%, transparent);
+  --skin-workspace-panel-surface: color-mix(in srgb, var(--color-sidebar) var(--chrome-surface-opacity, 66%), transparent);
+  --skin-workspace-page-surface: color-mix(in srgb, var(--skin-editor-base) var(--chrome-surface-opacity, 66%), transparent);
   --skin-control-surface: color-mix(in srgb, var(--color-panel) 88%, transparent);
   --skin-control-text: var(--skin-text-primary);
   --skin-control-border: var(--skin-border);
@@ -1866,10 +1920,6 @@
   --skin-border: #C8C8C8;
 }
 
-.app-skin-root[data-skin-readability='high-contrast'] .app-skin-background::after {
-  background: var(--skin-background-scrim);
-}
-
 /* 图片皮肤的阅读表面使用足够强的底色，避免自定义图片的极端明暗吞没文字。 */
 .app-skin-root[data-skin-readability='high-contrast'] :is(
   .writer-shell-surface,
@@ -1884,6 +1934,12 @@
 
 .app-skin-root[data-skin-readability='high-contrast'] .writer-shell-surface {
   background: var(--skin-welcome-surface) !important;
+}
+
+/* The home page is an open canvas; its cards provide their own text surfaces. */
+.app-skin-root[data-skin-readability='high-contrast'] .writer-shell-surface.literary-home,
+.app-skin-root[data-skin-readability='high-contrast'] .skin-workspace-page.literary-home {
+  background: transparent !important;
 }
 
 .app-skin-root[data-skin-readability='high-contrast'] :is(

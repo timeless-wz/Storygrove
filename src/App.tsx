@@ -11,7 +11,6 @@ import { useSkinStore } from './stores/skin-store'
 import { useEditorStore } from './stores/editor-store'
 import { ipc } from './services/ipc-client'
 import TitleBar from './components/layout/TitleBar'
-import StatusBar from './components/layout/StatusBar'
 import Sidebar from './components/panels/Sidebar'
 import EditorArea from './components/panels/EditorArea'
 import AIPanel from './components/panels/AIPanel'
@@ -314,9 +313,6 @@ export default function App() {
         </PanelGroup>
       </div>
 
-
-      {/* 状态栏（全宽） */}
-      {currentProject && sidebarView !== 'home' && <StatusBar />}
 
       {/* 全局对话框 — 由 layout-store 控制开关，不再依赖 window.dispatchEvent */}
       <NewProjectDialog

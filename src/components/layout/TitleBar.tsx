@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { Minus, Square, X } from 'lucide-react'
 import { useProjectStore } from '../../stores/project-store'
+import { useLayoutStore } from '../../stores/layout-store'
 import { useWorkflowStore } from '../../stores/workflow-store'
 import { useEditorStore, saveDirtyEditorChangesForExit } from '../../stores/editor-store'
 import { countUnsavedEditorItems } from '../../stores/editor-unsaved'
@@ -14,17 +15,20 @@ import {
 } from '../ui/Dialog'
 import { Button } from '../ui/Button'
 import { alertError } from '../ui/AlertDialog'
+import StatusBar from './StatusBar'
 
 const isMac = navigator.userAgent.includes('Mac')
 const windowControlStyle: CSSProperties = { minHeight: 22, padding: '0 6px' }
 
 /**
- * 极简应用栏：只承担品牌、拖拽区和系统窗口控制。
- * 项目状态与创作操作都在底部状态栏或项目资源树中，避免抢占编辑空间。
+ * 顶栏统一承载品牌、项目状态、创作操作和系统窗口控制。
+ * 项目状态只在项目工作台中出现，不再占用底部高度。
  */
 export default function TitleBar() {
   const text = useLocaleStore(s => s.text)
   const locale = useLocaleStore(s => s.locale)
+  const currentProject = useProjectStore(s => s.currentProject)
+  const sidebarView = useLayoutStore(s => s.sidebarView)
   const [exitRequest, setExitRequest] = useState<{ requestId: string; workflowBlocked?: boolean } | null>(null)
   const [exitBusy, setExitBusy] = useState(false)
   const [exitError, setExitError] = useState<string | null>(null)
@@ -117,7 +121,7 @@ export default function TitleBar() {
           WebkitAppRegion: 'drag',
         } as CSSProperties}
       >
-        <div className="flex items-center gap-2">
+        <div className="writer-topbar-brand flex shrink-0 items-center gap-2">
           <div className="writer-brand-mark flex h-5 w-5 items-center justify-center rounded-[var(--radius-sm)]">
             <img className="writer-brand-image" src="/brand-icon.png" alt="" />
           </div>
@@ -126,7 +130,13 @@ export default function TitleBar() {
           </span>
         </div>
 
-        <div className="flex items-center gap-0.5">
+        {currentProject && sidebarView !== 'home' && (
+          <div className="writer-topbar-workspace min-w-0 flex-1">
+            <StatusBar />
+          </div>
+        )}
+
+        <div className="writer-topbar-window-controls flex shrink-0 items-center gap-0.5">
           <button className="writer-command-button" aria-label={text('最小化', 'Minimize')} onClick={() => ipc.invoke('window:minimize')} style={windowControlStyle}>
             <Minus size={13} />
           </button>

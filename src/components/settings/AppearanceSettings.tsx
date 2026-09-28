@@ -56,7 +56,7 @@ export function getCustomSkinActionIds(customAvailable: boolean): Array<'choose'
   return customAvailable ? ['change', 'remove'] : ['choose']
 }
 
-/** Theme selection and image-skin selection intentionally remain independent. */
+/** Theme owns the window wallpaper; image skins add a decorative layer above it. */
 export default function AppearanceSettings() {
   const backdropBlur = useThemeStore((state) => state.backdropBlur)
   const setBackdropBlur = useThemeStore((state) => state.setBackdropBlur)

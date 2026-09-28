@@ -1,6 +1,6 @@
 export const enUS = {
   'appearance.anime': 'Hand-painted fantasy',
-  'appearance.animeDescription': 'An original anime-inspired skin balanced for scenery and readable text.',
+  'appearance.animeDescription': 'Adds anime-inspired art on the left while keeping the theme scenery in the upper right.',
   'appearance.change': 'Change image',
   'appearance.choose': 'Choose image',
   'appearance.classic': 'Classic',
@@ -12,7 +12,7 @@ export const enUS = {
   'appearance.remove': 'Remove',
   'appearance.section': 'Appearance',
   'appearance.skins': 'Interface skin',
-  'appearance.skinsDescription': 'A skin is independent from the color theme and never changes readability settings.',
+  'appearance.skinsDescription': 'The color theme sets the window wallpaper and palette; image skins layer over it. Frost is adjusted separately.',
   'appearance.theme': 'Theme',
   'appearance.themeDescription': 'Choose the color theme used by the title bar and interface controls.',
   'app.windowTitle': 'AI Novel Writer',
