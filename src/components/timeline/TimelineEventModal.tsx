@@ -25,6 +25,7 @@ import { toast } from '../ui/Toast'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
 import { Textarea } from '../ui/Textarea'
+import '../ui/feedback-surface.css'
 
 export interface TimelineEventModalProps {
   open: boolean
@@ -243,12 +244,12 @@ export function TimelineEventModal({
 
   return (
     <div
-      className="writer-timeline-modal-backdrop"
+      className="writer-timeline-modal-backdrop vela-feedback-overlay"
       data-testid="timeline-event-modal-backdrop"
       onClick={onClose}
     >
       <div
-        className="writer-timeline-modal"
+        className="writer-timeline-modal vela-feedback-panel"
         role="dialog"
         aria-modal="true"
         aria-label={getModalTitle()}

@@ -17,6 +17,8 @@
 import { createRoot } from 'react-dom/client'
 import { useEffect, useState } from 'react'
 import { X, CheckCircle2, AlertTriangle, Info } from 'lucide-react'
+import { useLocaleStore } from '../../stores/locale-store'
+import './feedback-surface.css'
 
 // ===== 类型定义 =====
 
@@ -33,6 +35,7 @@ interface ToastItem {
 
 let _toastCounter = 0
 let _addToast: ((item: ToastItem) => void) | null = null
+let _pendingToasts: ToastItem[] = []
 
 /** 挂载 Toast 容器到 DOM */
 function ensureContainer() {
@@ -52,6 +55,9 @@ function ToastContainer() {
     _addToast = (item) => {
       setToasts(prev => [...prev, item])
     }
+    const pending = _pendingToasts
+    _pendingToasts = []
+    queueMicrotask(() => pending.forEach(item => _addToast?.(item)))
     return () => { _addToast = null }
   }, [])
 
@@ -72,31 +78,28 @@ function ToastContainer() {
 
 // ===== 单条 Toast =====
 
-/** 类型 → 视觉映射（左边框颜色 + 图标 + 背景渐变） */
-const TOAST_STYLE: Record<ToastType, { border: string; bg: string; icon: React.ReactNode }> = {
+/** 类型只改变语义图标与点缀色，通知表面保持一致。 */
+const TOAST_STYLE: Record<ToastType, { accent: string; icon: React.ReactNode }> = {
   success: {
-    border: 'var(--color-success)',
-    bg: 'color-mix(in srgb, var(--color-success) 10%, var(--color-raised))',
-    icon: <CheckCircle2 size={15} style={{ color: 'var(--color-success)', flexShrink: 0 }} />
+    accent: 'var(--color-success)',
+    icon: <CheckCircle2 size={15} />
   },
   error: {
-    border: 'var(--color-error)',
-    bg: 'color-mix(in srgb, var(--color-error) 10%, var(--color-raised))',
-    icon: <AlertTriangle size={15} style={{ color: 'var(--color-error)', flexShrink: 0 }} />
+    accent: 'var(--color-error)',
+    icon: <AlertTriangle size={15} />
   },
   warning: {
-    border: 'var(--color-warning)',
-    bg: 'color-mix(in srgb, var(--color-warning) 10%, var(--color-raised))',
-    icon: <AlertTriangle size={15} style={{ color: 'var(--color-warning)', flexShrink: 0 }} />
+    accent: 'var(--color-warning)',
+    icon: <AlertTriangle size={15} />
   },
   info: {
-    border: 'var(--color-accent)',
-    bg: 'color-mix(in srgb, var(--color-accent) 10%, var(--color-raised))',
-    icon: <Info size={15} style={{ color: 'var(--color-accent)', flexShrink: 0 }} />
+    accent: 'var(--color-accent)',
+    icon: <Info size={15} />
   },
 }
 
 function ToastItemView({ item, onRemove }: { item: ToastItem; onRemove: (id: number) => void }) {
+  const text = useLocaleStore(s => s.text)
   const [isExiting, setIsExiting] = useState(false)
 
   useEffect(() => {
@@ -107,46 +110,16 @@ function ToastItemView({ item, onRemove }: { item: ToastItem; onRemove: (id: num
     return () => { clearTimeout(t2); clearTimeout(t3) }
   }, [item.id, item.duration, onRemove])
 
-  const { border, bg, icon } = TOAST_STYLE[item.type]
+  const { accent, icon } = TOAST_STYLE[item.type]
 
   return (
-    <div
-      className={`
-        pointer-events-auto flex items-start gap-3 px-4 py-3
-        rounded-xl border backdrop-blur-xl
-        ${isExiting ? 'animate-toast-exit' : 'animate-toast-enter'}
-      `}
-      style={{
-        backgroundColor: bg,
-        backdropFilter: 'blur(24px)',
-        border: `1px solid var(--color-border)`,
-        borderLeft: `3px solid ${border}`,
-        boxShadow: 'var(--shadow-popover)',
-        maxWidth: 380,
-        minWidth: 260,
-      }}
-    >
-      <div className="flex-shrink-0 mt-0.5">{icon}</div>
-      <span
-        className="flex-1 text-xs leading-relaxed"
-        style={{
-          color: 'var(--color-text)',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-        }}
-      >
-        {item.message}
-      </span>
+    <div className="vela-toast-card pointer-events-auto" data-exiting={isExiting} style={{ '--toast-accent': accent } as React.CSSProperties} role={item.type === 'error' ? 'alert' : 'status'}>
+      <span className="vela-toast-icon">{icon}</span>
+      <span className="vela-toast-message">{item.message}</span>
       <button
         onClick={() => onRemove(item.id)}
-        className="flex-shrink-0 p-0.5 rounded transition-all duration-150 hover:bg-[var(--color-hover)]"
-        style={{
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          color: 'var(--color-text-muted)',
-          lineHeight: 1,
-        }}
+        className="vela-feedback-close"
+        aria-label={text('关闭提示', 'Dismiss notification')}
       >
         <X size={13} />
       </button>
@@ -159,8 +132,8 @@ function ToastItemView({ item, onRemove }: { item: ToastItem; onRemove: (id: num
 function show(message: string, type: ToastType = 'info', duration = 4000) {
   ensureContainer()
   const item: ToastItem = { id: ++_toastCounter, type, message, duration }
-  // 等待下一帧确保容器已挂载
-  requestAnimationFrame(() => _addToast?.(item))
+  if (_addToast) _addToast(item)
+  else _pendingToasts.push(item)
 }
 
 export const toast = {

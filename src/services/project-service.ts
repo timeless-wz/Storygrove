@@ -29,6 +29,7 @@ import {
   type FinalizationCompletion,
   type FinalizationSnapshot,
 } from './finalization-snapshot'
+import { registerAgentProposalCommitSync } from './agent-proposal-sync'
 
 /** 存放解绑函数，用于 dispose 时清理 */
 let disposers: Array<() => void> = []
@@ -214,6 +215,9 @@ export function initProjectService(): void {
       },
     ))
   )
+
+  // 外部 AI 提交回执事件 → 刷新蓝图/草稿视图并保护未保存的编辑器内容
+  disposers.push(registerAgentProposalCommitSync())
 
   console.log('[ProjectService] 已初始化，事件监听已注册')
 }

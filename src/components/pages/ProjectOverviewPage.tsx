@@ -25,10 +25,12 @@ import { Button } from '../ui/Button'
 import { Card } from '../ui/Card'
 import { openBuiltinEditor, openChapterFile } from '../panels/sidebar/sidebar-file-openers'
 import { ipc } from '../../services/ipc-client'
+import { globalEventBus } from '../../shared/event-bus'
 import { captureProjectSession, isProjectSessionCurrent } from '../project-session-gate'
 import type { ChapterBlueprint } from '../../services/workflows/directory-workflow'
 import { NewDraftDialog } from '../panels/sidebar/NewDraftDialog'
 import { openResumableDraft } from './workbench-draft-entry'
+import { AgentProposalReviewPanel } from '../workspace/AgentProposalReviewPanel'
 import {
   formatLocationKind,
   formatSavedAt,
@@ -39,6 +41,7 @@ import {
 export default function ProjectOverviewPage() {
   const text = useLocaleStore(s => s.text)
   const currentProject = useProjectStore(s => s.currentProject)
+  const projectSessionEpoch = useProjectStore(s => s.projectSessionEpoch)
   const draftsByChapter = useDraftStore(s => s.draftsByChapter)
   const draftsProjectKey = useDraftStore(s => s.dataProjectKey)
   const nodes = useWorldMapStore(s => s.nodes)
@@ -85,6 +88,19 @@ export default function ProjectOverviewPage() {
       cancelled = true
     }
   }, [projectPath, currentProject, loadWorldMap, loadCharacters])
+
+  // 外部 AI 提交蓝图后（主进程广播的提交回执事件）刷新总览的蓝图统计。
+  useEffect(() => globalEventBus.on('REFRESH_RESOURCE', payload => {
+    if (!isProjectSessionCurrent(payload.projectSession)) return
+    if (!payload.resources.includes('blueprints')) return
+    const projectSession = captureProjectSession(currentProject)
+    if (!projectSession) return
+    ipc.invokeWithProjectSession(projectSession, 'db:blueprint-get-all', projectSession.projectPath)
+      .then((res: unknown) => {
+        if (isProjectSessionCurrent(projectSession) && Array.isArray(res)) setBlueprints(res as ChapterBlueprint[])
+      })
+      .catch(() => {})
+  }), [currentProject]) // eslint-disable-line react-hooks/exhaustive-deps -- 仅当前项目会话需要监听
 
   // 加载故事时间线真实数据
   useEffect(() => {
@@ -1064,6 +1080,7 @@ export default function ProjectOverviewPage() {
             </Card>
           </div>
         </section>
+        <AgentProposalReviewPanel key={`${projectPath ?? ''}:${projectSessionEpoch}`} />
       </div>
       <NewDraftDialog
         open={createDraftDialogOpen}

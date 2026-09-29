@@ -5,6 +5,7 @@ import { useLocaleStore } from '../../stores/locale-store'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
 import { toast } from '../ui/Toast'
+import '../ui/feedback-surface.css'
 
 export interface TimelineRangeModalProps {
   open: boolean
@@ -123,12 +124,12 @@ export function TimelineRangeModal({
 
   return (
     <div
-      className="writer-timeline-modal-backdrop"
+      className="writer-timeline-modal-backdrop vela-feedback-overlay"
       data-testid="timeline-range-modal-backdrop"
       onClick={onClose}
     >
       <div
-        className="writer-timeline-modal max-w-[540px]"
+        className="writer-timeline-modal vela-feedback-panel max-w-[540px]"
         role="dialog"
         aria-modal="true"
         aria-label={text('设置故事范围与刻度', 'Configure Story Range & Ruler')}

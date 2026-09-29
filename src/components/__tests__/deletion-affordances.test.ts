@@ -9,13 +9,11 @@ function source(file: string) {
 }
 
 describe('generated content deletion affordances', () => {
-  it('exposes visible all-generated-content clearing from the project tree', () => {
+  it('does not expose all-generated-content clearing from the project tree', () => {
     const projectTree = source('src/components/panels/sidebar/ProjectTree.tsx')
 
-    expect(projectTree).toContain('清除全部')
-    expect(projectTree).toContain('清除项目生成内容')
-    expect(projectTree).toContain("text('工作流运行中，暂不能清除', 'A workflow is running. Project data cannot be cleared yet.')")
-    expect(projectTree).toContain("text('清除项目生成内容', 'Clear generated project data')")
+    expect(projectTree).not.toContain('清除全部')
+    expect(projectTree).not.toContain('ClearProjectDataDialog')
   })
 
   it('localizes architecture document fallback and refresh affordance', () => {

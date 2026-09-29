@@ -22,7 +22,6 @@ import { IconTooltip } from '../../ui/Tooltip'
 import { EmptyState } from '../../ui/EmptyState'
 import { confirm } from '../../ui/Confirm'
 import { toast } from '../../ui/Toast'
-import ClearProjectDataDialog from '../../dialogs/ClearProjectDataDialog'
 import { SidebarGroup, SidebarGroupLabel, SidebarGroupContent, SidebarMenu, SidebarMenuItem } from '../../ui/sidebar'
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '../../ui/collapsible'
 
@@ -70,7 +69,6 @@ export default function ProjectTree() {
   // 章节蓝图数量
   const [blueprintCount, setBlueprintCount] = useState<number>(-1)
   const [refreshing, setRefreshing] = useState(false)
-  const [clearDialogOpen, setClearDialogOpen] = useState(false)
   const [backupBusy, setBackupBusy] = useState(false)
   const refreshRequestGate = useRef(new LatestRequestGate())
   const mapNodes = useWorldMapStore(s => s.nodes)
@@ -140,7 +138,6 @@ export default function ProjectTree() {
           setArchStatus({})
           setBlueprintCount(-1)
           setRefreshing(false)
-          setClearDialogOpen(false)
         }
       })
       return
@@ -250,7 +247,6 @@ export default function ProjectTree() {
 
   // 故事架构进度
   const archDone = ARCH_FILES.filter(f => archStatus[f.key]).length
-  const clearDisabled = activeRuns.length > 0
 
   const openOverview = () => openBuiltinEditor('project-overview', text('项目总览', 'Project overview'), 'overview')
   const openWorldMap = () => openBuiltinEditor('world-map-editor', text('多地图地图册', 'Map atlas'), 'world-map')
@@ -319,18 +315,6 @@ export default function ProjectTree() {
           {currentProject.name}
         </span>
         <div className="flex flex-shrink-0 items-center gap-0.5">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setClearDialogOpen(true)}
-            disabled={clearDisabled}
-            title={clearDisabled
-              ? text('工作流运行中，暂不能清除', 'A workflow is running. Project data cannot be cleared yet.')
-              : text('清除项目生成内容', 'Clear generated project data')}
-          >
-            <Trash2 size={12} />
-            {text('清除全部', 'Clear all')}
-          </Button>
           <IconTooltip label={text('刷新项目资源', 'Refresh project resources')}>
             <Button
               variant="ghost"
@@ -343,12 +327,6 @@ export default function ProjectTree() {
           </IconTooltip>
         </div>
       </div>
-
-      <ClearProjectDataDialog
-        open={clearDialogOpen}
-        onClose={() => setClearDialogOpen(false)}
-        onCleared={refreshAll}
-      />
 
       {/* 顶层导航：项目总览固定在项目树最上方，其余五个分组按作者任务自上而下排列 */}
       <SidebarGroup className="py-0.5 px-1">

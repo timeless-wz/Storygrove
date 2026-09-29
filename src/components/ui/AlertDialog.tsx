@@ -17,6 +17,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { AlertCircle } from 'lucide-react'
 import { Button } from './Button'
 import { useLocaleStore } from '../../stores/locale-store'
+import './feedback-surface.css'
 
 // ===== 类型定义 =====
 
@@ -66,98 +67,28 @@ function AlertDialog({
   }, [handleClose])
 
   return (
-    /* 遮罩 — 使用统一 CSS 变量和动画 */
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 10000,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'var(--color-backdrop)',
-        backdropFilter: 'blur(8px)',
-        pointerEvents: 'auto',
-        /* 使用 both 填充模式，让 0% 关键帧在动画前就应用，杜绝闪烁 */
-        animation: isExiting
-          ? 'backdrop-exit 0.15s ease-out both'
-          : 'backdrop-enter 0.25s ease-out both',
-      }}
-      onClick={handleClose}
-    >
+    <div className="vela-feedback-overlay" data-exiting={isExiting} onClick={handleClose}>
       {/* 弹窗主体 */}
       <div
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="alert-title"
         aria-describedby="alert-message"
-        style={{
-          /* 基础样式 */
-          backgroundColor: 'var(--color-bg)',
-          border: '1px solid var(--color-border)',
-          borderRadius: 'var(--radius-2xl)',
-          boxShadow: 'var(--shadow-popover)',
-          minWidth: 360,
-          maxWidth: 460,
-          width: '90vw',
-          /* CSS 动画，使用 both 从而提前应用 0% 关键帧，彻底杜绝闪烁现象 */
-          animation: isExiting
-            ? 'dialog-exit 0.15s ease-out both'
-            : 'dialog-enter 0.3s var(--transition-spring) both',
-        }}
+        className="vela-feedback-panel vela-feedback-content"
+        data-exiting={isExiting}
         onClick={e => e.stopPropagation()}
       >
-        {/* ── 标题区 ── */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '12px 16px 10px',
-            borderBottom: '1px solid var(--color-border)',
-          }}
-        >
+        <div className="vela-feedback-header">
           <AlertCircle
-            size={15}
+            size={18}
             style={{ color: 'var(--color-error)', flexShrink: 0 }}
           />
-          <span
-            id="alert-title"
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              color: 'var(--color-text)',
-              lineHeight: 1.3,
-              flex: 1,
-            }}
-          >
-          {resolvedTitle}
-          </span>
+          <h2 id="alert-title" className="vela-feedback-title">{resolvedTitle}</h2>
         </div>
 
-        {/* ── 消息体 ── */}
-        <div
-          id="alert-message"
-          style={{
-            padding: '14px 16px 16px',
-            fontSize: 12,
-            lineHeight: 1.7,
-            color: 'var(--color-text-secondary)',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-          }}
-        >
-          {message}
-        </div>
+        <div id="alert-message" className="vela-feedback-message">{message}</div>
 
-        {/* ── 按钮区 —— 右对齐，VSCode 风格 ── */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'flex-end',
-            padding: '0 16px 14px',
-          }}
-        >
+        <div className="vela-feedback-actions">
           <Button
             ref={btnRef}
             variant="default"

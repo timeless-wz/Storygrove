@@ -8,7 +8,8 @@ import { extractFinalizedDraftFactCandidates } from '../services/finalized-fact-
 import { markFactKnowledgeStale, scheduleKnowledgeIndexQueue, synchronizeConfirmedFactKnowledge } from '../services/rag-context-service'
 import { readJsonFile, DEFAULT_GLOBAL_CONFIG, GLOBAL_CONFIG_PATH, MODELS_CONFIG_PATH } from '../utils/config-utils'
 import type { GlobalConfig, ModelProfile } from '../../src/shared/ipc-channels'
-import { approveAgentProposal } from '../services/agent-proposal-service'
+import { approveAgentProposal, listPendingAgentProposals, rejectAgentProposal } from '../services/agent-proposal-service'
+import { watchAgentProposalCommit } from '../services/agent-commit-watch-service'
 import { projectAccess } from '../services/project-access'
 import { assertRequiredExpectedProjectPath } from '../utils/project-context'
 import { isProjectSessionContext } from '../../src/shared/project-session-context'
@@ -30,6 +31,7 @@ const MUTATING_CHANNELS = new Set([
   'story-data:approve-candidate',
   'story-data:reject-candidate',
   'story-data:approve-agent-proposal',
+  'story-data:reject-agent-proposal',
   'story-data:commit-fact-version',
   'story-data:add-relation',
 ])
@@ -57,6 +59,10 @@ function registerHandler(channel: string, handler: Handler): void {
       const session = projectAccess.assertCurrentProjectContext(context, currentPath)
       assertRequiredExpectedProjectPath(currentPath, expectedPath)
       const result = await handler(event, session.projectId, ...args)
+      if (channel === 'story-data:approve-agent-proposal' && typeof (result as { proposalId?: unknown })?.proposalId === 'string') {
+        // 作者批准后，外部 MCP 进程可能随时提交；主进程开始轮询回执并通知界面。
+        watchAgentProposalCommit(String((result as { proposalId: string }).proposalId), session)
+      }
       if (channel === 'story-data:approve-candidate' && !(typeof result === 'object' && result && 'success' in result && (result as { success?: unknown }).success === false)) {
         scheduleKnowledgeIndexQueue({ projectId: session.projectId, projectPath: session.rootPath, embedding: currentEmbeddingConfig() })
       }
@@ -170,4 +176,9 @@ export function registerStoryDataController(): void {
     const proposal = approveAgentProposal(projectId, String(args[0] || ''), String(args[1] || ''))
     return { success: true, proposalId: proposal.proposalId }
   })
+  registerHandler('story-data:reject-agent-proposal', (_event, projectId, ...args) => {
+    rejectAgentProposal(projectId, String(args[0] || ''))
+    return { success: true }
+  })
+  registerHandler('story-data:list-agent-proposals', (_event, projectId) => listPendingAgentProposals(projectId))
 }

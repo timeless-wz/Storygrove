@@ -833,10 +833,27 @@
   [data-theme='starlight-dark'],
   [data-theme='cosmic-glass']
 ) .writer-topbar {
-  /* 不透明度与模糊由「背景雾化」设置驱动；未设置时回退到各元素的原有取值。 */
-  background: color-mix(in srgb, var(--color-titlebar) var(--chrome-surface-opacity, 66%), transparent);
-  backdrop-filter: var(--navigation-blur, blur(12px));
-  -webkit-backdrop-filter: var(--navigation-blur, blur(12px));
+  /* 顶栏保持实色清晰：「背景雾化」只作用于状态栏、侧栏与页面洗色，不再冲淡标题栏。 */
+  background: var(--color-titlebar);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.app-skin-root[data-theme='storyforge'] .writer-topbar-window-controls .writer-command-button {
+  /* 青绿山水主题的三个窗口按钮使用深绿墨色。 */
+  color: var(--color-text);
+}
+
+.app-skin-root[data-theme='storyforge'] .writer-topbar-window-controls .writer-command-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-accent) 18%, var(--color-hover));
+  border-color: color-mix(in srgb, var(--color-accent) 34%, var(--color-border));
+  color: var(--color-text);
+}
+
+.app-skin-root[data-theme='storyforge'] .writer-topbar-window-controls .writer-command-button:focus-visible {
+  color: var(--color-text);
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
 }
 
 .app-skin-root:is(

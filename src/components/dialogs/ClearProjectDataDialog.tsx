@@ -11,6 +11,7 @@ import {
   isProjectSessionCurrent,
 } from '../project-session-gate'
 import type { ProjectSessionContext } from '../../shared/ipc-channels'
+import '../ui/feedback-surface.css'
 
 interface ClearProjectDataDialogProps {
   open: boolean
@@ -120,11 +121,7 @@ function ClearProjectDataDialogContents({
 
   return (
     <div
-      className="fixed inset-0 z-[9998] flex items-center justify-center"
-      style={{
-        backgroundColor: 'var(--color-backdrop)',
-        backdropFilter: 'blur(8px)',
-      }}
+      className="vela-feedback-overlay"
       onClick={() => {
         if (!clearing) onClose()
       }}
@@ -133,13 +130,7 @@ function ClearProjectDataDialogContents({
         role="dialog"
         aria-modal="true"
         aria-labelledby="clear-project-data-title"
-        className="w-[min(92vw,520px)] overflow-hidden"
-        style={{
-          backgroundColor: 'var(--color-sidebar)',
-          border: '1px solid var(--color-border)',
-          borderRadius: 'var(--radius-xl)',
-          boxShadow: 'var(--shadow-popover)',
-        }}
+        className="vela-feedback-panel w-[min(92vw,520px)] overflow-hidden"
         onClick={event => event.stopPropagation()}
       >
         <div

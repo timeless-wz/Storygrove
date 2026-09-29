@@ -1562,7 +1562,50 @@ export interface WorkspaceHubChannels {
 }
 
 // ===== 第二阶段故事资料管理中心 =====
+export interface AgentProposalCommitReceipt {
+  proposalId: string
+  projectId: string
+  resource: 'blueprint' | 'draft'
+  chapterNumber?: number
+  draftId?: number
+  revision: string
+  wordCount?: number
+  committedAt: string
+}
+
+export interface AgentProposalCommitEvent {
+  proposalId: string
+  projectId: string
+  proposalType: string
+  receipt: AgentProposalCommitReceipt | null
+  projectPath: string
+  projectSession: ProjectSessionContext
+}
+
+export interface StoryDataEventChannels {
+  'story-data:agent-proposal-committed': AgentProposalCommitEvent
+}
+
+export interface AgentProposalReview {
+  proposalId: string
+  projectId: string
+  proposalType: string
+  status: 'pending'
+  baseRevision: string
+  createdAt: string
+  approvable: boolean
+  payload: Record<string, unknown>
+}
+
 export interface StoryDataChannels {
+  'story-data:list-agent-proposals': {
+    args: [expectedProjectPath?: string]
+    return: AgentProposalReview[]
+  }
+  'story-data:reject-agent-proposal': {
+    args: [proposalId: string, expectedProjectPath?: string]
+    return: { success: boolean; error?: string }
+  }
   'story-data:persist-proposal': {
     args: [proposal: StoryChangeProposal, expectedProjectPath?: string]
     return: StoryFactCandidate[] | { success: false; error: string }
@@ -1620,7 +1663,7 @@ export interface StoryDataChannels {
 
 // ===== 合并所有频道 =====
 export type AllInvokeChannels = WindowChannels & OfficialHomepageChannels & ModelProviderResourceChannels & ConfigChannels & UpdateChannels & SkinChannels & ProjectChannels & FileChannels & AppDataChannels & LLMChannels & DatabaseChannels & WorldMapImageChannels & KnowledgeBaseChannels & ProjectDocumentChannels & ChapterLifecycleChannels & ImportChannels & MCPChannels & WorkspaceHubChannels & StoryDataChannels & Phase38Channels
-export type AllEventChannels = LLMStreamEvents & UpdateStateEvents & WindowEvents
+export type AllEventChannels = LLMStreamEvents & UpdateStateEvents & WindowEvents & StoryDataEventChannels
 
 /** 提取 invoke 频道名 */
 export type InvokeChannel = keyof AllInvokeChannels

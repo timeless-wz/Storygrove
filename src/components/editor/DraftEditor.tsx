@@ -56,6 +56,7 @@ import {
 import { useWidthBucket } from '../../hooks/useResponsiveWorkbenchLayout'
 import ChapterContextSidebar from './ChapterContextSidebar'
 import './chapter-context.css'
+import './draft-chapter-chrome.css'
 
 const DRAFT_STATUS_EN: Record<string, string> = {
   draft: 'Draft',
@@ -793,332 +794,317 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
     })
   }
 
+  // 状态色与圆点共用一次取值，避免两处 fallback 走偏
+  const statusColor = DRAFT_STATUS_COLOR[status] ?? 'var(--editor-ink-muted, var(--color-text-muted))'
+
   return (
     <div className="relative w-full h-full flex flex-col overflow-hidden">
-      {/* 顶部工具栏：文学工坊元数据看板与动作控制台 */}
+      {/* 章节栏：左边交代"我在写哪一章"，右边按 改这一章 / 换视角 / 落笔与提交 分三堆 */}
       <div
-        className="draft-workbench-toolbar flex flex-wrap items-center justify-between gap-2 px-3.5 py-1 min-h-10 flex-shrink-0 border-b select-none transition-colors"
+        className="draft-chapter-bar"
         style={{
-          borderColor: 'var(--editor-ruled-line, var(--color-border))',
-          backgroundColor: 'var(--color-editor-bg)',
+          borderColor: 'var(--editor-chrome-line)',
+          backgroundColor: 'var(--editor-chrome-bg)',
         }}
       >
-        {/* 左侧：章节标牌 + 卷章导航 + 标题 + 版本 + 状态胶囊 + 伏笔 */}
-        <div className="flex items-center gap-2 min-w-0">
-          {meta ? (
-            <div className="flex items-center gap-1.5 min-w-0">
-              {/* 卷章快速切换器 */}
-              <div className="inline-flex items-center rounded border border-[var(--editor-ruled-line,var(--color-border))] bg-[var(--editor-selection-bg,var(--color-hover))] p-0.5 flex-shrink-0">
-                <button
-                  type="button"
-                  onClick={() => handleJumpChapter(meta.chapterNumber - 1)}
-                  disabled={meta.chapterNumber <= 1}
-                  className="p-0.5 rounded hover:bg-[var(--color-hover)] text-[var(--editor-ink-muted,var(--color-text-muted))] hover:text-[var(--editor-ink-primary,var(--color-text))] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                  title={text('上一章', 'Previous chapter')}
-                >
-                  <ChevronLeft size={12} />
-                </button>
-                <span className="px-1 text-[10px] font-semibold font-mono tracking-wider text-[var(--editor-ink-primary,var(--color-text-secondary))]">
-                  CH.{meta.chapterNumber}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => handleJumpChapter(meta.chapterNumber + 1)}
-                  className="p-0.5 rounded hover:bg-[var(--color-hover)] text-[var(--editor-ink-muted,var(--color-text-muted))] hover:text-[var(--editor-ink-primary,var(--color-text))] transition-colors"
-                  title={text('下一章', 'Next chapter')}
-                >
-                  <ChevronRight size={12} />
-                </button>
-              </div>
-
-              <span
-                className="text-xs font-semibold text-[var(--editor-ink-primary,var(--color-text))] truncate max-w-[240px] tracking-wide"
-                title={meta.chapterTitle || text('未知标题', 'Untitled')}
+        {/* 左：章节身份 */}
+        <div className="draft-chapter-identity">
+          {meta && (
+            <div className="draft-chapter-stepper">
+              <button
+                type="button"
+                onClick={() => handleJumpChapter(meta.chapterNumber - 1)}
+                disabled={meta.chapterNumber <= 1}
+                className="draft-chapter-step"
+                title={text('上一章', 'Previous chapter')}
               >
-                {meta.chapterTitle || text('未知标题', 'Untitled')}
+                <ChevronLeft size={13} />
+              </button>
+              <span className="draft-chapter-index">
+                {text(`第 ${meta.chapterNumber} 章`, `Ch. ${meta.chapterNumber}`)}
               </span>
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--editor-selection-bg,var(--color-hover))] text-[var(--editor-ink-muted,var(--color-text-muted))] border border-[var(--editor-ruled-line,var(--color-border))] flex-shrink-0">
-                v{meta.version}
-              </span>
+              <button
+                type="button"
+                onClick={() => handleJumpChapter(meta.chapterNumber + 1)}
+                className="draft-chapter-step"
+                title={text('下一章', 'Next chapter')}
+              >
+                <ChevronRight size={13} />
+              </button>
             </div>
-          ) : (
-            <span className="text-xs font-semibold text-[var(--editor-ink-primary,var(--color-text-secondary))]">
-              {text('草稿', 'Draft')}
-            </span>
           )}
 
-          {/* 状态徽章胶囊 */}
           <span
-            className="inline-flex items-center gap-1.5 text-[11px] px-2 py-0.5 rounded-full flex-shrink-0 font-medium transition-colors border"
-            style={{
-              backgroundColor: 'var(--editor-selection-bg, var(--color-hover))',
-              color: DRAFT_STATUS_COLOR[status] ?? 'var(--editor-ink-primary, var(--color-text-muted))',
-              borderColor: 'var(--editor-ruled-line, var(--color-border))',
-            }}
+            className="draft-chapter-title"
+            title={meta?.chapterTitle || text('未知标题', 'Untitled')}
           >
-            <span
-              className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-              style={{ backgroundColor: DRAFT_STATUS_COLOR[status] ?? 'var(--editor-ink-primary, var(--color-text-muted))' }}
-            />
+            {meta ? (meta.chapterTitle || text('未知标题', 'Untitled')) : text('草稿', 'Draft')}
+          </span>
+
+          {meta && <span className="draft-chapter-version">v{meta.version}</span>}
+
+          {/* 状态：语义色圆点 + 文字，直接取自草稿状态表 */}
+          <span className="draft-chapter-status" style={{ color: statusColor }}>
+            <span className="draft-chapter-status-dot" style={{ backgroundColor: statusColor }} />
             {text(DRAFT_STATUS_LABEL[status] ?? status, DRAFT_STATUS_EN[status] ?? status)}
           </span>
 
           {/* 关联伏笔指示 */}
           {foreshadowings.length > 0 && (
-            <span
-              className="hidden md:inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded text-[var(--editor-ink-muted,var(--color-text-muted))] hover:text-[var(--color-accent)] cursor-pointer transition-colors"
+            <button
+              type="button"
+              className="draft-chapter-mark"
               onClick={handleOpenForeshadowingManager}
               title={text(`本章已标记 ${foreshadowings.length} 处伏笔，点击查看管理`, `${foreshadowings.length} foreshadowing marks, click to manage`)}
             >
-              <Bookmark size={11} className="text-[var(--color-accent)] opacity-80" />
-              <span className="tabular-nums font-mono text-[10px]">{foreshadowings.length}</span>
-            </span>
+              <Bookmark size={12} />
+              <span className="draft-chapter-mark-count">{foreshadowings.length}</span>
+            </button>
           )}
         </div>
 
-        {/* 右侧：字数 + 状态 + AI 操作 + 发布 + 辅助上下文开关 */}
+        {/* 右：改这一章 → 换视角 → 落笔与提交 */}
         {!isReadonly && (
-          <div className="flex items-center gap-1.5 flex-shrink-0">
-            {/* 字数 */}
-            {charCount > 0 && (
-              <span className="text-xs font-mono tabular-nums text-[var(--editor-ink-muted,var(--color-text-muted))] px-1" title={text(`当前字数：${charCount.toLocaleString(locale)}`, `Word count: ${charCount.toLocaleString(locale)}`)}>
-                {text(`${charCount.toLocaleString(locale)} 字`, `${charCount.toLocaleString(locale)} words`)}
-              </span>
+          <div className="draft-chapter-actions">
+            {/* 改这一章：伏笔、蓝图与审稿报告 */}
+            {meta && (
+              <div className="draft-chapter-group">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleToolbarMarkForeshadowing}
+                  className="draft-action draft-action--quiet"
+                  aria-label={text('标记为伏笔', 'Mark as Foreshadowing')}
+                  title={text('将选中文本标记为伏笔', 'Mark selected text as foreshadowing')}
+                >
+                  <Bookmark size={12} />
+                  <span className="draft-action-label">{text('标记为伏笔', 'Mark as Foreshadowing')}</span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setBindingDialogOpen(true)}
+                  className="draft-action draft-action--quiet"
+                  aria-label={text('绑定蓝图', 'Link blueprint')}
+                  title={text('绑定或更换章节蓝图', 'Link or change the chapter blueprint')}
+                >
+                  <Link2 size={12} />
+                  <span className="draft-action-label">{text('绑定蓝图', 'Link blueprint')}</span>
+                </Button>
+                {reviewCount > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={openLatestReview}
+                    className="draft-action draft-action--report"
+                    aria-label={text(`审稿报告(${reviewCount})`, `Review report (${reviewCount})`)}
+                    title={text('查看最新审稿报告', 'View the latest review report')}
+                  >
+                    <FileText size={12} />
+                    <span className="draft-action-label">{text(`审稿报告(${reviewCount})`, `Review report (${reviewCount})`)}</span>
+                  </Button>
+                )}
+              </div>
             )}
 
-            {/* 未保存指示呼吸灯 */}
-            {isDirty && (
-              <span
-                className="w-2 h-2 rounded-full flex-shrink-0 animate-pulse"
-                style={{ backgroundColor: 'var(--color-warning)' }}
-                title={text('有未保存的修改', 'There are unsaved changes')}
-              />
-            )}
-
-            {/* 保存按钮 */}
-            {isDirty && (
+            {/* 换视角：两个各自独立的两态开关 */}
+            <div className="draft-chapter-group">
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
-                onClick={() => doSave(currentBodyRef.current)}
-                disabled={saving}
-                className="h-6 px-2 text-xs border-[var(--color-warning)]/40 text-[var(--color-warning-text)] hover:bg-[var(--color-warning)]/10 transition-all"
-                title={text('保存（⌘S）', 'Save (Ctrl+S)')}
-              >
-                <Save size={11} />
-                {saving ? text('保存中...', 'Saving...') : text('保存', 'Save')}
-              </Button>
-            )}
-
-            {finalizationConflict && (
-              <span
-                className="text-[11px] px-2 py-0.5 rounded flex-shrink-0 border"
-                style={{ color: 'var(--color-warning-text)', backgroundColor: 'var(--editor-selection-bg, var(--color-hover))', borderColor: 'color-mix(in srgb, var(--color-warning) 30%, transparent)' }}
+                onClick={() => setChapterContextOpen(!chapterContextOpen)}
+                aria-expanded={chapterContextOpen}
+                aria-controls="chapter-context-panel"
+                aria-label={text('本章上下文', 'Chapter context')}
+                className={`draft-action draft-action--toggle${chapterContextOpen ? ' is-open' : ''}`}
                 title={text(
-                  '发布完成事件没有覆盖这次编辑；请保存后重新同步正文。',
-                  'Publication did not overwrite this edit. Save it and sync the manuscript again.',
+                  chapterContextOpen ? '收起本章创作上下文' : '展开本章创作上下文（本章蓝图要点与场景顺序）',
+                  chapterContextOpen ? 'Collapse chapter writing context' : 'Expand chapter writing context (blueprint goals and scene order)',
+                )}
+                data-testid="draft-chapter-context-toggle"
+              >
+                <Layers size={12} />
+                <span className="draft-action-label">{text('本章上下文', 'Chapter context')}</span>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={toggleReferencePanel}
+                aria-label={text('参考上下文', 'Context')}
+                className={`draft-action draft-action--toggle${referencePanelOpen ? ' is-open' : ''}`}
+                title={text(
+                  referencePanelOpen ? '收起参考上下文' : '展开参考上下文（蓝图/角色/世界设定）',
+                  referencePanelOpen ? 'Collapse reference context' : 'Expand reference context (blueprint/characters/worldbuilding)',
                 )}
               >
-                {text('已保留后续编辑', 'Later edits kept')}
-              </span>
-            )}
+                <BookOpen size={12} />
+                <span className="draft-action-label">{text('参考上下文', 'Context')}</span>
+              </Button>
+            </div>
 
-            {finalizationPending && (
+            <span className="draft-chapter-sep" aria-hidden="true" />
+
+            {/* 落笔与提交 */}
+            <div className="draft-chapter-group">
+              {/* 字数 */}
+              {charCount > 0 && (
+                <span
+                  className="draft-chapter-count"
+                  title={text(`当前字数：${charCount.toLocaleString(locale)}`, `Word count: ${charCount.toLocaleString(locale)}`)}
+                >
+                  {text(`${charCount.toLocaleString(locale)} 字`, `${charCount.toLocaleString(locale)} words`)}
+                </span>
+              )}
+
+              {/* 未保存指示呼吸灯 */}
+              {isDirty && (
+                <span
+                  className="draft-chapter-dirty"
+                  title={text('有未保存的修改', 'There are unsaved changes')}
+                />
+              )}
+
+              {finalizationConflict && (
+                <span
+                  className="draft-chapter-conflict"
+                  style={{
+                    color: 'var(--color-warning-text)',
+                    backgroundColor: 'var(--bg-hover, var(--color-hover))',
+                    borderColor: 'color-mix(in srgb, var(--color-warning) 30%, transparent)',
+                  }}
+                  title={text(
+                    '发布完成事件没有覆盖这次编辑；请保存后重新同步正文。',
+                    'Publication did not overwrite this edit. Save it and sync the manuscript again.',
+                  )}
+                >
+                  {text('已保留后续编辑', 'Later edits kept')}
+                </span>
+              )}
+
+              {finalizationPending && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={doRetryManuscriptPublication}
+                  className="draft-action"
+                  title={text('正文已保存、实体文件待同步；重试当前发布记录', 'The manuscript is saved and its file is pending sync. Retry the current publication.')}
+                >
+                  <Wrench size={12} />
+                  {text('重试同步', 'Retry sync')}
+                </Button>
+              )}
+
+              {/* 保存按钮 */}
+              {isDirty && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => doSave(currentBodyRef.current)}
+                  disabled={saving}
+                  className="draft-action draft-action--save"
+                  title={text('保存（⌘S）', 'Save (Ctrl+S)')}
+                >
+                  <Save size={12} />
+                  {saving ? text('保存中...', 'Saving...') : text('保存', 'Save')}
+                </Button>
+              )}
+
+              {/* 核心操作：AI 审稿 — 主题色描边，把实心位置让给发布 */}
               <Button
                 variant="outline"
                 size="sm"
-                onClick={doRetryManuscriptPublication}
-                className="h-6 px-2 text-xs"
-                title={text('正文已保存、实体文件待同步；重试当前发布记录', 'The manuscript is saved and its file is pending sync. Retry the current publication.')}
+                onClick={() => setConfirmAction('review')}
+                disabled={isChapterBusy}
+                className="draft-action draft-action--accent"
+                title={text('AI 审稿 — 一致性检查（蓝图兑现/未授权事件/设定冲突/证据链）', 'AI review — Consistency check (blueprint/events/setting conflict/evidence)')}
               >
-                <Wrench size={11} />
-                {text('重试同步', 'Retry sync')}
+                <Search size={12} />
+                {text('AI 审稿', 'AI review')}
               </Button>
-            )}
 
-            <div className="h-3 w-px bg-[var(--editor-ruled-line,var(--color-border))] mx-0.5 opacity-60" />
-
-            {/* 次级操作：伏笔 / 蓝图 */}
-            {meta && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleToolbarMarkForeshadowing}
-                className="h-6 px-2 text-xs text-[var(--editor-ink-muted,var(--color-text-secondary))] hover:bg-[var(--editor-selection-bg,var(--color-hover))] hover:text-[var(--editor-ink-primary,var(--color-accent))] border border-transparent hover:border-[var(--editor-ruled-line,var(--color-border))]"
-                title={text('将选中文本标记为伏笔', 'Mark selected text as foreshadowing')}
-              >
-                <Bookmark size={11} className="opacity-70" />
-                <span>{text('标记为伏笔', 'Mark as Foreshadowing')}</span>
-              </Button>
-            )}
-
-            {meta && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setBindingDialogOpen(true)}
-                className="h-6 px-2 text-xs text-[var(--editor-ink-muted,var(--color-text-secondary))] hover:bg-[var(--editor-selection-bg,var(--color-hover))] hover:text-[var(--editor-ink-primary,var(--color-accent))] border border-transparent hover:border-[var(--editor-ruled-line,var(--color-border))]"
-                title={text('绑定或更换章节蓝图', 'Link or change the chapter blueprint')}
-              >
-                <Link2 size={11} className="opacity-70" />
-                <span>{text('绑定蓝图', 'Link blueprint')}</span>
-              </Button>
-            )}
-
-            {/* Review report */}
-            {reviewCount > 0 && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={openLatestReview}
-                className="h-6 px-2 text-xs text-[var(--color-category-review-text)] border-[var(--editor-ruled-line,var(--color-border))]"
-                title={text('查看最新审稿报告', 'View the latest review report')}
-              >
-                <FileText size={11} />
-                {text(`审稿报告(${reviewCount})`, `Review report (${reviewCount})`)}
-              </Button>
-            )}
-
-            {/* 核心操作：AI 审稿 */}
-            <Button
-              variant="ai"
-              size="sm"
-              onClick={() => setConfirmAction('review')}
-              disabled={isChapterBusy}
-              className="h-6 px-2.5 text-xs shadow-xs hover:shadow-sm font-medium tracking-wide active:scale-[0.97]"
-              title={text('AI 审稿 — 一致性检查（蓝图兑现/未授权事件/设定冲突/证据链）', 'AI review — Consistency check (blueprint/events/setting conflict/evidence)')}
-            >
-              <Search size={11} />
-              {text('AI 审稿', 'AI review')}
-            </Button>
-
-            {/* 核心操作：发布到正文 */}
-            {status !== 'finalized' && (
-              <Button
-                variant="success"
-                size="sm"
-                onClick={doPublish}
-                disabled={isChapterBusy || !!finalizationConflict || finalizationPending}
-                className="h-6 px-2.5 text-xs shadow-xs hover:shadow-sm font-medium tracking-wide active:scale-[0.97]"
-                title={text('发布到正文（定稿） — 移到正文章节，之后仍可编辑', 'Publish / finalize — move to manuscript and keep editing')}
-              >
-                <Upload size={11} />
-                <span>{text('发布到正文', 'Publish')}</span>
-                <span className="sr-only">{text('定稿', 'Finalize')}</span>
-              </Button>
-            )}
-
-            <div className="h-3 w-px bg-[var(--editor-ruled-line,var(--color-border))] mx-0.5 opacity-60" />
-
-            {/* 本章创作上下文侧栏开关 */}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setChapterContextOpen(!chapterContextOpen)}
-              aria-expanded={chapterContextOpen}
-              aria-controls="chapter-context-panel"
-              className={`h-6 px-2 text-xs transition-colors border ${
-                chapterContextOpen
-                  ? 'bg-[var(--editor-selection-bg,var(--color-hover))] text-[var(--color-accent)] border-[var(--editor-ruled-line,var(--color-border))]'
-                  : 'border-transparent text-[var(--editor-ink-muted,var(--color-text-secondary))] hover:bg-[var(--editor-selection-bg,var(--color-hover))] hover:text-[var(--editor-ink-primary,var(--color-text))]'
-              }`}
-              title={text(
-                chapterContextOpen ? '收起本章创作上下文' : '展开本章创作上下文（本章蓝图要点与场景顺序）',
-                chapterContextOpen ? 'Collapse chapter writing context' : 'Expand chapter writing context (blueprint goals and scene order)',
+              {/* 核心操作：发布到正文 — 本页唯一的实心强调色按钮 */}
+              {status !== 'finalized' && (
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={doPublish}
+                  disabled={isChapterBusy || !!finalizationConflict || finalizationPending}
+                  className="draft-action draft-action--primary"
+                  title={text('发布到正文（定稿） — 移到正文章节，之后仍可编辑', 'Publish / finalize — move to manuscript and keep editing')}
+                >
+                  <Upload size={12} />
+                  <span>{text('发布到正文', 'Publish')}</span>
+                  <span className="sr-only">{text('定稿', 'Finalize')}</span>
+                </Button>
               )}
-              data-testid="draft-chapter-context-toggle"
-            >
-              <Layers size={11} className="opacity-80" />
-              <span>{text('本章上下文', 'Chapter context')}</span>
-            </Button>
-
-            <div className="h-3 w-px bg-[var(--editor-ruled-line,var(--color-border))] mx-0.5 opacity-60" />
-
-            {/* 辅助上下文面板切换按钮 */}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={toggleReferencePanel}
-              className={`h-6 px-2 text-xs transition-colors border ${
-                referencePanelOpen
-                  ? 'bg-[var(--editor-selection-bg,var(--color-hover))] text-[var(--color-accent)] border-[var(--editor-ruled-line,var(--color-border))]'
-                  : 'border-transparent text-[var(--editor-ink-muted,var(--color-text-secondary))] hover:bg-[var(--editor-selection-bg,var(--color-hover))] hover:text-[var(--editor-ink-primary,var(--color-text))]'
-              }`}
-              title={text(
-                referencePanelOpen ? '收起参考上下文' : '展开参考上下文（蓝图/角色/世界设定）',
-                referencePanelOpen ? 'Collapse reference context' : 'Expand reference context (blueprint/characters/worldbuilding)',
-              )}
-            >
-              <BookOpen size={11} className="opacity-80" />
-              <span>{text('参考上下文', 'Context')}</span>
-            </Button>
+            </div>
           </div>
         )}
 
         {/* 归档稿显示只读提示 */}
         {isReadonly && (
-          <div className="flex items-center gap-2 flex-shrink-0">
-            {charCount > 0 && (
-              <span className="text-xs font-mono tabular-nums text-[var(--editor-ink-muted,var(--color-text-muted))]">
-                {text(`${charCount.toLocaleString(locale)} 字`, `${charCount.toLocaleString(locale)} words`)}
+          <div className="draft-chapter-actions">
+            <div className="draft-chapter-group">
+              {charCount > 0 && (
+                <span className="draft-chapter-count">
+                  {text(`${charCount.toLocaleString(locale)} 字`, `${charCount.toLocaleString(locale)} words`)}
+                </span>
+              )}
+              <span className="draft-chapter-status" style={{ color: 'var(--color-text-muted)' }}>
+                <span className="draft-chapter-status-dot" style={{ backgroundColor: 'var(--color-text-muted)' }} />
+                {text('已归档（只读）', 'Archived (read-only)')}
               </span>
-            )}
-            <span className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-[var(--editor-selection-bg,var(--color-hover))] text-[var(--editor-ink-muted,var(--color-text-muted))] border border-[var(--editor-ruled-line,var(--color-border))]">
-              {text('已归档（只读）', 'Archived (read-only)')}
-            </span>
-            {finalizationPending && (
+              {finalizationPending && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={doRetryManuscriptPublication}
+                  className="draft-action"
+                  title={text('正文实体文件待同步；重试当前发布记录', 'The manuscript file is pending sync. Retry the current publication.')}
+                >
+                  <Wrench size={12} />
+                  {text('重试同步', 'Retry sync')}
+                </Button>
+              )}
+            </div>
+
+            <span className="draft-chapter-sep" aria-hidden="true" />
+
+            {/* 换视角：只读态下同样可以看上下文 */}
+            <div className="draft-chapter-group">
               <Button
-                variant="outline"
+                variant="ghost"
                 size="sm"
-                onClick={doRetryManuscriptPublication}
-                className="h-6 px-2 text-xs"
-                title={text('正文实体文件待同步；重试当前发布记录', 'The manuscript file is pending sync. Retry the current publication.')}
+                onClick={() => setChapterContextOpen(!chapterContextOpen)}
+                aria-expanded={chapterContextOpen}
+                aria-controls="chapter-context-panel"
+                aria-label={text('本章上下文', 'Chapter context')}
+                className={`draft-action draft-action--toggle${chapterContextOpen ? ' is-open' : ''}`}
+                title={text(
+                  chapterContextOpen ? '收起本章创作上下文' : '展开本章创作上下文（本章蓝图要点与场景顺序）',
+                  chapterContextOpen ? 'Collapse chapter writing context' : 'Expand chapter writing context (blueprint goals and scene order)',
+                )}
+                data-testid="draft-chapter-context-toggle"
               >
-                <Wrench size={11} />
-                {text('重试同步', 'Retry sync')}
+                <Layers size={12} />
+                <span className="draft-action-label">{text('本章上下文', 'Chapter context')}</span>
               </Button>
-            )}
 
-            {/* 本章创作上下文侧栏开关（只读模式） */}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setChapterContextOpen(!chapterContextOpen)}
-              aria-expanded={chapterContextOpen}
-              aria-controls="chapter-context-panel"
-              className={`h-6 px-2 text-xs transition-colors border ${
-                chapterContextOpen
-                  ? 'bg-[var(--editor-selection-bg,var(--color-hover))] text-[var(--color-accent)] border-[var(--editor-ruled-line,var(--color-border))]'
-                  : 'border-transparent text-[var(--editor-ink-muted,var(--color-text-secondary))] hover:bg-[var(--editor-selection-bg,var(--color-hover))] hover:text-[var(--editor-ink-primary,var(--color-text))]'
-              }`}
-              title={text(
-                chapterContextOpen ? '收起本章创作上下文' : '展开本章创作上下文（本章蓝图要点与场景顺序）',
-                chapterContextOpen ? 'Collapse chapter writing context' : 'Expand chapter writing context (blueprint goals and scene order)',
-              )}
-              data-testid="draft-chapter-context-toggle"
-            >
-              <Layers size={11} className="opacity-80" />
-              <span>{text('本章上下文', 'Chapter context')}</span>
-            </Button>
-
-            {/* 辅助上下文面板切换按钮（只读模式） */}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={toggleReferencePanel}
-              className={`h-6 px-2 text-xs transition-colors border ${
-                referencePanelOpen
-                  ? 'bg-[var(--editor-selection-bg,var(--color-hover))] text-[var(--color-accent)] border-[var(--editor-ruled-line,var(--color-border))]'
-                  : 'border-transparent text-[var(--editor-ink-muted,var(--color-text-secondary))] hover:bg-[var(--editor-selection-bg,var(--color-hover))] hover:text-[var(--editor-ink-primary,var(--color-text))]'
-              }`}
-              title={text(
-                referencePanelOpen ? '收起参考上下文' : '展开参考上下文（蓝图/角色/世界设定）',
-                referencePanelOpen ? 'Collapse reference context' : 'Expand reference context (blueprint/characters/worldbuilding)',
-              )}
-            >
-              <BookOpen size={11} className="opacity-80" />
-              <span>{text('参考上下文', 'Context')}</span>
-            </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={toggleReferencePanel}
+                aria-label={text('参考上下文', 'Context')}
+                className={`draft-action draft-action--toggle${referencePanelOpen ? ' is-open' : ''}`}
+                title={text(
+                  referencePanelOpen ? '收起参考上下文' : '展开参考上下文（蓝图/角色/世界设定）',
+                  referencePanelOpen ? 'Collapse reference context' : 'Expand reference context (blueprint/characters/worldbuilding)',
+                )}
+              >
+                <BookOpen size={12} />
+                <span className="draft-action-label">{text('参考上下文', 'Context')}</span>
+              </Button>
+            </div>
           </div>
         )}
       </div>

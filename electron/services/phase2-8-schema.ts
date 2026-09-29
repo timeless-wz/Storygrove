@@ -83,4 +83,8 @@ export function ensurePhase2To8Schema(db: BetterSqlite3.Database): void {
   `)
   const proposalColumns = db.prepare('PRAGMA table_info(agent_proposals)').all() as Array<{ name: string }>
   if (!proposalColumns.some(column => column.name === 'approved_by')) db.exec('ALTER TABLE agent_proposals ADD COLUMN approved_by TEXT')
+  // Durable commit receipts: written by the local MCP server inside the commit
+  // transaction; the app only reads them for change awareness and audit.
+  if (!proposalColumns.some(column => column.name === 'committed_at')) db.exec("ALTER TABLE agent_proposals ADD COLUMN committed_at TEXT")
+  if (!proposalColumns.some(column => column.name === 'commit_receipt_json')) db.exec('ALTER TABLE agent_proposals ADD COLUMN commit_receipt_json TEXT')
 }

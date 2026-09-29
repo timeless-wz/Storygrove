@@ -143,9 +143,10 @@ describe('Vditor prose editor', () => {
       '#vditor-icon-ordered-list',
       '#vditor-icon-check',
       '#vditor-icon-link',
-      '#vditor-icon-upload',
       '#vditor-icon-line',
-      '#vditor-icon-code',
+      '#vditor-icon-outdent',
+      '#vditor-icon-indent',
+      '#vditor-icon-table',
       '#vditor-icon-align-center',
       '#vditor-icon-fullscreen',
       '#vditor-icon-edit',
@@ -154,6 +155,48 @@ describe('Vditor prose editor', () => {
     expect(document.getElementById('vditorIconScript')).not.toBeNull()
     expect(document.querySelector('script[src*="unpkg.com"]')).toBeNull()
     expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('opens the insert menu with native document actions', async () => {
+    const onChange = vi.fn()
+    await render({ content: '林岚走进了房间。', editable: true, onChange })
+
+    await act(async () => {
+      const prose = proseElement()
+      prose.focus()
+      const range = document.createRange()
+      range.selectNodeContents(prose.lastElementChild ?? prose)
+      range.collapse(false)
+      window.getSelection()?.removeAllRanges()
+      window.getSelection()?.addRange(range)
+    })
+
+    const insert = container.querySelector<HTMLButtonElement>('.vditor-toolbar button[data-type="insert"]')
+    expect(insert).not.toBeNull()
+    await act(async () => insert?.click())
+
+    const menu = insert?.parentElement?.querySelector<HTMLElement>('.vditor-hint')
+    expect(menu).not.toBeNull()
+    expect(menu?.style.display).toBe('block')
+    expect(menu?.querySelector('[data-type="table"]')).not.toBeNull()
+    expect(menu?.querySelector('[data-type="upload"]')).not.toBeNull()
+    expect(menu?.querySelector('[data-type="code"]')).not.toBeNull()
+    expect(menu?.querySelector('[data-type="line"]')).not.toBeNull()
+
+    await act(async () => {
+      menu?.querySelector<HTMLButtonElement>('[data-type="line"]')?.click()
+    })
+    await vi.waitFor(() => expect(onChange).toHaveBeenCalled())
+    expect(String(onChange.mock.calls.at(-1)?.[0])).toContain('---')
+  })
+
+  it('places toolbar hints below the button so the top edge cannot clip them', async () => {
+    await render({ content: '正文', editable: true, onChange: vi.fn() })
+    const heading = container.querySelector<HTMLButtonElement>('.vditor-toolbar button[data-type="headings"]')
+    expect(heading).not.toBeNull()
+    const hint = getComputedStyle(heading!, '::after')
+    expect(hint.bottom).toBe('auto')
+    expect(hint.top).toContain('100%')
   })
 
   it('offers all three built-in editing modes', async () => {
@@ -209,6 +252,8 @@ describe('Vditor prose editor', () => {
     expect(prose.getAttribute('contenteditable')).toBe('false')
     // 会改写正文的工具栏动作全部被禁用。
     expect(container.querySelector('.vditor-toolbar .vditor-menu--disabled')).not.toBeNull()
+    const insert = container.querySelector<HTMLButtonElement>('.vditor-toolbar button[data-type="insert"]')
+    expect(insert?.disabled).toBe(true)
 
     const paste = new Event('paste', { bubbles: true, cancelable: true })
     await act(async () => {

@@ -205,7 +205,7 @@ export default function HomeSidebarPanel() {
                 </div>
               ))}
             {otherProjects.length === 0 && (
-              <p className="text-xs px-2 py-2 opacity-50 text-center" style={{ color: 'var(--color-text-muted)' }}>
+              <p className="text-xs px-2 py-2 text-center" style={{ color: 'var(--color-text-muted)' }}>
                 {text('暂无其他最近项目', 'No other recent projects')}
               </p>
             )}

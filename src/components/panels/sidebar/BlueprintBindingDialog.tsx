@@ -94,19 +94,24 @@ export function BlueprintBindingDialog({
               : text('选择要关联的章节蓝图。', 'Choose a chapter blueprint to link.')}
           </DialogDescription>
         </DialogHeader>
-        <select
-          className="w-full rounded border px-3 py-2 text-sm"
-          style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-input-bg, var(--color-bg))' }}
-          value={selected}
-          onChange={event => setSelected(event.target.value)}
-        >
-          <option value="">{text('不绑定蓝图', 'No blueprint')}</option>
-          {blueprints.map(blueprint => (
-            <option key={blueprint.chapterNumber} value={blueprint.chapterNumber}>
-              {text(`第${blueprint.chapterNumber}章 ${blueprint.title || '未命名蓝图'}`, `Chapter ${blueprint.chapterNumber} ${blueprint.title || 'Untitled blueprint'}`)}
-            </option>
-          ))}
-        </select>
+        <div className="vela-dialog-body">
+          <label className="vela-dialog-field-label" htmlFor="blueprint-binding-select">
+            {text('选择蓝图', 'Choose a blueprint')}
+          </label>
+          <select
+            id="blueprint-binding-select"
+            className="vela-dialog-select"
+            value={selected}
+            onChange={event => setSelected(event.target.value)}
+          >
+            <option value="">{text('不绑定蓝图', 'No blueprint')}</option>
+            {blueprints.map(blueprint => (
+              <option key={blueprint.chapterNumber} value={blueprint.chapterNumber}>
+                {text(`第${blueprint.chapterNumber}章 ${blueprint.title || '未命名蓝图'}`, `Chapter ${blueprint.chapterNumber} ${blueprint.title || 'Untitled blueprint'}`)}
+              </option>
+            ))}
+          </select>
+        </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>{text('取消', 'Cancel')}</Button>
           <Button onClick={() => void save()} disabled={saving}>{saving ? text('保存中...', 'Saving...') : text('保存绑定', 'Save link')}</Button>

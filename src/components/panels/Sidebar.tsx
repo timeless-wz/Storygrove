@@ -28,7 +28,6 @@ export default function Sidebar() {
   const openProject = useProjectStore(s => s.openProject)
   const setSidebarView = useLayoutStore(s => s.setSidebarView)
   const text = useLocaleStore(s => s.text)
-  const t = useLocaleStore(s => s.t)
   // 全局右键菜单状态
   const [sidebarMenu, setSidebarMenu] = useState<SidebarMenuState | null>(null)
 
@@ -52,6 +51,7 @@ export default function Sidebar() {
 
   return (
     <ShadcnSidebar
+      data-sidebar-view={effectiveView}
       className="literary-sidebar skin-workspace-panel w-full h-full border-r border-[var(--color-border)]"
     >
       {effectiveView === 'project' ? (
@@ -127,35 +127,7 @@ export default function Sidebar() {
             </div>
           </div>
         </SidebarHeader>
-      ) : (
-        <SidebarHeader className="writer-project-sidebar-header writer-project-sidebar-header--compact">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <span
-                className="flex items-center justify-center w-5 h-5 rounded-md flex-shrink-0"
-                style={{ backgroundColor: 'var(--color-badge-bg)', color: 'var(--color-accent)' }}
-              >
-                <Home size={13} />
-              </span>
-              <span className="text-xs font-semibold tracking-wide truncate" style={{ color: 'var(--color-text)' }}>
-                {t('home.brand')}
-              </span>
-            </div>
-            {currentProject && (
-              <button
-                type="button"
-                className="writer-command-button flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium"
-                style={{ color: 'var(--color-accent)' }}
-                title={text(`返回「${currentProject.name}」创作`, `Return to ${currentProject.name}`)}
-                onClick={() => setSidebarView('project')}
-              >
-                <FolderOpen size={13} />
-                <span className="truncate">{text('返回创作', 'Return to project')}</span>
-              </button>
-            )}
-          </div>
-        </SidebarHeader>
-      )}
+      ) : null}
       <SidebarContent className={`flex-1 ${effectiveView === 'project' || effectiveView === 'home' ? 'py-1' : 'py-0'}`}>
         {effectiveView === 'home'       && <HomeSidebarPanel />}
         {effectiveView === 'project'    && <ProjectTree />}

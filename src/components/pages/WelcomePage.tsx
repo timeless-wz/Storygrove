@@ -46,7 +46,6 @@ function InspirationNotes({ compact }: { compact: boolean }) {
           <Plus size={15} className="mr-1" />{t('home.inspirationAdd')}
         </Button>
       </div>
-      <p className="literary-session-notice">{t('home.inspirationSession')}</p>
       {editing && (
         <form className="literary-note-composer" onSubmit={save}>
           <textarea autoFocus value={content} onChange={event => setContent(event.target.value)} placeholder={t('home.inspirationPlaceholder')} maxLength={2000} />
@@ -163,11 +162,12 @@ export default function WelcomePage({ onNewProject, onOpenProject, onImportNovel
           <div className={`literary-hero-engines${onImportNovel ? '' : ' literary-hero-engines--single'}`}>
             <svg className="literary-hero-clips" width="0" height="0" aria-hidden="true" focusable="false">
               <defs>
+                {/* 中央斜切保留曲线，外角交给容器以固定像素圆角裁切。 */}
                 <clipPath id="literary-hero-left-clip" clipPathUnits="objectBoundingBox">
-                  <path d="M .024 0 H .899 C .913 0 .919 .011 .922 .034 L .997 .944 C 1 .977 .986 1 .965 1 H .024 C .009 1 0 .981 0 .95 V .05 C 0 .019 .009 0 .024 0 Z" />
+                  <path d="M 0 0 H .899 C .913 0 .919 .011 .922 .034 L .997 .944 C 1 .977 .986 1 .965 1 H 0 Z" />
                 </clipPath>
                 <clipPath id="literary-hero-right-clip" clipPathUnits="objectBoundingBox">
-                  <path d="M .012 0 H .976 C .991 0 1 .019 1 .05 V .95 C 1 .981 .991 1 .976 1 H .091 C .082 1 .077 .986 .075 .963 L .001 .055 C -.002 .024 .003 0 .012 0 Z" />
+                  <path d="M .012 0 H 1 V 1 H .091 C .082 1 .077 .986 .075 .963 L .001 .055 C -.002 .024 .003 0 .012 0 Z" />
                 </clipPath>
               </defs>
             </svg>

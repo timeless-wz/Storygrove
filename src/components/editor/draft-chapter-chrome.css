@@ -1,0 +1,354 @@
+/**
+ * 章节创作页外壳：章节栏与动作区
+ *
+ * 这一页有两套**各自成套**的令牌，不能交叉混用：
+ *   外壳区（章节栏 + 工具栏）—— 外壳底色配外壳墨色
+ *     背景 --bg-surface / --bg-base，文字 --text-primary / --text-secondary / --text-muted
+ *   纸面区（正文那张纸）—— 纸面底色配纸面墨色
+ *     背景 --editor-page-bg / --editor-solid-bg，文字 --editor-ink-*
+ * 混用会立刻出事：starlight 是"深色外壳 + 象牙纸面"的混合主题，把纸面的深墨
+ * （--editor-ink-strong #20252b）放到深色外壳上，标题对比度只剩 1.05:1，等于消失。
+ *
+ * 于是三层表面由外壳向外推到桌面，纸面始终是最亮的一层：
+ *   桌面 desk   —— --bg-base，写作区与工具栏共用的底
+ *   外壳 chrome —— --bg-surface，章节栏
+ *   纸面 paper  —— --editor-solid-bg / --editor-page-bg，正文所在的那张纸
+ *
+ * 章节栏内的控件在这里统一定义，而不是在 JSX 里重复 utility 类：这些规则要盖住
+ * Button 组件 cva 变体生成的工具类，用两段类选择器（.draft-chapter-bar .x）保证
+ * 优先级稳定，不依赖打包顺序，也不用 !important。
+ */
+
+:root {
+  /* 桌面底色：写作区与工具栏共用的底 */
+  --editor-desk-bg: var(--bg-base, var(--color-bg));
+  /* 外壳底色：比桌面亮一档的壳层表面 */
+  --editor-chrome-bg: var(--bg-surface, var(--color-sidebar, var(--editor-page-bg, var(--color-editor-bg))));
+  /* 外壳线条与悬停：同样取外壳一族，深色外壳上不会突然出现一条纸面的浅线 */
+  --editor-chrome-line: var(--border, var(--color-border));
+  --editor-chrome-hover: var(--bg-hover, var(--color-hover));
+  --editor-chrome-ink: var(--text-secondary, var(--color-text-secondary));
+  --editor-chrome-ink-strong: var(--text-primary, var(--color-text));
+}
+
+.draft-chapter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  column-gap: 16px;
+  row-gap: 4px;
+  min-height: 44px;
+  padding: 4px 12px 4px 16px;
+  border-bottom: 1px solid var(--editor-chrome-line);
+  background-color: var(--editor-chrome-bg, var(--editor-page-bg, var(--color-editor-bg)));
+  user-select: none;
+  flex-shrink: 0;
+  /* 次要动作要不要收起文字，取决于这条栏自己有多宽（编辑器宽度常被两侧面板
+     压掉两三百像素），而不是窗口有多宽。 */
+  container-type: inline-size;
+  container-name: draft-chapter-bar;
+}
+
+/* ---------- 左：章节身份 ---------- */
+
+.draft-chapter-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.draft-chapter-stepper {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.draft-chapter-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md, 6px);
+  background: transparent;
+  color: var(--editor-chrome-ink);
+  cursor: pointer;
+  transition: background-color var(--transition-fast, 0.15s ease), color var(--transition-fast, 0.15s ease);
+}
+
+.draft-chapter-step:hover:not(:disabled) {
+  background-color: var(--editor-chrome-hover);
+  color: var(--editor-chrome-ink-strong);
+}
+
+.draft-chapter-step:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.draft-chapter-step:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* 章号用写作字体：与纸面上的正文同一副面孔，外壳也带一点文稿气 */
+.draft-chapter-index {
+  padding: 0 6px;
+  font-family: var(--font-writing);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  color: var(--editor-chrome-ink);
+}
+
+.draft-chapter-title {
+  min-width: 0;
+  max-width: 280px;
+  overflow: hidden;
+  font-family: var(--font-writing);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--editor-chrome-ink-strong);
+}
+
+/* 版本号压低对比：它是标题的附注，不是第二个标题 */
+.draft-chapter-version {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--color-text-muted, var(--editor-chrome-ink));
+}
+
+/* 状态只留一个语义色圆点 + 文字，不再套一层胶囊：这一行已经有四个盒子了 */
+.draft-chapter-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.draft-chapter-status-dot {
+  width: 5px;
+  height: 5px;
+  flex-shrink: 0;
+  border-radius: 50%;
+}
+
+.draft-chapter-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-md, 6px);
+  background: transparent;
+  color: var(--editor-chrome-ink);
+  cursor: pointer;
+  transition: background-color var(--transition-fast, 0.15s ease), color var(--transition-fast, 0.15s ease);
+}
+
+.draft-chapter-mark:hover {
+  background-color: var(--editor-chrome-hover);
+  color: var(--color-accent);
+}
+
+.draft-chapter-mark-count {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 右：动作区 ---------- */
+
+.draft-chapter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* 组内 2px、组间 14px：用间距而不是一排竖线把动作分堆 */
+.draft-chapter-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.draft-chapter-sep {
+  width: 1px;
+  height: 16px;
+  flex-shrink: 0;
+  background-color: color-mix(in srgb, var(--editor-chrome-ink) 45%, transparent);
+}
+
+.draft-chapter-count {
+  padding: 0 6px 0 2px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--editor-chrome-ink);
+}
+
+.draft-chapter-dirty {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background-color: var(--color-warning);
+  animation: draft-chapter-dirty-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes draft-chapter-dirty-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* 发布冲突提示：说明"这次编辑没被发布覆盖"，属于需要读一眼的状态说明 */
+.draft-chapter-conflict {
+  padding: 0 8px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md, 6px);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+/* ---------- 外壳内的动作按钮 ---------- */
+
+.draft-chapter-bar .draft-action {
+  height: 26px;
+  padding: 0 8px;
+  gap: 5px;
+  border-radius: var(--radius-md, 6px);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.draft-chapter-bar .draft-action-label {
+  white-space: nowrap;
+}
+
+/* 次级动作：默认只有文字与图标，悬停才浮出底色 */
+.draft-chapter-bar .draft-action--quiet {
+  border: 1px solid transparent;
+  color: var(--editor-chrome-ink);
+}
+
+.draft-chapter-bar .draft-action--quiet:hover:not(:disabled) {
+  background-color: var(--editor-chrome-hover);
+  border-color: var(--editor-chrome-line);
+  color: var(--editor-chrome-ink-strong);
+}
+
+/* 审稿报告：一件已经存在的产物，值得一直看得见 */
+.draft-chapter-bar .draft-action--report {
+  border-color: var(--editor-chrome-line);
+  color: var(--color-category-review-text, var(--editor-chrome-ink-strong));
+}
+
+.draft-chapter-bar .draft-action--report:hover:not(:disabled) {
+  background-color: var(--editor-chrome-hover);
+  border-color: var(--color-accent);
+  color: var(--color-category-review-text, var(--color-accent));
+}
+
+/* 视图开关：独立两态，不共用填充底，避免被当成单选分段控件 */
+.draft-chapter-bar .draft-action--toggle {
+  border: 1px solid transparent;
+  color: var(--editor-chrome-ink);
+}
+
+.draft-chapter-bar .draft-action--toggle:hover:not(:disabled) {
+  background-color: var(--editor-chrome-hover);
+  color: var(--editor-chrome-ink-strong);
+}
+
+.draft-chapter-bar .draft-action--toggle.is-open {
+  background-color: var(--bg-hover, var(--editor-chrome-hover));
+  border-color: var(--editor-chrome-line);
+  color: var(--color-accent);
+}
+
+/* 未保存：琥珀色描边，是"需要你动手"的状态，不是主题强调色 */
+.draft-chapter-bar .draft-action--save {
+  padding: 0 8px;
+  border-color: color-mix(in srgb, var(--color-warning) 45%, transparent);
+  color: var(--color-warning-text, var(--color-warning));
+}
+
+.draft-chapter-bar .draft-action--save:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  border-color: var(--color-warning);
+  color: var(--color-warning-text, var(--color-warning));
+}
+
+/* AI 审稿：主题强调色的描边态，与实心的发布按钮构成主次，而不是两个实心按钮对喊 */
+.draft-chapter-bar .draft-action--accent {
+  padding: 0 10px;
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.draft-chapter-bar .draft-action--accent:hover:not(:disabled) {
+  background-color: var(--color-accent-subtle, var(--editor-chrome-hover));
+  border-color: var(--color-accent-hover);
+  color: var(--color-accent-hover);
+}
+
+/* 发布到正文：全屏唯一的实心强调色按钮 */
+.draft-chapter-bar .draft-action--primary {
+  padding: 0 10px;
+}
+
+/* ---------- 响应式：先收起次要动作的文字，保留可点面积与提示 ---------- */
+
+/* 编辑器实际可用宽度常被两侧面板压到 1000px 出头，此时让次要动作只剩图标
+   （按钮都已带 aria-label，无障碍名不随文字收起而变）。发布/审稿/保存是本屏的
+   落笔动作，任何宽度下都保留文字。 */
+@container draft-chapter-bar (max-width: 1200px) {
+  .draft-chapter-bar .draft-action--quiet .draft-action-label,
+  .draft-chapter-bar .draft-action--report .draft-action-label,
+  .draft-chapter-bar .draft-action--toggle .draft-action-label {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .draft-chapter-bar {
+    padding: 4px 10px;
+  }
+  .draft-chapter-title {
+    max-width: 180px;
+  }
+  .draft-chapter-mark {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .draft-chapter-dirty {
+    animation: none;
+  }
+}

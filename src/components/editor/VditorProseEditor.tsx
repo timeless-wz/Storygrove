@@ -19,6 +19,7 @@ import { Sparkles, Check, Bookmark, CheckCircle2, Circle, ExternalLink, X } from
 import Vditor from 'vditor'
 import 'vditor/dist/index.css'
 import './vditor-prose.css'
+import './document-toolbar.css'
 import './foreshadowing.css'
 
 import { locateForeshadowingInText } from '../../services/foreshadowing-locator'
@@ -48,33 +49,43 @@ import { cn } from '../../lib/utils'
  */
 const VDITOR_ASSET_BASE = `${import.meta.env.BASE_URL}vditor`
 
-/**
- * 小说创作用的工具栏：只保留写作相关动作。
- * 顺序为 撤销、重做、标题、粗体、斜体、删除线、引用、列表、
- * 任务列表、链接、图片、分割线、代码、目录、全屏、编辑模式切换。
- */
-const VDITOR_TOOLBAR: string[] = [
+/** 文档式工具栏沿用 Vditor 的原生编辑命令，避免绕开其撤销栈与 Markdown 转换。 */
+const VDITOR_TOOLBAR = [
+  {
+    name: 'insert',
+    tip: '插入内容',
+    tipPosition: 'ne',
+    icon: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="currentColor"/><path d="M12 7v10M7 12h10" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>',
+    toolbar: ['table', 'upload', 'code', 'line'],
+    click: () => {},
+  },
+  '|',
   'undo',
   'redo',
   '|',
-  'headings',
+  {
+    name: 'headings',
+    icon: '<span class="doc-toolbar-heading-label">标题</span><svg aria-hidden="true"><use xlink:href="#vditor-icon-headings"></use></svg>',
+  },
+  '|',
   'bold',
   'italic',
   'strike',
-  'quote',
   '|',
   'list',
   'ordered-list',
   'check',
+  'outdent',
+  'indent',
   '|',
   'link',
-  'upload',
+  'quote',
   'line',
-  'code',
+  'table',
   '|',
   'outline',
-  'fullscreen',
   'edit-mode',
+  'fullscreen',
 ]
 
 type EditorAIAction = {

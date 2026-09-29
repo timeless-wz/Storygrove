@@ -1961,6 +1961,13 @@
   background: var(--skin-workspace-panel-surface) !important;
 }
 
+/* Home navigation sits over scenic artwork; keep every text tier readable. */
+.app-skin-root .literary-sidebar[data-sidebar-view='home'] {
+  --color-text-secondary: color-mix(in srgb, var(--color-text) 88%, var(--color-sidebar));
+  --color-text-muted: color-mix(in srgb, var(--color-text) 80%, var(--color-sidebar));
+  background: color-mix(in srgb, var(--color-sidebar) 65%, color-mix(in srgb, var(--color-sidebar) var(--chrome-surface-opacity, 66%), transparent)) !important;
+}
+
 .app-skin-root[data-skin-readability='high-contrast'] .skin-workspace-page {
   background: var(--skin-workspace-page-surface) !important;
 }

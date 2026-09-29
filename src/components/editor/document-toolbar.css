@@ -1,0 +1,127 @@
+/* 正文编辑器的文档式工具栏；只改变 Vditor 工具栏的呈现。 */
+.vditor-prose-host .vditor-toolbar {
+  min-height: 54px;
+  padding: 8px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 2;
+  border-bottom: 1px solid var(--editor-ruled-line, var(--color-border));
+  background-color: var(--editor-solid-bg, var(--color-editor-bg));
+}
+
+.vditor-prose-host .vditor-toolbar__item > button.vditor-tooltipped {
+  width: 32px;
+  height: 34px;
+  padding: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--editor-ink-primary, var(--color-text));
+}
+
+.vditor-prose-host .vditor-toolbar__item > button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.vditor-prose-host .vditor-toolbar__item > button[data-type="insert"] {
+  color: #08b96b;
+  margin-right: 2px;
+}
+
+.vditor-prose-host .vditor-toolbar__item > button[data-type="insert"] svg {
+  width: 25px;
+  height: 25px;
+}
+
+.vditor-prose-host .vditor-toolbar__item > button[data-type="headings"] {
+  width: 98px;
+  justify-content: space-between;
+  padding-inline: 10px;
+  white-space: nowrap;
+}
+
+.vditor-prose-host .vditor-toolbar__item > button[data-type="headings"] svg {
+  display: none;
+}
+
+.vditor-prose-host .doc-toolbar-heading-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 25px;
+  font-size: 15px;
+}
+
+.vditor-prose-host .doc-toolbar-heading-label::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg) translateY(-2px);
+  opacity: 0.65;
+}
+
+.vditor-prose-host .vditor-toolbar__item > button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.vditor-prose-host .vditor-toolbar__divider {
+  height: 22px;
+  margin: 0 7px;
+  opacity: 0.8;
+}
+
+.vditor-prose-host .vditor-toolbar__item .vditor-hint {
+  z-index: 3;
+}
+
+/* 工具栏贴着顶部标签栏，上方提示会被编辑区裁切；统一在按钮下方显示。 */
+.vditor-prose-host .vditor-toolbar__item > .vditor-tooltipped::before {
+  display: none;
+}
+
+.vditor-prose-host .vditor-toolbar__item > .vditor-tooltipped::after {
+  top: calc(100% + 7px);
+  right: auto;
+  bottom: auto;
+  left: 50%;
+  margin: 0;
+  padding: 7px 10px;
+  transform: translateX(-50%);
+  color: var(--color-text);
+  background: var(--color-raised, var(--color-panel));
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  box-shadow: 0 9px 22px -11px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.vditor-prose-host .vditor-toolbar__item:has(.vditor-hint[style*="display: block"]) > .vditor-tooltipped::after {
+  display: none;
+}
+
+/* 章节位置栏与正文工具栏共用一块纸面，墨色也随纸面切换。 */
+.draft-chapter-bar {
+  --editor-chrome-bg: var(--editor-solid-bg, var(--color-editor-bg));
+  --editor-chrome-line: var(--editor-ruled-line, var(--color-border));
+  --editor-chrome-ink: var(--editor-ink-muted, var(--color-text-secondary));
+  --editor-chrome-ink-strong: var(--editor-ink-primary, var(--color-text));
+  --editor-chrome-hover: var(--editor-selection-bg, var(--color-hover));
+}
+
+.draft-chapter-bar .draft-chapter-version {
+  color: var(--editor-chrome-ink);
+}
+
+.draft-chapter-bar .draft-action--toggle.is-open {
+  background-color: var(--editor-chrome-hover);
+}

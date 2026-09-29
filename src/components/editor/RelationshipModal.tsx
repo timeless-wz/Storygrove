@@ -5,6 +5,7 @@ import { useLocaleStore } from '../../stores/locale-store'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
 import { Textarea } from '../ui/Textarea'
+import '../ui/feedback-surface.css'
 
 /** 弹窗只按稳定人物 ID 提交关系；姓名仅用于标题展示。 */
 export interface RelationshipModalCharacter {
@@ -89,7 +90,7 @@ export default function RelationshipModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-[1px] p-4"
+      className="vela-feedback-overlay"
       data-testid="relationship-modal-backdrop"
       onClick={onClose}
     >
@@ -98,12 +99,7 @@ export default function RelationshipModal({
         aria-modal="true"
         aria-label={isEdit ? text('编辑人物关系', 'Edit Relationship') : text('建立人物关系', 'Create Relationship')}
         data-testid="relationship-modal"
-        className="w-full max-w-md rounded-xl border p-5 shadow-xl transition-all"
-        style={{
-          borderColor: 'var(--color-border)',
-          backgroundColor: 'var(--color-bg)',
-          color: 'var(--color-text)',
-        }}
+        className="vela-feedback-panel w-full max-w-md p-6"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}

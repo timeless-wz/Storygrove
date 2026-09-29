@@ -4,6 +4,13 @@
  * Vditor 自带样式用一组 CSS 变量描述面板、工具栏、边框与文字色。
  * 这里把那些变量映射到应用的设计令牌，再补上中文小说的排版细节，
  * 因此不需要重写 Vditor 的布局规则。
+ *
+ * 本文只负责写作面（桌面、纸面、正文排版）。
+ * 工具栏本身由 document-toolbar.css 负责，两者不要重复定义同一个选择器：
+ * 外壳区配外壳墨色、纸面区配纸面墨色是这一页的底线，跨族混用会在 starlight
+ * 这类"深色外壳 + 象牙纸面"的主题上直接把文字变成看不见的颜色。
+ *   桌面 --editor-desk-bg（外壳一族）—— 纸面周围的空地
+ *   纸面 --editor-solid-bg / --editor-page-bg（纸面一族）—— 正文所在的那张纸 + 工具栏底
  */
 
 .vditor-prose-host {
@@ -11,16 +18,16 @@
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  background-color: var(--color-editor-bg);
+  background-color: var(--editor-desk-bg, var(--bg-base, var(--color-editor-bg)));
 }
 
 .vditor-prose-host .vditor {
-  /* 设计令牌映射：工具栏、正文面板、边框与图标色跟随皮肤与墨色。 */
+  /* 设计令牌映射：弹层与纸面共用同一套纸面墨色，工具栏的图标色见 document-toolbar.css。 */
   --border-color: var(--editor-ruled-line, var(--color-border));
   --panel-background-color: var(--color-editor-bg);
   --textarea-background-color: var(--color-editor-bg);
   --textarea-text-color: var(--editor-ink-primary, var(--color-text));
-  --toolbar-background-color: var(--color-editor-bg);
+  --toolbar-background-color: var(--editor-solid-bg, var(--color-editor-bg));
   --toolbar-icon-color: var(--editor-ink-muted, var(--color-text-secondary));
   --toolbar-icon-hover-color: var(--editor-ink-primary, var(--color-accent));
   --second-color: var(--editor-ink-muted, var(--color-text-muted));
@@ -29,52 +36,9 @@
   height: 100%;
   border: none;
   border-radius: 0;
-  background-color: var(--bg-base, var(--color-editor-bg));
+  background-color: var(--editor-desk-bg, var(--bg-base, var(--color-editor-bg)));
   display: flex;
   flex-direction: column;
-}
-
-/* 工具栏融入写作页顶部，扁平轻量、精细微距 */
-.vditor-prose-host .vditor-toolbar {
-  border-bottom: 1px solid var(--editor-ruled-line, var(--color-border));
-  background-color: var(--color-editor-bg);
-  padding: 3px 14px;
-  min-height: 34px;
-  display: flex;
-  align-items: center;
-  gap: 1px;
-  flex-shrink: 0;
-}
-
-.vditor-prose-host .vditor-toolbar__item {
-  margin: 0;
-}
-
-.vditor-prose-host .vditor-toolbar__item button {
-  border-radius: var(--radius-sm, 4px);
-  padding: 4px 6px;
-  color: var(--editor-ink-muted, var(--color-text-secondary));
-  transition: background-color var(--transition-fast, 0.15s ease), color var(--transition-fast, 0.15s ease);
-}
-
-.vditor-prose-host .vditor-toolbar__item button:hover {
-  background-color: var(--editor-selection-bg, var(--color-hover));
-  color: var(--editor-ink-primary, var(--color-accent));
-}
-
-.vditor-prose-host .vditor-toolbar__item .vditor-tooltipped {
-  color: var(--editor-ink-muted, var(--color-text-secondary));
-}
-
-.vditor-prose-host .vditor-toolbar__item .vditor-tooltipped:hover {
-  color: var(--editor-ink-primary, var(--color-accent));
-}
-
-.vditor-prose-host .vditor-toolbar__divider {
-  height: 14px;
-  margin: 0 4px;
-  border-left: 1px solid var(--editor-ruled-line, var(--color-border));
-  opacity: 0.6;
 }
 
 /* 编辑内容视口容器：居中承托与纵向滚动 */
@@ -84,7 +48,7 @@
   width: 100%;
   display: flex;
   flex-direction: column;
-  background-color: var(--bg-base, var(--color-editor-bg));
+  background-color: var(--editor-desk-bg, var(--color-editor-bg));
 }
 
 .vditor-prose-host .vditor-ir,
@@ -94,9 +58,9 @@
   overflow-x: hidden;
   width: 100%;
   box-sizing: border-box;
-  background-color: var(--bg-base, var(--color-editor-bg));
+  background-color: var(--editor-desk-bg, var(--bg-base, var(--color-editor-bg)));
   cursor: text;
-  padding: 24px 16px 40px 16px;
+  padding: 28px 16px 40px 16px;
 }
 
 /* 正文排版：860px 黄金阅读宽度居中、2.0 舒适行距、长篇小说呼吸感 */
@@ -112,7 +76,9 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* 居中纸面实体：纸张轻微浮动阴影与边框，还原真实文稿纸质感 */
+/* 居中纸面实体：纸张轻微浮动阴影与边框，还原真实文稿纸质感。
+   纸张比外壳圆一档，控件与纸面各自成套：纸面 --radius-lg，控件 --radius-md。
+   阴影用主题墨色调而不是纯黑：浅绿桌面上纯黑投影会发灰发脏。 */
 .vditor-prose-host .vditor-ir pre.vditor-reset,
 .vditor-prose-host .vditor-wysiwyg pre.vditor-reset {
   overflow-x: hidden;
@@ -120,35 +86,39 @@
   max-width: 860px;
   min-height: calc(100% - 32px);
   margin: 0 auto !important;
-  padding: 40px 48px 35vh 48px !important;
+  padding: 48px 56px 35vh 56px !important;
   box-sizing: border-box;
   background-color: var(--editor-solid-bg, var(--editor-page-bg, var(--color-editor-bg)));
   border: 1px solid var(--editor-ruled-line, var(--color-border));
-  border-radius: var(--radius-md, 6px);
-  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 2px 6px -1px rgba(0, 0, 0, 0.03);
+  border-radius: var(--radius-lg, 8px);
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--editor-ink-strong, #000) 4%, transparent),
+    0 14px 34px -10px color-mix(in srgb, var(--editor-ink-strong, #000) 10%, transparent);
 }
 
 .vditor-prose-host textarea.vditor-sv {
   max-width: 860px;
   margin: 0 auto !important;
-  padding: 40px 48px !important;
+  padding: 48px 56px !important;
   box-sizing: border-box;
   background-color: var(--editor-solid-bg, var(--editor-page-bg, var(--color-editor-bg))) !important;
   color: var(--editor-ink-primary, var(--color-text)) !important;
   caret-color: var(--editor-ink-primary, var(--color-editor-caret, var(--color-text)));
   border: 1px solid var(--editor-ruled-line, var(--color-border));
-  border-radius: var(--radius-md, 6px);
-  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 2px 6px -1px rgba(0, 0, 0, 0.03);
+  border-radius: var(--radius-lg, 8px);
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--editor-ink-strong, #000) 4%, transparent),
+    0 14px 34px -10px color-mix(in srgb, var(--editor-ink-strong, #000) 10%, transparent);
 }
 
-/* 占位文字：确保在各类纸面墨色下具备舒适辨识度 */
+/* 占位文字：中文没有真斜体，浏览器合成的斜体在正文里是破碎的，所以只降墨色不倾斜 */
 .vditor-prose-host .vditor-ir pre.vditor-reset:empty::before,
 .vditor-prose-host .vditor-wysiwyg pre.vditor-reset:empty::before,
 .vditor-prose-host .vditor-sv::placeholder {
   color: var(--editor-ink-muted, var(--color-text-muted)) !important;
-  font-style: italic;
-  letter-spacing: 0.02em;
-  opacity: 0.72;
+  font-style: normal;
+  letter-spacing: 0.04em;
+  opacity: 1;
 }
 
 /* 窄窗口与小屏自适应：渐进收缩内边距，保持正文最大可读列宽不被挤压 */
@@ -156,13 +126,13 @@
   .vditor-prose-host .vditor-ir,
   .vditor-prose-host .vditor-wysiwyg,
   .vditor-prose-host .vditor-sv {
-    padding: 12px 10px 30vh 10px;
+    padding: 18px 10px 30vh 10px;
   }
   .vditor-prose-host .vditor-ir pre.vditor-reset,
   .vditor-prose-host .vditor-wysiwyg pre.vditor-reset,
   .vditor-prose-host textarea.vditor-sv {
-    padding: 30px 24px 30vh 24px !important;
-    border-radius: var(--radius-sm, 4px);
+    padding: 34px 28px 30vh 28px !important;
+    border-radius: var(--radius-md, 6px);
   }
 }
 

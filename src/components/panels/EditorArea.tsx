@@ -14,6 +14,7 @@ import WorldBuildingEditor from '../editor/WorldBuildingEditor'
 import ArchFileViewer from '../editor/ArchFileViewer'
 import ProjectDocumentEditor from '../editor/ProjectDocumentEditor'
 import DraftEditor from '../editor/DraftEditor'
+import ChapterOutlineSidebar from '../editor/ChapterOutlineSidebar'
 import VersionHistory from '../editor/VersionHistory'
 import ReviewReport from '../editor/ReviewReport'
 import NarrativeThreadEditor from '../editor/NarrativeThreadEditor'
@@ -621,7 +622,12 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
 
 
       {/* 编辑区主体 */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-hidden flex relative">
+        {activeTab?.type === 'chapter' && activeTab.projectKey === currentProject.path
+          && !activeTab.filePath?.startsWith('vela://recovery/') && (
+          <ChapterOutlineSidebar tab={activeTab} />
+        )}
+        <div className="min-w-0 flex-1 overflow-hidden">
         {activeTab?.type === 'chapter' && activeTab.projectKey === currentProject.path && (
           activeTab.filePath?.startsWith('vela://draft/')
           || activeTab.filePath?.startsWith('vela://manuscript/')
@@ -826,6 +832,7 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
           </DialogContent>
         </Dialog>
 
+        </div>
       </div>
 
       {/* Tab 右键菜单 */}

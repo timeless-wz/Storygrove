@@ -15,6 +15,7 @@ import { createRoot } from 'react-dom/client'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Button } from './Button'
 import { useLocaleStore } from '../../stores/locale-store'
+import './feedback-surface.css'
 
 // ===== 内部组件 =====
 
@@ -70,64 +71,24 @@ function ConfirmDialog({
   }, [handleCancel])
 
   return (
-    /* 遮罩层 — 统一 CSS 变量和动画 */
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 9998,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'var(--color-backdrop)',
-        backdropFilter: 'blur(8px)',
-        pointerEvents: 'auto',
-        /* 为遮罩层的进场同样加入 both 属性防闪烁 */
-        animation: isExiting
-          ? 'backdrop-exit 0.15s ease-out both'
-          : 'backdrop-enter 0.25s ease-out both',
-      }}
-      onClick={handleCancel}
-    >
+    <div className="vela-feedback-overlay" data-exiting={isExiting} onClick={handleCancel}>
       {/* 弹窗主体 */}
       <div
         role="dialog"
         aria-modal="true"
-        style={{
-          backgroundColor: 'var(--color-sidebar)',
-          border: '1px solid var(--color-border)',
-          borderRadius: 'var(--radius-2xl)',
-          boxShadow: 'var(--shadow-popover)',
-          padding: '20px 24px',
-          minWidth: 320,
-          maxWidth: 460,
-          /* CSS 动画，使用 both 从而提前应用 0% 关键帧，彻底杜绝闪烁现象 */
-          animation: isExiting
-            ? 'dialog-exit 0.15s ease-out both'
-            : 'dialog-enter 0.25s var(--transition-spring) both',
-        }}
+        aria-labelledby="confirm-dialog-title"
+        aria-describedby="confirm-dialog-message"
+        className="vela-feedback-panel vela-feedback-content"
+        data-exiting={isExiting}
         onClick={e => e.stopPropagation()}
       >
-        {/* 标题 */}
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text)', marginBottom: 10 }}>
-          {resolvedTitle}
+        <div className="vela-feedback-header">
+          <h2 id="confirm-dialog-title" className="vela-feedback-title">{resolvedTitle}</h2>
         </div>
 
-        {/* 消息体 */}
-        <div
-          style={{
-            fontSize: 12,
-            color: 'var(--color-text-secondary)',
-            lineHeight: 1.65,
-            whiteSpace: 'pre-wrap',
-            marginBottom: 20,
-          }}
-        >
-          {message}
-        </div>
+        <div id="confirm-dialog-message" className="vela-feedback-message">{message}</div>
 
-        {/* 按钮区 */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+        <div className="vela-feedback-actions">
           <Button variant="ghost" size="sm" onClick={handleCancel}>
             {resolvedCancelText}
           </Button>

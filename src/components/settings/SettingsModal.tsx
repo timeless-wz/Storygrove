@@ -24,6 +24,7 @@ import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
 import { Label } from '../ui/Label'
 import { NativeSelect } from '../ui/NativeSelect'
+import '../ui/feedback-surface.css'
 import { cn } from '../../lib/utils'
 import { ipc } from '../../services/ipc-client'
 import { Switch } from '../ui/Switch'
@@ -89,15 +90,10 @@ export default function SettingsModal({ open, onClose }: SettingsModalProps) {
 
   return (
     <div
-      className="skin-solid-surface fixed inset-0 z-50 flex items-center justify-center"
-      style={{ backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
+      className="skin-solid-surface vela-feedback-overlay"
     >
       <div
-        className="relative flex w-[880px] h-[600px] rounded-2xl overflow-hidden shadow-2xl"
-        style={{
-          backgroundColor: 'var(--color-editor-bg)',
-          border: '1px solid var(--color-border)',
-        }}
+        className="vela-feedback-panel relative flex w-[880px] h-[600px] overflow-hidden"
       >
         {/* 左侧导航 */}
         <aside

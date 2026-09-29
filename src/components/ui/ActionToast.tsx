@@ -22,6 +22,7 @@ import { createRoot } from 'react-dom/client'
 import { useEffect, useState, useCallback } from 'react'
 import { X, CheckCircle2, AlertTriangle, Info, Sparkles } from 'lucide-react'
 import { useLocaleStore } from '../../stores/locale-store'
+import './feedback-surface.css'
 
 // ===== 类型定义 =====
 
@@ -133,26 +134,27 @@ function ActionToastContainer() {
 // ===== 单条 ActionToast =====
 
 /** 类型→视觉映射 */
-const TYPE_STYLE: Record<ActionToastType, { border: string; icon: React.ReactNode }> = {
+const TYPE_STYLE: Record<ActionToastType, { accent: string; icon: React.ReactNode }> = {
   success: {
-    border: 'var(--color-success)',
-    icon: <CheckCircle2 size={16} style={{ color: 'var(--color-success)', flexShrink: 0 }} />,
+    accent: 'var(--color-success)',
+    icon: <CheckCircle2 size={16} />,
   },
   info: {
-    border: 'var(--color-info)',
-    icon: <Info size={16} style={{ color: 'var(--color-info)', flexShrink: 0 }} />,
+    accent: 'var(--color-info)',
+    icon: <Info size={16} />,
   },
   warning: {
-    border: 'var(--color-warning)',
-    icon: <AlertTriangle size={16} style={{ color: 'var(--color-warning)', flexShrink: 0 }} />,
+    accent: 'var(--color-warning)',
+    icon: <AlertTriangle size={16} />,
   },
   ai: {
-    border: 'var(--color-accent)',
-    icon: <Sparkles size={16} style={{ color: 'var(--color-accent)', flexShrink: 0 }} />,
+    accent: 'var(--color-accent)',
+    icon: <Sparkles size={16} />,
   },
 }
 
 function ActionToastCard({ item, onRemove }: { item: ActionToastItem; onRemove: (id: number) => void }) {
+  const text = useLocaleStore(s => s.text)
   const [isExiting, setIsExiting] = useState(false)
   const duration = item.duration ?? 8000
 
@@ -182,59 +184,18 @@ function ActionToastCard({ item, onRemove }: { item: ActionToastItem; onRemove: 
     dismiss()
   }
 
-  const { border, icon } = TYPE_STYLE[item.type || 'info']
+  const { accent, icon } = TYPE_STYLE[item.type || 'info']
 
   return (
-    <div
-      style={{
-        pointerEvents: 'auto',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        padding: '12px 14px',
-        borderRadius: 'var(--radius-xl)',
-        backgroundColor: 'var(--color-sidebar)',
-        border: '1px solid var(--color-border)',
-        borderLeft: `3px solid ${border}`,
-        boxShadow: 'var(--shadow-popover)',
-        maxWidth: 400,
-        minWidth: 260,
-        /* 使用 both 填充模式，让 0% 关键帧在动画前就应用，杜绝闪烁 */
-        animation: isExiting
-          ? 'action-toast-exit 0.25s ease-out both'
-          : 'action-toast-enter 0.3s ease-out both',
-      }}
-    >
+    <div className="vela-toast-card vela-action-toast" data-exiting={isExiting} style={{ '--toast-accent': accent } as React.CSSProperties} role="status">
       {/* 第一行：图标 + 消息 + 关闭 */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-        {icon}
-        <span
-          style={{
-            flex: 1,
-            fontSize: 12,
-            lineHeight: 1.6,
-            color: 'var(--color-text)',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-          }}
-        >
-          {item.message}
-        </span>
+      <div className="vela-action-toast-row">
+        <span className="vela-toast-icon">{icon}</span>
+        <span className="vela-toast-message">{item.message}</span>
         <button
           onClick={dismiss}
-          style={{
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            padding: 2,
-            flexShrink: 0,
-            color: 'var(--color-text-muted)',
-            lineHeight: 1,
-            borderRadius: 'var(--radius-sm)',
-            transition: 'color var(--transition-fast)',
-          }}
-          onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-text)' }}
-          onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-text-muted)' }}
+          className="vela-feedback-close"
+          aria-label={text('关闭提示', 'Dismiss notification')}
         >
           <X size={12} />
         </button>
@@ -242,42 +203,12 @@ function ActionToastCard({ item, onRemove }: { item: ActionToastItem; onRemove: 
 
       {/* 第二行：操作按钮 */}
       {item.actions && item.actions.length > 0 && (
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+        <div className="vela-action-toast-actions">
           {item.actions.map((action, i) => (
             <button
               key={i}
               onClick={() => handleAction(action)}
-              style={{
-                padding: '4px 12px',
-                borderRadius: 'var(--radius-md)',
-                fontSize: 11,
-                fontWeight: 500,
-                cursor: 'pointer',
-                transition: 'all var(--transition-fast)',
-                border: action.variant === 'ghost'
-                  ? '1px solid var(--color-border)'
-                  : '1px solid transparent',
-                backgroundColor: action.variant === 'ghost'
-                  ? 'transparent'
-                  : 'var(--color-accent)',
-                color: action.variant === 'ghost'
-                  ? 'var(--color-text-secondary)'
-                  : 'var(--color-accent-foreground)',
-              }}
-              onMouseEnter={e => {
-                if (action.variant === 'ghost') {
-                  e.currentTarget.style.backgroundColor = 'var(--color-hover)'
-                } else {
-                  e.currentTarget.style.filter = 'brightness(1.1)'
-                }
-              }}
-              onMouseLeave={e => {
-                if (action.variant === 'ghost') {
-                  e.currentTarget.style.backgroundColor = 'transparent'
-                } else {
-                  e.currentTarget.style.filter = 'none'
-                }
-              }}
+              data-variant={action.variant || 'primary'}
             >
               {action.label}
             </button>

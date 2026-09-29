@@ -270,7 +270,84 @@ describe('工作台首页与项目总览视觉渲染与截图', () => {
     await page.screenshot({ path: 'screenshots/codex-home-redesign-empty.png' })
   })
 
-  it('灵感便签可在本次会话保存并从全局素材库查看，拆书入口调用既有向导', async () => {
+  it('首页版式契约：顶栏实色、窗口按钮深墨、品牌框对齐、圆角统一、底边对齐且无持久化提示', async () => {
+    await page.viewport(1767, 1509)
+    document.documentElement.setAttribute('data-theme', 'storyforge')
+    useProjectStore.setState({ currentProject: null, recentProjects: [] })
+    await act(async () => {
+      root?.render(
+        <div className="app-skin-root flex flex-col w-full h-full overflow-hidden" data-skin="classic" data-theme="storyforge">
+          <div className="app-skin-background" aria-hidden="true" />
+          <TitleBar />
+          <div className="writer-desktop-shell flex flex-1 min-h-0 overflow-hidden">
+            <div className="literary-sidebar w-[260px] shrink-0"><HomeSidebarPanel /></div>
+            <WelcomePage onNewProject={() => {}} onOpenProject={() => {}} onImportNovel={() => {}} />
+          </div>
+        </div>,
+      )
+    })
+
+    // 模拟「背景雾化：强」档位（theme-store 会把这些令牌内联写到根元素）：
+    // 侧栏、状态栏继续磨砂，顶栏必须保持实色且不吃模糊。
+    const rootStyle = document.documentElement.style
+    rootStyle.setProperty('--navigation-blur', 'blur(20px)')
+    rootStyle.setProperty('--surface-blur', 'blur(26px)')
+    rootStyle.setProperty('--chrome-surface-opacity', '82%')
+
+    const titlebar = container?.querySelector('.writer-topbar') as HTMLElement
+    const controls = Array.from(container?.querySelectorAll<HTMLElement>('.writer-topbar-window-controls .writer-command-button') ?? [])
+    expect(controls).toHaveLength(3)
+    expect(getComputedStyle(titlebar).backgroundColor).toBe('rgb(228, 238, 231)')
+    expect(getComputedStyle(titlebar).backdropFilter).toBe('none')
+    for (const control of controls) {
+      expect(getComputedStyle(control).color).toBe('rgb(36, 72, 66)')
+      control.focus()
+      expect(getComputedStyle(control).outlineStyle).toBe('solid')
+      expect(getComputedStyle(control).outlineColor).toBe('rgb(40, 106, 93)')
+    }
+    const appSkin = container?.querySelector<HTMLElement>('.app-skin-root')
+    controls.forEach(control => { control.style.transition = 'none' })
+    document.documentElement.setAttribute('data-theme', 'verdant')
+    appSkin?.setAttribute('data-theme', 'verdant')
+    expect(getComputedStyle(controls[0]).color).toBe('rgb(78, 91, 67)')
+    document.documentElement.setAttribute('data-theme', 'storyforge')
+    appSkin?.setAttribute('data-theme', 'storyforge')
+
+    const brand = container?.querySelector('.literary-home-heading') as HTMLElement
+    const hero = container?.querySelector('.literary-continue-card') as HTMLElement
+    const engines = container?.querySelector('.literary-hero-engines') as HTMLElement
+    const sectionHeading = container?.querySelector('.literary-section-heading') as HTMLElement
+    const libraryCard = container?.querySelector('.literary-resource-library-card') as HTMLElement
+    const inspiration = container?.querySelector('.literary-inspiration-section') as HTMLElement
+    expect(Math.abs(brand.getBoundingClientRect().left - hero.getBoundingClientRect().left)).toBeLessThan(0.5)
+    expect(Math.abs(brand.getBoundingClientRect().right - engines.getBoundingClientRect().right)).toBeLessThan(0.5)
+    expect(getComputedStyle(sectionHeading).borderRadius).toBe(getComputedStyle(brand).borderRadius)
+    expect(getComputedStyle(libraryCard).borderRadius).toBe(getComputedStyle(brand).borderRadius)
+    expect(getComputedStyle(engines).borderRadius).toBe(getComputedStyle(brand).borderRadius)
+    expect(Math.abs(inspiration.getBoundingClientRect().bottom - libraryCard.getBoundingClientRect().bottom)).toBeLessThan(1)
+
+    await act(async () => {
+      useHomeSurfaceStore.setState({
+        notes: [{ id: 'note-evidence', content: '对岸的灯火', tags: ['场景'], updatedAt: '2026-09-28T10:00:00Z' }],
+      })
+    })
+    expect(container?.textContent).toContain('对岸的灯火')
+    expect(Math.abs(inspiration.getBoundingClientRect().bottom - libraryCard.getBoundingClientRect().bottom)).toBeLessThan(1)
+
+    await act(async () => {
+      (container?.querySelector('.literary-inspiration-section .literary-section-heading button') as HTMLButtonElement).click()
+    })
+    expect(Math.abs(inspiration.getBoundingClientRect().bottom - libraryCard.getBoundingClientRect().bottom)).toBeLessThan(1)
+
+    expect(container?.querySelector('.literary-session-notice')).toBeNull()
+    expect(container?.textContent).not.toContain('便签保存在本机')
+
+    rootStyle.removeProperty('--navigation-blur')
+    rootStyle.removeProperty('--surface-blur')
+    rootStyle.removeProperty('--chrome-surface-opacity')
+  })
+
+  it('灵感便签可在本机保存并从全局素材库查看，拆书入口调用既有向导', async () => {
     useProjectStore.setState({ currentProject: null, recentProjects: [] })
     const onImportNovel = vi.fn()
     await act(async () => {
@@ -279,10 +356,17 @@ describe('工作台首页与项目总览视觉渲染与截图', () => {
     await act(async () => { await page.getByRole('button', { name: '记下一条灵感' }).click() })
     await act(async () => { await page.getByPlaceholder('写下灵感……').fill('雨夜里无人认得归来的主角') })
     await act(async () => { await page.getByPlaceholder('标签，用逗号分隔').fill('主角, 场景') })
-    await act(async () => { await page.getByRole('button', { name: '保存到本次会话' }).click() })
+    await act(async () => { await page.getByRole('button', { name: '保存便签' }).click() })
     expect(useHomeSurfaceStore.getState().notes).toMatchObject([{ content: '雨夜里无人认得归来的主角', tags: ['主角', '场景'] }])
     await act(async () => { await page.getByRole('button', { name: '打开素材库' }).click() })
     expect(container?.textContent).toContain('雨夜里无人认得归来的主角')
+    // 复用的便签视图不保留持久化提示块，删除后回到空状态且仍能继续添加。
+    expect(container?.querySelector('.literary-session-notice')).toBeNull()
+    await act(async () => { await page.getByRole('button', { name: '删除便签' }).click() })
+    expect(useHomeSurfaceStore.getState().notes).toHaveLength(0)
+    expect(container?.textContent).toContain('还没有灵感便签')
+    await act(async () => { await page.getByRole('button', { name: '记下一条灵感' }).click() })
+    expect(container?.querySelector('.literary-note-composer')).not.toBeNull()
     await act(async () => { await page.getByRole('button', { name: '对标作品' }).click() })
     await act(async () => { await page.getByRole('button', { name: '导入到项目' }).click() })
     expect(onImportNovel).toHaveBeenCalledOnce()
@@ -300,6 +384,8 @@ describe('工作台首页与项目总览视觉渲染与截图', () => {
     const library = container?.querySelector('.literary-resource-library-card')?.getBoundingClientRect()
     expect(deconstructCard!.top).toBeGreaterThanOrEqual(continueCard!.bottom - 1)
     expect(library!.top).toBeGreaterThanOrEqual(inspiration!.bottom - 1)
+    expect(getComputedStyle(container?.querySelector('.literary-continue-card') as HTMLElement).borderRadius).toBe('12px')
+    expect(getComputedStyle(container?.querySelector('.literary-deconstruct-card') as HTMLElement).borderRadius).toBe('12px')
   })
 
   it('14 套文学主题都为拆书标题提供可读的面板对比度', async () => {
