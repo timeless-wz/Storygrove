@@ -1879,7 +1879,7 @@
   --skin-welcome-surface: color-mix(in srgb, var(--color-bg) var(--chrome-surface-opacity, 66%), transparent);
   --skin-panel-surface: color-mix(in srgb, var(--color-panel) var(--chrome-surface-opacity, 66%), transparent);
   --skin-main-surface: color-mix(in srgb, var(--skin-editor-base) 78%, transparent);
-  --skin-workspace-panel-surface: color-mix(in srgb, var(--color-sidebar) var(--chrome-surface-opacity, 66%), transparent);
+  --skin-workspace-panel-surface: var(--literary-chrome-frost-surface, color-mix(in srgb, var(--color-sidebar) var(--chrome-surface-opacity, 66%), transparent));
   --skin-workspace-page-surface: color-mix(in srgb, var(--skin-editor-base) var(--chrome-surface-opacity, 66%), transparent);
   --skin-control-surface: color-mix(in srgb, var(--color-panel) 88%, transparent);
   --skin-control-text: var(--skin-text-primary);
@@ -1965,7 +1965,7 @@
 .app-skin-root .literary-sidebar[data-sidebar-view='home'] {
   --color-text-secondary: color-mix(in srgb, var(--color-text) 88%, var(--color-sidebar));
   --color-text-muted: color-mix(in srgb, var(--color-text) 80%, var(--color-sidebar));
-  background: color-mix(in srgb, var(--color-sidebar) 65%, color-mix(in srgb, var(--color-sidebar) var(--chrome-surface-opacity, 66%), transparent)) !important;
+  background: var(--literary-chrome-frost-surface, var(--skin-workspace-panel-surface)) !important;
 }
 
 .app-skin-root[data-skin-readability='high-contrast'] .skin-workspace-page {

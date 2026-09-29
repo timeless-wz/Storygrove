@@ -270,7 +270,7 @@ describe('工作台首页与项目总览视觉渲染与截图', () => {
     await page.screenshot({ path: 'screenshots/codex-home-redesign-empty.png' })
   })
 
-  it('首页版式契约：顶栏实色、窗口按钮深墨、品牌框对齐、圆角统一、底边对齐且无持久化提示', async () => {
+  it('首页版式契约：顶栏雾化、窗口按钮深墨、品牌框对齐、圆角统一、底边对齐且无持久化提示', async () => {
     await page.viewport(1767, 1509)
     document.documentElement.setAttribute('data-theme', 'storyforge')
     useProjectStore.setState({ currentProject: null, recentProjects: [] })
@@ -280,7 +280,7 @@ describe('工作台首页与项目总览视觉渲染与截图', () => {
           <div className="app-skin-background" aria-hidden="true" />
           <TitleBar />
           <div className="writer-desktop-shell flex flex-1 min-h-0 overflow-hidden">
-            <div className="literary-sidebar w-[260px] shrink-0"><HomeSidebarPanel /></div>
+            <div className="literary-sidebar w-[260px] shrink-0" data-sidebar-view="home"><HomeSidebarPanel /></div>
             <WelcomePage onNewProject={() => {}} onOpenProject={() => {}} onImportNovel={() => {}} />
           </div>
         </div>,
@@ -288,17 +288,29 @@ describe('工作台首页与项目总览视觉渲染与截图', () => {
     })
 
     // 模拟「背景雾化：强」档位（theme-store 会把这些令牌内联写到根元素）：
-    // 侧栏、状态栏继续磨砂，顶栏必须保持实色且不吃模糊。
+    // 标题栏与首页侧栏始终共享同一底色和模糊深度。
     const rootStyle = document.documentElement.style
     rootStyle.setProperty('--navigation-blur', 'blur(20px)')
-    rootStyle.setProperty('--surface-blur', 'blur(26px)')
-    rootStyle.setProperty('--chrome-surface-opacity', '82%')
 
     const titlebar = container?.querySelector('.writer-topbar') as HTMLElement
+    const sidebar = container?.querySelector('.literary-sidebar') as HTMLElement
     const controls = Array.from(container?.querySelectorAll<HTMLElement>('.writer-topbar-window-controls .writer-command-button') ?? [])
     expect(controls).toHaveLength(3)
-    expect(getComputedStyle(titlebar).backgroundColor).toBe('rgb(228, 238, 231)')
-    expect(getComputedStyle(titlebar).backdropFilter).toBe('none')
+    expect(getComputedStyle(titlebar).backgroundColor).toBe(getComputedStyle(sidebar).backgroundColor)
+    expect(getComputedStyle(titlebar).backdropFilter).toBe(getComputedStyle(sidebar).backdropFilter)
+    const colors: string[] = []
+    for (const [opacity, blur] of [['32%', 'none'], ['54%', 'blur(8px)'], ['82%', 'blur(26px)']]) {
+      rootStyle.setProperty('--chrome-surface-opacity', opacity)
+      rootStyle.setProperty('--surface-blur', blur)
+      const topbarStyle = getComputedStyle(titlebar)
+      const sidebarStyle = getComputedStyle(sidebar)
+      expect(topbarStyle.backgroundColor).toBe(sidebarStyle.backgroundColor)
+      expect(topbarStyle.backdropFilter).toBe(sidebarStyle.backdropFilter)
+      expect(topbarStyle.backdropFilter).toBe(blur)
+      colors.push(topbarStyle.backgroundColor)
+    }
+    expect(new Set(colors).size).toBe(3)
+    await page.screenshot({ path: '../../../../output/playwright/titlebar-frost-home.png' })
     for (const control of controls) {
       expect(getComputedStyle(control).color).toBe('rgb(36, 72, 66)')
       control.focus()

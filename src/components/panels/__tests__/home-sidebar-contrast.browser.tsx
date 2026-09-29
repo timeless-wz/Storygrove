@@ -49,6 +49,13 @@ describe('home sidebar over a literary wallpaper', () => {
       expect(getComputedStyle(sidebar).backgroundColor).not.toBe('rgba(0, 0, 0, 0)')
       expect(getComputedStyle(secondaryLink).color).not.toBe(getComputedStyle(document.documentElement).color)
       expect(sidebar.textContent).toContain('D:/novels/unwritten-book')
+      document.documentElement.style.setProperty('--surface-blur', 'blur(26px)')
+      document.documentElement.style.setProperty('--chrome-surface-opacity', '82%')
+      expect(getComputedStyle(titlebar).backgroundColor).toBe(getComputedStyle(sidebar).backgroundColor)
+      expect(getComputedStyle(titlebar).backdropFilter).toBe(getComputedStyle(sidebar).backdropFilter)
+      sidebar.setAttribute('data-sidebar-view', 'project')
+      expect(getComputedStyle(titlebar).backgroundColor).toBe(getComputedStyle(sidebar).backgroundColor)
+      sidebar.setAttribute('data-sidebar-view', 'home')
       await page.screenshot({ path: '../../../../output/playwright/home-sidebar-contrast.png' })
 
       document.documentElement.setAttribute('data-theme', 'starlight-dark')
@@ -62,6 +69,8 @@ describe('home sidebar over a literary wallpaper', () => {
       document.documentElement.removeAttribute('data-page-wallpaper')
       document.documentElement.removeAttribute('data-theme')
       document.documentElement.style.removeProperty('--shell-wash-scale')
+      document.documentElement.style.removeProperty('--surface-blur')
+      document.documentElement.style.removeProperty('--chrome-surface-opacity')
     }
   })
 })

@@ -18,17 +18,17 @@ const storeSource = readFileSync(resolve(process.cwd(), 'src/stores/theme-store.
 
 describe('background frost setting contract', () => {
   it('routes every classic-skin chrome blur through a token with its original fallback', () => {
-    // 顶栏与状态栏用 --navigation-blur，左右边栏用 --surface-blur。
+    // 顶栏与侧边栏共用 --surface-blur；状态栏保留 --navigation-blur。
     // 注意 -webkit-backdrop-filter 含 backdrop-filter 子串，故用负向后行断言只数标准属性。
     const standard = (token: string, px: number) =>
       new RegExp(`(?<!-webkit-)backdrop-filter: var\\(--${token}, blur\\(${px}px\\)\\)`, 'g')
     const webkit = (token: string, px: number) =>
       new RegExp(`-webkit-backdrop-filter: var\\(--${token}, blur\\(${px}px\\)\\)`, 'g')
 
-    expect(themeCss.match(standard('navigation-blur', 12))).toHaveLength(2)
-    expect(themeCss.match(webkit('navigation-blur', 12))).toHaveLength(2)
-    expect(themeCss.match(standard('surface-blur', 16))).toHaveLength(1)
-    expect(themeCss.match(webkit('surface-blur', 16))).toHaveLength(1)
+    expect(themeCss.match(standard('navigation-blur', 12))).toHaveLength(1)
+    expect(themeCss.match(webkit('navigation-blur', 12))).toHaveLength(1)
+    expect(themeCss.match(standard('surface-blur', 16))).toHaveLength(2)
+    expect(themeCss.match(webkit('surface-blur', 16))).toHaveLength(2)
 
     // 不允许再出现固定模糊值
     expect(themeCss).not.toMatch(/(?<!-webkit-)backdrop-filter: blur\(\d+px\)/)
@@ -36,14 +36,14 @@ describe('background frost setting contract', () => {
 
   it('routes all four translucent chrome surfaces through the opacity token', () => {
     const expected = [
-      'color-mix(in srgb, var(--color-titlebar) var(--chrome-surface-opacity, 66%), transparent)',
+      '--literary-chrome-frost-surface: color-mix(in srgb, var(--color-sidebar) 65%, color-mix(in srgb, var(--color-sidebar) var(--chrome-surface-opacity, 66%), transparent))',
       'color-mix(in srgb, var(--color-statusbar) var(--chrome-surface-opacity, 85%), transparent)',
-      'color-mix(in srgb, var(--color-sidebar) var(--chrome-surface-opacity, 66%), transparent)',
       'color-mix(in srgb, var(--color-sidebar) var(--chrome-surface-opacity, 66%), transparent)',
     ]
     for (const declaration of expected) {
       expect(themeCss, declaration).toContain(declaration)
     }
+    expect(themeCss.match(/background: var\(--literary-chrome-frost-surface\);/g)).toHaveLength(2)
     // 这四处不得再有写死的百分比
     expect(themeCss).not.toMatch(/color-mix\(in srgb, var\(--color-(?:titlebar|statusbar|sidebar)\)\s+\d+%, transparent\)/)
   })

@@ -596,6 +596,7 @@
   --color-bg: var(--bg-base);
   --color-raised: var(--bg-elevated);
   --color-sidebar: var(--bg-surface);
+  --literary-chrome-frost-surface: color-mix(in srgb, var(--color-sidebar) 65%, color-mix(in srgb, var(--color-sidebar) var(--chrome-surface-opacity, 66%), transparent));
   --color-panel: var(--bg-surface);
   --color-titlebar: var(--bg-base);
   --color-activity-bar: var(--bg-base);
@@ -833,10 +834,10 @@
   [data-theme='starlight-dark'],
   [data-theme='cosmic-glass']
 ) .writer-topbar {
-  /* 顶栏保持实色清晰：「背景雾化」只作用于状态栏、侧栏与页面洗色，不再冲淡标题栏。 */
-  background: var(--color-titlebar);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
+  /* 顶栏与侧栏共用底色和模糊强度，切换雾化档位时始终一致。 */
+  background: var(--literary-chrome-frost-surface);
+  backdrop-filter: var(--surface-blur, blur(16px));
+  -webkit-backdrop-filter: var(--surface-blur, blur(16px));
 }
 
 .app-skin-root[data-theme='storyforge'] .writer-topbar-window-controls .writer-command-button {
@@ -893,7 +894,7 @@
   [data-theme='starlight-dark'],
   [data-theme='cosmic-glass']
 ) :is(.literary-sidebar, .writer-project-tree) {
-  background: color-mix(in srgb, var(--color-sidebar) var(--chrome-surface-opacity, 66%), transparent);
+  background: var(--literary-chrome-frost-surface);
   backdrop-filter: var(--surface-blur, blur(16px));
   -webkit-backdrop-filter: var(--surface-blur, blur(16px));
 }

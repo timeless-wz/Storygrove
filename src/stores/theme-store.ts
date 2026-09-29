@@ -94,10 +94,10 @@ const BASE_FONT_SIZE = 14 as const
 
 // ─── 背景雾化（外壳磨砂强度） ─────────────────────────────────────────────
 //
-// 经典皮肤的外壳用「半透明背景 + backdrop-filter」做磨砂：顶栏与状态栏读
-// --navigation-blur，左右边栏读 --surface-blur，半透明度读 --chrome-surface-opacity
+// 经典皮肤的外壳用「半透明背景 + backdrop-filter」做磨砂：顶栏与左右边栏读
+// --surface-blur，状态栏读 --navigation-blur，半透明度读 --chrome-surface-opacity
 // （见 literary-themes.css）。三个令牌在样式表里都保留了原始值作回退，
-// 因此 standard 档不写任何变量，观感与接入本设置前完全一致。
+// 因此 standard 档不写任何变量，使用主题定义的默认取值。
 export type BackdropBlurLevel = 'off' | 'light' | 'standard' | 'strong'
 
 export const BACKDROP_BLUR_LEVELS: readonly BackdropBlurLevel[] = ['off', 'light', 'standard', 'strong']
