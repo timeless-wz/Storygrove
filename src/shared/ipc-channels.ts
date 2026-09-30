@@ -866,6 +866,12 @@ import type {
   BlueprintRangeCommitRequest,
 } from '../../electron/repositories/blueprint-repository'
 import type {
+  ChapterBlueprintV2Detail,
+  ChapterBlueprintV2SaveInput,
+  ChapterBlueprintV2Summary,
+  ChapterBlueprintV2Unreadable,
+} from './blueprint-v2'
+import type {
   CharacterData,
 } from '../../electron/repositories/character-repository'
 import type { DraftMeta, DraftFull } from '../../electron/repositories/draft-repository'
@@ -1011,6 +1017,37 @@ export interface DatabaseChannels {
   'db:blueprint-update-notes': { args: [chapterNumber: number, notes: string, expectedProjectPath: string]; return: { success: boolean; updated?: boolean; error?: string } }
   'db:blueprint-delete': { args: [chapterNumber: number, expectedProjectPath: string]; return: { success: boolean; error?: string } }
   'db:blueprint-clear-all': { args: [expectedProjectPath: string]; return: { success: boolean; error?: string } }
+
+  // 2b. 蓝图 v2 细纲（blueprint-v2-contract §6；轻量列表与单章完整读取分离，§5.2）
+  /**
+   * 单章完整细纲。null = 该章暂无 v2 细纲；detail_json 损坏 / schema 超前时返回
+   * ChapterBlueprintV2Unreadable（附 raw_markdown 原文，绝不静默丢弃，§5.1）；
+   * DB 故障按惯例抛错（渲染层 catch → load-error，与"不存在"可区分，§7.1）。
+   */
+  'db:blueprint-v2-get': {
+    args: [chapterNumber: number, expectedProjectPath: string]
+    return: ChapterBlueprintV2Detail | ChapterBlueprintV2Unreadable | null
+  }
+  /** 轻量摘要列表：仅含已有 v2 的章；载荷绝不含分镜正文与 rawMarkdown（§5.2）。 */
+  'db:blueprint-v2-summary-list': {
+    args: [expectedProjectPath: string]
+    return: ChapterBlueprintV2Summary[]
+  }
+  /** 乐观并发保存（baseRevision；§7.2）。冲突时 success=false + conflict + currentRevision。 */
+  'db:blueprint-v2-save': {
+    args: [input: ChapterBlueprintV2SaveInput, expectedProjectPath: string]
+    return: { success: boolean; revision?: number; contentHash?: string; conflict?: boolean; currentRevision?: number; error?: string }
+  }
+  /** 拖动重排专用：仅改 storyboard 条目位次（§8.3），同样携带 baseRevision。 */
+  'db:blueprint-v2-scene-order-save': {
+    args: [input: { chapterNumber: number; baseRevision: number; orderedSceneIds: string[] }, expectedProjectPath: string]
+    return: { success: boolean; revision?: number; contentHash?: string; conflict?: boolean; currentRevision?: number; error?: string }
+  }
+  /** 仅删 detail 行；blueprints v1 字段不动（§7.3）。UI 二次确认由调用方负责。 */
+  'db:blueprint-v2-delete': {
+    args: [chapterNumber: number, expectedProjectPath: string]
+    return: { success: boolean; error?: string }
+  }
 
   // 3. characters
   'db:character-get-all': { args: [expectedProjectPath: string]; return: CharacterData[] }

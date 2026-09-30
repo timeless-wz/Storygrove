@@ -17,6 +17,7 @@ const require = createRequire(import.meta.url)
 const Database = require('better-sqlite3') as typeof import('better-sqlite3')
 import type BetterSqlite3 from 'better-sqlite3'
 import { ensureCharacterRosterSchema } from './repositories/character-roster-schema'
+import { ensureBlueprintDetailSchema } from './repositories/blueprint-detail-repository'
 import { ensureStoryDomainSchema } from './services/story-domain-schema'
 import { ensurePhase2To8Schema } from './services/phase2-8-schema'
 import {
@@ -210,6 +211,8 @@ export function initProjectDatabase(projectPath: string, importSourceSecret?: Bu
   // 创建表结构
   createTables(projectDb, importSourceSecret)
   ensureForeshadowingSchema(projectDb)
+  // 章节蓝图 v2 细纲表（blueprint-v2-contract §5.1）；blueprints 表不加列、不改列。
+  ensureBlueprintDetailSchema(projectDb)
 
   // 旧项目只有「一张项目底图 + 图层筛选」的结构。一次性把旧图层转换成同名地图，
   // 并把旧底图迁入其中一张地图的受控目录；迁移不删除任何既有地点、图层或连接。

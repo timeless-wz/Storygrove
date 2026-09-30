@@ -17,6 +17,11 @@ import {
   type BlueprintVolumeData,
   type BlueprintRangeCommitRequest,
 } from '../repositories/blueprint-repository'
+import {
+  BlueprintDetailRepository,
+  type BlueprintDetailSceneOrderInput,
+} from '../repositories/blueprint-detail-repository'
+import type { ChapterBlueprintV2SaveInput } from '../../src/shared/blueprint-v2'
 import { CharacterRepository } from '../repositories/character-repository'
 import { CharacterRelationshipRepository } from '../repositories/character-relationship-repository'
 import { CharacterRosterRepository } from '../repositories/character-roster-repository'
@@ -112,6 +117,9 @@ const MUTATING_DATABASE_CHANNELS = new Set([
   'db:blueprint-delete',
   'db:blueprint-clear-all',
   'db:blueprint-volume-upsert',
+  'db:blueprint-v2-save',
+  'db:blueprint-v2-scene-order-save',
+  'db:blueprint-v2-delete',
   'db:character-roster-commit',
   'db:character-identities-ensure',
   'db:character-relationship-upsert',
@@ -664,6 +672,57 @@ export function registerDatabaseController() {
     try {
       assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
       BlueprintRepository.clearAll()
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  // ============================================================
+  // 2b. blueprint v2 — 章节细纲（blueprint-v2-contract §6）
+  // ============================================================
+  ipcMain.handle('db:blueprint-v2-get', async (_event, chapterNumber: number, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    // null = 暂无 v2 细纲；detail_json 损坏/schema 超前 = unreadable 结果（附原文）；
+    // DB 故障抛错 → 渲染层 catch → load-error，与"不存在"可区分（契约 §7.1）。
+    return BlueprintDetailRepository.get(chapterNumber)
+  })
+
+  ipcMain.handle('db:blueprint-v2-summary-list', async (_event, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return BlueprintDetailRepository.getSummaryList()
+  })
+
+  ipcMain.handle('db:blueprint-v2-save', async (
+    _event,
+    input: ChapterBlueprintV2SaveInput,
+    expectedProjectPath: string,
+  ) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return BlueprintDetailRepository.save(input)
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('db:blueprint-v2-scene-order-save', async (
+    _event,
+    input: BlueprintDetailSceneOrderInput,
+    expectedProjectPath: string,
+  ) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return BlueprintDetailRepository.saveSceneOrder(input)
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('db:blueprint-v2-delete', async (_event, chapterNumber: number, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      BlueprintDetailRepository.delete(chapterNumber)
       return { success: true }
     } catch (err) {
       return { success: false, error: String(err) }

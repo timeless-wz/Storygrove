@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto'
 
 import { getProjectDb } from '../database'
 import { CharacterRosterRepository } from './character-roster-repository'
+import { BlueprintDetailRepository } from './blueprint-detail-repository'
 import { blueprintCharacterSyncFactError } from '../../src/shared/blueprint-character-sync-evidence'
 import type { BlueprintNewCharacterCandidate } from '../../src/shared/blueprint-semantic-contract'
 
@@ -253,6 +254,8 @@ export function clearBlueprintFactsWithinTransaction(
     db: NonNullable<ReturnType<typeof getProjectDb>>,
 ): void {
     ensureBlueprintCommitSchema(db)
+    // v2 细纲属于 blueprints 清理范围；不清会导致 chaptersWithDetails 守卫永久拦截重生成。
+    BlueprintDetailRepository.clearAllWithinTransaction(db)
     db.prepare('DELETE FROM blueprint_character_sync_operations').run()
     db.prepare('DELETE FROM blueprint_commit_operations').run()
     db.prepare('DELETE FROM blueprints').run()
