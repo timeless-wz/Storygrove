@@ -187,6 +187,7 @@ describe('Agent domain proposal confirmation', () => {
   it('previews English config impacts and sends only the selected unwritten blueprint diff to the existing gate', async () => {
     useLocaleStore.setState({ locale: 'en-US', initialized: true })
     invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'db:blueprint-v2-summary-list') return []
       if (channel === 'db:blueprint-list-summary') return [
         { chapterNumber: 2, title: 'The sealed door', purpose: '', keyEvents: '' },
         { chapterNumber: 3, title: 'The old verdict', purpose: '', keyEvents: '' },
@@ -252,6 +253,7 @@ describe('Agent domain proposal confirmation', () => {
   it('shows the Chinese impact preview but cancels it without any domain write', async () => {
     useLocaleStore.setState({ locale: 'zh-CN', initialized: true })
     invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'db:blueprint-v2-summary-list') return []
       if (channel === 'db:blueprint-list-summary') return [{
         chapterNumber: 2, title: '封闭的门', purpose: '', keyEvents: '',
       }]
@@ -275,5 +277,28 @@ describe('Agent domain proposal confirmation', () => {
     expect(cancelGeneration).toHaveBeenCalledOnce()
     expect(resolveToolConfirmation).not.toHaveBeenCalled()
     expect(invoke.mock.calls.every(([channel]) => channel !== 'project:update-config' && channel !== 'db:blueprint-upsert')).toBe(true)
+  })
+  it('excludes existing v2 outlines from legacy field proposals when approving config changes', async () => {
+    useLocaleStore.setState({ locale: 'en-US', initialized: true })
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'db:blueprint-list-summary') return [{ chapterNumber: 2, title: 'Detailed chapter', purpose: '', keyEvents: '' }]
+      if (channel === 'db:blueprint-v2-summary-list') return [{ chapterNumber: 2, sceneCount: 4, sceneTitles: ['Scene one'], wordBudget: 4200, revision: 3, contentHash: 'frozen-v2' }]
+      if (channel === 'db:draft-list-all' || channel === 'db:narrative-thread-list') return []
+      throw new Error(`unexpected channel ${channel}`)
+    })
+    await act(async () => root.render(<ConfirmCard toolCall={{
+      id: 'impact-v2', toolName: 'propose_novel_config', status: 'waiting_confirm', source: 'builtin', projectSession: session,
+      arguments: {
+        changes: { coreOutline: 'Updated author intent' },
+        blueprint_changes: [{ chapter_number: 2, changes: { purpose: 'LEGACY_OVERWRITE_SENTINEL' } }],
+      },
+    }} />))
+    await flushImpactReads()
+    await expect.element(page.getByText('Complete outlines already exist')).toBeVisible()
+    await expect.element(page.getByText('LEGACY_OVERWRITE_SENTINEL')).not.toBeInTheDocument()
+    await expect.element(page.getByRole('checkbox')).not.toBeInTheDocument()
+    await page.getByRole('button', { name: 'Approve' }).click()
+    expect(resolveToolConfirmation).toHaveBeenCalledWith('impact-v2', true)
+    expect(invoke.mock.calls.every(([channel]) => channel !== 'db:blueprint-upsert' && channel !== 'db:blueprint-v2-save')).toBe(true)
   })
 })

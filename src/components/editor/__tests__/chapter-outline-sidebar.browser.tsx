@@ -18,6 +18,10 @@ const invoke = vi.fn(async (channel: string) => {
     { chapterNumber: 1, volumeId: 'volume-1', title: '雨夜' },
     { chapterNumber: 2, volumeId: 'volume-1', title: '回声' },
   ]
+  if (channel === 'db:blueprint-v2-summary-list') return [{
+    chapterNumber: 1, revision: 1, contentHash: 'a'.repeat(64), origin: 'import', updatedAt: '',
+    sceneCount: 4, sceneTitles: ['雨夜开场', '青石村旧屋', '离村'], wordBudget: 3000,
+  }]
   if (channel === 'db:draft-list-all') return [
     { id: 1, chapterNumber: 1, blueprintChapterNumber: 1, version: 1, status: 'draft' },
     { id: 2, chapterNumber: 1, blueprintChapterNumber: 1, version: 2, status: 'finalized' },
