@@ -5,8 +5,9 @@ import { ReviewPromptBuilder } from '../../prompts/prompt-builder'
 import { ipc } from '../../ipc-client'
 import { requireIpcSuccess } from '../../ipc-result'
 import { projectSessionContextFromProject, sameProjectSessionContext } from '../../../shared/project-session-context'
-import type { ProjectSessionContext } from '../../../shared/ipc-channels'
+import type { ExpectedDraftSource, ProjectSessionContext } from '../../../shared/ipc-channels'
 import type { FinalizedContinuityProjection } from '../../../shared/finalized-continuity'
+import type { ChapterBlueprintV2Detail, ChapterBlueprintV2DetailRead } from '../../../shared/blueprint-v2'
 import { readWorkflowDraftMeta } from '../workflow-draft-meta'
 import {
   requireWorkflowProjectSession,
@@ -22,6 +23,10 @@ import type { FrozenDraftSourceIdentity } from '../chapter-workflow'
 import { throwIfSourceDraftChanged } from '../source-draft-changed'
 import { CHARACTER_STATE_TEXT_FIELDS } from '../../../shared/character-roster'
 import { buildChapterGoalReviewPrompt, chapterGoalReviewItems, freezeChapterGoals, normalizeChapterGoalReview } from '../../../shared/chapter-goal-review'
+import {
+  buildChapterBlueprintReviewPrompt,
+  normalizeChapterBlueprintReview,
+} from '../../../shared/chapter-blueprint-review'
 
 
 export interface ReviewChapterParams {
@@ -48,6 +53,9 @@ interface ReviewResult extends Record<string, unknown> {
   summary: string
   items: ReviewResultItem[]
   goalReviews?: unknown
+  blueprintReview?: unknown
+  blueprintEvidence?: unknown
+  blueprintReviewUnavailable?: 'corrupt' | 'needs-newer-app' | 'unavailable'
 }
 
 function isBoundedText(value: unknown, maxCharacters: number): value is string {
@@ -63,7 +71,14 @@ function boundText(value: string, maxCharacters: number): string {
 function isReviewShape(value: unknown): value is ReviewResult {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const review = value as Record<string, unknown>
-  if (Object.keys(review).some(key => key !== 'summary' && key !== 'items' && key !== 'goalReviews')
+  if (Object.keys(review).some(key => (
+    key !== 'summary'
+    && key !== 'items'
+    && key !== 'goalReviews'
+    && key !== 'blueprintReview'
+    && key !== 'blueprintEvidence'
+    && key !== 'blueprintReviewUnavailable'
+  ))
     || typeof review.summary !== 'string'
     || !Array.isArray(review.items)
     || review.items.length < 1
@@ -104,6 +119,8 @@ function parseReviewResult(content: string): ReviewResult {
   if (!isReviewShape(parsed)) throw new Error('invalid review contract')
   const bounded: ReviewResult = {
     ...(parsed.goalReviews === undefined ? {} : { goalReviews: parsed.goalReviews }),
+    ...(parsed.blueprintReview === undefined ? {} : { blueprintReview: parsed.blueprintReview }),
+    ...(parsed.blueprintEvidence === undefined ? {} : { blueprintEvidence: parsed.blueprintEvidence }),
     summary: boundText(parsed.summary, REVIEW_SUMMARY_MAX_CHARACTERS),
     items: parsed.items.map(item => ({
       category: item.category,
@@ -206,6 +223,82 @@ export class ReviewChapterCommand extends BaseWorkflowCommand<string> {
     const draft = this.params.draftContent
     if (!draft) throw new Error(text('无草稿内容', 'There is no draft content to review.'))
 
+    // Freeze the exact DB draft identity and explicit blueprint binding before
+    // reading outline data or calling the model. A display chapter number is
+    // never used as a substitute for drafts.blueprint_chapter_number.
+    const legacyBaseDraft = this.params.sourceDraft
+      ? null
+      : await readWorkflowDraftMeta(this.params.draftPath, context.projectPath, projectSession)
+    const sourceDraftId = this.params.sourceDraft?.id ?? legacyBaseDraft?.id
+    if (sourceDraftId === undefined) {
+      throw new Error(text('找不到基准草稿版本', 'The source draft version could not be found.'))
+    }
+    const storedDraft = await ipc.invokeWithProjectSession(
+      projectSession, 'db:draft-get-full', sourceDraftId, context.projectPath,
+    )
+    this.assertNotCancelled(context)
+    if (
+      !storedDraft
+      || storedDraft.chapterNumber !== this.params.chapterNumber
+      || storedDraft.content !== draft
+      || (this.params.sourceDraft && (
+        storedDraft.id !== this.params.sourceDraft.id
+        || storedDraft.chapterNumber !== this.params.sourceDraft.chapterNumber
+        || storedDraft.version !== this.params.sourceDraft.version
+        || storedDraft.status !== this.params.sourceDraft.status
+      ))
+      || (!this.params.sourceDraft && (
+        storedDraft.id !== legacyBaseDraft?.id
+        || storedDraft.version !== legacyBaseDraft?.version
+        || storedDraft.status !== legacyBaseDraft?.status
+      ))
+    ) {
+      throw new Error(text(
+        '源草稿已变化，未启动审查；请重新打开草稿后重试。',
+        'The source draft changed. The review was not started; reopen the draft and try again.',
+      ))
+    }
+    const sourceSnapshot = {
+      id: storedDraft.id,
+      chapterNumber: storedDraft.chapterNumber,
+      version: storedDraft.version,
+      status: storedDraft.status as ExpectedDraftSource['status'],
+      content: draft,
+    }
+    const boundBlueprintChapterNumber = storedDraft.blueprintChapterNumber
+
+    let boundBlueprint: ChapterBlueprint | null = null
+    let blueprintV2Detail: ChapterBlueprintV2Detail | null = null
+    let blueprintReviewUnavailable: ReviewResult['blueprintReviewUnavailable']
+    let blueprintV2ReadFailed = false
+    if (boundBlueprintChapterNumber !== undefined) {
+      try {
+        boundBlueprint = await ipc.invokeWithProjectSession(
+          projectSession, 'db:blueprint-get', boundBlueprintChapterNumber, context.projectPath,
+        )
+      } catch { /* v1 continuity evidence remains optional */ }
+      try {
+        const detail = await ipc.invokeWithProjectSession(
+          projectSession, 'db:blueprint-v2-get', boundBlueprintChapterNumber, context.projectPath,
+        ) as ChapterBlueprintV2DetailRead | null
+        if (detail?.readStatus === 'corrupt' || detail?.readStatus === 'needs-newer-app') {
+          blueprintReviewUnavailable = detail.readStatus
+        } else if (detail) {
+          if (
+            detail.schemaVersion === 2
+            && detail.chapterNumber === boundBlueprintChapterNumber
+            && Number.isSafeInteger(detail.revision)
+            && detail.revision > 0
+            && /^[a-f0-9]{64}$/u.test(detail.contentHash)
+          ) blueprintV2Detail = detail
+          else blueprintReviewUnavailable = 'unavailable'
+        }
+      } catch {
+        blueprintV2ReadFailed = true
+        blueprintReviewUnavailable = 'unavailable'
+      }
+    }
+
     callbacks.log(text('准备启动一致性审查引擎...', 'Preparing the continuity review...'))
     callbacks.log(text('  读取已定稿连续性事实...', '  Reading finalized continuity facts...'))
 
@@ -244,22 +337,35 @@ export class ReviewChapterCommand extends BaseWorkflowCommand<string> {
       `[Author-confirmed project configuration | constraint, not established history]\n${JSON.stringify(novelConfig, null, 2)}`,
     )
     let planningMaterial = formatReviewPlanningMaterial([], writingLanguage)
-    let frozenGoals = freezeChapterGoals(this.params.chapterNumber, undefined)
-    try {
-      const { loadDirectoryBlueprints } = await import('../directory-workflow')
-      const blueprints = (await loadDirectoryBlueprints(context.projectPath, projectSession))
-        .filter(blueprint => (
-          blueprint.chapterNumber >= this.params.chapterNumber
-          && blueprint.chapterNumber <= this.params.chapterNumber + 5
-        ))
-      planningMaterial = formatReviewPlanningMaterial(blueprints, writingLanguage)
-      frozenGoals = freezeChapterGoals(this.params.chapterNumber,
-        blueprints.find(blueprint => blueprint.chapterNumber === this.params.chapterNumber)?.keyEvents ?? null)
-    } catch {
+    let frozenGoals: ReturnType<typeof freezeChapterGoals> | null = null
+    if (boundBlueprintChapterNumber !== undefined) {
+      if (!blueprintV2Detail && !blueprintReviewUnavailable && !blueprintV2ReadFailed && boundBlueprint) {
+        frozenGoals = freezeChapterGoals(boundBlueprintChapterNumber, boundBlueprint.keyEvents)
+      }
+      try {
+        const { loadDirectoryBlueprints } = await import('../directory-workflow')
+        const blueprints = (await loadDirectoryBlueprints(context.projectPath, projectSession))
+          .filter(blueprint => (
+            blueprint.chapterNumber >= boundBlueprintChapterNumber
+            && blueprint.chapterNumber <= boundBlueprintChapterNumber + 5
+          ))
+        const futureBlueprints = blueprintV2Detail
+          ? blueprints.filter(blueprint => blueprint.chapterNumber !== boundBlueprintChapterNumber)
+          : blueprints
+        planningMaterial = formatReviewPlanningMaterial(futureBlueprints, writingLanguage)
+      } catch {
+        planningMaterial = promptLanguageText(
+          writingLanguage,
+          '【当前及未来蓝图/计划｜非既定历史】\n（蓝图读取暂时不可用）',
+          '[Current and future blueprints/plans | not established history]\n(blueprint retrieval unavailable)',
+        )
+      }
+    }
+    if (!boundBlueprintChapterNumber) {
       planningMaterial = promptLanguageText(
         writingLanguage,
-        '【当前及未来蓝图/计划｜非既定历史】\n（蓝图读取暂时不可用）',
-        '[Current and future blueprints/plans | not established history]\n(blueprint retrieval unavailable)',
+        '【当前及未来蓝图/计划｜非既定历史】\n（草稿未绑定章节蓝图，未按显示章号推测）',
+        '[Current and future blueprints/plans | not established history]\n(The draft has no bound blueprint; none was inferred from its displayed chapter number.)',
       )
     }
 
@@ -277,7 +383,8 @@ export class ReviewChapterCommand extends BaseWorkflowCommand<string> {
       authorGuidanceSection,
       authorConfigSection,
       planningMaterial,
-      buildChapterGoalReviewPrompt(frozenGoals, writingLanguage),
+      ...(frozenGoals ? [buildChapterGoalReviewPrompt(frozenGoals, writingLanguage)] : []),
+      ...(blueprintV2Detail ? [buildChapterBlueprintReviewPrompt(blueprintV2Detail, writingLanguage)] : []),
     ].join('\n\n')
 
     callbacks.log(text('调用 AI 审查员对本章进行多维度扫描...', 'Running the AI continuity review...'))
@@ -328,8 +435,8 @@ export class ReviewChapterCommand extends BaseWorkflowCommand<string> {
       const rebuildHeading = promptLanguageText(writingLanguage, '【原始审稿任务】', '[Original review task]')
       const rebuildContract = promptLanguageText(
         writingLanguage,
-        '【硬性要求】只重新输出一个完整审稿 JSON，根字段为 summary、items、goalReviews：summary 不超过 120 字符；items 为 1–10 条，每条含 category、severity(error|warning|pass)、description(≤200 字符)；quote 仅 pass 可省略，error/warning 必须提供且不超过 160 字符。goalReviews 按上方最初冻结清单逐项返回 id、status、description、evidence，不受 items 条数限制；只用原始待审正文核对。不得输出这些约定以外的字段、Markdown、解释或思考过程。',
-        '[Hard requirement] Output one complete review JSON with root fields summary, items and goalReviews: summary within 120 characters; items 1–10 entries with category, severity(error|warning|pass), description(≤200 characters); quote is optional only for pass and required (≤160 characters) for error/warning. goalReviews must cover the original frozen checklist above with id, status, description and evidence, without the general items count limit; use only the original draft for evidence. No fields outside these contracts, Markdown, explanation, or reasoning.',
+        `【硬性要求】只重新输出一个完整审稿 JSON，根字段为 summary、items、goalReviews${blueprintV2Detail ? '、blueprintReview' : ''}：summary 不超过 120 字符；items 为 1–10 条，每条含 category、severity(error|warning|pass)、description(≤200 字符)；quote 仅 pass 可省略，error/warning 必须提供且不超过 160 字符。goalReviews 按上方最初冻结清单逐项返回 id、status、description、evidence，不受 items 条数限制；只用原始待审正文核对。${blueprintV2Detail ? 'blueprintReview 按上方蓝图模块的形状完整返回全部 sceneId 与 must/forbid checkId；引用必须来自同一份正文快照。' : ''}不得输出这些约定以外的字段、Markdown、解释或思考过程。`,
+        `[Hard requirement] Output one complete review JSON with root fields summary, items, goalReviews${blueprintV2Detail ? ', blueprintReview' : ''}: summary within 120 characters; items 1–10 entries with category, severity(error|warning|pass), description(≤200 characters); quote is optional only for pass and required (≤160 characters) for error/warning. goalReviews must cover the original frozen checklist above with id, status, description and evidence, without the general items count limit; use only the original draft for evidence. ${blueprintV2Detail ? 'blueprintReview must follow the blueprint module shape and include every sceneId and must/forbid checkId; quotes must come from this same prose snapshot.' : ''}No fields outside these contracts, Markdown, explanation, or reasoning.`,
       )
       reviewResultRaw = await this.callLLMWithBoundedCompletion(
         [rebuildInstruction, rebuildHeading, reviewPrompt, rebuildContract].join('\n\n'),
@@ -367,22 +474,43 @@ export class ReviewChapterCommand extends BaseWorkflowCommand<string> {
     }
     this.assertNotCancelled(context)
 
-    const goalReview = normalizeChapterGoalReview(parsedResult.goalReviews, frozenGoals, draft, writingLanguage)
+    if (frozenGoals) {
+      const goalReview = normalizeChapterGoalReview(parsedResult.goalReviews, frozenGoals, draft, writingLanguage)
+      parsedResult.goalReview = goalReview
+      parsedResult.items = [...(parsedResult.items ?? []), ...chapterGoalReviewItems(goalReview, writingLanguage)]
+      if (goalReview.items.some(item => item.status === 'unmet')) {
+        parsedResult.summary = text('本章存在尚未完成的目标，请核对逐项证据。', 'Some chapter goals are unmet; check their evidence.')
+      }
+    }
     delete parsedResult.goalReviews
-    parsedResult.goalReview = goalReview
-    parsedResult.items = [...(parsedResult.items ?? []), ...chapterGoalReviewItems(goalReview, writingLanguage)]
-    if (parsedResult.items.some(item => item.severity === 'unknown')) {
+    if (blueprintV2Detail) {
+      const blueprintReview = normalizeChapterBlueprintReview(
+        parsedResult.blueprintReview, blueprintV2Detail, draft,
+      )
+      parsedResult.blueprintReview = blueprintReview.review
+      parsedResult.blueprintEvidence = blueprintReview.review.evidence
+      parsedResult.items = [
+        ...(parsedResult.items ?? []),
+        ...blueprintReview.findings.map(finding => ({
+          category: finding.category,
+          severity: finding.severity,
+          description: Array.from(finding.description).slice(0, REVIEW_DESCRIPTION_MAX_CHARACTERS).join(''),
+          ...(finding.quote ? { quote: boundText(finding.quote, REVIEW_QUOTE_MAX_CHARACTERS) } : {}),
+          ...(finding.sceneId ? { sceneId: finding.sceneId } : {}),
+          ...(finding.checkId ? { checkId: finding.checkId } : {}),
+          ...(finding.checkMode ? { checkMode: finding.checkMode } : {}),
+        })),
+      ]
+    } else if (blueprintReviewUnavailable) {
+      parsedResult.blueprintReviewUnavailable = blueprintReviewUnavailable
+    }
+    if ((parsedResult.items ?? []).some(item => item.severity === 'unknown')) {
       parsedResult.summary = text('审稿包含待核实项目，不能视为全部通过。', 'The review contains unresolved items and is not an overall pass.')
-    } else if (goalReview.items.some(item => item.status === 'unmet')) {
-      parsedResult.summary = text('本章存在尚未完成的目标，请核对逐项证据。', 'Some chapter goals are unmet; check their evidence.')
     }
 
-    const blueprint = await ipc.invokeWithProjectSession(
-      projectSession, 'db:blueprint-get', this.params.chapterNumber, context.projectPath,
-    )
-    if (blueprint) {
+    if (boundBlueprint) {
       try {
-        const preflight = await readConsistencyPreflight(projectSession, [blueprint])
+        const preflight = await readConsistencyPreflight(projectSession, [boundBlueprint])
         parsedResult = mergeConsistencyFindingsIntoReview(parsedResult, preflight.findings, context.uiLocale ?? 'zh-CN')
       } catch {
         callbacks.log(text(
@@ -395,29 +523,11 @@ export class ReviewChapterCommand extends BaseWorkflowCommand<string> {
       }
     }
 
-    const frozenSource = this.params.sourceDraft
-    const legacyBaseDraft = frozenSource
-      ? null
-      : await readWorkflowDraftMeta(this.params.draftPath, context.projectPath, projectSession)
-    const baseDraftId = frozenSource?.id ?? legacyBaseDraft?.id
-    const baseVersion = frozenSource?.version ?? legacyBaseDraft?.version
-    if (baseDraftId === undefined || baseVersion === undefined) {
-      throw new Error(text('找不到基准草稿版本', 'The source draft version could not be found.'))
-    }
-
     this.assertNotCancelled(context)
     const createResult = await ipc.invokeWithProjectSession(projectSession, 'db:review-create', {
-      baseDraftId,
+      baseDraftId: sourceSnapshot.id,
       content: JSON.stringify(parsedResult, null, 2),
-      ...(frozenSource ? {
-        expectedSource: {
-          id: frozenSource.id,
-          chapterNumber: frozenSource.chapterNumber,
-          version: frozenSource.version,
-          status: frozenSource.status,
-          content: draft,
-        },
-      } : {}),
+      expectedSource: sourceSnapshot,
     }, context.projectPath)
     throwIfSourceDraftChanged(createResult, workflowUiLocale(context), 'review')
     requireIpcSuccess(createResult, text('保存审稿报告', 'Save the review report'))
@@ -433,7 +543,7 @@ export class ReviewChapterCommand extends BaseWorkflowCommand<string> {
       projectSessionContextFromProject(useProjectStore.getState().currentProject),
     )) throw new Error(text('当前项目已切换，已拒绝打开旧审稿报告', 'The project changed, so the stale review report was not opened.'))
     const { useEditorStore } = await import('../../../stores/editor-store')
-    const pseudoReviewPath = `vela://draft/ch${this.params.chapterNumber}/v${baseVersion}/review${revIndex}`
+    const pseudoReviewPath = `vela://draft/ch${this.params.chapterNumber}/v${sourceSnapshot.version}/review${revIndex}`
     useEditorStore.getState().openFile({
       id: `review-${this.params.draftPath}-${revIndex}`,
       name: text(

@@ -26,6 +26,51 @@ const sourceDraft = Object.freeze({
 })
 
 describe('human-confirmed review snapshot contract', () => {
+  it('keeps the bound blueprint revision, scene identity, and evidence in the immutable confirmation', () => {
+    const blueprintEvidence = { chapterNumber: 7, revision: 3, contentHash: 'a'.repeat(64) }
+    const blueprintReview = {
+      evidence: blueprintEvidence,
+      scenes: [{
+        sceneId: 'bps-scene-1', order: 1, title: '场景一：接线', presence: 'present' as const,
+        sequence: 'in-order' as const, causality: 'supported' as const, description: '正文可定位。',
+        evidence: [{ quote: '末班公交', start: 0, end: 4, startLine: 1, endLine: 1 }],
+        searchRange: { startLine: 1, endLine: 1 },
+      }],
+      checks: [],
+      chapterHook: {
+        status: 'lands' as const, requirement: '公交钩子', description: '钩子成立。', evidence: [],
+        searchRange: { startLine: 1, endLine: 1 },
+      },
+      blueprintIssues: [],
+    }
+    const snapshot = createHumanConfirmedReviewSnapshot({
+      sourceReviewId: 42,
+      sourceDraft,
+      summary: '按固定蓝图审查。',
+      authorGuidance: '',
+      blueprintEvidence,
+      blueprintReview,
+      items: [{
+        category: '蓝图场景', sceneId: 'bps-scene-1', severity: 'unknown', description: '场景待人工判断。',
+        decision: 'apply', origin: 'ai',
+      }],
+    })!
+
+    expect(snapshot.blueprintEvidence).toEqual(blueprintEvidence)
+    expect(Object.isFrozen(snapshot.blueprintReview!.scenes)).toBe(true)
+    expect(snapshot.items[0]?.sceneId).toBe('bps-scene-1')
+    const serialized = serializeHumanConfirmedReviewSnapshot(snapshot)
+    expect(parseHumanConfirmedReviewSnapshot(serialized)).toEqual(snapshot)
+    expect(renderHumanConfirmedReviewBrief(snapshot, 'zh-CN')).toContain('蓝图 v2 r3')
+    expect(renderHumanConfirmedReviewBrief(snapshot, 'zh-CN')).toContain('sceneId=bps-scene-1')
+
+    expect(createHumanConfirmedReviewSnapshot({
+      sourceReviewId: 42, sourceDraft, summary: '', authorGuidance: '', blueprintEvidence,
+      blueprintReview: { ...blueprintReview, evidence: { ...blueprintEvidence, revision: 4 } },
+      items: [{ category: '连续性', severity: 'warning', description: '内容不同。', decision: 'apply', origin: 'ai' }],
+    })).toBeNull()
+  })
+
   it('待核实目标保留身份与证据，默认忽略不进入修稿，明确纳入仍保留不确定性', () => {
     const input = {
       sourceReviewId: 42, sourceDraft, summary: '', authorGuidance: '',

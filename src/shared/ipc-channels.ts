@@ -869,6 +869,7 @@ import type {
   CharacterData,
 } from '../../electron/repositories/character-repository'
 import type { DraftMeta, DraftFull } from '../../electron/repositories/draft-repository'
+import type { ChapterBlueprintV2DetailRead } from './blueprint-v2'
 import type {
   DraftMarkdownSelectionRequest,
   DraftMarkdownSelectionReceiptItem,
@@ -1011,6 +1012,9 @@ export interface DatabaseChannels {
   'db:blueprint-update-notes': { args: [chapterNumber: number, notes: string, expectedProjectPath: string]; return: { success: boolean; updated?: boolean; error?: string } }
   'db:blueprint-delete': { args: [chapterNumber: number, expectedProjectPath: string]; return: { success: boolean; error?: string } }
   'db:blueprint-clear-all': { args: [expectedProjectPath: string]; return: { success: boolean; error?: string } }
+
+  // 2b. 章节蓝图 v2：一致性审查固定读取 detail revision/hash。
+  'db:blueprint-v2-get': { args: [chapterNumber: number, expectedProjectPath: string]; return: ChapterBlueprintV2DetailRead | null }
 
   // 3. characters
   'db:character-get-all': { args: [expectedProjectPath: string]; return: CharacterData[] }
