@@ -17,8 +17,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Sparkles, Check, Bookmark, CheckCircle2, Circle, ExternalLink, X } from 'lucide-react'
 
 import Vditor from 'vditor'
-// 随包语言包：避免依赖运行时脚本注入（注入悬挂时 init 永不执行且无报错）。
-import 'vditor/dist/js/i18n/zh_CN.js'
 import 'vditor/dist/index.css'
 import './vditor-prose.css'
 import './document-toolbar.css'
@@ -938,6 +936,18 @@ export default function VditorProseEditor({
     // 那次演练性挂载会在构造前被取消，不会触发 Vditor 的异步语言包/销毁竞态。
     const timer = window.setTimeout(() => {
       if (disposed) return
+      void createVditor()
+    }, 0)
+
+    // 随包语言包：避免依赖 Vditor 的运行时 <script> 注入（注入悬挂时 init 永不执行
+    // 且不报错，编辑器会永久空白）。动态导入只在浏览器执行，Node 测试环境不受影响。
+    const createVditor = async () => {
+      try {
+        await import('vditor/dist/js/i18n/zh_CN.js')
+      } catch {
+        // 语言包加载失败时回退到 Vditor 自带加载路径，不阻断编辑器创建
+      }
+      if (disposed) return
       const instance = new Vditor(host, {
         // 本地资源目录，绝不指向公网 CDN。
         cdn: VDITOR_ASSET_BASE,
@@ -987,7 +997,7 @@ export default function VditorProseEditor({
       }
       vditor = instance
       vditorRef.current = instance
-    }, 0)
+    }
     return () => {
       // 兜底记录编辑位置：作者跳转前已主动记录过时不会覆盖那份更准的位置。
       rememberPositionOnUnmount()

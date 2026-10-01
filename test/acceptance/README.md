@@ -41,8 +41,15 @@ node test/acceptance/run-isolated-node.mjs node_modules/vitest/vitest.mjs run --
 
 # E00 / E01P 场景（内部自行构建当前源码、切 Electron ABI 并在结束时恢复）
 node test/acceptance/run-isolated-node.mjs test/acceptance/scenarios/e00-project-persistence.e2e.mjs
-node test/acceptance/run-isolated-node.mjs test/acceptance/scenarios/e01-draft-persistence.e2e.mjs
+node test/acceptance/run-isolated-node.mjs test/acceptance/scenarios/e01p-strict-isolation.e2e.mjs
 ```
+
+## 驱动能力与约定（阶段三后）
+
+- 退出语义分四段记录：`titlebarClose` / `exitConfirm` / `gracefulKill` / `forceKill`；场景断言必须拒绝 `forced:true`。
+- 产物哈希锁：`recordArtifactHashes` 在构建后调用，`assertArtifactsUnchanged` 在关键节点校验，防并发构建覆盖。
+- 浏览器套件与 Electron 场景**禁止并发**：本机实测并发会翻转原生模块 ABI 并使 smoke marker 丢失。
+- 若 Node 全量出现 `window is not defined` 于 vditor 链路：检查是否又把浏览器专用模块改回静态导入（应保持动态导入）。
 
 ## 缓存缺失诊断与已知边界
 

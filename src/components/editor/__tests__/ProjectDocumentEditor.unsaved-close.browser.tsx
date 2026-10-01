@@ -56,6 +56,7 @@ function createInvokeHandler(options: { writeFails?: boolean } = {}) {
     if (channel === 'db:blueprint-get-all') return []
     if (channel === 'db:map-get-all') return { nodes: [], edges: [] }
     if (channel === 'db:draft-list-all' || channel === 'fs:list-dir') return []
+    if (channel === 'story-data:list-agent-proposals') return []
     return { success: false, error: `unexpected channel ${channel}` }
   }
 }

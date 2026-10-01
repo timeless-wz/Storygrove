@@ -1,6 +1,6 @@
 # 蓝图 v2 后续修复与复验
 
-基线：`b1cf592a3b2720809b20eac84e8bfe132d797587` 加主工作区现有未提交修改。未提交、合并或清理工作树。未操作 `ChapterOutlineSidebar.tsx`；后续发现它被外部恢复，见第 6 节。A、D、E 工作树未操作。
+修复验收基线：`b1cf592a3b2720809b20eac84e8bfe132d797587` 加当时主工作区未提交修改。修复阶段未提交、合并或清理工作树；后续按用户授权提交并合并，见第 7 节。`ChapterOutlineSidebar.tsx` 的外部恢复得到用户认可，见第 6 节。
 
 **结论：指定章节写作入口的 v2/旧版两条链路通过；本轮整体验收仍受主目录 Node ABI 恢复阻塞，不能宣布全部端到端验收完成。**
 
@@ -121,3 +121,11 @@ P4 历史字段污染、未视觉检查的旧截图、brand-icon 失败记录及
 主目录最终 SQLite 探测仍失败：ABI 145 对 137。PID 30800 仍为 Electron；PID 34604 查询明确返回找不到进程。未终止原占用者，未覆盖其原生模块，恢复步骤仍等待 E01 所有者安全结束实例。篇幅处理维持超限提示与完整保存，没有擅自加入截断或硬拒绝流程。
 
 工作区并发变化：`ChapterOutlineSidebar.tsx` 于 19:44 被外部恢复，目前为修改状态，差异为改用 `db:blueprint-list-summary`。用户随后明确授权保留这次恢复；本轮未编辑或移除这个文件。此前“删除保留”的约束已由这条新授权更新。
+
+## 7. 按用户授权提交与支线合并
+
+主目录全部非 ignored 改动保存为 `7fc352c`。A 原提交 `275fe91` 保留；D 的未提交改动保存为 `0de9a3c`（`codex/blueprint-consistency-review`），E 的未提交改动保存为 `5499079`（`codex/blueprint-context-read-paths`）。三条支线通过实际 merge commit 纳入 main：A `8873d70`、D `4cc5c66`、E `35570cc`。冲突逐文件核对，保留主目录较新的完整 Markdown、确认版本保护、AI 修稿入口和有界读取实现；E 增补章节目录分镜元数据及配置变更时排除已有 v2 细纲的旧字段提案。保留外部恢复的侧栏文件。
+
+合并回归：Node **25 文件 / 342 项通过**，浏览器 **12 文件 / 75 项通过**。Node 仍使用独立 ABI runner，不能替代主目录原生模块恢复。证据为 `merge-node.log`、`merge-browser-verified.log`、`merge-typecheck-verified.log`、`merge-i18n-verified.log`；浏览器现有 act、ResizeObserver 和 mock 诊断保留。测试初次失败及修正后的日志均保留。
+
+Vditor 动态语言包导入修正另行回归 **2 文件 / 26 项通过**，证据 `merge-vditor-verified.log`。分支与工作树保留，未推送、清理临时项目或删除 ignored 证据。并行产生的编辑器修正、Stage 3 记录和新增截图一并保存；该 Stage 3 报告是外部验收记录，不将其中未完成的场景改写为通过。主目录 ABI、历史 P4 退出与污染限制、篇幅仅提示的产品行为仍按第 6 节记录，不因合并提交而关闭。

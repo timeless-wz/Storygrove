@@ -25,7 +25,9 @@ export function AgentProposalReviewPanel() {
     const session = captureProjectSession(useProjectStore.getState().currentProject)
     if (!session) return
     const result = await ipc.invokeWithProjectSession(session, 'story-data:list-agent-proposals', session.projectPath)
-    if (isProjectSessionCurrent(session)) setProposals(result)
+    // 响应可能是错误包（{ success:false, error }）或空值：非数组一律按空列表处理，
+    // 否则 .find 会抛错并连带挂掉整个编辑器区域（2026-10-01 实测崩溃路径）。
+    if (isProjectSessionCurrent(session)) setProposals(Array.isArray(result) ? result : [])
   }
 
   useEffect(() => {
