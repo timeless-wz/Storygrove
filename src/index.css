@@ -1876,11 +1876,13 @@
   --skin-text-primary: var(--text-primary, var(--color-text));
   --skin-text-secondary: var(--text-secondary, var(--color-text-secondary));
   --skin-border: var(--border, var(--color-border));
-  --skin-welcome-surface: color-mix(in srgb, var(--color-bg) var(--chrome-surface-opacity, 66%), transparent);
-  --skin-panel-surface: color-mix(in srgb, var(--color-panel) var(--chrome-surface-opacity, 66%), transparent);
+  /* Text-bearing image surfaces need a minimum opacity on extreme artwork. */
+  --skin-readable-opacity: max(88%, var(--chrome-surface-opacity, 66%));
+  --skin-welcome-surface: color-mix(in srgb, var(--color-bg) var(--skin-readable-opacity), transparent);
+  --skin-panel-surface: color-mix(in srgb, var(--color-panel) var(--skin-readable-opacity), transparent);
   --skin-main-surface: color-mix(in srgb, var(--skin-editor-base) 78%, transparent);
   --skin-workspace-panel-surface: var(--literary-chrome-frost-surface, color-mix(in srgb, var(--color-sidebar) var(--chrome-surface-opacity, 66%), transparent));
-  --skin-workspace-page-surface: color-mix(in srgb, var(--skin-editor-base) var(--chrome-surface-opacity, 66%), transparent);
+  --skin-workspace-page-surface: color-mix(in srgb, var(--skin-editor-base) var(--skin-readable-opacity), transparent);
   --skin-control-surface: color-mix(in srgb, var(--color-panel) 88%, transparent);
   --skin-control-text: var(--skin-text-primary);
   --skin-control-border: var(--skin-border);

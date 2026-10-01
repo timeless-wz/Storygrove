@@ -16,6 +16,7 @@ import { globalEventBus, type EventPayloadMap } from '../shared/event-bus'
 import type { ProjectSessionContext } from '../shared/ipc-channels'
 import { useProjectStore } from '../stores/project-store'
 import { useCharacterStore } from '../stores/character-store'
+import { useWorldWorkbenchStore } from '../stores/world-workbench-store'
 import { useDraftStore } from '../stores/draft-store'
 import { useEditorStore } from '../stores/editor-store'
 import { useWorkflowStore } from '../stores/workflow-store'
@@ -302,6 +303,9 @@ export async function onProjectClosed(projectPath: string | null): Promise<void>
 export function disableProjectBindingsPreservingDrafts(projectPath: string | null): void {
   useCharacterStore.getState().reset()
   useDraftStore.getState().reset()
+  // 世界资料按项目隔离：关闭项目时清空选中世界、分区与本项目缓存。
+  // 会话守卫已经会丢弃迟到响应，这里再把可见状态一并收回。
+  useWorldWorkbenchStore.getState().reset()
 
   console.log('[ProjectService] 已停用项目数据绑定并保留未保存草稿:', projectPath)
 }

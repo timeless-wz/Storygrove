@@ -4,7 +4,17 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-import { normalizeSourceEol, readNormalizedSource } from './source-contract'
+import { normalizeSourceEol, readNormalizedSource, withoutDecorativeClipDefinitions } from './source-contract'
+
+describe('decorative SVG source boundary', () => {
+  const geometry = '<svg width="0" height="0" aria-hidden="true" focusable="false"><defs><clipPath id="shape" clipPathUnits="objectBoundingBox"><path d="M 0 0 H 1 V 1 Z" /></clipPath></defs></svg>'
+  it('allows only inert layout clip definitions and retains visible or executable SVG for rejection', () => {
+    expect(withoutDecorativeClipDefinitions(geometry)).toBe('')
+    for (const unsafe of [geometry.replace('width="0"', 'width="20"'), geometry.replace('<defs>', '<defs><rect />'), geometry.replace('d="M 0 0 H 1 V 1 Z"', 'd={dynamicPath}')]) {
+      expect(withoutDecorativeClipDefinitions(unsafe)).toBe(unsafe)
+    }
+  })
+})
 
 describe('source contract normalization', () => {
   it('treats LF, CRLF, and CR source text as the same source contract', () => {

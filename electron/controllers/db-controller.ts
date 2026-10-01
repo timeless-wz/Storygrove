@@ -1,3 +1,5 @@
+import { CultivationRepository } from '../repositories/cultivation-repository'
+import type { CultivationSaveRequest } from '../../src/shared/cultivation'
 import { ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { isProjectSessionContext } from '../../src/shared/project-session-context'
 import { closeProjectDatabase, getCurrentProjectPath } from '../database'
@@ -17,6 +19,7 @@ import {
   type BlueprintVolumeData,
   type BlueprintRangeCommitRequest,
 } from '../repositories/blueprint-repository'
+import { BlueprintDetailRepository } from '../repositories/blueprint-detail-repository'
 import { CharacterRepository } from '../repositories/character-repository'
 import { CharacterRelationshipRepository } from '../repositories/character-relationship-repository'
 import { CharacterRosterRepository } from '../repositories/character-roster-repository'
@@ -71,7 +74,29 @@ import { PlotCanvasRepository } from '../repositories/plot-canvas-repository'
 import type { PlotCanvasNodeUpsertPayload, PlotCanvasEdgeUpsertPayload, PlotCanvasGraphApplyPayload, PlotCanvasNodesMergePayload, PlotCanvasUpdatePayload } from '../../src/shared/plot-canvas'
 import { ChapterCanvasRepository } from '../repositories/chapter-canvas-repository'
 import type { ChapterCanvasNodeUpsertPayload, ChapterCanvasEdgeUpsertPayload } from '../../src/shared/chapter-canvas'
+import type { ChapterBlueprintV2SaveInput } from '../../src/shared/blueprint-v2'
 import { StoryTimelineRepository } from '../repositories/story-timeline-repository'
+import { WorldWorkbenchRepository } from '../repositories/world-workbench-repository'
+import type {
+  WorldCharacterLink,
+  WorldCharacterLocation,
+  WorldCurrentLocationCommitOptions,
+  WorldEventLink,
+  WorldFaction,
+  WorldFactionCharacter,
+  WorldFactionPlace,
+  WorldFactionRelation,
+  WorldPortal,
+  WorldPortalCharacter,
+  WorldPortalFaction,
+  WorldRecord,
+  WorldRelic,
+  WorldRelicCharacter,
+  WorldRelicFaction,
+  WorldRule,
+  WorldRuleTarget,
+  WorldTrailCommitRequest,
+} from '../../src/shared/world-workbench'
 import type { StoryTimelineBranch, StoryTimelineEvent, StoryTimelineSettings } from '../../src/shared/story-timeline'
 import { RecoveryCandidateRepository } from '../repositories/recovery-candidate-repository'
 import type { RecoveryCandidateRecordInput } from '../../src/shared/recovery-candidate'
@@ -111,7 +136,12 @@ const MUTATING_DATABASE_CHANNELS = new Set([
   'db:blueprint-update-notes',
   'db:blueprint-delete',
   'db:blueprint-clear-all',
+  'db:blueprint-v2-save',
+  'db:blueprint-v2-scene-order-save',
+  'db:blueprint-v2-delete',
+  'db:blueprint-v2-review-notices-clear',
   'db:blueprint-volume-upsert',
+  'db:cultivation-save',
   'db:character-roster-commit',
   'db:character-identities-ensure',
   'db:character-relationship-upsert',
@@ -164,6 +194,33 @@ const MUTATING_DATABASE_CHANNELS = new Set([
   'db:timeline-events-reorder',
   'db:timeline-branch-upsert',
   'db:timeline-branch-delete',
+  'db:world-upsert',
+  'db:world-delete',
+  'db:world-map-assignment-apply',
+  'db:world-faction-upsert',
+  'db:world-faction-delete',
+  'db:world-faction-place-upsert',
+  'db:world-faction-relation-upsert',
+  'db:world-faction-character-upsert',
+  'db:world-relic-upsert',
+  'db:world-relic-delete',
+  'db:world-relic-faction-upsert',
+  'db:world-relic-character-upsert',
+  'db:world-portal-upsert',
+  'db:world-portal-delete',
+  'db:world-portal-faction-upsert',
+  'db:world-portal-character-upsert',
+  'db:world-rule-upsert',
+  'db:world-rule-delete',
+  'db:world-rule-target-upsert',
+  'db:world-character-link-upsert',
+  'db:world-character-location-birth-save',
+  'db:world-character-current-location-commit',
+  'db:world-character-current-location-clear',
+  'db:world-trail-commit',
+  'db:world-trail-delete',
+  'db:world-event-links-save',
+  'db:world-relation-delete',
   'db:plot-canvas-create',
   'db:plot-canvas-update',
   'db:plot-canvas-rename',
@@ -554,6 +611,16 @@ export function registerDatabaseController() {
     return BlueprintRepository.getAll()
   })
 
+  ipcMain.handle('db:blueprint-list-summary', async (_event, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return BlueprintRepository.getSummaryList()
+  })
+
+  ipcMain.handle('db:blueprint-recent-notes', async (_event, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return BlueprintRepository.getRecentNoteSummaries()
+  })
+
   ipcMain.handle('db:blueprint-volume-list', async (_event, expectedProjectPath: string) => {
     assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
     return BlueprintRepository.getVolumes()
@@ -653,6 +720,13 @@ export function registerDatabaseController() {
   ipcMain.handle('db:blueprint-delete', async (_event, chapterNumber: number, expectedProjectPath: string) => {
     try {
       assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      // 删除整章蓝图时联动清理 v2 细纲行：章节号是稳定标识，避免章号复用后
+      // 旧细纲复活（与章节画布 deleteByChapter 同理）。v1 字段本就随之删除。
+      try {
+        BlueprintDetailRepository.delete(chapterNumber)
+      } catch {
+        // 极端旧库无 blueprint_details 表时跳过；删除操作本身不受影响。
+      }
       BlueprintRepository.delete(chapterNumber)
       return { success: true }
     } catch (err) {
@@ -663,7 +737,72 @@ export function registerDatabaseController() {
   ipcMain.handle('db:blueprint-clear-all', async (_event, expectedProjectPath: string) => {
     try {
       assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      try {
+        BlueprintDetailRepository.deleteAll()
+      } catch {
+        // 极端旧库无 blueprint_details 表时跳过。
+      }
       BlueprintRepository.clearAll()
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  // ============================================================
+  // 2b. blueprint_details — 章节蓝图 v2 细纲（blueprint-v2-contract §6）
+  // ============================================================
+  ipcMain.handle('db:blueprint-v2-get', async (_event, chapterNumber: number, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return BlueprintDetailRepository.get(chapterNumber)
+  })
+
+  ipcMain.handle('db:blueprint-v2-summary-list', async (_event, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return BlueprintDetailRepository.getSummaryList()
+  })
+
+  ipcMain.handle('db:blueprint-v2-save', async (
+    _event,
+    input: ChapterBlueprintV2SaveInput,
+    expectedProjectPath: string,
+  ) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return BlueprintDetailRepository.save(input)
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('db:blueprint-v2-scene-order-save', async (
+    _event,
+    input: { chapterNumber: number; baseRevision: number; orderedSceneIds: string[] },
+    expectedProjectPath: string,
+  ) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return BlueprintDetailRepository.saveSceneOrder(input)
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('db:blueprint-v2-delete', async (_event, chapterNumber: number, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      // 仅删 detail 行；blueprints v1 字段保持删除前的投影值（契约 §7.3）。
+      BlueprintDetailRepository.delete(chapterNumber)
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: String(err) }
+    }
+  })
+
+  ipcMain.handle('db:blueprint-v2-review-notices-clear', async (_event, chapterNumber: number, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      BlueprintDetailRepository.clearReviewNotices(chapterNumber)
       return { success: true }
     } catch (err) {
       return { success: false, error: String(err) }
@@ -676,6 +815,17 @@ export function registerDatabaseController() {
   ipcMain.handle('db:character-get-all', async (_event, expectedProjectPath: string) => {
     assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
     return CharacterRepository.getAll()
+  })
+
+  ipcMain.handle('db:cultivation-read', async (_event, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return CultivationRepository.read()
+  })
+  ipcMain.handle('db:cultivation-save', async (_event, request: CultivationSaveRequest, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, result: CultivationRepository.save(request) }
+    } catch (error) { return { success: false, error: String(error) } }
   })
 
   ipcMain.handle('db:character-roster-read', async (_event, expectedProjectPath: string) => {
@@ -789,6 +939,7 @@ export function registerDatabaseController() {
 
   ipcMain.handle('db:draft-create', async (_event, params: {
     chapterNumber: number
+    blueprintChapterNumber?: number | null
     version: number
     source: 'write' | 'rewrite'
     content: string
@@ -1693,6 +1844,342 @@ export function registerDatabaseController() {
     try {
       assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
       StoryTimelineRepository.deleteBranch(id)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  // ============================================================
+  // world — 多世界资料（世界 / 势力 / 秘境 / 通道 / 规则 / 人物关联与行踪）
+  //
+  // 读通道直接返回快照（失败即抛出，由会话门禁统一处理）；写通道统一返回
+  // { success, error }，保证前端看到的是数据库真实结果而不是乐观成功。
+  // ============================================================
+  ipcMain.handle('db:world-get-all', async (_event, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return WorldWorkbenchRepository.getAll()
+  })
+
+  ipcMain.handle('db:world-upsert', async (_event, world: WorldRecord, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, world: WorldWorkbenchRepository.upsertWorld(world) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-delete-plan', async (_event, worldId: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, plan: WorldWorkbenchRepository.planDelete('world', worldId) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-delete', async (_event, worldId: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      WorldWorkbenchRepository.deleteEntity('world', worldId)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-map-assignment-plan', async (_event, mapId: string, nextWorldId: string | null, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, plan: WorldWorkbenchRepository.planMapWorldAssignment(mapId, nextWorldId) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-map-assignment-apply', async (_event, mapId: string, nextWorldId: string | null, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, plan: WorldWorkbenchRepository.applyMapWorldAssignment(mapId, nextWorldId) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-faction-upsert', async (_event, faction: WorldFaction, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, faction: WorldWorkbenchRepository.upsertFaction(faction) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-faction-delete-plan', async (_event, factionId: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, plan: WorldWorkbenchRepository.planDelete('faction', factionId) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-faction-delete', async (_event, factionId: string, detachEventLinks: boolean, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      WorldWorkbenchRepository.deleteEntity('faction', factionId, { detachEventLinks })
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-faction-place-upsert', async (_event, place: WorldFactionPlace, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, place: WorldWorkbenchRepository.upsertFactionPlace(place) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-faction-relation-upsert', async (_event, relation: WorldFactionRelation, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, relation: WorldWorkbenchRepository.upsertFactionRelation(relation) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-faction-character-upsert', async (_event, link: WorldFactionCharacter, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, link: WorldWorkbenchRepository.upsertFactionCharacter(link) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-relic-upsert', async (_event, relic: WorldRelic, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, relic: WorldWorkbenchRepository.upsertRelic(relic) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-relic-delete-plan', async (_event, relicId: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, plan: WorldWorkbenchRepository.planDelete('relic', relicId) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-relic-delete', async (_event, relicId: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      WorldWorkbenchRepository.deleteEntity('relic', relicId)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-relic-faction-upsert', async (_event, link: WorldRelicFaction, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, link: WorldWorkbenchRepository.upsertRelicFaction(link) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-relic-character-upsert', async (_event, link: WorldRelicCharacter, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, link: WorldWorkbenchRepository.upsertRelicCharacter(link) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-portal-upsert', async (_event, portal: WorldPortal, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, portal: WorldWorkbenchRepository.upsertPortal(portal) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-portal-delete-plan', async (_event, portalId: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, plan: WorldWorkbenchRepository.planDelete('portal', portalId) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-portal-delete', async (_event, portalId: string, detachEventLinks: boolean, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      WorldWorkbenchRepository.deleteEntity('portal', portalId, { detachEventLinks })
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-portal-faction-upsert', async (_event, link: WorldPortalFaction, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, link: WorldWorkbenchRepository.upsertPortalFaction(link) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-portal-character-upsert', async (_event, link: WorldPortalCharacter, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, link: WorldWorkbenchRepository.upsertPortalCharacter(link) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-rule-upsert', async (_event, rule: WorldRule, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, rule: WorldWorkbenchRepository.upsertRule(rule) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-rule-delete-plan', async (_event, ruleId: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, plan: WorldWorkbenchRepository.planDelete('rule', ruleId) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-rule-delete', async (_event, ruleId: string, detachEventLinks: boolean, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      WorldWorkbenchRepository.deleteEntity('rule', ruleId, { detachEventLinks })
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-rule-target-upsert', async (_event, target: WorldRuleTarget, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, target: WorldWorkbenchRepository.upsertRuleTarget(target) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-character-link-upsert', async (_event, link: WorldCharacterLink, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, link: WorldWorkbenchRepository.upsertCharacterLink(link) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-character-location-birth-save', async (_event, location: WorldCharacterLocation, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, location: WorldWorkbenchRepository.saveBirthLocation(location) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle(
+    'db:world-character-current-location-commit',
+    async (
+      _event,
+      characterId: string,
+      worldId: string | null,
+      nodeId: string | null,
+      options: WorldCurrentLocationCommitOptions,
+      expectedProjectPath: string,
+    ) => {
+      try {
+        assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+        return WorldWorkbenchRepository.commitCurrentLocation(characterId, worldId, nodeId, options ?? {})
+      } catch (error) {
+        return { success: false, error: String(error) }
+      }
+    },
+  )
+
+  ipcMain.handle('db:world-character-current-location-clear', async (_event, characterId: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      WorldWorkbenchRepository.clearCurrentLocationBinding(characterId)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-trail-commit', async (_event, request: WorldTrailCommitRequest, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return WorldWorkbenchRepository.commitTrail(request)
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-trail-delete-plan', async (_event, trailId: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, plan: WorldWorkbenchRepository.planDelete('trail', trailId) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-trail-delete', async (_event, trailId: string, releaseCurrentLocation: boolean, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      WorldWorkbenchRepository.deleteEntity('trail', trailId, { releaseCurrentLocation })
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-event-links-save', async (_event, eventId: string, worldIds: string[], links: WorldEventLink[], expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      WorldWorkbenchRepository.saveEventLinks(eventId, worldIds ?? [], links ?? [])
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:world-relation-delete', async (_event, table: string, id: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      WorldWorkbenchRepository.deleteRelation(table, id)
       return { success: true }
     } catch (error) {
       return { success: false, error: String(error) }

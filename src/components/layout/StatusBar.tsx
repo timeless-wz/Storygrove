@@ -101,7 +101,7 @@ export default function StatusBar() {
         <StatusBarSegment title={text('重置缩放', 'Reset zoom')} onClick={zoomReset}><span className="tabular-nums">{Math.round(zoom * 100)}%</span></StatusBarSegment>
         <StatusBarSegment title={text('放大', 'Zoom in')} onClick={zoomIn}><Plus size={11} /></StatusBarSegment>
         <StatusBarSegment title={text('切换语言', 'Switch language')} onClick={() => void toggleLocale()}><Languages size={12} /><span>{locale === 'zh-CN' ? 'EN' : '中文'}</span></StatusBarSegment>
-        <StatusBarSegment title={text('设置（含日志与模型配置）', 'Settings, logs and model configuration')} onClick={() => openSettings('editor')}>
+        <StatusBarSegment title={text('设置（含日志与模型配置）', 'Settings, logs and model configuration')} ariaLabel={text('设置', 'Settings')} onClick={() => openSettings('editor')}>
           <Settings size={12} />
         </StatusBarSegment>
 
@@ -162,9 +162,9 @@ function AITaskCapsule() {
   )
 }
 
-function StatusBarSegment({ children, title, onClick }: { children: ReactNode; title?: string; onClick?: () => void }) {
+function StatusBarSegment({ children, title, onClick, ariaLabel }: { children: ReactNode; title?: string; onClick?: () => void; ariaLabel?: string }) {
   return (
-    <button type="button" className="writer-topbar-segment flex items-center gap-1 px-2 h-full transition-colors" title={title} onClick={onClick} disabled={!onClick}>
+    <button type="button" className="writer-topbar-segment flex items-center gap-1 px-2 h-full transition-colors" title={title} aria-label={ariaLabel} onClick={onClick} disabled={!onClick}>
       {children}
     </button>
   )

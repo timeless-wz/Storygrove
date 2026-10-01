@@ -765,6 +765,9 @@ async function loadProductRuntime(repositoryRoot) {
         sourcefile: 'real-provider-generation-qualification-entry.ts',
       },
       bundle: true,
+      // This runtime executes generation logic in Node without a DOM. Keep
+      // actual TS/JS dependencies; presentation styles have no Node behavior.
+      loader: { '.css': 'empty' },
       format: 'esm',
       platform: 'node',
       target: 'node20',

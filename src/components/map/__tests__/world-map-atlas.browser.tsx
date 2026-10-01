@@ -66,6 +66,7 @@ let root: Root
 let invokedChannels: string[]
 let mapDeleteCalls: Array<{ mapId: string; strategy: string }>
 let mapImageDataUrl: string | undefined
+let savedNodes: WorldMapNode[]
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -76,7 +77,12 @@ function stubApi(): void {
       invoke: vi.fn(async (channel: string, ...args: unknown[]) => {
         invokedChannels.push(channel)
         if (channel === 'db:map-get-all') {
-          return { maps: MAPS, nodes: NODES, edges: EDGES, migration: null }
+          return { maps: MAPS, nodes: savedNodes, edges: EDGES, migration: null }
+        }
+        if (channel === 'db:map-node-upsert') {
+          const node = args[0] as WorldMapNode
+          savedNodes = [...savedNodes.filter(item => item.id !== node.id), node]
+          return { success: true, node }
         }
         if (channel === 'db:map-candidates-get') return []
         if (channel === 'world-map-image:get') return { success: true, image: null, dataUrl: mapImageDataUrl }
@@ -138,6 +144,7 @@ function readCanvasTransform(): { x: number; y: number; zoom: number } {
 }
 
 beforeEach(() => {
+  savedNodes = NODES.map(node => ({ ...node }))
   invokedChannels = []
   mapDeleteCalls = []
   mapImageDataUrl = undefined
@@ -172,6 +179,38 @@ afterEach(async () => {
 })
 
 describe('world map atlas view', () => {
+  it('lets buildings of the same location type use distinct persisted markers', async () => {
+    await render()
+    await clickButton('北境大陆地图')
+    const marker = container.querySelector('#map-node-node-north-keep')!
+    expect(marker.querySelector('.lucide-castle')).not.toBeNull()
+    await act(async () => { marker.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })) })
+    const templeButton = document.body.querySelector<HTMLButtonElement>('button[aria-label="神殿"]')!
+    expect(templeButton).not.toBeNull()
+    await act(async () => { templeButton.click() })
+    expect(templeButton.getAttribute('aria-pressed')).toBe('true')
+    const save = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'))
+      .find(button => button.textContent?.trim() === '保存地点')!
+    const saveBounds = save.getBoundingClientRect()
+    expect(saveBounds.top).toBeGreaterThanOrEqual(0)
+    expect(saveBounds.bottom).toBeLessThanOrEqual(window.innerHeight)
+    await act(async () => { save.click() })
+    expect(useWorldMapStore.getState().nodes.find(node => node.id === 'node-north-keep'))
+      .toMatchObject({ type: 'city', markerIcon: 'temple' })
+    expect(container.querySelector('#map-node-node-north-keep .lucide-landmark')).not.toBeNull()
+    // 重开编辑器仍能看到已保存图标；自动选项会明确清除自定义图标。
+    await act(async () => {
+      container.querySelector('#map-node-node-north-keep')!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+    })
+    expect(document.body.querySelector('button[aria-label="神殿"]')?.getAttribute('aria-pressed')).toBe('true')
+    await act(async () => { document.body.querySelector<HTMLButtonElement>('button[aria-label="自动"]')!.click() })
+    await act(async () => {
+      Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'))
+        .find(button => button.textContent?.trim() === '保存地点')!.click()
+    })
+    expect(container.querySelector('#map-node-node-north-keep .lucide-castle')).not.toBeNull()
+  })
+
   it('fits the full base image into the narrowed canvas used with a sidebar', () => {
     // 侧边栏展开后的可用区域比底图窄；适配后左右都应保留边距，不能裁掉右侧。
     const fitted = getMapImageFitTransform(900, 1000)

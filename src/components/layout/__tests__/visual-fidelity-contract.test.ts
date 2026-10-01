@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
+import { withoutDecorativeClipDefinitions } from '../../../../test/source-contract'
 
 const pseudoIconPattern = new RegExp([
   '[\\u2600-\\u27BF]',
@@ -123,7 +124,7 @@ describe('writer console visual fidelity contract', () => {
       source('src/components/panels/AIOutputPanel.tsx'),
     ].join('\n')).toContain('writer-ai-panel')
     expect(combined).not.toMatch(pseudoIconPattern)
-    expect(combined).not.toMatch(/<svg\b|<path\b/)
+    expect(withoutDecorativeClipDefinitions(combined)).not.toMatch(/<svg\b|<path\b/)
   })
 
   it('keeps the custom title bar draggable while controls stay interactive', () => {

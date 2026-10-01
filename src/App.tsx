@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect } from 'react'
+import { type ReactNode, type Ref, useEffect, useLayoutEffect, useRef } from 'react'
 import { Panel, Group as PanelGroup, Separator as PanelResizeHandle } from 'react-resizable-panels'
 import { type Theme, useThemeStore } from './stores/theme-store'
 import { useLayoutStore } from './stores/layout-store'
@@ -19,6 +19,7 @@ import ProjectReferencePanel from './components/panels/ProjectReferencePanel'
 import NewProjectDialog from './components/dialogs/NewProjectDialog'
 import ImportNovelDialog from './components/dialogs/ImportNovelDialog'
 import ExportDialog from './components/dialogs/ExportDialog'
+import ChapterCreationDialog from './components/dialogs/ChapterCreationDialog'
 import SettingsModal from './components/settings/SettingsModal'
 import { ANIME_SKIN_URL } from './components/settings/AppearanceSettings'
 import { ErrorBoundary } from './components/ErrorBoundary'
@@ -32,6 +33,7 @@ import {
   sameProjectSessionContext,
 } from './shared/project-session-context'
 import type { SkinId } from './shared/skin-types'
+import { isLiteraryTheme } from './shared/literary-themes'
 
 // eslint-disable-next-line react-refresh/only-export-components
 export function resolveSkinBackgroundUrl(skinId: SkinId, customUrl: string | null): string | null {
@@ -66,16 +68,20 @@ export function SkinBackgroundLayer({
 export function AppSkinRoot({
   theme,
   skinId,
+  rootRef,
   children,
 }: {
   theme: Theme
   skinId: SkinId
+  rootRef?: Ref<HTMLDivElement>
   children: ReactNode
 }) {
   return (
     <div
+      ref={rootRef}
       className="app-skin-root flex flex-col w-full h-full overflow-hidden"
       data-theme={theme}
+      data-literary-theme={isLiteraryTheme(theme)}
       data-skin={skinId}
       data-skin-readability={skinId === 'classic' ? 'theme-default' : 'high-contrast'}
     >
@@ -108,6 +114,9 @@ export default function App() {
   const closeExport = useLayoutStore(s => s.closeExport)
   const importNovelOpen = useLayoutStore(s => s.importNovelOpen)
   const closeImportNovel = useLayoutStore(s => s.closeImportNovel)
+  const chapterCreationOpen = useLayoutStore(s => s.chapterCreationOpen)
+  const chapterCreationPrefill = useLayoutStore(s => s.chapterCreationPrefill)
+  const closeChapterCreation = useLayoutStore(s => s.closeChapterCreation)
   const initLLM = useLLMStore((s) => s.init)
   const loadRecentProjects = useProjectStore((s) => s.loadRecentProjects)
   const skinState = useSkinStore((s) => s.skinState)
@@ -115,6 +124,15 @@ export default function App() {
   const initSkin = useSkinStore((s) => s.init)
   const disposeSkin = useSkinStore((s) => s.dispose)
   const recoverFromImageFailure = useSkinStore((s) => s.recoverFromImageFailure)
+  const skinRootRef = useRef<HTMLDivElement>(null)
+  const sidebarWidthRef = useRef(260)
+
+  useLayoutEffect(() => {
+    skinRootRef.current?.style.setProperty(
+      '--writer-sidebar-width',
+      sidebarOpen && !focusMode ? `${sidebarWidthRef.current + 1}px` : '0px',
+    )
+  }, [sidebarOpen, focusMode])
 
   // 窄屏策略：右栏优先收起，1280px 起三栏完整可用
   useResponsiveWorkbenchLayout()
@@ -253,12 +271,17 @@ export default function App() {
 
   return (
     <TooltipProvider delayDuration={400} skipDelayDuration={300}>
-    <AppSkinRoot theme={resolvedTheme} skinId={skinState.activeSkin}>
+    <AppSkinRoot
+      theme={resolvedTheme}
+      skinId={skinState.activeSkin}
+      rootRef={skinRootRef}
+    >
       <SkinBackgroundLayer
         skinId={skinState.activeSkin}
         backgroundUrl={skinBackgroundUrl}
         onImageError={() => void recoverFromImageFailure()}
       />
+      <div className="writer-chrome-frost" aria-hidden="true" />
       <UpdateNotifier />
       {/* 标题栏 */}
       <TitleBar />
@@ -271,17 +294,33 @@ export default function App() {
               {/* 左侧边栏 */}
               {sidebarOpen && !focusMode && (
                 <>
-                  <Panel id="sidebar" defaultSize="260px" minSize="200px" maxSize="380px">
+                  <Panel
+                    id="sidebar"
+                    defaultSize="260px"
+                    minSize="200px"
+                    maxSize="380px"
+                    onResize={({ inPixels }) => {
+                      sidebarWidthRef.current = inPixels
+                      if (sidebarOpen && !focusMode) {
+                        // The separator stays 1px wide; the mask starts after it.
+                        skinRootRef.current?.style.setProperty('--writer-sidebar-width', `${inPixels + 1}px`)
+                      }
+                    }}
+                  >
                     <ErrorBoundary fallbackLabel={text('侧边栏渲染失败', 'Sidebar failed to render')}>
                       <Sidebar />
                     </ErrorBoundary>
                   </Panel>
-                  <PanelResizeHandle />
+                  <PanelResizeHandle className="writer-sidebar-resize-handle" />
                 </>
               )}
 
               {/* 编辑区 */}
-              <Panel id="editor" minSize="300px">
+              <Panel
+                id="editor"
+                minSize="300px"
+                className={currentProject && sidebarView !== 'home' ? 'writer-project-editor-panel' : undefined}
+              >
                 <ErrorBoundary fallbackLabel={text('编辑区渲染失败', 'Editor failed to render')}>
                   <EditorArea onNewProject={() => useLayoutStore.getState().openNewProject()} />
                 </ErrorBoundary>
@@ -323,6 +362,7 @@ export default function App() {
         open={importNovelOpen}
         onClose={closeImportNovel}
       />
+      <ChapterCreationDialog isOpen={chapterCreationOpen} onClose={closeChapterCreation} prefill={chapterCreationPrefill} />
       <ExportDialog
         isOpen={exportOpen}
         onClose={closeExport}

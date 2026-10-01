@@ -99,6 +99,8 @@ function installIpc() {
           }
         }
         if (channel === 'db:blueprint-get-all') return [{ chapterNumber: 1 }]
+        if (channel === 'db:blueprint-list-summary') return [{ chapterNumber: 1, title: '' }]
+        if (channel === 'db:map-get-all') return []
         if (channel === 'db:continuity-list-before') {
           if (continuityProjectionReadError) throw continuityProjectionReadError
           return continuityProjections

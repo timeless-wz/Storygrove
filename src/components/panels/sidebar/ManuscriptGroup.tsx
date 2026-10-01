@@ -40,11 +40,13 @@ async function readChapterTitle(
   filePath: string,
   fallback: string,
   projectSession: ProjectSessionContext,
+  locale: string,
   chapterNumber?: number,
   authoritativeTitle?: string,
 ): Promise<string | null> {
   if (!isProjectSessionCurrent(projectSession)) return null
-  const cacheKey = chapterTitleCacheKey(projectSession.projectPath, filePath)
+  // 显示名随语言变化，缓存键必须带语言（否则切换语言后显示旧语言标题）。
+  const cacheKey = chapterTitleCacheKey(projectSession.projectPath, filePath, locale)
   if (chapterNumber && authoritativeTitle?.trim()) {
     const prefix = `第${chapterNumber}章`
     const title = authoritativeTitle.trim().startsWith(prefix)
@@ -67,7 +69,9 @@ async function readChapterTitle(
       )
       if (!isProjectSessionCurrent(projectSession)) return null
       if (bpResult) {
-        const display = `第${chapterNumber}章 ${bpResult.title}`
+        // 前缀走本地化的 fallback（en-US 下为 "Chapter N"）；此前硬编码中文前缀
+        // 会让英文界面的正文章节全部显示成「第N章 …」。
+        const display = `${fallback} ${bpResult.title}`
         chapterTitleCache.set(cacheKey, display)
         return display
       }
@@ -107,6 +111,7 @@ export default function ManuscriptGroup({ files, projectPath }: { files: Manuscr
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [bindingTarget, setBindingTarget] = useState<BlueprintBindingTarget | null>(null)
   const text = useLocaleStore(s => s.text)
+  const locale = useLocaleStore(s => s.locale)
   const currentProject = useProjectStore(s => s.currentProject)
   const [deletionState, setDeletionState] = useState<{
     projectPath: string
@@ -130,7 +135,7 @@ export default function ManuscriptGroup({ files, projectPath }: { files: Manuscr
       // 只读取当前 state 中还没有的路径（增量更新，避免重复 IPC 调用）
       const missing = files.filter(f => (
         !f.name.includes('_notes')
-        && !titleMap[chapterTitleCacheKey(projectPath, f.path)]
+        && !titleMap[chapterTitleCacheKey(projectPath, f.path, locale)]
       ))
       if (missing.length === 0) return
       const entries: Record<string, string> = {}
@@ -141,8 +146,8 @@ export default function ManuscriptGroup({ files, projectPath }: { files: Manuscr
           const fallback = chMatch ? text(`第${parseInt(chMatch[1], 10)}章`, `Chapter ${parseInt(chMatch[1], 10)}`) : rawName
           const chNum = chMatch ? parseInt(chMatch[1], 10) : undefined
           try {
-            const title = await readChapterTitle(f.path, fallback, projectSession, chNum, f.chapterTitle)
-            if (title !== null) entries[chapterTitleCacheKey(projectPath, f.path)] = title
+            const title = await readChapterTitle(f.path, fallback, projectSession, locale, chNum, f.chapterTitle)
+            if (title !== null) entries[chapterTitleCacheKey(projectPath, f.path, locale)] = title
           } catch {
             // 读取失败时保留界面上的兜底名称；不把失败当成空正文或缓存结果。
           }
@@ -154,7 +159,7 @@ export default function ManuscriptGroup({ files, projectPath }: { files: Manuscr
     }
     void load()
     return () => { cancelled = true }
-  }, [files, filesDep, projectPath, titleMap, text, currentProject])
+  }, [files, filesDep, projectPath, titleMap, text, locale, currentProject])
 
   const getDisplay = (f: ManuscriptFileNode) => {
     const rawName = f.name.replace(/\.[^.]+$/, '')
@@ -170,7 +175,7 @@ export default function ManuscriptGroup({ files, projectPath }: { files: Manuscr
         : f.chapterTitle.trim()
       return title ? `${fallback} ${title}` : fallback
     }
-    return titleMap[chapterTitleCacheKey(projectPath, f.path)] ?? fallback
+    return titleMap[chapterTitleCacheKey(projectPath, f.path, locale)] ?? fallback
   }
 
   // 只显示正文章节（过滤掉旧的 _notes 文件）

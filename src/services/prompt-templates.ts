@@ -577,9 +577,9 @@ export const BUILTIN_PROMPTS: PromptTemplate[] = [
 
   {
     key: 'chapter_blueprint',
-    name: '章节蓝图生成（全量）',
-    description: '基于全书架构一次性生成所有章节的详细蓝图',
-    systemRole: '你是一位经验丰富的章节架构师。将作者事实转化为具体场景、角色行动、阻力、转折和章节钩子，不输出思考过程。',
+    name: '章节蓝图生成（全量简纲）',
+    description: '基于全书架构一次性生成章节级简纲，不生成逐场分镜细纲',
+    systemRole: '你是一位经验丰富的章节架构师。将作者事实转化为简洁的章节级事件摘要，不输出思考过程，也不伪称生成逐场分镜细纲。',
     variables: {
       novel_architecture: '完整故事架构（故事前提+角色图谱+世界观+情节大纲）',
       number_of_chapters: '总章数',
@@ -594,7 +594,9 @@ export const BUILTIN_PROMPTS: PromptTemplate[] = [
       'genre',
       'pacing_guidance',
     ],
-    content: `请基于我们此前推演出的【全书架构引擎】，为本书生成从第1章到第{{number_of_chapters}}章的具体"保姆级执行目录细纲"。
+    content: `请基于我们此前推演出的【全书架构引擎】，为本书生成从第1章到第{{number_of_chapters}}章的章节级简纲。
+
+本流程只生成章节级简纲字段，不生成逐场分镜、完整 Markdown 细纲或蓝图 v2；不得把本次结果称为完整细纲。详细细纲由作者逐章导入或编辑。
 
 【核心防偏离守则】
 - 小说题材：{{genre}}
@@ -632,6 +634,7 @@ export const BUILTIN_PROMPTS: PromptTemplate[] = [
 }
 
 要求：
+- 本流程只生成章节级简纲，不生成逐场分镜或完整 Markdown 细纲。
 - 每章的 keyEvents 控制在 100-150 字以内，信息密度必须极高。
 - 每个对象必须包含完整的 chapterNumber、title、role、purpose、characters、relationships、keyEvents、suspenseHook；relationships 仅写本章可确认的角色关系，无则输出空数组。
 - 仅给出最终的 JSON 文本，不要任何客套解释、分析、计划、Markdown 或代码块。
@@ -642,9 +645,9 @@ export const BUILTIN_PROMPTS: PromptTemplate[] = [
 
   {
     key: 'chapter_blueprint_chunk',
-    name: '章节蓝图续写（分块）',
-    description: '在已有目录基础上续写后续章节蓝图，支持分块生成',
-    systemRole: '你是一位经验丰富的章节架构师。将作者事实转化为连续的具体事件，保持角色动机、因果链和长篇节奏一致，不输出思考过程。',
+    name: '章节简纲续写（分块）',
+    description: '在已有目录基础上续写后续章节级简纲，不生成逐场分镜细纲',
+    systemRole: '你是一位经验丰富的章节架构师。将作者事实转化为连续的章节级简纲，保持角色动机、因果链和长篇节奏一致，不输出思考过程，也不伪称生成逐场分镜细纲。',
     variables: {
       novel_architecture: '完整故事架构（故事前提+角色图谱+世界观+情节大纲）',
       chapter_list: '已生成的章节列表（最近100章）',
@@ -665,7 +668,9 @@ export const BUILTIN_PROMPTS: PromptTemplate[] = [
       'genre',
       'pacing_guidance',
     ],
-    content: `请基于【全书架构引擎】与【已生成的目录进度】，为接下来的 第{{n}}章到第{{m}}章 生成极其严密的"保姆级执行目录细纲"。
+    content: `请基于【全书架构引擎】与【已生成的目录进度】，为接下来的第{{n}}章到第{{m}}章生成章节级简纲。
+
+本流程只生成章节级简纲字段，不生成逐场分镜、完整 Markdown 细纲或蓝图 v2；不得把本次结果称为完整细纲。详细细纲由作者逐章导入或编辑。
 
 【核心防偏离守则】
 - 小说题材：{{genre}}
@@ -705,6 +710,7 @@ export const BUILTIN_PROMPTS: PromptTemplate[] = [
 }
 
 要求：
+- 本流程只生成章节级简纲，不生成逐场分镜或完整 Markdown 细纲。
 - 严格遵循上下文连贯，不要前后矛盾。
 - 每个对象必须包含完整的 chapterNumber、title、role、purpose、characters、relationships、keyEvents、suspenseHook；relationships 仅写本章可确认的角色关系，无则输出空数组。
 - 仅给出最终的 JSON 文本，不要解释、分析、计划、Markdown 或代码块。

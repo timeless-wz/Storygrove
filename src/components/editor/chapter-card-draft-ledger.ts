@@ -1,4 +1,5 @@
 import type { ChapterBlueprint } from '../../services/workflows/directory-workflow'
+import type { ChapterBlueprintV2Content } from '../../shared/blueprint-v2'
 
 export const CHAPTER_CARD_TAB_ID = 'chapter-card-editor'
 
@@ -279,4 +280,121 @@ export function reconcileClearedBlueprintSnapshots(
     blueprints,
     dirtyChapterNumbers: new Set(blueprints.map(blueprint => blueprint.chapterNumber)),
   }
+}
+
+// ===== 章节蓝图 v2（细纲）草稿账本 =====
+//
+// 与 v1 账本使用不同的 draftLedger key，互不影响；以章节号为键保存未保存的
+// v2 细纲编辑，保证切换章节、切换蓝图/画布视图、列表刷新时输入不丢失。
+// content 保存的是本地工作副本；baseRevision 是它所基于的数据库 revision，
+// 保存时作为乐观并发依据（blueprint-v2-contract §7.2）。
+
+export const CHAPTER_CARD_V2_TAB_ID = 'chapter-card-editor-v2'
+
+export interface ChapterCardBlueprintV2Draft {
+  chapterNumber: number
+  content: ChapterBlueprintV2Content
+  baseRevision: number
+  /** 保存遇到 conflict 时记录的当前 revision；null = 无冲突。 */
+  conflictCurrentRevision?: number | null
+}
+
+export interface ChapterCardV2ProjectDraft {
+  projectKey: string
+  drafts: ChapterCardBlueprintV2Draft[]
+}
+
+export interface ChapterCardV2DraftLedger {
+  version: 1
+  projects: ChapterCardV2ProjectDraft[]
+}
+
+/** v2 草稿账本只需要写入 draftLedgers 的能力。 */
+export interface ChapterCardV2LedgerWriter {
+  setDraftLedger(key: string, content: string): void
+}
+
+export function createEmptyChapterCardV2DraftLedger(): ChapterCardV2DraftLedger {
+  return { version: 1, projects: [] }
+}
+
+function isV2DraftShape(value: unknown): value is ChapterCardBlueprintV2Draft {
+  if (!value || typeof value !== 'object') return false
+  const record = value as Record<string, unknown>
+  const content = record.content as Record<string, unknown> | undefined
+  return Number.isInteger(record.chapterNumber)
+    && typeof record.baseRevision === 'number'
+    && Boolean(content)
+    && content?.schemaVersion === 2
+    && Array.isArray(content?.sections)
+}
+
+export function parseChapterCardV2DraftLedger(content: string | undefined): ChapterCardV2DraftLedger {
+  if (!content) return createEmptyChapterCardV2DraftLedger()
+  try {
+    const parsed = JSON.parse(content) as Record<string, unknown>
+    if (parsed.version !== 1 || !Array.isArray(parsed.projects)) {
+      return createEmptyChapterCardV2DraftLedger()
+    }
+    const projects: ChapterCardV2ProjectDraft[] = []
+    for (const project of parsed.projects) {
+      const record = project as Record<string, unknown>
+      if (typeof record.projectKey !== 'string' || !Array.isArray(record.drafts)) continue
+      const drafts = record.drafts.filter(isV2DraftShape)
+      if (drafts.length > 0) projects.push({ projectKey: record.projectKey, drafts })
+    }
+    return { version: 1, projects }
+  } catch {
+    return createEmptyChapterCardV2DraftLedger()
+  }
+}
+
+export function getChapterCardV2ProjectDraft(
+  ledger: ChapterCardV2DraftLedger,
+  projectKey: string,
+): ChapterCardV2ProjectDraft | undefined {
+  return ledger.projects.find(project => project.projectKey === projectKey)
+}
+
+export function getChapterCardV2Draft(
+  ledger: ChapterCardV2DraftLedger,
+  projectKey: string,
+  chapterNumber: number,
+): ChapterCardBlueprintV2Draft | undefined {
+  return getChapterCardV2ProjectDraft(ledger, projectKey)
+    ?.drafts.find(draft => draft.chapterNumber === chapterNumber)
+}
+
+export function updateChapterCardV2Draft(
+  ledger: ChapterCardV2DraftLedger,
+  projectKey: string,
+  draft: ChapterCardBlueprintV2Draft,
+): ChapterCardV2DraftLedger {
+  const otherProjects = ledger.projects.filter(project => project.projectKey !== projectKey)
+  const existing = getChapterCardV2ProjectDraft(ledger, projectKey)
+  const drafts = (existing?.drafts ?? []).filter(item => item.chapterNumber !== draft.chapterNumber)
+  return {
+    version: 1,
+    projects: [...otherProjects, { projectKey, drafts: [...drafts, draft] }],
+  }
+}
+
+export function discardChapterCardV2Draft(
+  ledger: ChapterCardV2DraftLedger,
+  projectKey: string,
+  chapterNumber: number,
+): ChapterCardV2DraftLedger {
+  const otherProjects = ledger.projects.filter(project => project.projectKey !== projectKey)
+  const existing = getChapterCardV2ProjectDraft(ledger, projectKey)
+  if (!existing) return { version: 1, projects: otherProjects }
+  const drafts = existing.drafts.filter(item => item.chapterNumber !== chapterNumber)
+  if (drafts.length === 0) return { version: 1, projects: otherProjects }
+  return { version: 1, projects: [...otherProjects, { projectKey, drafts }] }
+}
+
+export function persistChapterCardV2DraftLedger(
+  writer: ChapterCardV2LedgerWriter,
+  ledger: ChapterCardV2DraftLedger,
+): void {
+  writer.setDraftLedger(CHAPTER_CARD_V2_TAB_ID, JSON.stringify(ledger))
 }

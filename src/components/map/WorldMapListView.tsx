@@ -4,11 +4,13 @@ import {
   type WorldMapEdge,
   WORLD_MAP_NODE_TYPE_LABELS,
   WORLD_MAP_EDGE_TYPE_LABELS,
+  getWorldMapMarkerIcon,
 } from '../../shared/world-map'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
 import { Search, Edit2, Trash2, ArrowRight } from 'lucide-react'
 import { useLocaleStore } from '../../stores/locale-store'
+import { WORLD_MAP_MARKER_ICONS } from './world-map-marker-icons'
 
 interface Props {
   /** 当前地图自己的地点与内部连接。 */
@@ -109,13 +111,16 @@ export default function WorldMapListView({
               <tbody>
                 {filteredNodes.map(n => {
                   const isSelected = n.id === selectedNodeId
+                  const MarkerIcon = WORLD_MAP_MARKER_ICONS[getWorldMapMarkerIcon(n)]
                   return (
                     <tr
                       key={n.id}
                       className={`border-b border-[var(--color-border)] hover:bg-[var(--color-hover)] cursor-pointer transition-colors ${isSelected ? 'bg-[var(--color-active)]' : ''}`}
                       onClick={() => onSelectNode(n.id)}
                     >
-                      <td className="py-2 px-3 font-medium text-[var(--color-text)]">{n.name}</td>
+                      <td className="py-2 px-3 font-medium text-[var(--color-text)]">
+                        <span className="inline-flex items-center gap-2"><MarkerIcon size={16} className="shrink-0" aria-hidden="true" />{n.name}</span>
+                      </td>
                       <td className="py-2 px-3">
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-hover)] text-[var(--color-text-secondary)]">
                           {text(WORLD_MAP_NODE_TYPE_LABELS[n.type]?.zh || n.type, n.type)}

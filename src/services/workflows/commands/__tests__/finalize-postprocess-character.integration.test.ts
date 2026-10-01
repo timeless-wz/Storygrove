@@ -172,6 +172,7 @@ function installRealRepositoryIpc(): void {
           case 'kb:search-writing-context':
             return { success: true, value: [] }
           case 'db:blueprint-get':
+          case 'db:blueprint-v2-get':
             return null
           case 'db:draft-get-finalized':
             return getProjectDb()?.prepare(`

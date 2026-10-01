@@ -4,7 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ipc } from '../ipc-client'
-import { exportSelectedMarkdown, type BasicSettingsExportSnapshot } from '../export-service'
+import { exportSelectedMarkdown, loadBasicSettingsExportSnapshot, renderBasicSettingsMarkdown, type BasicSettingsExportSnapshot } from '../export-service'
 import { setActiveProjectSessionContext } from '../../shared/project-session-context'
 import type { ProjectSessionContext } from '../../shared/ipc-channels'
 import type { DraftMarkdownSelectedChapter } from '../../shared/markdown-exchange'
@@ -85,10 +85,15 @@ beforeEach(() => {
     if (channel === 'db:draft-export-selection') return { chapters: selected, receipt: selected.map(receipt) } as never
     if (channel === 'db:draft-export-selection-current') return true as never
     if (channel === 'db:blueprint-volume-list') return [{ id: 'volume-1', name: '第1卷', sortOrder: 1 }] as never
+    if (channel === 'db:blueprint-list-summary') return [{ chapterNumber: 1, volumeId: 'volume-1' }] as never
     if (channel === 'db:blueprint-get-all') return [{ chapterNumber: 1, volumeId: 'volume-1' }] as never
     if (channel === 'db:project-core-get') return settingsData.core as never
     if (channel === 'db:character-roster-read') return settingsData.roster as never
     if (channel === 'db:character-get-all') return settingsData.characters as never
+    if (channel === 'db:cultivation-read') return {
+      revision: 1,
+      realms: [{ id: 'qi', name: '炼气', levelId: 'qi-base', stages: [{ id: 'qi-1', name: '一层' }, { id: 'qi-2', name: '二层' }] }],
+    } as never
     throw new Error(`Unexpected project channel: ${String(channel)}`)
   }) as never)
 })
@@ -157,6 +162,26 @@ describe('selected Markdown export', () => {
     expect(fs.readFileSync(path.join(outputRoot, split.path!, '03-character-graph.md'), 'utf8')).toContain('## 主角：林舟')
   })
 
+  it('exports a bound level with its number and full name while preserving labeled legacy free text', async () => {
+    const character = {
+      ...settingsData.characters[0]!,
+      cultivationLevelId: 'qi-2',
+      currentState: {
+        location: '', powerLevel: '旧修为：筑基中期', physicalState: '', mentalState: '', keyItems: '', recentEvents: '', updatedAtChapter: 0,
+      },
+    }
+    settingsData.characters = [character]
+    const snapshot = await loadBasicSettingsExportSnapshot(session)
+    const chinese = renderBasicSettingsMarkdown(snapshot, ['character-profiles'], 'zh-CN')[0]!.content
+    expect(chinese).toContain('- 修炼等级: 2 = 炼气·二层')
+    expect(chinese).toContain('- 修为描述（自由文本）: 旧修为：筑基中期')
+
+    const english = renderBasicSettingsMarkdown(snapshot, ['character-profiles'], 'en-US')[0]!.content
+    expect(english).toContain('- Cultivation level: 2 = 炼气·二层')
+    expect(english).toContain('- Power description (free text): 旧修为：筑基中期')
+    expect(ipc.invokeWithProjectSession).toHaveBeenCalledWith(session, 'db:cultivation-read', session.projectPath)
+  })
+
   it('writes each mixed-version volume chapter to its own Markdown file', async () => {
     const second: DraftMarkdownSelectedChapter = {
       draftId: 20, kind: 'finalized', chapterNumber: 2, version: 1, status: 'finalized',
@@ -170,7 +195,7 @@ describe('selected Markdown export', () => {
       } as never
       if (channel === 'db:draft-export-selection-current') return true as never
       if (channel === 'db:blueprint-volume-list') return [{ id: 'volume-1', name: '第1卷', sortOrder: 1 }] as never
-      if (channel === 'db:blueprint-get-all') return [
+      if (channel === 'db:blueprint-list-summary') return [
         { chapterNumber: 1, volumeId: 'volume-1' }, { chapterNumber: 2, volumeId: 'volume-1' },
       ] as never
       throw new Error(`Unexpected project channel: ${channel}`)
@@ -192,7 +217,7 @@ describe('selected Markdown export', () => {
     vi.mocked(ipc.invokeWithProjectSession).mockImplementation((async (_context: ProjectSessionContext, channel: string) => {
       if (channel === 'db:draft-export-selection') return { chapters: selected, receipt: selected.map(receipt) } as never
       if (channel === 'db:blueprint-volume-list') return [{ id: 'volume-1', name: '第1卷', sortOrder: 1 }] as never
-      if (channel === 'db:blueprint-get-all') return [
+      if (channel === 'db:blueprint-list-summary') return [
         { chapterNumber: 1, volumeId: 'volume-1' }, { chapterNumber: 2, volumeId: 'volume-1' },
       ] as never
       throw new Error(`Unexpected project channel: ${String(channel)}`)
@@ -226,7 +251,7 @@ describe('selected Markdown export', () => {
     vi.mocked(ipc.invokeWithProjectSession).mockImplementation((async (_context: ProjectSessionContext, channel: string) => {
       if (channel === 'db:draft-export-selection') return { chapters: selected, receipt: selected.map(receipt) } as never
       if (channel === 'db:blueprint-volume-list') return [{ id: 'volume-1', name: '第1卷', sortOrder: 1 }] as never
-      if (channel === 'db:blueprint-get-all') return [{ chapterNumber: 1, volumeId: 'volume-1' }, { chapterNumber: 2, volumeId: 'volume-1' }] as never
+      if (channel === 'db:blueprint-list-summary') return [{ chapterNumber: 1, volumeId: 'volume-1' }, { chapterNumber: 2, volumeId: 'volume-1' }] as never
       throw new Error(`Unexpected project channel: ${String(channel)}`)
     }) as never)
     const response = await exportSelectedMarkdown({

@@ -1,0 +1,16 @@
+PASS  fixture.created
+PASS  build.current-source
+PASS  build.gate
+PASS  abi.rebuild-electron
+PASS  isolation.profile-dir-used
+PASS  ui.launch1.project-opened
+FAIL  main.smoke-open-marker
+PASS  app.quit1
+PASS  abi.restore-node
+FAIL  execution.error
+PASS  storage.project-a.sqlite
+PASS  storage.project-a.manifest
+PASS  storage.global-home.recent-projects
+PASS  isolation.project-b-untouched
+PASS  storage.source-fixtures.readonly
+PASS  isolation.electron-profile-used

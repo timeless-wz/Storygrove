@@ -14,11 +14,22 @@ if (typeof electronPath !== 'string' || !electronPath) {
   process.exit(1)
 }
 const serverPath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'story-mcp-server.mjs')
+// Development/test installs may have a Node binding. Prefer this actual runtime
+// when it can open SQLite; packaged Electron bindings keep the Electron fallback.
+let runtimePath = electronPath
+const runtimeEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+try {
+  const Database = require('better-sqlite3')
+  const probe = new Database(':memory:')
+  probe.close()
+  runtimePath = process.execPath
+  delete runtimeEnv.ELECTRON_RUN_AS_NODE
+} catch { /* The app's Electron runtime owns the installed native binding. */ }
 // Pipe the protocol through instead of sharing stdio handles: when this wrapper
 // dies or its stdin closes, the child's pipes break too, so the Electron process
 // never outlives the MCP client while holding the project database open.
-const child = spawn(electronPath, [serverPath], {
-  env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+const child = spawn(runtimePath, [serverPath], {
+  env: runtimeEnv,
   stdio: ['pipe', 'pipe', 'pipe'],
   windowsHide: true,
 })

@@ -1,3 +1,4 @@
+import { resolvedCultivationName } from '../../../shared/cultivation'
 import {
   BaseWorkflowCommand,
   injectWritingSkillIntoSession,
@@ -47,6 +48,12 @@ import {
   type SelectedCandidateDraft,
 } from '../chapter-materials'
 import type { DraftSourceDependency } from '../../../shared/draft-source-dependency'
+import type { ChapterBlueprintV2DetailRead } from '../../../shared/blueprint-v2'
+import {
+  assembleBlueprintV2WritingBlock,
+  isWritableBlueprintV2Detail,
+  type BlueprintV2WritingBlock,
+} from './blueprint-v2-writing'
 
 export { countDraftUnits } from '../../../shared/draft-units'
 export { previousChapterEnding } from '../chapter-materials'
@@ -60,7 +67,15 @@ const CROSS_CHAPTER_REUSE_ENGLISH_NGRAM_CHARS = 20
 const CROSS_CHAPTER_REUSE_LONG_RUN_CHARS = 80
 const ACTIVE_THREAD_CONTEXT_MAX_CHARS = 1200
 const ACTIVE_THREAD_CONTEXT_MAX_ITEMS = 6
+const FUTURE_BLUEPRINT_CONTEXT_MAX_CHAPTERS = 5
+const FUTURE_BLUEPRINT_TITLE_MAX_CHARS = 120
+const FUTURE_BLUEPRINT_EVENTS_MAX_CHARS = 360
 const STREAM_PREVIEW_INTERVAL_MS = 250
+
+function boundedFutureBlueprintText(value: string, maxChars: number): string {
+  const chars = Array.from(value.trim())
+  return chars.length <= maxChars ? chars.join('') : `${chars.slice(0, maxChars - 1).join('')}…`
+}
 
 type ChapterHeading = Readonly<{
   lineIndex: number
@@ -459,16 +474,17 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
       '(no future chapter blueprints)',
     )
     try {
-      const { loadDirectoryBlueprints } = await import('../directory-workflow')
-      const allBlueprints = await loadDirectoryBlueprints(expectedProjectPath, projectSession)
+      const { loadDirectoryBlueprintSummaries } = await import('../directory-workflow')
+      const allBlueprints = await loadDirectoryBlueprintSummaries(expectedProjectPath, projectSession)
       const futureBlueprintsArr = allBlueprints.filter(
         b => b.chapterNumber > this.chapterInfo.chapterNumber && b.chapterNumber <= this.chapterInfo.chapterNumber + 5
-      )
+      ).sort((left, right) => left.chapterNumber - right.chapterNumber)
+        .slice(0, FUTURE_BLUEPRINT_CONTEXT_MAX_CHAPTERS)
       if (futureBlueprintsArr.length > 0) {
         futureBlueprintsStr = futureBlueprintsArr.map(b => promptLanguageText(
           writingLanguage,
-          `第${b.chapterNumber}章 ${b.title}：${b.keyEvents}`,
-          `Chapter ${b.chapterNumber}: ${b.title} — ${b.keyEvents}`,
+          `第${b.chapterNumber}章 ${boundedFutureBlueprintText(b.title, FUTURE_BLUEPRINT_TITLE_MAX_CHARS)}：${boundedFutureBlueprintText(b.keyEvents, FUTURE_BLUEPRINT_EVENTS_MAX_CHARS)}`,
+          `Chapter ${b.chapterNumber}: ${boundedFutureBlueprintText(b.title, FUTURE_BLUEPRINT_TITLE_MAX_CHARS)} — ${boundedFutureBlueprintText(b.keyEvents, FUTURE_BLUEPRINT_EVENTS_MAX_CHARS)}`,
         )).join('\n')
       }
     } catch { /* 忽略 */ }
@@ -542,8 +558,41 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
       const unavailableContext = promptLanguageText(writingLanguage, '（知识库检索不可用）', '(knowledge-base search unavailable)')
       knowledgeReferences = [{ text: unavailableContext, rendered: unavailableContext }]
     }
-    const writerChapterInfo = toWriterChapterInfo(this.chapterInfo)
-    const targetChars = normalizeChapterWordsTarget(this.chapterInfo.wordsTarget, novelConfig.wordsPerChapter)
+    // 契约 §9：detail 存在 → v2 注入路径（分镜全文/规则/章末目标/冲突/检查条目）；
+    // 不存在或读取不可信 → 原 v1 路径。同一章只走一条注入路径。
+    const blueprintV2Detail = await this.readBlueprintV2Detail(
+      expectedProjectPath,
+      projectSession,
+      uiText,
+      message => callbacks.log(message),
+    )
+    const blueprintV2Block: BlueprintV2WritingBlock | null = isWritableBlueprintV2Detail(blueprintV2Detail)
+      ? assembleBlueprintV2WritingBlock(blueprintV2Detail, writingLanguage)
+      : null
+    const legacyWriterChapterInfo = toWriterChapterInfo(this.chapterInfo)
+    // v2 已携带完整的本章事件与收束；不要再将 v1 投影摘要作为第二条
+    // 当前章任务路径重复注入。角色、章节功能和作者微操指导仍保留。
+    const writerChapterInfo: WriterChapterInfo = blueprintV2Block
+      ? { ...legacyWriterChapterInfo, purpose: '', keyEvents: '', suspenseHook: '' }
+      : legacyWriterChapterInfo
+    if (blueprintV2Detail && !blueprintV2Block) {
+      callbacks.log(uiText(
+        '本章细纲存在但不含可注入内容，本次按简纲字段生成。',
+        'The chapter detailed outline exists but has no injectable content; using simple-outline fields.',
+      ))
+    } else if (blueprintV2Block) {
+      callbacks.log(uiText(
+        `已注入本章 v2 细纲：${blueprintV2Block.sceneCount} 个分镜` +
+          (blueprintV2Block.wordBudget !== null ? `，字数预算 ${blueprintV2Block.wordBudget} 字` : ''),
+        `Injected the chapter v2 detailed outline: ${blueprintV2Block.sceneCount} scene(s)` +
+          (blueprintV2Block.wordBudget !== null ? `, word budget ${blueprintV2Block.wordBudget}` : ''),
+      ))
+    }
+    // 字数预算优先采用蓝图中的明确值（如 4200）；没有时才走现有默认值。
+    const targetChars = normalizeChapterWordsTarget(
+      blueprintV2Block?.wordBudget ?? this.chapterInfo.wordsTarget,
+      novelConfig.wordsPerChapter,
+    )
     const lowerTargetChars = Math.round(targetChars * 0.8)
     const upperTargetChars = Math.round(targetChars * 1.2)
     const promptBuilder = new ChapterPromptBuilder(template, writingLanguage)
@@ -642,7 +691,7 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
       `【本章篇幅合同】\n用户目标 ${targetChars} 字；可接受范围 ${lowerTargetChars}–${upperTargetChars} 字（±20%）。在此篇幅内完整落实本章蓝图中的全部作者任务和必需事件；不得为满足篇幅而删除、改写或截断这些要求，不要为凑字数增加无关内容。`,
       `[Chapter length contract]\nThe user's target is ${targetChars} words; the acceptable range is ${lowerTargetChars}-${upperTargetChars} words (±20%). Within this length, fully realize every author task and required event in the chapter blueprint; do not delete, rewrite, or truncate those requirements to meet the range, and do not add unrelated content just to fill space.`,
     )
-    const executionItems = [
+    const executionItems = blueprintV2Block ? [] : [
       { zhCN: '必需事件', enUS: 'Required events', value: this.chapterInfo.keyEvents },
       { zhCN: '章节钩子', enUS: 'Chapter hook', value: this.chapterInfo.suspenseHook },
       { zhCN: '作者本章指导', enUS: 'Author guidance for this chapter', value: this.chapterInfo.userGuidance },
@@ -654,7 +703,7 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
           `[Current-chapter execution card (author text repeated verbatim)]\nThe non-empty items below are current-chapter actions and end states, not new facts. Before output, check that each item is realized through manuscript action or outcome. Each later action must continue from the item ownership, character knowledge, and plan-completion state actually established in the prose.\n${executionItems.flatMap(item => item.value?.trim() ? [`- ${item.enUS}: ${item.value}`] : []).join('\n')}`,
         )
       : ''
-    const prompt = [chapterMaterials.text, promptBuilder.build(), chapterExecutionCard, chapterLengthContract]
+    const prompt = [chapterMaterials.text, promptBuilder.build(), blueprintV2Block?.text ?? '', chapterExecutionCard, chapterLengthContract]
       .filter(Boolean)
       .join('\n\n')
     const previousEnding = chapterMaterials.previousEnding
@@ -750,6 +799,7 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
             writingStyle,
             novelConfigFacts: novelConfigFactsJson,
             chapterMaterials: chapterMaterials.text,
+            blueprintV2Text: blueprintV2Block?.text ?? '',
             writingLanguage,
             reasoning: initialOutcome.receipt.capabilities.reasoning === true,
             onRecoverableCandidate: candidate => { recoverableDraftCandidate = candidate },
@@ -771,6 +821,14 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
         throw new Error(uiText(
           '新章节开头与上一章结尾存在大段重演，结果未保存。请重新生成，并让本章从上一章已完成事件之后继续。',
           'The new chapter substantially replays the previous ending, so it was not saved. Regenerate it and continue after the events already completed in the previous chapter.',
+        ))
+      }
+
+      const completedUnits = countDraftUnits(cleanDraftText)
+      if (completedUnits > upperTargetChars) {
+        callbacks.log(uiText(
+          `篇幅超出目标范围：${completedUnits} 字，上限 ${upperTargetChars} 字。完整正文将保留为草稿，请检查并精简。`,
+          `Draft exceeds the target range: ${completedUnits} units, upper bound ${upperTargetChars}. The complete prose will be kept as a draft; review and shorten it.`,
         ))
       }
 
@@ -819,6 +877,10 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
       )
       const createResult = await ipc.invokeWithProjectSession(projectSession, 'db:draft-create', {
         chapterNumber: this.chapterInfo.chapterNumber,
+        // This workflow was launched for this chapter's blueprint. Persist the
+        // explicit binding atomically with the generated draft so later review
+        // freezes the same outline instead of guessing from chapterNumber.
+        blueprintChapterNumber: this.chapterInfo.chapterNumber,
         version: nextVersion,
         source: 'write',
         content: cleanDraftText,
@@ -927,6 +989,59 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
     }
   }
 
+  /**
+   * 读取绑定本章的完整 v2 细纲（契约 §9）。无细纲返回 null（v1 路径）；
+   * corrupt / needs-newer-app 时记录证据日志后返回 null（回落 v1 路径；
+   * DB 的 raw_markdown 仍完整保留，绝不静默丢弃，契约 §5.1）。
+   */
+  private async readBlueprintV2Detail(
+    expectedProjectPath: string,
+    projectSession: ProjectSessionContext,
+    uiText: (zhCNText: string, enUSText: string) => string,
+    log: (message: string) => void,
+  ): Promise<ChapterBlueprintV2DetailRead | null> {
+    let detail: ChapterBlueprintV2DetailRead | null
+    try {
+      detail = await ipc.invokeWithProjectSession(
+        projectSession,
+        'db:blueprint-v2-get',
+        this.chapterInfo.chapterNumber,
+        expectedProjectPath,
+      )
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      const message = uiText(
+        `读取第 ${this.chapterInfo.chapterNumber} 章 v2 细纲失败，已停止写作以免漏用细纲：${reason}`,
+        `Could not read Chapter ${this.chapterInfo.chapterNumber}'s v2 detailed outline. Writing stopped to avoid omitting it: ${reason}`,
+      )
+      log(message)
+      throw new Error(message)
+    }
+    if (!detail) return null
+    const readStatus = (detail as { readStatus?: string }).readStatus
+    if (readStatus === 'corrupt' || readStatus === 'needs-newer-app') {
+      const message = uiText(
+        readStatus === 'corrupt'
+          ? `本章 v2 细纲存储已损坏，已停止写作；原始 Markdown 仍保留在数据库中，请在细纲界面修复或重新导入。`
+          : `本章 v2 细纲由更新版本的应用写入（schema 超前），已停止写作；原始 Markdown 仍保留在数据库中。`,
+        readStatus === 'corrupt'
+          ? 'The chapter v2 detailed outline is corrupted. Writing stopped; the raw Markdown remains in the database. Repair or re-import it in the outline editor.'
+          : 'The chapter v2 detailed outline was written by a newer app version (newer schema). Writing stopped; the raw Markdown remains in the database.',
+      )
+      log(message)
+      throw new Error(message)
+    }
+    if (detail.chapterNumber !== this.chapterInfo.chapterNumber) {
+      const message = uiText(
+        `蓝图读取返回第 ${detail.chapterNumber} 章，但当前写作目标是第 ${this.chapterInfo.chapterNumber} 章；已停止以防串章。`,
+        `The blueprint read returned Chapter ${detail.chapterNumber}, but the writing target is Chapter ${this.chapterInfo.chapterNumber}. Writing stopped to prevent a chapter mismatch.`,
+      )
+      log(message)
+      throw new Error(message)
+    }
+    return detail
+  }
+
   private shouldAutoContinue(
     currentText: string,
     targetChars: number,
@@ -955,6 +1070,8 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
     writingStyle: string
     novelConfigFacts: string
     chapterMaterials: string
+    /** 本章 v2 细纲注入块（含固定脚手架）；空串表示走 v1 路径。 */
+    blueprintV2Text: string
     writingLanguage: WritingLanguage
     reasoning: boolean
     onRecoverableCandidate(candidate: string): void
@@ -1005,6 +1122,9 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
               + 'This is the only no-progress recovery attempt: advance directly to the next event, action, or line of dialogue without repeating the existing ending.\n\n',
           )
         : ''
+      const blueprintV2Section = params.blueprintV2Text
+        ? `\n${params.blueprintV2Text}\n`
+        : ''
       const continuationPrompt = promptLanguageText(
         params.writingLanguage,
         `${recoveryInstruction}请无缝续写当前章节正文。
@@ -1019,7 +1139,7 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
 
 【本章蓝图】
 ${JSON.stringify(params.chapterInfo, null, 2)}
-
+${blueprintV2Section}
 【全局写作要求】
 ${params.globalGuidance}
 
@@ -1049,7 +1169,7 @@ ${visibleTail}`,
 
 [Current chapter blueprint]
 ${JSON.stringify(params.chapterInfo, null, 2)}
-
+${blueprintV2Section}
 [Project-wide writing guidance]
 ${params.globalGuidance}
 
@@ -1250,6 +1370,8 @@ ${visibleTail}`,
           '(character-profile provenance is unknown or needs repair; it was not injected as author fact)',
         )
       }
+      const cultivation = roster.entries.some(card => card.cultivationLevelId)
+        ? await ipc.invokeWithProjectSession(projectSession, 'db:cultivation-read', projectPath) : null
       const profiles: string[] = []
       const relevantNames = new Set(relevantCharacterNames.map(name => name.trim()).filter(Boolean))
       for (const card of roster.entries) {
@@ -1264,6 +1386,7 @@ ${visibleTail}`,
           card.motivation && `motivation: ${card.motivation}`,
           card.arc && `arc: ${card.arc}`,
           card.notes && `notes: ${card.notes}`,
+          card.cultivationLevelId && cultivation && `cultivation: ${resolvedCultivationName(card, cultivation.realms)}`,
         ].filter(Boolean)
         for (const relationship of card.relationships ?? []) {
           const target = relationship.target?.trim()
@@ -1280,7 +1403,8 @@ ${visibleTail}`,
         }
         for (const field of CHARACTER_STATE_TEXT_FIELDS) {
           const provenance = card.currentState?.provenance?.[field]
-          const value = card.currentState?.[field]?.trim()
+          const value = field === 'powerLevel' && card.cultivationLevelId && cultivation
+            ? resolvedCultivationName(card, cultivation.realms) : card.currentState?.[field]?.trim()
           if (provenance?.kind === 'author' && value) {
             facts.push(`${field}@chapter${provenance.chapterNumber}: ${value}`)
           }

@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useEffect, useMemo, useState } from 'react'
 
-import type { BlueprintData } from '../../../../electron/repositories/blueprint-repository'
+import type { BlueprintListSummary } from '../../../../electron/repositories/blueprint-repository'
 import type { DraftMeta } from '../../../../electron/repositories/draft-repository'
 import type { NarrativeThreadView } from '../../../shared/narrative-thread'
 import { sameProjectSessionContext, projectSessionContextFromProject } from '../../../shared/project-session-context'
@@ -65,7 +65,7 @@ function displayValue(value: unknown, locale: string): string {
 
 function buildSelectableProposals(
   args: Record<string, unknown>,
-  unwrittenBlueprints: BlueprintData[],
+  unwrittenBlueprints: BlueprintListSummary[],
 ): SelectableBlueprintProposal[] {
   if (!Array.isArray(args.blueprint_changes)) return []
   const byChapter = new Map(unwrittenBlueprints.map(blueprint => [blueprint.chapterNumber, blueprint]))
@@ -100,7 +100,7 @@ function buildSelectableProposals(
 export function buildConfigImpactPreview(
   args: Record<string, unknown>,
   changedFields: string[],
-  blueprints: BlueprintData[],
+  blueprints: BlueprintListSummary[],
   drafts: DraftMeta[],
   threads: NarrativeThreadView[],
 ): Extract<ConfigImpactPreviewState, { kind: 'valid' }> {
@@ -160,7 +160,7 @@ export function useConfigImpactPreview(
     if (immediate || !currentProject || !toolCall.projectSession) return
     let disposed = false
     void Promise.all([
-      ipc.invokeWithProjectSession(toolCall.projectSession, 'db:blueprint-get-all', currentProject.path),
+      ipc.invokeWithProjectSession(toolCall.projectSession, 'db:blueprint-list-summary', currentProject.path),
       ipc.invokeWithProjectSession(toolCall.projectSession, 'db:draft-list-all', currentProject.path),
       ipc.invokeWithProjectSession(toolCall.projectSession, 'db:narrative-thread-list', currentProject.path),
     ]).then(([blueprints, drafts, threads]) => {

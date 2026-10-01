@@ -34,6 +34,8 @@ import { ipc } from '../../services/ipc-client'
 import { getWorldMapName } from '../../shared/world-map'
 import type { ChapterBlueprint } from '../../services/workflows/directory-workflow'
 import type { ReviewFull } from '../../../electron/repositories/review-repository'
+import type { ChapterBlueprintV2DetailRead } from '../../shared/blueprint-v2'
+import { assertNoLossOnSerialize } from '../../shared/blueprint-v2-markdown'
 
 type ReferenceGroupProps = {
   icon: typeof Users
@@ -101,9 +103,34 @@ export default function ProjectReferencePanel() {
 
   // 正在写草稿时上下文感知的当前蓝图与审核状态
   const [currentBlueprint, setCurrentBlueprint] = useState<ChapterBlueprint | null>(null)
+  const [currentBlueprintDetail, setCurrentBlueprintDetail] = useState<ChapterBlueprintV2DetailRead | null>(null)
+  const [currentBlueprintNumber, setCurrentBlueprintNumber] = useState<number | null>(null)
   const [currentReview, setCurrentReview] = useState<ReviewFull | null>(null)
   const [chapterForeshadowings, setChapterForeshadowings] = useState<ForeshadowingRecord[]>([])
   const [blueprintLoading, setBlueprintLoading] = useState(false)
+  const currentBlueprintMarkdown = useMemo(() => {
+    if (!currentBlueprintDetail || currentBlueprintDetail.readStatus) return null
+    try {
+      return assertNoLossOnSerialize(currentBlueprintDetail)
+    } catch {
+      return null
+    }
+  }, [currentBlueprintDetail])
+
+  const acknowledgeBlueprintReview = async () => {
+    const session = captureProjectSession(currentProject)
+    if (!session || !currentBlueprintNumber || !currentBlueprintDetail?.reviewNotices?.length) return
+    try {
+      const result = await ipc.invokeWithProjectSession(
+        session, 'db:blueprint-v2-review-notices-clear', currentBlueprintNumber, session.projectPath,
+      )
+      if (result.success) {
+        setCurrentBlueprintDetail(previous => previous ? { ...previous, reviewNotices: [] } : previous)
+      }
+    } catch {
+      // Keep the persistent notice visible when acknowledgment could not be saved.
+    }
+  }
 
   useEffect(() => {
     const projectPath = currentProject?.path
@@ -111,12 +138,14 @@ export default function ProjectReferencePanel() {
     void useCharacterStore.getState().load(projectPath)
   }, [currentProject?.path, dataProjectKey])
 
-  // 当处于草稿编辑 Tab 时，实时查询该章节的蓝图与审稿状态
+  // 正文参考只跟随草稿明确保存的 blueprint_chapter_number；未绑定时不猜章号。
   const chapterNumber = activeTab?.chapterNumber
   useEffect(() => {
     if (activeTab?.type !== 'chapter' || !chapterNumber || !currentProject) {
       queueMicrotask(() => {
         setCurrentBlueprint(null)
+        setCurrentBlueprintDetail(null)
+        setCurrentBlueprintNumber(null)
         setCurrentReview(null)
       })
       return
@@ -125,25 +154,41 @@ export default function ProjectReferencePanel() {
     if (!projectSession) return
 
     let cancelled = false
+    setCurrentBlueprint(null)
+    setCurrentBlueprintDetail(null)
+    setCurrentBlueprintNumber(null)
     queueMicrotask(() => {
       if (!cancelled) setBlueprintLoading(true)
     })
 
-    // 1. 获取蓝图
-    ipc.invokeWithProjectSession(projectSession, 'db:blueprint-get', chapterNumber, projectSession.projectPath)
-      .then((bp: unknown) => {
-        if (!cancelled && bp) {
-          setCurrentBlueprint(bp as ChapterBlueprint)
-        } else if (!cancelled) {
+    const readBoundBlueprint = async () => {
+      try {
+        const draftId = activeTab.draftId
+        if (!draftId) return
+        const meta = await ipc.invokeWithProjectSession(
+          projectSession, 'db:draft-get-meta', draftId, projectSession.projectPath,
+        )
+        if (cancelled) return
+        const boundNumber = meta?.blueprintChapterNumber
+        if (!Number.isSafeInteger(boundNumber) || (boundNumber as number) <= 0) return
+        setCurrentBlueprintNumber(boundNumber as number)
+        const [bp, detail] = await Promise.all([
+          ipc.invokeWithProjectSession(projectSession, 'db:blueprint-get', boundNumber as number, projectSession.projectPath),
+          ipc.invokeWithProjectSession(projectSession, 'db:blueprint-v2-get', boundNumber as number, projectSession.projectPath),
+        ])
+        if (cancelled) return
+        setCurrentBlueprint(bp as ChapterBlueprint | null)
+        setCurrentBlueprintDetail(detail as ChapterBlueprintV2DetailRead | null)
+      } catch {
+        if (!cancelled) {
           setCurrentBlueprint(null)
+          setCurrentBlueprintDetail(null)
         }
-      })
-      .catch(() => {
-        if (!cancelled) setCurrentBlueprint(null)
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setBlueprintLoading(false)
-      })
+      }
+    }
+    void readBoundBlueprint()
 
     // 2. 获取最近审稿
     const draftId = activeTab.draftId
@@ -309,7 +354,9 @@ export default function ProjectReferencePanel() {
             <div className="flex items-center justify-between gap-2">
               <span className="writer-context-block-title">
                 <BookOpen size={13} />
-                {text(`第 ${chapterNumber ?? '?'} 章蓝图与创作指导`, `Chapter ${chapterNumber ?? '?'} blueprint & guidance`)}
+                {currentBlueprintNumber
+                  ? text(`第 ${currentBlueprintNumber} 章蓝图与创作指导`, `Chapter ${currentBlueprintNumber} blueprint & guidance`)
+                  : text('当前草稿未绑定章节蓝图', 'This draft has no linked chapter blueprint')}
               </span>
               <button
                 type="button"
@@ -325,6 +372,10 @@ export default function ProjectReferencePanel() {
             {blueprintLoading ? (
               <div className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
                 {text('加载章节蓝图中...', 'Loading blueprint...')}
+              </div>
+            ) : !currentBlueprintNumber ? (
+              <div className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+                {text('此处只显示草稿明确绑定的蓝图；可通过蓝图绑定入口选择章节。', 'This panel only shows the blueprint explicitly linked to the draft. Use the blueprint binding action to choose one.')}
               </div>
             ) : currentBlueprint ? (
               <div className="space-y-2">
@@ -349,6 +400,52 @@ export default function ProjectReferencePanel() {
                     <div className="writer-context-field-label">{text('关键事件', 'Key events')}</div>
                     <div className="writer-context-field-body">{currentBlueprint.keyEvents}</div>
                   </div>
+                )}
+
+                {(currentBlueprintDetail?.reviewNotices?.length ?? 0) > 0 && (
+                  <div className="writer-context-field rounded border border-[var(--color-warning-border,var(--color-border))] p-2 text-[11px]" role="alert" data-testid="blueprint-name-review-notice">
+                    <div className="font-semibold">{text('角色改名待核对', 'Character rename needs review')}</div>
+                    <ul className="mt-1 list-disc pl-4 space-y-1">
+                      {currentBlueprintDetail?.reviewNotices?.map((notice, index) => (
+                        <li key={`${notice.oldName}-${notice.newName}-${index}`}>
+                          {notice.oldName
+                            ? text(`请核对「${notice.oldName} → ${notice.newName}」在细纲正文中的出现位置；正文未自动替换。`, `Check occurrences of “${notice.oldName} → ${notice.newName}” in the outline. The text was not automatically replaced.`)
+                            : text('细纲中可能包含待核对的角色名；正文未自动替换。', 'A character name in this outline may need review. The text was not automatically replaced.')}
+                        </li>
+                      ))}
+                    </ul>
+                    <button type="button" className="mt-2 underline" onClick={() => void acknowledgeBlueprintReview()}>
+                      {text('我已核对细纲正文', 'I reviewed the outline text')}
+                    </button>
+                  </div>
+                )}
+
+                {currentBlueprintDetail && !currentBlueprintDetail.readStatus && currentBlueprintMarkdown && (
+                  <details className="writer-context-field" data-testid="project-reference-blueprint-v2">
+                    <summary className="cursor-pointer font-medium">
+                      {text(
+                        `阅读完整 v2 细纲（${currentBlueprintDetail.sections.length} 个分区）`,
+                        `Read full v2 outline (${currentBlueprintDetail.sections.length} sections)`,
+                      )}
+                    </summary>
+                    <pre className="mt-2 whitespace-pre-wrap break-words font-sans text-[11px] leading-relaxed">{currentBlueprintMarkdown}</pre>
+                  </details>
+                )}
+                {currentBlueprintDetail && !currentBlueprintDetail.readStatus && !currentBlueprintMarkdown && (
+                  <div className="writer-context-field text-[11px] text-[var(--color-warning-text)]" role="status">
+                    {text('完整细纲无法通过无损序列化自检，请在蓝图编辑器中核对。', 'The full outline failed the lossless serialization check. Inspect it in the blueprint editor.')}
+                  </div>
+                )}
+                {currentBlueprintDetail?.readStatus && currentBlueprintDetail.rawMarkdown && (
+                  <details className="writer-context-field" data-testid="project-reference-blueprint-v2-raw">
+                    <summary className="cursor-pointer font-medium text-[var(--color-warning-text)]">
+                      {text(
+                        `细纲结构读取状态：${currentBlueprintDetail.readStatus}；查看保留的原始 Markdown`,
+                        `Outline status: ${currentBlueprintDetail.readStatus}; inspect preserved raw Markdown`,
+                      )}
+                    </summary>
+                    <pre className="mt-2 whitespace-pre-wrap break-words font-sans text-[11px] leading-relaxed">{currentBlueprintDetail.rawMarkdown}</pre>
+                  </details>
                 )}
 
                 {/* user_guidance 创作指导与细纲 */}
@@ -497,9 +594,27 @@ export default function ProjectReferencePanel() {
                   )}
                 </div>
               </div>
+            ) : currentBlueprintDetail && !currentBlueprintDetail.readStatus ? (
+              <div className="space-y-2">
+                <div className="text-[12px] font-medium" style={{ color: 'var(--color-text)' }}>
+                  {currentBlueprintDetail.chapterTitle || text(`第 ${currentBlueprintNumber} 章细纲`, `Chapter ${currentBlueprintNumber} outline`)}
+                </div>
+                {currentBlueprintMarkdown ? (
+                  <details className="writer-context-field" data-testid="project-reference-blueprint-v2">
+                    <summary className="cursor-pointer font-medium">
+                      {text(`阅读完整 v2 细纲（${currentBlueprintDetail.sections.length} 个分区）`, `Read full v2 outline (${currentBlueprintDetail.sections.length} sections)`)}
+                    </summary>
+                    <pre className="mt-2 whitespace-pre-wrap break-words font-sans text-[11px] leading-relaxed">{currentBlueprintMarkdown}</pre>
+                  </details>
+                ) : (
+                  <div className="writer-context-field text-[11px] text-[var(--color-warning-text)]" role="status">
+                    {text('完整细纲无法通过无损序列化自检，请在蓝图编辑器中核对。', 'The full outline failed the lossless serialization check. Inspect it in the blueprint editor.')}
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
-                {text('未查询到当前章节的蓝图信息', 'No blueprint found for this chapter')}
+                {text(`草稿绑定的第 ${currentBlueprintNumber} 章蓝图不存在或不可读取。`, `The blueprint linked to Chapter ${currentBlueprintNumber} does not exist or could not be read.`)}
               </div>
             )}
           </div>

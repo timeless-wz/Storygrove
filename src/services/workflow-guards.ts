@@ -190,7 +190,7 @@ export async function guardChapterWriting(
   }
 
   const { projectPath, projectSession } = captured
-  const blueprints = await ipc.invokeWithProjectSession(projectSession, 'db:blueprint-get-all', projectPath)
+  const blueprints = await ipc.invokeWithProjectSession(projectSession, 'db:blueprint-list-summary', projectPath)
   if (blueprints.length === 0) {
     return {
       ok: false,
@@ -272,7 +272,7 @@ export async function guardCharacterRegeneration(
 
   const blueprints = await ipc.invokeWithProjectSession(
     captured.projectSession,
-    'db:blueprint-get-all',
+    'db:blueprint-list-summary',
     captured.projectPath,
   )
   if (blueprints.length > 0) {

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 import { useProjectStore } from '../../../../stores/project-store'
 import { useLocaleStore } from '../../../../stores/locale-store'
@@ -9,6 +11,11 @@ import type {
   ModelExecutionLeaseReceipt,
 } from '../../../../shared/ipc-channels'
 import type { NarrativeThreadView } from '../../../../shared/narrative-thread'
+import { parseChapterBlueprintMarkdown } from '../../../../shared/blueprint-v2-markdown'
+import {
+  computeBlueprintV2ContentHash,
+  type ChapterBlueprintV2DetailRead,
+} from '../../../../shared/blueprint-v2'
 import {
   createGenerationRuntime,
   type GenerationRuntime,
@@ -353,6 +360,7 @@ describe('GenerateDraftCommand generation runtime boundary', () => {
       content: string
     }>
     knowledgeResults?: Array<{ text: string; score: number; fileName: string }>
+    purpose?: string
     keyEvents?: string
     suspenseHook?: string
     knowledgeQueryHint?: string
@@ -363,6 +371,8 @@ describe('GenerateDraftCommand generation runtime boundary', () => {
       [key: string]: unknown
     }>
     sourceDraft?: { id: number; version: number }
+    blueprintV2Detail?: ChapterBlueprintV2DetailRead | null
+    blueprintV2ReadError?: Error
   }) {
     let recoveryCandidateSequence = 0
     const invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
@@ -376,9 +386,19 @@ describe('GenerateDraftCommand generation runtime boundary', () => {
           synopsis: options.synopsis ?? '',
         }
       }
-      if (channel === 'db:blueprint-get-all') return options.blueprints ?? []
+      if (channel === 'db:blueprint-list-summary') return (options.blueprints ?? []).map(blueprint => ({
+        chapterNumber: blueprint.chapterNumber,
+        title: blueprint.title,
+        purpose: '',
+        keyEvents: blueprint.keyEvents,
+      }))
+      if (channel === 'db:blueprint-v2-summary-list') return []
       if (channel === 'db:blueprint-get') {
         return options.blueprints?.find(blueprint => blueprint.chapterNumber === args[0]) ?? null
+      }
+      if (channel === 'db:blueprint-v2-get') {
+        if (options.blueprintV2ReadError) throw options.blueprintV2ReadError
+        return options.blueprintV2Detail ?? null
       }
       if (channel === 'db:continuity-list-before') return options.continuity ?? []
       if (channel === 'db:continuity-read-source') {
@@ -521,7 +541,7 @@ describe('GenerateDraftCommand generation runtime boundary', () => {
       chapterNumber: options.chapterNumber ?? 1,
       title: options.chapterNumber === 2 ? 'Chapter Two' : '第一章',
       role: '开端',
-      purpose: '建立冲突',
+      purpose: options.purpose ?? '建立冲突',
       keyEvents: options.keyEvents ?? '开端',
       suspenseHook: options.suspenseHook,
       characters: options.characters ?? [],
@@ -847,6 +867,205 @@ describe('GenerateDraftCommand generation runtime boundary', () => {
     expect(user).not.toContain('【本章执行卡（作者原文重列）】')
     expect(user).toContain('【本章篇幅合同】')
     expect(runtime.complete).toHaveBeenCalledOnce()
+  })
+
+  const V2_FIXTURE_PATH = resolve(__dirname, '../../../../../test/fixtures/blueprint-v2/chapter-01.md')
+
+  function v2FixtureDetail(overrides: Partial<ChapterBlueprintV2DetailRead> = {}): ChapterBlueprintV2DetailRead {
+    const { content } = parseChapterBlueprintMarkdown(readFileSync(V2_FIXTURE_PATH, 'utf8'))
+    return {
+      ...content,
+      revision: 3,
+      contentHash: computeBlueprintV2ContentHash(content),
+      ...overrides,
+    }
+  }
+
+  it('keeps the legacy simple-outline path and manual author guidance when no v2 detail exists', async () => {
+    let observedTask: GenerationTask | undefined
+    const runtime = fakeRuntime((_attempt, task) => {
+      observedTask = task
+      return outcome('正'.repeat(900), 'stop')
+    })
+    const { invoke, context, callbacks, command } = setup({
+      runtime,
+      writingLanguage: 'zh-CN',
+      wordsTarget: 900,
+      purpose: '旧版简纲目标 FALLBACK_PURPOSE_SENTINEL',
+      keyEvents: '旧版必达事件 FALLBACK_EVENTS_SENTINEL',
+      suspenseHook: '旧版章末悬念 FALLBACK_HOOK_SENTINEL',
+      userGuidance: '作者手工指导 MANUAL_GUIDANCE_SENTINEL',
+      blueprintV2Detail: null,
+    })
+
+    await command.execute({ step: {}, context, callbacks })
+
+    const user = observedTask?.messages.find(message => message.role === 'user')?.content ?? ''
+    expect(user).toContain('FALLBACK_PURPOSE_SENTINEL')
+    expect(user).toContain('FALLBACK_EVENTS_SENTINEL')
+    expect(user).toContain('FALLBACK_HOOK_SENTINEL')
+    expect(user).toContain('MANUAL_GUIDANCE_SENTINEL')
+    expect(user).not.toContain('【本章细纲（蓝图 v2 任务书）')
+    expect(user).not.toContain('场景一：02:14的冷汗与声学隔离席')
+    expect(invoke).toHaveBeenCalledWith('db:blueprint-v2-get', 1, projectPath, context.projectSession)
+    expect(runtime.complete).toHaveBeenCalledOnce()
+  })
+
+  it('injects the bound v2 detailed outline for chapter 1 with scene order, the explicit 4200 budget, and forbid framing', async () => {
+    let observedTask: GenerationTask | undefined
+    const runtime = fakeRuntime((_attempt, task) => {
+      observedTask = task
+      return outcome('正'.repeat(4200), 'stop')
+    })
+    const { invoke, context, callbacks, command } = setup({
+      runtime,
+      writingLanguage: 'zh-CN',
+      wordsTarget: 3000,
+      purpose: '仅供旧投影的重复使命摘要 SENTINEL',
+      keyEvents: '仅供旧投影的重复情节摘要 SENTINEL',
+      suspenseHook: '仅供旧投影的重复钩子 SENTINEL',
+      blueprintV2Detail: v2FixtureDetail(),
+    })
+
+    await command.execute({ step: {}, context, callbacks })
+
+    const user = observedTask?.messages.find(message => message.role === 'user')?.content ?? ''
+    // 四场分镜按正式顺序进入写作输入（验收样例《第1章｜接错的人》）。
+    const sceneIndexes = [
+      user.indexOf('场景一：02:14的冷汗与声学隔离席'),
+      user.indexOf('场景二：桌面下的余温与失声的十七秒'),
+      user.indexOf('场景三：红灯尖鸣与接通线路'),
+      user.indexOf('场景四：开出地图的末班车'),
+    ]
+    expect(sceneIndexes.every(index => index >= 0)).toBe(true)
+    expect([...sceneIndexes].sort((left, right) => left - right)).toEqual(sceneIndexes)
+    // 字数预算优先采用蓝图明确值 4200，而非本章 wordsTarget 3000 或项目默认 5000。
+    expect(user).toContain('用户目标 4200 字；可接受范围 3360–5040 字（±20%）')
+    expect(user).toContain('正文字数预算：4200 字（蓝图明确值，优先生效）。')
+    expect(user).not.toContain('用户目标 3000 字')
+    expect(user).not.toContain('仅供旧投影的重复情节摘要 SENTINEL')
+    expect(user).not.toContain('仅供旧投影的重复钩子 SENTINEL')
+    expect(user).not.toContain('仅供旧投影的重复使命摘要 SENTINEL')
+    // 规则、章末目标逐字在场。
+    expect(user).toContain('- **源**：百年前异文明归航遗留的避难协议。')
+    expect(user).toContain('下一站，老槐树平房。')
+    // 禁忌以禁写约束身份进入检查条目区，不伪装成情节任务；固定脚手架在场。
+    expect(user).toContain('- [禁写] - 严禁在第1章解释前世事故、原身死因全貌、信标来源或故事之神真身。')
+    expect(user).toContain('规则、禁忌与检查条目约束事件与现象的走向')
+    expect(user).toContain('不是要求正文解释的题材')
+    expect(user).toContain('不得直接讲解世界观设定、系统规则或神明名号')
+    // 注入路径单一：v2 块只出现一次。
+    expect(user.split('【本章细纲（蓝图 v2 任务书）')).toHaveLength(2)
+    expect(callbacks.log).toHaveBeenCalledWith(expect.stringContaining('已注入本章 v2 细纲：4 个分镜，字数预算 4200 字'))
+    expect(invoke).toHaveBeenCalledWith('db:blueprint-v2-get', 1, projectPath, context.projectSession)
+    expect(invoke).toHaveBeenCalledWith(
+      'db:draft-create',
+      expect.objectContaining({ blueprintChapterNumber: 1 }),
+      projectPath,
+      context.projectSession,
+    )
+    expect(runtime.complete).toHaveBeenCalledOnce()
+  })
+
+  it('carries the v2 detailed outline into continuation requests without duplicating it', async () => {
+    const runtime = fakeOutcomes(
+      outcome('初'.repeat(100), 'length', 1),
+      outcome(`${'续'.repeat(3600)}。`, 'stop', 2),
+    )
+    const { context, callbacks, command } = setup({
+      runtime,
+      writingLanguage: 'zh-CN',
+      wordsTarget: 3000,
+      blueprintV2Detail: v2FixtureDetail(),
+    })
+
+    await command.execute({ step: {}, context, callbacks })
+
+    expect(runtime.complete).toHaveBeenCalledTimes(2)
+    for (const prompt of runtime.complete.mock.calls.map(([task]) => (
+      task.messages.find(message => message.role === 'user')?.content ?? ''
+    ))) {
+      expect(prompt).toContain('场景四：开出地图的末班车')
+      expect(prompt).toContain('严禁在第1章解释前世事故、原身死因全貌')
+      expect(prompt.split('【本章细纲（蓝图 v2 任务书）')).toHaveLength(2)
+    }
+  })
+
+  it('stops before generation when the v2 detail is corrupt', async () => {
+    let observedTask: GenerationTask | undefined
+    const runtime = fakeRuntime((_attempt, task) => {
+      observedTask = task
+      return outcome('正'.repeat(4200), 'stop')
+    })
+    const { context, callbacks, command } = setup({
+      runtime,
+      writingLanguage: 'zh-CN',
+      wordsTarget: 3000,
+      blueprintV2Detail: v2FixtureDetail({
+        readStatus: 'corrupt',
+        rawMarkdown: '原始 Markdown 仍保留在数据库中',
+      }),
+    })
+
+    await expect(command.execute({ step: {}, context, callbacks })).rejects.toThrow('v2 细纲存储已损坏')
+
+    expect(callbacks.log).toHaveBeenCalledWith(expect.stringContaining('细纲存储已损坏'))
+    expect(observedTask).toBeUndefined()
+    expect(runtime.complete).not.toHaveBeenCalled()
+  })
+
+  it('does not reinterpret a failed v2 read as a missing outline', async () => {
+    const runtime = fakeRuntime(() => outcome('不应开始写作', 'stop'))
+    const { context, callbacks, command } = setup({
+      runtime,
+      blueprintV2ReadError: new Error('temporary database read failure'),
+    })
+
+    await expect(command.execute({ step: {}, context, callbacks })).rejects.toThrow('temporary database read failure')
+
+    expect(callbacks.log).toHaveBeenCalledWith(expect.stringContaining('读取第 1 章 v2 细纲失败'))
+    expect(runtime.complete).not.toHaveBeenCalled()
+  })
+
+  it('stops if the detail read returns a different chapter than the writing target', async () => {
+    const runtime = fakeRuntime(() => outcome('不应开始写作', 'stop'))
+    const { context, callbacks, command } = setup({
+      runtime,
+      chapterNumber: 2,
+      blueprintV2Detail: v2FixtureDetail({ chapterNumber: 1 }),
+    })
+
+    await expect(command.execute({ step: {}, context, callbacks })).rejects.toThrow('当前写作目标是第 2 章')
+
+    expect(runtime.complete).not.toHaveBeenCalled()
+  })
+
+  it('bounds adjacent chapter context without truncating the current chapter scenes', async () => {
+    let observedTask: GenerationTask | undefined
+    const runtime = fakeRuntime((_attempt, task) => {
+      observedTask = task
+      return outcome('正'.repeat(4200), 'stop')
+    })
+    const longSummary = `FUTURE_SUMMARY_SENTINEL ${'后续章节摘要'.repeat(200)}`
+    const { context, callbacks, command } = setup({
+      runtime,
+      wordsTarget: 4200,
+      blueprints: Array.from({ length: 6 }, (_, index) => ({
+        chapterNumber: index + 2,
+        title: `未来标题${index + 2}`.repeat(50),
+        keyEvents: `未来事件${index + 2} ${longSummary}`,
+      })),
+      blueprintV2Detail: v2FixtureDetail(),
+    })
+
+    await command.execute({ step: {}, context, callbacks })
+
+    const user = observedTask?.messages.find(message => message.role === 'user')?.content ?? ''
+    expect(user).toContain('FUTURE_SUMMARY_SENTINEL')
+    expect(user).toContain('场景一：02:14的冷汗与声学隔离席')
+    expect(user).toContain('场景四：开出地图的末班车')
+    expect(user).not.toContain('未来事件7')
+    expect(user.match(/后续章节摘要/gu)?.length ?? 0).toBeLessThanOrEqual(360)
   })
 
   it('sends English continuation-stage instructions for an English project', async () => {
@@ -2237,6 +2456,17 @@ ${headingPrefix}第3章：潮门
       expect.anything(),
       expect.anything(),
     )
+  })
+
+  it.each([1079, 1080, 1081])('preserves complete prose and flags only counts above the upper bound: %i', async units => {
+    const prose = '正'.repeat(units)
+    const { invoke, context, callbacks, command } = setup({
+      runtime: fakeOutcomes(outcome(prose, 'stop', 1)), wordsPerChapter: 900, wordsTarget: 900,
+    })
+    await expect(command.execute({ step: {}, context, callbacks })).resolves.toBe(prose)
+    expect(invoke).toHaveBeenCalledWith('db:draft-create', expect.objectContaining({ content: prose, wordCount: units }), expect.anything(), expect.anything())
+    const exceeded = vi.mocked(callbacks.log).mock.calls.some(([message]) => /篇幅超出目标范围|Draft exceeds the target range/.test(message))
+    expect(exceeded).toBe(units > 1080)
   })
 
   it('continues a 719-unit result before persisting the completed draft', async () => {

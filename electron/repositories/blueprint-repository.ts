@@ -51,6 +51,21 @@ export interface BlueprintData {
     notesUpdatedAt: string
 }
 
+/** Bounded projection for lists and cross-chapter context. */
+export interface BlueprintListSummary {
+    chapterNumber: number
+    volumeId?: string
+    title: string
+    purpose: string
+    keyEvents: string
+}
+
+export interface BlueprintRecentNoteSummary {
+    chapterNumber: number
+    title: string
+    notes: string
+}
+
 /** A project-local container used to organize chapter blueprints. */
 export interface BlueprintVolumeData {
     id: string
@@ -514,6 +529,45 @@ function samePersistedBlueprint(left: BlueprintData, right: BlueprintData): bool
 }
 
 export class BlueprintRepository {
+    /**
+     * List-safe v1 projection. Never returns role, character lists, guidance,
+     * finalized notes, or arbitrarily long outline fields.
+     */
+    static getSummaryList(): BlueprintListSummary[] {
+        const db = requireProjectDb()
+        ensureBlueprintVolumeSchema(db)
+        const rows = db.prepare(`
+          SELECT chapter_number, volume_id, title, purpose, key_events
+          FROM blueprints
+          ORDER BY chapter_number ASC
+          LIMIT 300
+        `).all() as Array<{ chapter_number: number; volume_id?: string; title: string; purpose: string; key_events: string }>
+        return rows.map(row => ({
+            chapterNumber: row.chapter_number,
+            ...(row.volume_id ? { volumeId: row.volume_id } : {}),
+            title: String(row.title ?? '').slice(0, 160),
+            purpose: String(row.purpose ?? '').slice(0, 300),
+            keyEvents: String(row.key_events ?? '').slice(0, 800),
+        }))
+    }
+
+    /** Bounded finalized-note projection for agent project-state summaries. */
+    static getRecentNoteSummaries(): BlueprintRecentNoteSummary[] {
+        const db = requireProjectDb()
+        const rows = db.prepare(`
+          SELECT chapter_number, title, notes
+          FROM blueprints
+          WHERE TRIM(COALESCE(notes, '')) <> ''
+          ORDER BY chapter_number DESC
+          LIMIT 5
+        `).all() as Array<{ chapter_number: number; title: string; notes: string }>
+        return rows.map(row => ({
+            chapterNumber: row.chapter_number,
+            title: String(row.title ?? '').slice(0, 160),
+            notes: String(row.notes ?? '').slice(0, 1200),
+        }))
+    }
+
     /** 取得当前项目的卷目录；首次打开旧项目时自动建立第 1 卷。 */
     static getVolumes(): BlueprintVolumeData[] {
         const db = requireProjectDb()

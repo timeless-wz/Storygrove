@@ -13,7 +13,7 @@ export interface EditorTabSaveSnapshot {
 export interface EditorTab {
   id: string
   name: string
-  type: 'chapter' | 'outline' | 'character' | 'config' | 'diff' | 'chapter-card' | 'world-building' | 'arch-file' | 'version-history' | 'review-report' | 'narrative-thread' | 'world-map' | 'story-timeline' | 'overview' | 'project-document' | 'foreshadowing'
+  type: 'chapter' | 'outline' | 'character' | 'config' | 'diff' | 'chapter-card' | 'world-building' | 'arch-file' | 'version-history' | 'review-report' | 'narrative-thread' | 'world-map' | 'story-timeline' | 'world' | 'overview' | 'project-document' | 'foreshadowing' | 'cultivation'
   filePath?: string
   content?: string
   /** 架构文档已持久化的基准内容，用于跨 Tab/项目切换后恢复脏状态。 */
@@ -83,7 +83,7 @@ interface EditorState {
   setDraftLedger: (key: string, content: string) => void
   /** 同步某项目可见内置编辑器的未保存状态。 */
   setProjectEditorDirty: (
-    type: Extract<EditorTab['type'], 'character' | 'config' | 'chapter-card'>,
+    type: Extract<EditorTab['type'], 'character' | 'config' | 'chapter-card' | 'cultivation'>,
     projectKey: string,
     dirty: boolean,
   ) => void
@@ -121,11 +121,13 @@ interface EditorState {
 }
 
 const BACKGROUND_LEDGER_BY_EDITOR_TYPE: Partial<Record<EditorTab['type'], string>> = {
+  cultivation: 'cultivation-settings',
   character: 'character-editor-drafts',
   config: 'config',
   'chapter-card': 'chapter-card-editor',
 }
 const PROJECT_SCOPED_BUILTIN_TYPES = new Set<EditorTab['type']>([
+  'cultivation',
   'character',
   'config',
   'chapter-card',
@@ -137,6 +139,7 @@ const PROJECT_SCOPED_BUILTIN_TYPES = new Set<EditorTab['type']>([
   'narrative-thread',
   'world-map',
   'story-timeline',
+  'world',
   'overview',
   'project-document',
   'foreshadowing',

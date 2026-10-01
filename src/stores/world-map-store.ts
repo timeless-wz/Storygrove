@@ -28,6 +28,11 @@ interface WorldMapState {
   selectedNodeId: string | null
   selectedEdgeId: string | null
   viewMode: 'canvas' | 'list'
+  /**
+   * 一次性「定位到某个地点」的请求。世界资料跳转到地图时写入，
+   * 画布消费后把视图移动到该地点；token 保证同一地点可以被重复定位。
+   */
+  focusNodeRequest: { nodeId: string; mapId: string; token: number } | null
   loading: boolean
   candidatesLoading: boolean
 
@@ -35,6 +40,7 @@ interface WorldMapState {
   setSelectedNodeId: (id: string | null) => void
   setSelectedEdgeId: (id: string | null) => void
   setViewMode: (mode: 'canvas' | 'list') => void
+  consumeFocusNodeRequest: (token: number) => void
 
   loadAll: (projectPath: string) => Promise<void>
   loadCandidates: (projectPath: string) => Promise<void>
@@ -65,6 +71,7 @@ export const useWorldMapStore = create<WorldMapState>((set, get) => ({
   selectedNodeId: null,
   selectedEdgeId: null,
   viewMode: 'canvas',
+  focusNodeRequest: null,
   loading: false,
   candidatesLoading: false,
 
@@ -76,6 +83,10 @@ export const useWorldMapStore = create<WorldMapState>((set, get) => ({
   setSelectedNodeId: (id) => set({ selectedNodeId: id, selectedEdgeId: null }),
   setSelectedEdgeId: (id) => set({ selectedEdgeId: id, selectedNodeId: null }),
   setViewMode: (mode) => set({ viewMode: mode }),
+  consumeFocusNodeRequest: (token) => {
+    // 只清掉已经消费的那一次请求：期间到来的新请求不能被旧响应抹掉。
+    if (get().focusNodeRequest?.token === token) set({ focusNodeRequest: null })
+  },
 
   loadAll: async (projectPath: string) => {
     const currentProject = useProjectStore.getState().currentProject

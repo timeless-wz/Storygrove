@@ -3,8 +3,10 @@
  *
  * currentState 子结构已拍平为 cs_* 前缀列，杜绝 JSON 大字段。
  */
+import { ensureCultivationSchema } from './cultivation-schema'
 import { getProjectDb } from '../database'
 import { CharacterRelationshipRepository } from './character-relationship-repository'
+import { BlueprintDetailRepository } from './blueprint-detail-repository'
 import {
     normalizeCharacterRole,
     type CharacterRole,
@@ -44,6 +46,7 @@ export interface CharacterData {
     relationships: string
     arc: string
     notes: string
+    cultivationLevelId?: string | null
     currentState?: CharacterStateData
 }
 
@@ -66,6 +69,7 @@ function rowToData(row: Record<string, unknown>): CharacterData {
         relationships: (row.relationships as string) || '',
         arc: (row.arc as string) || '',
         notes: (row.notes as string) || '',
+        ...(row.cultivation_level_id ? { cultivationLevelId: row.cultivation_level_id as string } : {}),
     }
 
     // currentState 存在与否由列是否为 NULL 决定（chapter 0 为合法状态）
@@ -140,6 +144,11 @@ export class CharacterRepository {
         const db = getProjectDb()
         if (!db) return
 
+        ensureCultivationSchema(db)
+        const binding = data.cultivationLevelId === undefined
+            ? (db.prepare('SELECT cultivation_level_id FROM characters WHERE name=?').get(data.name) as { cultivation_level_id: string | null } | undefined)?.cultivation_level_id ?? null
+            : data.cultivationLevelId
+        if (binding !== null && !db.prepare('SELECT 1 FROM cultivation_levels WHERE id=?').get(binding)) throw new Error('修炼等级已删除，请重新选择 / Cultivation level no longer exists')
         const cs = data.currentState
         db.prepare(`
       INSERT INTO characters (
@@ -147,8 +156,8 @@ export class CharacterRepository {
         abilities, motivation, relationships, arc, notes,
         cs_location, cs_power_level, cs_physical_state, cs_mental_state,
         cs_key_items, cs_recent_events, cs_updated_at_chapter
-        , cs_provenance
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        , cs_provenance, cultivation_level_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(name) DO UPDATE SET
         role = excluded.role,
         gender = excluded.gender,
@@ -169,6 +178,7 @@ export class CharacterRepository {
         cs_recent_events = excluded.cs_recent_events,
         cs_updated_at_chapter = excluded.cs_updated_at_chapter,
         cs_provenance = excluded.cs_provenance,
+        cultivation_level_id = excluded.cultivation_level_id,
         updated_at = datetime('now')
     `).run(
             data.name,
@@ -191,6 +201,7 @@ export class CharacterRepository {
             cs?.recentEvents ?? '',
             cs?.updatedAtChapter ?? null,
             JSON.stringify(cs?.provenance ?? {}),
+            binding,
         )
     }
 
@@ -296,6 +307,7 @@ export class CharacterRepository {
                         updateBlueprint.run(JSON.stringify(renamed), blueprint.chapter_number)
                     }
                 }
+                BlueprintDetailRepository.markCharacterRenameReview(normalizedRenames, db)
                 // 改名只更新展示名镜像；关系端点与坐标主键都是稳定 ID，不受改名影响。
                 CharacterRelationshipRepository.applyRenames(normalizedRenames, db)
             }

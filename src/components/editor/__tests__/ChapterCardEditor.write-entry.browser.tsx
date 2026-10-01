@@ -70,6 +70,7 @@ function installIpc(options: {
 } = {}) {
   const invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
     if (channel === 'db:blueprint-get-all') return options.blueprints ?? [blueprint(1)]
+    if (channel === 'db:blueprint-v2-get') return null
     if (channel === 'db:blueprint-volume-list') return [{ id: 'volume-1', name: '第1卷', sortOrder: 1 }]
     if (channel === 'db:draft-list') return []
     if (channel === 'db:draft-create') return { success: true, id: 101 }
@@ -136,6 +137,19 @@ afterEach(async () => {
 })
 
 describe('ChapterCardEditor writing entry', () => {
+  it('opens AI writing from the authoritative blueprint with the author fields intact', async () => {
+    installIpc({ blueprints: [{ ...blueprint(1), userGuidance: '保留人工指导', notes: '既有章节记录' }] })
+    await renderEditor()
+    await vi.waitFor(() => expect(container?.textContent).toContain('写作此章'))
+    const button = Array.from(container!.querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === '写作此章')!
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+    await act(async () => button.click())
+    expect(useLayoutStore.getState()).toMatchObject({ chapterCreationOpen: true, chapterCreationPrefill: {
+      chapterNumber: 1, title: '雨夜启程', keyEvents: '收到匿名信。', userGuidance: '保留人工指导',
+    } })
+    expect(useLayoutStore.getState().chapterCreationPrefill).not.toHaveProperty('notes')
+  })
+
   it('uses finalized authority to expose Chapter 10 even when imported Chapters 1 through 9 have no blueprints', async () => {
     installIpc({
       blueprints: [blueprint(10)],
@@ -222,6 +236,7 @@ describe('ChapterCardEditor writing entry', () => {
   })
 
   it('creates and opens the authoritative Chapter 1 draft directly from its blueprint', async () => {
+    const invoke = installIpc()
     await renderEditor()
 
     await vi.waitFor(() => {
@@ -236,6 +251,12 @@ describe('ChapterCardEditor writing entry', () => {
     await vi.waitFor(() => {
       expect(useEditorStore.getState().tabs.some(tab => tab.filePath === 'vela://draft/101')).toBe(true)
     })
+    expect(invoke).toHaveBeenCalledWith(
+      'db:draft-create',
+      expect.objectContaining({ chapterNumber: 1, blueprintChapterNumber: 1 }),
+      PROJECT_PATH,
+      expect.objectContaining({ projectPath: PROJECT_PATH }),
+    )
     expect(useLayoutStore.getState().chapterCreationOpen).toBe(false)
   })
 

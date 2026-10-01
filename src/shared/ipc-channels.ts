@@ -3,6 +3,14 @@
  * 所有 IPC 调用都通过此文件定义频道名和参数/返回值类型
  */
 import type { Locale } from '../i18n/types'
+import type { FinalizationSnapshot, FinalizationResult } from './finalization'
+
+/** Narrow snapshot/receipt actions; no arbitrary filesystem destination. */
+export interface FinalizationChannels {
+  'publication:publish': { args: [snapshot: FinalizationSnapshot, context: ProjectSessionContext]; return: FinalizationResult }
+  'finalization:commit': { args: [snapshot: FinalizationSnapshot, context: ProjectSessionContext]; return: FinalizationResult }
+  'finalization:retry': { args: [finalizationId: string, context: ProjectSessionContext]; return: FinalizationResult }
+}
 import type {
   CreativeStrategy,
   GenerationReasoningStage,
@@ -59,6 +67,31 @@ import type {
   ChapterCanvasEdgeUpsertPayload,
 } from './chapter-canvas'
 import type { WorldMapNode, WorldMapEdge, WorldMapCandidate, WorldMapImage, WorldMap, WorldMapAtlas } from './world-map'
+import type {
+  WorldCharacterLink,
+  WorldCharacterLocation,
+  WorldCurrentLocationCommitOptions,
+  WorldDeletePlan,
+  WorldFaction,
+  WorldFactionCharacter,
+  WorldFactionPlace,
+  WorldFactionRelation,
+  WorldLocationCommitResult,
+  WorldMapAssignmentPlan,
+  WorldEventLink,
+  WorldPortal,
+  WorldPortalCharacter,
+  WorldPortalFaction,
+  WorldRecord,
+  WorldRelic,
+  WorldRelicCharacter,
+  WorldRelicFaction,
+  WorldRule,
+  WorldRuleTarget,
+  WorldTrailCommitRequest,
+  WorldTrailCommitResult,
+  WorldWorkbenchSnapshot,
+} from './world-workbench'
 import type {
   StoryTimelineBranch,
   StoryTimelineEvent,
@@ -861,10 +894,17 @@ import type {
 import type {
   BlueprintCharacterSyncOperation,
   BlueprintData,
+  BlueprintListSummary,
+  BlueprintRecentNoteSummary,
   BlueprintVolumeData,
   BlueprintRangeCommitReceipt,
   BlueprintRangeCommitRequest,
 } from '../../electron/repositories/blueprint-repository'
+import type {
+  ChapterBlueprintV2DetailRead,
+  ChapterBlueprintV2SaveInput,
+  ChapterBlueprintV2Summary,
+} from './blueprint-v2'
 import type {
   CharacterData,
 } from '../../electron/repositories/character-repository'
@@ -984,6 +1024,8 @@ export interface DatabaseChannels {
 
   // 2. blueprints
   'db:blueprint-get-all': { args: [expectedProjectPath: string]; return: BlueprintData[] }
+  'db:blueprint-list-summary': { args: [expectedProjectPath: string]; return: BlueprintListSummary[] }
+  'db:blueprint-recent-notes': { args: [expectedProjectPath: string]; return: BlueprintRecentNoteSummary[] }
   'db:blueprint-volume-list': { args: [expectedProjectPath: string]; return: BlueprintVolumeData[] }
   'db:blueprint-volume-upsert': { args: [volume: BlueprintVolumeData, expectedProjectPath: string]; return: { success: boolean; error?: string } }
   'db:blueprint-get': { args: [chapterNumber: number, expectedProjectPath: string]; return: BlueprintData | null }
@@ -1012,12 +1054,30 @@ export interface DatabaseChannels {
   'db:blueprint-delete': { args: [chapterNumber: number, expectedProjectPath: string]; return: { success: boolean; error?: string } }
   'db:blueprint-clear-all': { args: [expectedProjectPath: string]; return: { success: boolean; error?: string } }
 
+  // 2b. blueprint_details — 章节蓝图 v2 细纲（blueprint-v2-contract §6，冻结通道）
+  // corrupt / needs-newer-app 以 Detail 上的附加可选字段表达（契约缺口 §13.5），
+  // 正常读取时与冻结的 ChapterBlueprintV2Detail | null 完全一致。
+  'db:blueprint-v2-get': { args: [chapterNumber: number, expectedProjectPath: string]; return: ChapterBlueprintV2DetailRead | null }
+  'db:blueprint-v2-summary-list': { args: [expectedProjectPath: string]; return: ChapterBlueprintV2Summary[] }
+  'db:blueprint-v2-save': {
+    args: [input: ChapterBlueprintV2SaveInput, expectedProjectPath: string]
+    return: { success: boolean; revision?: number; contentHash?: string; conflict?: boolean; currentRevision?: number; error?: string }
+  }
+  'db:blueprint-v2-scene-order-save': {
+    args: [input: { chapterNumber: number; baseRevision: number; orderedSceneIds: string[] }, expectedProjectPath: string]
+    return: { success: boolean; revision?: number; contentHash?: string; conflict?: boolean; currentRevision?: number; error?: string }
+  }
+  'db:blueprint-v2-delete': { args: [chapterNumber: number, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:blueprint-v2-review-notices-clear': { args: [chapterNumber: number, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+
   // 3. characters
   'db:character-get-all': { args: [expectedProjectPath: string]; return: CharacterData[] }
   /**
    * 结构化角色名单的唯一提交 seam。角色条目仍持久化于 characters 表；
    * 返回的快照经过主进程事务内 read-back 验证。
    */
+  'db:cultivation-read': { args: [expectedProjectPath: string]; return: import('./cultivation').CultivationSystem }
+  'db:cultivation-save': { args: [request: import('./cultivation').CultivationSaveRequest, expectedProjectPath: string]; return: { success: boolean; result?: import('./cultivation').CultivationSaveResult; error?: string } }
   'db:character-roster-read': {
     args: [expectedProjectPath: string]
     return: CharacterRosterSnapshot
@@ -1069,7 +1129,7 @@ export interface DatabaseChannels {
     args: [request: FinalizedDraftImportRequest, expectedProjectPath: string]
     return: { success: boolean; receipt?: FinalizedDraftImportReceipt; error?: string }
   }
-  'db:draft-create': { args: [params: { chapterNumber: number; version: number; source: 'write' | 'rewrite'; content: string; wordCount: number; sourceDependencies?: DraftSourceDependency[] }, expectedProjectPath: string]; return: { success: boolean; id?: number; error?: string } }
+  'db:draft-create': { args: [params: { chapterNumber: number; blueprintChapterNumber?: number | null; version: number; source: 'write' | 'rewrite'; content: string; wordCount: number; sourceDependencies?: DraftSourceDependency[] }, expectedProjectPath: string]; return: { success: boolean; id?: number; error?: string } }
   'db:draft-list': { args: [chapterNumber: number, expectedProjectPath: string]; return: DraftMeta[] }
   'db:draft-list-all': { args: [expectedProjectPath: string]; return: DraftMeta[] }
   'db:draft-get-meta': { args: [id: number, expectedProjectPath: string]; return: DraftMeta | null }
@@ -1292,6 +1352,54 @@ export interface DatabaseChannels {
   'db:timeline-events-reorder': { args: [orderedIds: string[], expectedProjectPath: string]; return: { success: boolean; error?: string } }
   'db:timeline-branch-upsert': { args: [branch: StoryTimelineBranch, expectedProjectPath: string]; return: { success: boolean; branch?: StoryTimelineBranch; error?: string } }
   'db:timeline-branch-delete': { args: [id: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+
+  // 7.5 world — 多世界资料（世界/势力/秘境/通道/规则/人物关联与行踪）
+  // 读路径返回完整快照；写路径返回 { success, error } 并携带保存后的实体。
+  'db:world-get-all': { args: [expectedProjectPath: string]; return: WorldWorkbenchSnapshot }
+  'db:world-upsert': { args: [world: WorldRecord, expectedProjectPath: string]; return: { success: boolean; world?: WorldRecord; error?: string } }
+  'db:world-delete-plan': { args: [worldId: string, expectedProjectPath: string]; return: { success: boolean; plan?: WorldDeletePlan; error?: string } }
+  'db:world-delete': { args: [worldId: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+
+  'db:world-map-assignment-plan': { args: [mapId: string, nextWorldId: string | null, expectedProjectPath: string]; return: { success: boolean; plan?: WorldMapAssignmentPlan; error?: string } }
+  'db:world-map-assignment-apply': { args: [mapId: string, nextWorldId: string | null, expectedProjectPath: string]; return: { success: boolean; plan?: WorldMapAssignmentPlan; error?: string } }
+
+  'db:world-faction-upsert': { args: [faction: WorldFaction, expectedProjectPath: string]; return: { success: boolean; faction?: WorldFaction; error?: string } }
+  'db:world-faction-delete-plan': { args: [factionId: string, expectedProjectPath: string]; return: { success: boolean; plan?: WorldDeletePlan; error?: string } }
+  'db:world-faction-delete': { args: [factionId: string, detachEventLinks: boolean, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:world-faction-place-upsert': { args: [place: WorldFactionPlace, expectedProjectPath: string]; return: { success: boolean; place?: WorldFactionPlace; error?: string } }
+  'db:world-faction-relation-upsert': { args: [relation: WorldFactionRelation, expectedProjectPath: string]; return: { success: boolean; relation?: WorldFactionRelation; error?: string } }
+  'db:world-faction-character-upsert': { args: [link: WorldFactionCharacter, expectedProjectPath: string]; return: { success: boolean; link?: WorldFactionCharacter; error?: string } }
+
+  'db:world-relic-upsert': { args: [relic: WorldRelic, expectedProjectPath: string]; return: { success: boolean; relic?: WorldRelic; error?: string } }
+  'db:world-relic-delete-plan': { args: [relicId: string, expectedProjectPath: string]; return: { success: boolean; plan?: WorldDeletePlan; error?: string } }
+  'db:world-relic-delete': { args: [relicId: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:world-relic-faction-upsert': { args: [link: WorldRelicFaction, expectedProjectPath: string]; return: { success: boolean; link?: WorldRelicFaction; error?: string } }
+  'db:world-relic-character-upsert': { args: [link: WorldRelicCharacter, expectedProjectPath: string]; return: { success: boolean; link?: WorldRelicCharacter; error?: string } }
+
+  'db:world-portal-upsert': { args: [portal: WorldPortal, expectedProjectPath: string]; return: { success: boolean; portal?: WorldPortal; error?: string } }
+  'db:world-portal-delete-plan': { args: [portalId: string, expectedProjectPath: string]; return: { success: boolean; plan?: WorldDeletePlan; error?: string } }
+  'db:world-portal-delete': { args: [portalId: string, detachEventLinks: boolean, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:world-portal-faction-upsert': { args: [link: WorldPortalFaction, expectedProjectPath: string]; return: { success: boolean; link?: WorldPortalFaction; error?: string } }
+  'db:world-portal-character-upsert': { args: [link: WorldPortalCharacter, expectedProjectPath: string]; return: { success: boolean; link?: WorldPortalCharacter; error?: string } }
+
+  'db:world-rule-upsert': { args: [rule: WorldRule, expectedProjectPath: string]; return: { success: boolean; rule?: WorldRule; error?: string } }
+  'db:world-rule-delete-plan': { args: [ruleId: string, expectedProjectPath: string]; return: { success: boolean; plan?: WorldDeletePlan; error?: string } }
+  'db:world-rule-delete': { args: [ruleId: string, detachEventLinks: boolean, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:world-rule-target-upsert': { args: [target: WorldRuleTarget, expectedProjectPath: string]; return: { success: boolean; target?: WorldRuleTarget; error?: string } }
+
+  'db:world-character-link-upsert': { args: [link: WorldCharacterLink, expectedProjectPath: string]; return: { success: boolean; link?: WorldCharacterLink; error?: string } }
+  'db:world-character-location-birth-save': { args: [location: WorldCharacterLocation, expectedProjectPath: string]; return: { success: boolean; location?: WorldCharacterLocation; error?: string } }
+  'db:world-character-current-location-commit': { args: [characterId: string, worldId: string | null, nodeId: string | null, options: WorldCurrentLocationCommitOptions, expectedProjectPath: string]; return: WorldLocationCommitResult }
+  'db:world-character-current-location-clear': { args: [characterId: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+
+  'db:world-trail-commit': { args: [request: WorldTrailCommitRequest, expectedProjectPath: string]; return: WorldTrailCommitResult }
+  'db:world-trail-delete-plan': { args: [trailId: string, expectedProjectPath: string]; return: { success: boolean; plan?: WorldDeletePlan; error?: string } }
+  'db:world-trail-delete': { args: [trailId: string, releaseCurrentLocation: boolean, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+
+  'db:world-event-links-save': { args: [eventId: string, worldIds: string[], links: WorldEventLink[], expectedProjectPath: string]; return: { success: boolean; error?: string } }
+
+  // 解除单条关联。与「删除实体」严格区分：只解除关系，绝不删除目标实体。
+  'db:world-relation-delete': { args: [table: string, id: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
 
   // 8. plot_canvas — 作者可编辑的剧情画布（与 plot-tree 只读投影严格分离）
   'db:plot-canvas-list': { args: [expectedProjectPath: string]; return: PlotCanvasSummary[] }
@@ -1662,7 +1770,7 @@ export interface StoryDataChannels {
 }
 
 // ===== 合并所有频道 =====
-export type AllInvokeChannels = WindowChannels & OfficialHomepageChannels & ModelProviderResourceChannels & ConfigChannels & UpdateChannels & SkinChannels & ProjectChannels & FileChannels & AppDataChannels & LLMChannels & DatabaseChannels & WorldMapImageChannels & KnowledgeBaseChannels & ProjectDocumentChannels & ChapterLifecycleChannels & ImportChannels & MCPChannels & WorkspaceHubChannels & StoryDataChannels & Phase38Channels
+export type AllInvokeChannels = WindowChannels & OfficialHomepageChannels & ModelProviderResourceChannels & ConfigChannels & UpdateChannels & SkinChannels & ProjectChannels & FileChannels & AppDataChannels & LLMChannels & DatabaseChannels & WorldMapImageChannels & KnowledgeBaseChannels & ProjectDocumentChannels & ChapterLifecycleChannels & ImportChannels & MCPChannels & WorkspaceHubChannels & StoryDataChannels & Phase38Channels & FinalizationChannels
 export type AllEventChannels = LLMStreamEvents & UpdateStateEvents & WindowEvents & StoryDataEventChannels
 
 /** 提取 invoke 频道名 */

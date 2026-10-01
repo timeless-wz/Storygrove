@@ -36,10 +36,10 @@ export const CHARACTER_STATE_FIELD_LABELS: Readonly<
     shortEnUS: 'Location',
   },
   powerLevel: {
-    zhCN: '修为境界/能力等级',
-    enUS: 'Power or ability level',
-    shortZhCN: '能力等级',
-    shortEnUS: 'Power level',
+    zhCN: '修为描述（自由文本）',
+    enUS: 'Power description (free text)',
+    shortZhCN: '修为描述',
+    shortEnUS: 'Power description',
   },
   physicalState: {
     zhCN: '身体状态（伤势/BUFF/外貌）',

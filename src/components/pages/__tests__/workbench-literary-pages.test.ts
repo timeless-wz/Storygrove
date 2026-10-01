@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { withoutDecorativeClipDefinitions } from '../../../../test/source-contract'
 
 function readSource(relativePath: string): string {
   return readFileSync(resolve(process.cwd(), relativePath), 'utf8')
@@ -43,7 +44,7 @@ describe('AI Novel Writer 首页、项目总览与新项目创作路径规范', 
     })
 
     it('符合代码保洁约定：无直接 SVG/Path、无伪字符图标', () => {
-      expect(welcomeSource).not.toMatch(/<svg\b|<path\b/)
+      expect(withoutDecorativeClipDefinitions(welcomeSource)).not.toMatch(/<svg\b|<path\b/)
       expect(welcomeSource).not.toMatch(/[\u2600-\u27BF]|[\u{1F300}-\u{1FAFF}]/u)
     })
   })

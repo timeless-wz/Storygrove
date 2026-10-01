@@ -1,0 +1,93 @@
+{
+  "scenario": "E01P-strict",
+  "runId": "vela-acc-e01p2-2026-10-01T11-55-23-500Z-8638839b",
+  "verdict": "FAIL",
+  "failedSteps": [
+    "execution.error",
+    "storage.sqlite",
+    "execution.crashed"
+  ],
+  "steps": [
+    {
+      "name": "fixture.created",
+      "ok": true,
+      "data": {
+        "projectA": "f2cdca53-aee0-4adc-9637-fc7ee721b8f7",
+        "projectB": "2fdf6034-a7ea-4394-81bc-b8a10cc41be3",
+        "distinctIdentities": true
+      }
+    },
+    {
+      "name": "build.current-source",
+      "ok": true,
+      "data": {
+        "script": "build",
+        "exitCode": 0,
+        "ok": true
+      }
+    },
+    {
+      "name": "build.gate",
+      "ok": true,
+      "data": {
+        "ok": true,
+        "missing": []
+      }
+    },
+    {
+      "name": "abi.rebuild-electron",
+      "ok": true,
+      "data": {
+        "script": "rebuild:electron",
+        "exitCode": 0,
+        "ok": true
+      }
+    },
+    {
+      "name": "a.explicit-save.readback-while-running",
+      "ok": true,
+      "data": {
+        "rows": 1,
+        "chapter": 2,
+        "version": 1,
+        "status": "draft",
+        "containsMarker": true
+      }
+    },
+    {
+      "name": "abi.restore-node",
+      "ok": true,
+      "data": {
+        "script": "prepare:native-node",
+        "exitCode": 0,
+        "ok": true,
+        "caveat": "isolated-runner: probes independent copy"
+      }
+    },
+    {
+      "name": "execution.error",
+      "ok": false,
+      "data": {
+        "error": "Error: locator.waitFor: Target page, context or browser has been closed"
+      }
+    },
+    {
+      "name": "storage.manifests",
+      "ok": true,
+      "data": {
+        "a": true,
+        "b": true
+      }
+    },
+    {
+      "name": "storage.sqlite",
+      "ok": false,
+      "data": {
+        "aIntegrity": "ok",
+        "aForeignKeys": 0,
+        "bForeignKeys": 0
+      }
+    }
+  ],
+  "error": "SqliteError: unable to open database file"
+}

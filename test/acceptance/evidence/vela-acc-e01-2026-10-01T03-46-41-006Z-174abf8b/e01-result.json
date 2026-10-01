@@ -1,0 +1,239 @@
+{
+  "scenario": "E01-draft-persistence (partial: manual free draft)",
+  "runId": "vela-acc-e01-2026-10-01T03-46-41-006Z-174abf8b",
+  "verdict": "PASS",
+  "failedSteps": [],
+  "steps": [
+    {
+      "name": "fixture.created",
+      "ok": true,
+      "data": {
+        "projectId": "bfc6aab3-fbdd-45f7-b939-a3e60beea010",
+        "sources": 8
+      }
+    },
+    {
+      "name": "build.current-source",
+      "ok": true,
+      "data": {
+        "script": "build",
+        "exitCode": 0,
+        "ok": true
+      }
+    },
+    {
+      "name": "build.gate",
+      "ok": true,
+      "data": {
+        "ok": true,
+        "missing": []
+      }
+    },
+    {
+      "name": "abi.rebuild-electron",
+      "ok": true,
+      "data": {
+        "script": "rebuild:electron",
+        "exitCode": 0,
+        "ok": true,
+        "ms": 1790
+      }
+    },
+    {
+      "name": "isolation.profile-dir-used",
+      "ok": true,
+      "data": {
+        "files": 13
+      }
+    },
+    {
+      "name": "ui.launch1.project-opened",
+      "ok": true,
+      "data": {
+        "projectTreeVisible": true,
+        "visibleDialogCount": 0,
+        "failureText": null,
+        "ok": true,
+        "screenshotPath": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e01-2026-10-01T03-46-41-006Z-174abf8b\\evidence\\01-launch-open-project-a.png"
+      }
+    },
+    {
+      "name": "ui.draft-created-and-edited",
+      "ok": true,
+      "data": {
+        "chapter": 1,
+        "proseLength": 62
+      }
+    },
+    {
+      "name": "ui.explicit-save",
+      "ok": true,
+      "data": {
+        "buttonAppeared": true,
+        "buttonCleared": true
+      }
+    },
+    {
+      "name": "app.quit1",
+      "ok": true,
+      "data": {
+        "code": 0,
+        "signal": null
+      }
+    },
+    {
+      "name": "ui.launch2.reopened",
+      "ok": true,
+      "data": {
+        "projectTreeVisible": true,
+        "visibleDialogCount": 0,
+        "failureText": null,
+        "ok": true,
+        "screenshotPath": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e01-2026-10-01T03-46-41-006Z-174abf8b\\evidence\\04-relaunch-project-a.png"
+      }
+    },
+    {
+      "name": "main.relaunch-fresh-marker",
+      "ok": true,
+      "data": {
+        "ok": true,
+        "marker": {
+          "projectPath": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e01-2026-10-01T03-46-41-006Z-174abf8b\\project-a",
+          "openedAt": "2026-10-01T03:47:45.586Z"
+        }
+      }
+    },
+    {
+      "name": "ui.reopened-draft-content",
+      "ok": true,
+      "data": {
+        "length": 62,
+        "containsMarker": true
+      }
+    },
+    {
+      "name": "app.quit2",
+      "ok": true,
+      "data": {
+        "code": 0,
+        "signal": null
+      }
+    },
+    {
+      "name": "abi.restore-node",
+      "ok": true,
+      "data": {
+        "script": "prepare:native-node",
+        "exitCode": 0,
+        "ok": true,
+        "caveat": "isolated-runner: probes independent copy"
+      }
+    },
+    {
+      "name": "storage.project-a.manifest",
+      "ok": true,
+      "data": {
+        "ok": true
+      }
+    },
+    {
+      "name": "storage.project-a.sqlite",
+      "ok": true,
+      "data": {
+        "integrity": "ok",
+        "foreignKeyViolations": 0,
+        "tableCount": 104
+      }
+    },
+    {
+      "name": "storage.draft-readback",
+      "ok": true,
+      "data": {
+        "draftCount": 1,
+        "chapterNumber": 1,
+        "containsMarker": true,
+        "bodyLength": 63
+      }
+    },
+    {
+      "name": "storage.no-project-b-marker-in-a",
+      "ok": true,
+      "data": {
+        "clean": true
+      }
+    },
+    {
+      "name": "isolation.project-b-untouched",
+      "ok": true,
+      "data": {
+        "dbExists": false
+      }
+    },
+    {
+      "name": "storage.global-home.recent-projects",
+      "ok": true,
+      "data": {
+        "containsProjectA": true
+      }
+    },
+    {
+      "name": "storage.source-fixtures.readonly",
+      "ok": true,
+      "data": {
+        "unchanged": true
+      }
+    }
+  ],
+  "diagnostics": [
+    {
+      "at": "2026-10-01T03:47:35.866Z",
+      "kind": "main-stdout",
+      "text": "\r\n"
+    },
+    {
+      "at": "2026-10-01T03:47:36.593Z",
+      "kind": "main-stderr",
+      "text": "\r\nDevTools listening on ws://127.0.0.1:6189/devtools/browser/53ae1b07-52a3-45a6-b05d-7a554389b9d7\r\n"
+    },
+    {
+      "at": "2026-10-01T03:47:36.604Z",
+      "kind": "main-stdout",
+      "text": "[Vela IPC] 所有 Controller 已注册完成 | 全局工作区: C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e01-2026-10-01T03-46-41-006Z-174abf8b\\global-home\n"
+    },
+    {
+      "at": "2026-10-01T03:47:36.604Z",
+      "kind": "main-stdout",
+      "text": "[MCP] IPC 处理器已注册\n"
+    },
+    {
+      "at": "2026-10-01T03:47:37.481Z",
+      "kind": "main-stdout",
+      "text": "[Vela DB] 项目数据库已打开: C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e01-2026-10-01T03-46-41-006Z-174abf8b\\project-a\\.vela\\vela.db\n"
+    },
+    {
+      "at": "2026-10-01T03:47:43.241Z",
+      "kind": "main-stdout",
+      "text": "\r\n"
+    },
+    {
+      "at": "2026-10-01T03:47:43.916Z",
+      "kind": "main-stderr",
+      "text": "\r\nDevTools listening on ws://127.0.0.1:8533/devtools/browser/f7fb206f-2a05-4ed2-a288-4102a7146441\r\n"
+    },
+    {
+      "at": "2026-10-01T03:47:43.924Z",
+      "kind": "main-stdout",
+      "text": "[Vela IPC] 所有 Controller 已注册完成 | 全局工作区: C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e01-2026-10-01T03-46-41-006Z-174abf8b\\global-home\n"
+    },
+    {
+      "at": "2026-10-01T03:47:43.924Z",
+      "kind": "main-stdout",
+      "text": "[MCP] IPC 处理器已注册\n"
+    },
+    {
+      "at": "2026-10-01T03:47:44.719Z",
+      "kind": "main-stdout",
+      "text": "[Vela DB] 项目数据库已打开: C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e01-2026-10-01T03-46-41-006Z-174abf8b\\project-a\\.vela\\vela.db\n"
+    }
+  ]
+}

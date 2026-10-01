@@ -122,8 +122,14 @@ describe('回到上次创作位置（真实路径）', () => {
         case 'db:chapter-canvas-nodes-reposition':
         case 'db:chapter-canvas-viewport-save':
           return { success: true }
-        case 'db:blueprint-get-all':
-          return [{ chapterNumber: 2, title: '验牌与夜袭', role: '发展', purpose: '', keyEvents: '', characters: [], suspenseHook: '', userGuidance: '', notes: '', notesUpdatedAt: '' }]
+        case 'db:blueprint-list-summary':
+          return [{ chapterNumber: 2, title: '验牌与夜袭', purpose: '', keyEvents: '' }]
+        case 'db:blueprint-v2-summary-list':
+          return []
+        case 'db:blueprint-v2-get':
+          return null
+        case 'story-data:list-agent-proposals':
+          return []
         case 'db:draft-list-all':
           return []
         case 'db:narrative-thread-list':
@@ -142,13 +148,14 @@ describe('回到上次创作位置（真实路径）', () => {
     })
 
     await act(async () => {
+      const text = useLocaleStore.getState().text
       root.render(
         <ChapterCanvasWorkbench
           projectKey={PROJECT_PATH}
           chapterNumber={2}
-          chapterTitle="验牌与夜袭"
+          chapterTitle={text('验牌与夜袭', 'Token Check and Night Raid')}
           canOpenDraft
-          openDraftLabel="打开第2章正文"
+          openDraftLabel={text('打开第2章正文', 'Open Chapter 2 draft')}
           onOpenDraft={() => {}}
         />,
       )
@@ -212,7 +219,9 @@ describe('回到上次创作位置（真实路径）', () => {
     const invoke = vi.fn(async (channel: string) => {
       if (channel === 'db:draft-get-full') return { content: '# 第七章\n已保存正文' }
       if (channel === 'db:draft-get-meta') return { id: 7, chapterNumber: 7, version: 1, status: 'draft' }
-      if (channel === 'db:blueprint-get-all') return []
+      if (channel === 'db:blueprint-list-summary' || channel === 'db:blueprint-v2-summary-list') return []
+      if (channel === 'db:blueprint-v2-get') return null
+      if (channel === 'story-data:list-agent-proposals') return []
       return { success: true }
     })
     Object.defineProperty(window, 'velaAPI', {
@@ -250,7 +259,15 @@ describe('回到上次创作位置（真实路径）', () => {
     Object.defineProperty(window, 'velaAPI', {
       configurable: true,
       value: {
-        invoke: vi.fn(async (channel: string) => channel === 'db:blueprint-get-all' ? [] : { success: true }),
+        invoke: vi.fn(async (channel: string) => (
+          channel === 'db:blueprint-list-summary' || channel === 'db:blueprint-v2-summary-list'
+            ? []
+            : channel === 'db:blueprint-v2-get'
+              ? null
+              : channel === 'story-data:list-agent-proposals'
+                ? []
+                : { success: true }
+        )),
         on: vi.fn(() => () => {}),
         once: vi.fn(),
         send: vi.fn(),

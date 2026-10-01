@@ -1,0 +1,1015 @@
+{
+  "note": "验收功能/用例映射骨架（方案第 5 节）。status/chain/storage/completeness 取值：PASS|FAIL|BLOCKED|NOT_RUN|MANUAL_PENDING。锚点来自 2026-10-01 静态勘察，执行时须复核。",
+  "features": [
+    {
+      "id": "F01",
+      "name": "项目新建/打开/最近/关闭",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "src/components/dialogs/NewProjectDialog.tsx",
+        "最近项目（home 页）"
+      ],
+      "channels": [
+        "project:create",
+        "project:open",
+        "project:recent-list",
+        "project:recent-remove",
+        "dialog:select-folder"
+      ],
+      "storageTargets": [
+        ".vela/vela.db",
+        ".vela/project.json",
+        "~/.vela/recent-projects.json"
+      ],
+      "cases": [
+        "新建后目录/DB 正确",
+        "切换前脏数据处理",
+        "最近项目重开",
+        "不存在/只读路径错误可理解"
+      ]
+    },
+    {
+      "id": "F02",
+      "name": "导航、资源树、参考栏",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        ".writer-project-tree",
+        "src/components/panels/",
+        "ChapterContextSidebar"
+      ],
+      "channels": [],
+      "storageTargets": [],
+      "cases": [
+        "所有可见入口打开正确编辑器",
+        "空项目/无项目状态合理"
+      ]
+    },
+    {
+      "id": "F03",
+      "name": "小说配置、前提、架构、世界观、剧情概要",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "NovelConfigEditor",
+        "WorldBuildingEditor"
+      ],
+      "channels": [
+        "db:project-core-update",
+        "db:project-core-synopsis-commit",
+        "project:update-config"
+      ],
+      "storageTargets": [
+        "project_core"
+      ],
+      "cases": [
+        "手工保存与 AI 生成分别验证",
+        "事实源回读",
+        "写作语言与 UI 语言独立"
+      ]
+    },
+    {
+      "id": "F04",
+      "name": "卷与章节蓝图 v1/v2",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "BlueprintV2Editor",
+        "BlueprintV2ImportDialog",
+        "blueprint-detail-repository"
+      ],
+      "channels": [
+        "db:blueprint-*",
+        "db:blueprint-v2-*",
+        "db:blueprint-volume-*"
+      ],
+      "storageTargets": [
+        "blueprints",
+        "blueprint_details",
+        "blueprint_volumes",
+        "blueprint_detail_review_notices"
+      ],
+      "cases": [
+        "新增/编辑/导入预览/取消/确认/重排/删除",
+        "原文无损",
+        "notes/user_guidance 不被 v2 覆盖"
+      ]
+    },
+    {
+      "id": "F05",
+      "name": "章节画布",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "src/components/canvas/ChapterCanvasWorkbench.tsx"
+      ],
+      "channels": [
+        "db:chapter-canvas-*"
+      ],
+      "storageTargets": [
+        "chapter_canvases",
+        "chapter_canvas_nodes",
+        "chapter_canvas_edges"
+      ],
+      "cases": [
+        "导入分镜/拖动/移出放回/保存重开",
+        "移出不删除分镜",
+        "顺序被写稿消费"
+      ]
+    },
+    {
+      "id": "F06",
+      "name": "剧情画布与子画布",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "src/components/canvas/PlotCanvasWorkbench.tsx",
+        "PlotCanvasAIDialog"
+      ],
+      "channels": [
+        "db:plot-canvas-*"
+      ],
+      "storageTargets": [
+        "plot_canvases",
+        "plot_canvas_nodes",
+        "plot_canvas_edges"
+      ],
+      "cases": [
+        "节点/关系/子画布/合并/排序/缩放保存",
+        "AI 提案经确认落库"
+      ]
+    },
+    {
+      "id": "F07",
+      "name": "草稿与正文编辑",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "DraftEditor",
+        "ChapterCardEditor",
+        "ChapterCreationDialog"
+      ],
+      "channels": [
+        "db:draft-*"
+      ],
+      "storageTargets": [
+        "drafts",
+        "contents"
+      ],
+      "cases": [
+        "新建/多版本/自动与显式保存/切章/关闭",
+        "失败保留输入",
+        "未绑定不虚构章上下文"
+      ]
+    },
+    {
+      "id": "F08",
+      "name": "AI 写稿、批量、续写与下一章",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "generate-draft.command",
+        "BatchChapterCreationDialog",
+        "GenerateConfigDialog"
+      ],
+      "channels": [
+        "llm:generate-stream",
+        "llm:cancel",
+        "llm:begin-execution-lease"
+      ],
+      "storageTargets": [
+        "drafts",
+        "recovery_candidates",
+        "llm_calls"
+      ],
+      "cases": [
+        "prompt 消费正确蓝图/上下文",
+        "异常保留恢复候选",
+        "暂停后无未授权提交"
+      ],
+      "external": "需要确定性模型 fixture（L4 单独测真实供应商）"
+    },
+    {
+      "id": "F09",
+      "name": "AI 审稿与一致性检查",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "ReviewReport",
+        "ConsistencyPreflightPanel"
+      ],
+      "channels": [
+        "phase:audit-chapter",
+        "phase:list-audit-findings",
+        "db:review-*",
+        "db:consistency-exemption-*"
+      ],
+      "storageTargets": [
+        "reviews",
+        "audit_runs",
+        "audit_findings",
+        "audit_waivers",
+        "consistency_exemptions"
+      ],
+      "cases": [
+        "引文定位/来源哈希/must-reference-forbid 语义",
+        "过期审稿不能用于新版本"
+      ]
+    },
+    {
+      "id": "F10",
+      "name": "修稿、版本历史、差异与合并",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "VersionHistory",
+        "DiffViewer",
+        "ThreeWayMerge"
+      ],
+      "channels": [
+        "db:revision-*"
+      ],
+      "storageTargets": [
+        "revisions"
+      ],
+      "cases": [
+        "确认意见进入修稿输入",
+        "取消不覆盖",
+        "源正文变更冲突检测 SOURCE_DRAFT_CHANGED"
+      ]
+    },
+    {
+      "id": "F11",
+      "name": "定稿、发布、后处理",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "finalization-client",
+        "manuscript-publisher"
+      ],
+      "channels": [
+        "finalization:commit",
+        "publication:publish",
+        "finalization:retry"
+      ],
+      "storageTargets": [
+        "finalization_outbox",
+        "post_process_runs",
+        "post_process_steps",
+        "项目根 .txt"
+      ],
+      "cases": [
+        "冻结正文事务提交",
+        "实体稿与冻结哈希一致",
+        "发布失败单独可重试"
+      ],
+      "note": "三条窄快照/收据通道已入共享契约；真实业务场景仍未执行。"
+    },
+    {
+      "id": "F12",
+      "name": "已定稿章节删除/恢复",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "chapter-deletion-service"
+      ],
+      "channels": [
+        "chapter:delete-finalized",
+        "chapter:retry-deletion",
+        "chapter:list-incomplete-deletions"
+      ],
+      "storageTargets": [
+        "chapter_deletion_operations"
+      ],
+      "cases": [
+        "影响可查",
+        "正文/实体稿/索引/引用按合同处理",
+        "中途失败可续做"
+      ]
+    },
+    {
+      "id": "F13",
+      "name": "角色卡/名单/图谱/关系",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "CharacterEditor",
+        "character-profile/",
+        "RelationshipGraph"
+      ],
+      "channels": [
+        "db:character-*",
+        "db:character-relationship-*",
+        "db:character-graph-positions-*"
+      ],
+      "storageTargets": [
+        "characters",
+        "character_identities",
+        "character_shared_relationships",
+        "character_graph_positions",
+        "character_roster_meta"
+      ],
+      "cases": [
+        "稳定身份",
+        "关系端点",
+        "作者字段与派生字段来源一致"
+      ]
+    },
+    {
+      "id": "F14",
+      "name": "伏笔与叙事线索",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "ForeshadowingManagementView",
+        "NarrativeThreadEditor"
+      ],
+      "channels": [
+        "db:foreshadowing-*",
+        "db:narrative-thread-*"
+      ],
+      "storageTargets": [
+        "foreshadowings",
+        "narrative_thread_plans",
+        "narrative_thread_confirmations"
+      ],
+      "cases": [
+        "计划/确认/推进/回收",
+        "拒绝候选不提升为确认事件"
+      ]
+    },
+    {
+      "id": "F15",
+      "name": "时间线与支线",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "src/components/timeline/"
+      ],
+      "channels": [
+        "db:timeline-*"
+      ],
+      "storageTargets": [
+        "story_timeline_settings",
+        "story_timeline_branches",
+        "story_timeline_events"
+      ],
+      "cases": [
+        "事件/主线支线/范围/位置",
+        "删除引用对象后状态合理"
+      ]
+    },
+    {
+      "id": "F16",
+      "name": "地图册",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "src/components/map/",
+        "world-map-image-store"
+      ],
+      "channels": [
+        "db:map-*",
+        "world-map-image:*"
+      ],
+      "storageTargets": [
+        "world_maps",
+        "world_map_nodes",
+        "world_map_edges",
+        ".vela/world-maps/<map-id>/"
+      ],
+      "cases": [
+        "图片在所属地图目录",
+        "删除/迁移/图片缺失有明确结果"
+      ]
+    },
+    {
+      "id": "F17",
+      "name": "世界工作台",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "src/components/world/",
+        "world-workbench-repository"
+      ],
+      "channels": [
+        "db:world-*"
+      ],
+      "storageTargets": [
+        "worlds + 20 张 world_* 表"
+      ],
+      "cases": [
+        "世界/势力/宝物/门户/规则/轨迹",
+        "跨世界联动",
+        "删除影响"
+      ]
+    },
+    {
+      "id": "F18",
+      "name": "修炼等级与角色修为",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "cultivation-repository",
+        "preload 白名单 db:cultivation-read/save"
+      ],
+      "channels": [
+        "db:cultivation-read",
+        "db:cultivation-save"
+      ],
+      "storageTargets": [
+        "cultivation_meta",
+        "cultivation_realms",
+        "cultivation_levels"
+      ],
+      "cases": [
+        "建境界/等级/排序/角色选级",
+        "过期 revision 拒绝且本地编辑保留"
+      ]
+    },
+    {
+      "id": "F19",
+      "name": "创作资料中枢",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "src/components/workspace/",
+        "workspace-hub-controller"
+      ],
+      "channels": [
+        "workspace:*"
+      ],
+      "storageTargets": [
+        "workspace_sources",
+        "workspace_source_snapshots",
+        "workspace_approval_receipts",
+        "setting_rules",
+        "chapter_context_snapshots"
+      ],
+      "cases": [
+        "绑定/扫描/批准/规则/候选确认",
+        "来源只读",
+        "变化/失效不静默沿用"
+      ]
+    },
+    {
+      "id": "F20",
+      "name": "故事事实/事件/状态与长期控制",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "story-data-controller",
+        "story-domain-repository"
+      ],
+      "channels": [
+        "story-data:*"
+      ],
+      "storageTargets": [
+        "story_fact_candidates",
+        "story_facts",
+        "story_fact_versions",
+        "story_fact_relations",
+        "story_fact_impacts",
+        "story_events"
+      ],
+      "cases": [
+        "候选→作者确认→事实版本",
+        "未经确认内容不混入 confirmed"
+      ]
+    },
+    {
+      "id": "F21",
+      "name": "知识库、FTS、向量与 RAG",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "kb-controller",
+        "vector-store"
+      ],
+      "channels": [
+        "kb:*",
+        "phase:rag-search"
+      ],
+      "storageTargets": [
+        "knowledge_chunks",
+        "embedding_records",
+        ".vela/lancedb/",
+        ".vela/embedding-spaces.json"
+      ],
+      "cases": [
+        "导入/chunk/检索/清理/重建",
+        "换模型/维度隔离",
+        "降级模式明示"
+      ]
+    },
+    {
+      "id": "F22",
+      "name": "项目文档",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "ProjectDocumentEditor",
+        "project-documents-controller"
+      ],
+      "channels": [
+        "docs:*"
+      ],
+      "storageTargets": [
+        ".vela/documents/",
+        ".vela/documents/assets/"
+      ],
+      "cases": [
+        "新建/读写/导入/重命名/附件/删除",
+        "边界路径拒绝",
+        "不进入正文库"
+      ]
+    },
+    {
+      "id": "F23",
+      "name": "Markdown 章节导入",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "ImportChapterDraftDialog",
+        "import-controller"
+      ],
+      "channels": [
+        "dialog:select-chapter-markdown-files",
+        "db:draft-import-markdown"
+      ],
+      "storageTargets": [
+        "drafts",
+        "contents"
+      ],
+      "cases": [
+        "选择→解析预览→确认→SQLite 回读",
+        "重复/非法文件",
+        "取消无副作用"
+      ]
+    },
+    {
+      "id": "F24",
+      "name": "小说导入/参考拆解/原稿恢复",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "ImportNovelDialog",
+        "import-run-repository"
+      ],
+      "channels": [
+        "dialog:select-novel-files",
+        "db:import-run-*"
+      ],
+      "storageTargets": [
+        "import_runs",
+        "import_run_chapters",
+        "import_run_receipts",
+        "import_source_aliases",
+        "import_legacy_identity_bridge"
+      ],
+      "cases": [
+        "解析/人工确认/阶段回执/暂停恢复",
+        "重复运行幂等"
+      ]
+    },
+    {
+      "id": "F25",
+      "name": "Markdown/单章/单卷/设定导出",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "ExportDialog"
+      ],
+      "channels": [
+        "dialog:select-export-directory",
+        "fs:grant-write-file",
+        "db:draft-export-*"
+      ],
+      "storageTargets": [
+        "授权导出目标目录"
+      ],
+      "cases": [
+        "预览选择与实际版本一致",
+        "输出内容与权威数据逐项比对"
+      ]
+    },
+    {
+      "id": "F26",
+      "name": "备份/恢复与旧版本迁移",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "project-backup-service",
+        "backup-controller"
+      ],
+      "channels": [
+        "project:backup",
+        "project:restore-backup",
+        "dialog:select-backup-directory",
+        "dialog:select-restore-directory"
+      ],
+      "storageTargets": [
+        "manifest.json（format=ai-novel-writer-backup）",
+        ".vela/ 副本"
+      ],
+      "cases": [
+        "manifest SHA-256 核对",
+        "恢复到新目标",
+        "实体稿在备份范围外须实测重新发布"
+      ],
+      "note": "当前备份实现以 .vela/ 为范围，项目根实体稿不在内（方案 E08 明确要求实测）"
+    },
+    {
+      "id": "F27",
+      "name": "AI 助手、工具、提案与 MCP",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "src/components/panels/ ai-panel",
+        "mcp-ipc-bridge",
+        "agent-proposal-service"
+      ],
+      "channels": [
+        "story-data:list-agent-proposals",
+        "story-data:approve-agent-proposal",
+        "mcp:*"
+      ],
+      "storageTargets": [
+        "agent_sessions",
+        "agent_proposals",
+        "mcp_config.json"
+      ],
+      "cases": [
+        "提案预览→批准→提交→UI 刷新",
+        "拒绝/过期/重复批准",
+        "mcp_audit_log 当前无写入方（orphan）"
+      ]
+    },
+    {
+      "id": "F28",
+      "name": "模型、提示词、推理策略与写作 Skill",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "src/components/settings/",
+        "app-data-controller"
+      ],
+      "channels": [
+        "llm:list-models",
+        "llm:save-model",
+        "llm:test-connection",
+        "prompt:*",
+        "skills:*",
+        "config:get/set"
+      ],
+      "storageTargets": [
+        "~/.vela/config.json",
+        "models.json",
+        "prompts/",
+        "skills/",
+        ".vela/prompts/",
+        ".vela/skills/"
+      ],
+      "cases": [
+        "配置持久化/连接/发现",
+        "全局/项目优先级",
+        "配置损坏保留原文件"
+      ]
+    },
+    {
+      "id": "F29",
+      "name": "任务、日志、模型活动与异常恢复",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        ".writer-task-table",
+        "ModelExecutionLeaseRegistry"
+      ],
+      "channels": [
+        "llm:begin-execution-lease",
+        "llm:close-execution-lease"
+      ],
+      "storageTargets": [
+        "llm_calls",
+        "recovery_candidates"
+      ],
+      "cases": [
+        "状态与实际执行一致",
+        "互斥资源/队列/暂停取消",
+        "日志隐藏秘密"
+      ]
+    },
+    {
+      "id": "F30",
+      "name": "外观、主题、语言、缩放与灵感便签",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "appearance-settings",
+        "home-surface-store"
+      ],
+      "channels": [
+        "skin:execute",
+        "velaAPI.setZoomFactor"
+      ],
+      "storageTargets": [
+        "Electron profile localStorage（ai-novel-writer-theme 等）",
+        "~/.vela/skins/"
+      ],
+      "cases": [
+        "重启保持",
+        "中英切换",
+        "便签持久化范围符合说明"
+      ],
+      "note": "缩放由 ai-novel-writer-theme.zoom 持久化；vela-zoom-level 是旧键读取，须验收旧键与新配置的优先级。"
+    },
+    {
+      "id": "F31",
+      "name": "窗口、帮助、官方链接、更新",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "window-controller",
+        "update-controller",
+        "official-homepage-controller"
+      ],
+      "channels": [
+        "window:*",
+        "update:*",
+        "official-homepage:open"
+      ],
+      "storageTargets": [
+        "~/.vela/config.json updatePreferences"
+      ],
+      "cases": [
+        "未保存关闭处理",
+        "受控链接",
+        "更新检查在隔离环境验证"
+      ]
+    },
+    {
+      "id": "F32",
+      "name": "存储/权限/文件能力共性",
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "entries": [
+        "windows-safe-file-system",
+        "external-file-grants",
+        "project-storage-preflight"
+      ],
+      "channels": [
+        "fs:*",
+        "fs:grant-*"
+      ],
+      "storageTargets": [
+        "授权 grant/session"
+      ],
+      "cases": [
+        "中文空格路径",
+        "只读/越界",
+        "不串项目不假成功"
+      ]
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "E00",
+      "name": "验收台架自证：隔离启动→打开项目→重启→独立回读",
+      "features": [
+        "F01",
+        "F32"
+      ],
+      "status": "PASS",
+      "chain": "PASS",
+      "storage": "PASS",
+      "completeness": "NOT_RUN",
+      "script": "test/acceptance/scenarios/e00-project-persistence.e2e.mjs",
+      "evidence": "test/acceptance/evidence/stage3-e00.log（runRoot: vela-acc-e00-2026-10-01T11-53-14-437Z-1f565a86）",
+      "runRoot": "C:/Users/Administrator/AppData/Local/Temp/vela-acc-e00-2026-10-01T03-50-46-349Z-a536b72d",
+      "covered": [
+        "隔离启动（profile/global-home 文件事实）",
+        "smoke 链路打开项目+主进程 marker 收据",
+        "退出重启后重开（用户路径关闭，拒绝 forced）",
+        "vela.db integrity/foreign_key_check + manifest",
+        "recent-projects 由 project:open 写入",
+        "项目 B 零污染",
+        "来源 fixture 哈希不变",
+        "Electron profile 隔离"
+      ],
+      "driver": "raw-electron + CDP attach（规避并发任务 inspector 争用）",
+      "note": "并发 ABI 翻转会使 marker 丢失（实测一次）；本 PASS 为无并发执行结果"
+    },
+    {
+      "id": "E01",
+      "name": "完整创作闭环",
+      "features": [
+        "F03",
+        "F04",
+        "F05",
+        "F07",
+        "F08",
+        "F09",
+        "F10",
+        "F11",
+        "F25",
+        "F30"
+      ],
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "note": "NOT_RUN：完整闭环依赖 14 步真实链路（蓝图 v2 导入/画布绑定/生成/审稿/定稿/发布/导出）。本轮完成了其首个业务分支的加强版（E01P-strict）与浏览器/单测层面的组件契约；端到端 14 步场景文件未实现。"
+    },
+    {
+      "id": "E02",
+      "name": "外部资料到写作输入",
+      "features": [
+        "F19",
+        "F07"
+      ],
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "note": "NOT_RUN：外部资料中枢的批准快照/来源变化链路未在本轮建立场景。"
+    },
+    {
+      "id": "E03",
+      "name": "角色、世界、时间线与修炼",
+      "features": [
+        "F13",
+        "F16",
+        "F17",
+        "F15",
+        "F18"
+      ],
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "note": "NOT_RUN：角色/世界/地图/时间线/修炼的跨域引用与删除策略未建立场景。"
+    },
+    {
+      "id": "E04",
+      "name": "导入、编辑与导出",
+      "features": [
+        "F23",
+        "F07",
+        "F25",
+        "F24"
+      ],
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "note": "NOT_RUN：导入预览/取消/确认与导出的端到端未建立场景（浏览器侧有组件级回归）。"
+    },
+    {
+      "id": "E05",
+      "name": "检索、重建与连续性",
+      "features": [
+        "F20",
+        "F21",
+        "F09"
+      ],
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "note": "NOT_RUN：检索/向量重建/连续性需 LanceDB 与 embedding 配置，未建立场景。"
+    },
+    {
+      "id": "E06",
+      "name": "项目切换与迟到结果",
+      "features": [
+        "F01",
+        "F08",
+        "F21"
+      ],
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "note": "NOT_RUN：迟到结果与项目切换已由 E01P-strict 部分覆盖（重启式切换），会话内热切换无程序化钩子。"
+    },
+    {
+      "id": "E07",
+      "name": "失败与恢复",
+      "features": [
+        "F08",
+        "F11",
+        "F12",
+        "F29"
+      ],
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "note": "NOT_RUN：故障注入（DB 提交失败/落盘失败/流式截断等）未建立场景。"
+    },
+    {
+      "id": "E08",
+      "name": "重启、备份、恢复与迁移",
+      "features": [
+        "F26",
+        "F01"
+      ],
+      "status": "NOT_RUN",
+      "chain": "NOT_RUN",
+      "storage": "NOT_RUN",
+      "completeness": "NOT_RUN",
+      "note": "NOT_RUN：备份/恢复/迁移未建立场景（备份服务以 .vela/ 为范围，实体稿在范围外须实测）。"
+    },
+    {
+      "id": "E01P",
+      "name": "E01 部分分支（加强）：跨项目隔离与保存语义（A/B 双开、同章号、显式保存 vs 退出保存、放弃分支、A→B→A 往返）",
+      "features": [
+        "F01",
+        "F07",
+        "F32"
+      ],
+      "status": "PASS",
+      "chain": "PASS",
+      "storage": "PASS",
+      "completeness": "NOT_RUN",
+      "script": "test/acceptance/scenarios/e01p-strict-isolation.e2e.mjs",
+      "evidence": "test/acceptance/evidence/stage3-e01p.log（runRoot: vela-acc-e01p2-2026-10-01T11-58-42-670Z-68a64a9f，22/22）",
+      "covered": [
+        "A、B 都经真实应用打开并各自写入第 2 章草稿（同章号）",
+        "显式保存：应用运行中以只读连接回读，正文含 A1 标记",
+        "退出保存：未保存输入 + 「保存并退出」后 A2 落盘",
+        "放弃：未保存输入 + 「放弃并退出」后 B2 不落盘",
+        "A→B→A 往返：界面正文与独立 SQLite 都指向各自项目",
+        "跨项目隔离：两侧互不含对方标记；manifest projectId 不同",
+        "草稿字段取证：chapter/version/status/blueprint_chapter_number",
+        "来源与产物哈希：dist 产物在本轮全程未变"
+      ],
+      "note": "会话内热切换（原生目录对话框）自动化不可用，登记为未覆盖；E01 完整闭环仍 NOT_RUN"
+    }
+  ]
+}

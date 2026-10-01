@@ -22,8 +22,10 @@ export const RENDERER_SURFACE_E2E_CONTRACT = Object.freeze({
   ]),
   themes: Object.freeze(['light', 'galaxy', 'paper', 'dark']),
   surfaces: Object.freeze({
-    sidebar: Object.freeze({ selector: '.skin-workspace-panel', alpha: 0.56 }),
-    page: Object.freeze({ selector: '.skin-workspace-page', alpha: 0.60 }),
+    // 图片皮肤表面不透明度按可读性设计上调：侧栏 frost 66%、页面 surface ≥88%
+    // （--skin-readable-opacity 下限），4.5:1 对比度由浏览器契约测试守护。
+    sidebar: Object.freeze({ selector: '.skin-workspace-panel', alpha: 0.66 }),
+    page: Object.freeze({ selector: '.skin-workspace-page', alpha: 0.88 }),
     solid: Object.freeze({ selector: '.skin-solid-surface', alpha: 0.88 }),
   }),
   routes: Object.freeze(['project', 'workspace', 'knowledge', 'characters']),
@@ -63,42 +65,17 @@ export const RENDERER_SURFACE_E2E_CONTRACT = Object.freeze({
   classicThemeSurfaces: Object.freeze({
     themed: Object.freeze(['light', 'galaxy', 'paper', 'dark']),
     paper: 'paper',
+    // 现行 chrome 面集（2026-10-01 资源树/标题栏重构后）：
+    // 旧契约里的 .writer-left-rail 与 .writer-task-table 已未挂载（任务改为状态栏浮层），
+    // 旧 .writer-statusbar 并入标题栏。期望一律来自主题 token（设计契约），
+    // 冻结色值由 theme-computed-contrast 浏览器套件承担。
     surfaces: Object.freeze({
       topbar: Object.freeze({ selector: '.writer-topbar', token: '--color-titlebar', textToken: '--color-titlebar-text', minHeight: 24 }),
-      leftRail: Object.freeze({ selector: '.writer-left-rail', token: '--color-activity-bar', textToken: '--color-text-secondary', minWidth: 40 }),
       projectTree: Object.freeze({ selector: '.writer-project-tree', token: '--color-sidebar', textToken: '--color-text' }),
       aiPanel: Object.freeze({ selector: '.writer-ai-panel', token: '--color-panel', textToken: '--color-text' }),
-      taskTable: Object.freeze({ selector: '.writer-task-table', token: '--color-panel', textToken: '--color-text' }),
       workspacePage: Object.freeze({ selector: '.skin-workspace-page', token: '--color-editor-bg', textToken: '--color-text' }),
-      statusbar: Object.freeze({ selector: '.writer-statusbar', token: '--color-statusbar', textToken: '--color-text-secondary', minHeight: 20 }),
     }),
-    statusbarHover: Object.freeze({ selector: '.writer-statusbar-segment', token: '--color-hover' }),
-    approvedComputed: Object.freeze({
-      light: Object.freeze({
-        topbar: Object.freeze(['#FCFAF3', '#2B2A26']), leftRail: Object.freeze(['#F0EADA', '#6E6A5F']),
-        projectTree: Object.freeze(['#F0EADA', '#2B2A26']), aiPanel: Object.freeze(['#F0EADA', '#2B2A26']),
-        taskTable: Object.freeze(['#F0EADA', '#2B2A26']), workspacePage: Object.freeze(['#FCFAF3', '#2B2A26']),
-        statusbar: Object.freeze(['#FCFAF3', '#6E6A5F']), statusbarHover: '#EAE3D2',
-      }),
-      galaxy: Object.freeze({
-        topbar: Object.freeze(['#0A1628', '#8BA4BE']), leftRail: Object.freeze(['#071220', '#8BA4BE']),
-        projectTree: Object.freeze(['#0E1B30', '#E0ECF4']), aiPanel: Object.freeze(['#0E1B30', '#E0ECF4']),
-        taskTable: Object.freeze(['#0E1B30', '#E0ECF4']), workspacePage: Object.freeze(['#091525', '#E0ECF4']),
-        statusbar: Object.freeze(['#071220', '#8BA4BE']), statusbarHover: '#142640',
-      }),
-      paper: Object.freeze({
-        topbar: Object.freeze(['#FCFAF3', '#2B2A26']), leftRail: Object.freeze(['#F0EADA', '#6E6A5F']),
-        projectTree: Object.freeze(['#F0EADA', '#2B2A26']), aiPanel: Object.freeze(['#F0EADA', '#2B2A26']),
-        taskTable: Object.freeze(['#F0EADA', '#2B2A26']), workspacePage: Object.freeze(['#FCFAF3', '#2B2A26']),
-        statusbar: Object.freeze(['#FCFAF3', '#6E6A5F']), statusbarHover: '#EAE3D2',
-      }),
-      dark: Object.freeze({
-        topbar: Object.freeze(['#181818', '#CCCCCC']), leftRail: Object.freeze(['#333333', '#A0A0A0']),
-        projectTree: Object.freeze(['#252526', '#D4D4D4']), aiPanel: Object.freeze(['#252526', '#D4D4D4']),
-        taskTable: Object.freeze(['#252526', '#D4D4D4']), workspacePage: Object.freeze(['#1E1E1E', '#D4D4D4']),
-        statusbar: Object.freeze(['#181818', '#A0A0A0']), statusbarHover: '#2A2D2E',
-      }),
-    }),
+    statusbarHover: Object.freeze({ selector: '.writer-topbar-segment', token: '--color-hover' }),
   }),
 })
 
@@ -383,12 +360,11 @@ export function assertVisualEvidenceObservation(observation, expected) {
     Date.parse(observation.markerOpenedAt ?? '') >= expected.launchStartedAt - 1_000,
     'Visual evidence project-open marker is stale',
   )
-  assert.equal(observation.routeTitleVisible, true, 'Novel configuration route must be visible')
+  assert.equal(observation.routeTitleVisible, true, 'Creative parameters route must be visible')
   assert.deepEqual(observation.panelsVisible, {
     projectTree: true,
     aiPanel: true,
-    taskTable: true,
-  }, 'Project tree, AI panel, and task table must all be visible')
+  }, 'Project tree and AI panel must both be visible')
   assert.equal(observation.visibleDialogCount, 0, 'Visual evidence must not contain a visible dialog')
   assert.doesNotMatch(
     observation.bodyText,
@@ -402,7 +378,7 @@ export function assertVisualEvidenceObservation(observation, expected) {
   } else {
     assert.equal(observation.imageDecoded, true, 'Visual evidence background image must decode')
     if (observation.workspaceAlpha != null) {
-      assertClose(observation.workspaceAlpha, 0.60, IMAGE_SKIN_ALPHA_TOLERANCE, 'Image-skin workspace alpha')
+      assertClose(observation.workspaceAlpha, RENDERER_SURFACE_E2E_CONTRACT.surfaces.page.alpha, IMAGE_SKIN_ALPHA_TOLERANCE, 'Image-skin workspace alpha')
     }
   }
 }
@@ -418,11 +394,10 @@ async function assertCurrentVisualEvidenceState(page, fixture, launchStartedAt, 
   const observation = {
     projectPath: marker.projectPath,
     markerOpenedAt: marker.openedAt,
-    routeTitleVisible: await page.locator('h2').filter({ hasText: /小说配置|Novel configuration/ }).first().isVisible(),
+    routeTitleVisible: await page.locator('h2').filter({ hasText: /创作参数|Creative parameters/ }).first().isVisible(),
     panelsVisible: {
       projectTree: await page.locator('.writer-project-tree').first().isVisible(),
       aiPanel: await page.locator('.writer-ai-panel').first().isVisible(),
-      taskTable: await page.locator('.writer-task-table').first().isVisible(),
     },
     visibleDialogCount: await page.locator('[role="dialog"]:visible').count(),
     bodyText: await page.locator('body').innerText(),
@@ -573,7 +548,8 @@ async function selectImageSkin(page, skinId) {
 }
 
 async function selectTheme(page, theme) {
-  await page.locator(`.appearance-theme-option[data-theme="${theme}"]`).click()
+  // 主题画廊重构后由 ThemeGallery 渲染，稳定钩子是 data-theme-option（data-theme 仍在）
+  await page.locator(`[data-theme-option="${theme}"]`).click()
   await page.waitForFunction(
     expected => document.querySelector('.app-skin-root')?.getAttribute('data-theme') === expected,
     theme,
@@ -581,27 +557,43 @@ async function selectTheme(page, theme) {
   )
 }
 
-async function clickNavigation(page, titles) {
-  await page.locator(labelSelector(titles)).first().click()
+// 现行导航模型（2026-10-01 重构）：
+// 资源树是唯一入口——视图都从树的叶子（role=button）进入，旧的主导航按钮已不存在。
+async function ensureProjectTree(page) {
+  if (await page.locator('.writer-project-tree').first().isVisible().catch(() => false)) return
+  const back = page.locator('button[aria-label="返回创作"], button[aria-label="Return to project"]').first()
+  if (await back.count()) await back.click()
+  await page.locator('.writer-project-tree').first().waitFor({ state: 'visible', timeout: RUNNER_TIMEOUT_MS })
+}
+
+async function openProjectTreeLeaf(page, labelPattern) {
+  await ensureProjectTree(page)
+  await page.locator('.writer-project-tree [role="button"]')
+    .filter({ hasText: labelPattern })
+    .first()
+    .click()
   await page.locator('.skin-workspace-page').first().waitFor({ state: 'visible', timeout: RUNNER_TIMEOUT_MS })
 }
 
 async function selectVisualQaState(page) {
-  await clickNavigation(page, ['创作', 'Writing'])
-  await page.locator('.writer-project-tree .tree-item')
-    .filter({ hasText: /小说配置|Novel configuration/ })
-    .first()
-    .click()
-  await page.locator('h2').filter({ hasText: /小说配置|Novel configuration/ }).first()
+  // 「创作参数」为用户可见的配置编辑器（旧名「小说配置」）。
+  await openProjectTreeLeaf(page, /创作参数|Creative parameters/)
+  await page.locator('h2').filter({ hasText: /创作参数|Creative parameters/ }).first()
     .waitFor({ state: 'visible', timeout: RUNNER_TIMEOUT_MS })
+  // AI 面板默认收起（布局状态），经状态栏真实入口展开，保证面板面集可断言。
+  const aiPanel = page.locator('.writer-ai-panel').first()
+  if (!(await aiPanel.isVisible().catch(() => false))) {
+    await page.locator(labelSelector(['打开 AI 助手', 'Open AI assistant'])).first().click()
+  }
+  await aiPanel.waitFor({ state: 'visible', timeout: RUNNER_TIMEOUT_MS })
 }
 
 async function assertImageSkinThemes(page) {
   const evidence = []
   for (const theme of RENDERER_SURFACE_E2E_CONTRACT.themes) {
     await selectTheme(page, theme)
-    const sidebar = await assertSurfaceAlpha(page, 'sidebar', 0.56, `${theme} sidebar`)
-    const workspacePage = await assertSurfaceAlpha(page, 'page', 0.60, `${theme} workspace page`)
+    const sidebar = await assertSurfaceAlpha(page, 'sidebar', RENDERER_SURFACE_E2E_CONTRACT.surfaces.sidebar.alpha, `${theme} sidebar`)
+    const workspacePage = await assertSurfaceAlpha(page, 'page', RENDERER_SURFACE_E2E_CONTRACT.surfaces.page.alpha, `${theme} workspace page`)
     const solid = await assertSurfaceAlpha(page, 'solid', 0.88, `${theme} settings modal`)
     assertTextColor(sidebar.color, theme, `${theme} sidebar text`)
     assertTextColor(workspacePage.color, theme, `${theme} workspace text`)
@@ -618,28 +610,29 @@ async function assertImageSkinThemes(page) {
 }
 
 async function assertReachableRoutes(page) {
-  // The primary rail holds workspace-level destinations only now: chapter
-  // blueprints, world and plot entries live inside their owning view.
+  // 现行入口：项目总览（树本身）+ 资料库叶子三视图。
   const routes = [
-    { id: 'project', titles: ['创作', 'Writing'] },
-    { id: 'workspace', titles: ['资料', 'Sources'] },
-    { id: 'knowledge', titles: ['知识库', 'Knowledge'] },
-    { id: 'characters', titles: ['角色', 'Characters'] },
+    { id: 'project', leaf: null },
+    { id: 'workspace', leaf: /资料来源与审核|Sources & review/ },
+    { id: 'knowledge', leaf: /知识检索|Knowledge retrieval/ },
+    { id: 'characters', leaf: /角色档案|Character profile/ },
   ]
   const evidence = []
   for (const route of routes) {
-    await clickNavigation(page, route.titles)
-    const sidebar = await assertSurfaceAlpha(page, 'sidebar', 0.56, `${route.id} sidebar`)
-    const workspacePage = await assertSurfaceAlpha(page, 'page', 0.60, `${route.id} workspace page`)
+    if (route.leaf) await openProjectTreeLeaf(page, route.leaf)
+    else await ensureProjectTree(page)
+    const sidebar = await assertSurfaceAlpha(page, 'sidebar', RENDERER_SURFACE_E2E_CONTRACT.surfaces.sidebar.alpha, `${route.id} sidebar`)
+    const workspacePage = await assertSurfaceAlpha(page, 'page', RENDERER_SURFACE_E2E_CONTRACT.surfaces.page.alpha, `${route.id} workspace page`)
     evidence.push({ route: route.id, sidebar: sidebar.backgroundColor, page: workspacePage.backgroundColor })
   }
+  await ensureProjectTree(page)
   return evidence
 }
 
 async function assertClassicThemeSurfaces(page, visualEvidenceDirectory, fixture, launchStartedAt) {
   const evidence = []
   const screenshots = []
-  const { themed, surfaces, statusbarHover, approvedComputed } = RENDERER_SURFACE_E2E_CONTRACT.classicThemeSurfaces
+  const { themed, surfaces, statusbarHover } = RENDERER_SURFACE_E2E_CONTRACT.classicThemeSurfaces
   for (const [themeIndex, theme] of themed.entries()) {
     await selectTheme(page, theme)
     await closeSettings(page)
@@ -651,9 +644,6 @@ async function assertClassicThemeSurfaces(page, visualEvidenceDirectory, fixture
       const expectedText = await computedTokenColor(page, contract.textToken)
       assertColorMatches(surface.backgroundColor, expectedBackground, `${theme} classic ${surfaceName} background`)
       assertColorMatches(surface.color, expectedText, `${theme} classic ${surfaceName} text`)
-      const [approvedBackground, approvedText] = approvedComputed[theme][surfaceName]
-      assertColorMatches(surface.backgroundColor, approvedBackground, `${theme} classic ${surfaceName} approved background`)
-      assertColorMatches(surface.color, approvedText, `${theme} classic ${surfaceName} approved text`)
       themeEvidence.surfaces[surfaceName] = {
         background: surface.backgroundColor,
         text: surface.color,
@@ -670,12 +660,13 @@ async function assertClassicThemeSurfaces(page, visualEvidenceDirectory, fixture
       ordinal: themeIndex + 1,
     })
     if (screenshot) screenshots.push(screenshot)
-    const clickableSegments = page.locator(statusbarHover.selector)
+    // 现行状态栏分段是按钮：可点击性由「未禁用」表达，不再依赖 cursor:pointer。
+    const clickableSegments = page.locator(`${statusbarHover.selector}:not([disabled])`)
     const segmentCount = await clickableSegments.count()
     let clickableSegment = null
     for (let index = 0; index < segmentCount; index += 1) {
       const candidate = clickableSegments.nth(index)
-      if (await candidate.evaluate(element => getComputedStyle(element).cursor === 'pointer')) {
+      if (await candidate.isVisible().catch(() => false)) {
         clickableSegment = candidate
         break
       }
@@ -703,7 +694,6 @@ async function assertClassicThemeSurfaces(page, visualEvidenceDirectory, fixture
     })
     const hoverLabel = `${theme} classic statusbar clickable hover background (var=${hoverState.themeHover}, inline=${hoverState.inlineStyle}, background=${hoverState.background})`
     assertColorMatches(hoverState.backgroundColor, expectedHover, hoverLabel)
-    assertColorMatches(hoverState.backgroundColor, approvedComputed[theme].statusbarHover, `${theme} classic approved statusbar hover`)
     const actualHover = hoverState.backgroundColor
     themeEvidence.statusbarHover = actualHover
     evidence.push(themeEvidence)
@@ -730,7 +720,7 @@ async function assertSameStateImageSkinEvidence(page, visualEvidenceDirectory, f
       const pageSurface = await computedSurface(page, '.skin-workspace-page', 'classic same-state workspace')
       assert.equal(computedColorAlpha(pageSurface.backgroundColor), 1, 'classic same-state workspace must be opaque')
     } else {
-      await assertSurfaceAlpha(page, 'page', 0.60, `${imageSkin} same-state workspace page`)
+      await assertSurfaceAlpha(page, 'page', RENDERER_SURFACE_E2E_CONTRACT.surfaces.page.alpha, `${imageSkin} same-state workspace page`)
       const image = page.locator('.app-skin-background-image')
       await image.waitFor({ state: 'visible', timeout: RUNNER_TIMEOUT_MS })
       assert.ok(await image.evaluate(element => element.complete && element.naturalWidth > 0), `${imageSkin} background image must decode`)
@@ -1013,7 +1003,13 @@ async function runRendererSurfaceE2e() {
         errors.push(error)
       }
       if (visualEvidenceDirectory) markVisualEvidenceRunFailed(visualEvidenceDirectory, 'execution')
-      if (errors.length > 1) throw new AggregateError(errors, 'Renderer validation and postprocess both failed')
+      if (errors.length > 1) {
+        // 聚合错误必须携带每条明细：否则只看到 "both failed" 无法定位（2026-10-01 实测痛点）。
+        for (const error of errors) {
+          console.error(`[renderer-surface-e2e] ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
+        }
+        throw new AggregateError(errors, 'Renderer validation and postprocess both failed')
+      }
       throw executionError
     }
 
@@ -1029,7 +1025,24 @@ async function runRendererSurfaceE2e() {
     }
     return runEvidence
   } finally {
-    rmSync(fixture.temporaryRoot, { recursive: true, force: true })
+    // Windows 下 Electron 退出后短时间仍持有 profile 文件句柄，清理需要重试；
+    // 清理失败不能吞掉校验结果（运行目录在 .runtime/.cache 下且有 TTL 收据管理）。
+    removeRunDirectoryWithRetry(fixture.temporaryRoot)
+  }
+}
+
+function removeRunDirectoryWithRetry(directory, attempts = 5) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      rmSync(directory, { recursive: true, force: true })
+      return
+    } catch (error) {
+      if (attempt === attempts - 1) {
+        console.warn(`[renderer-surface-e2e] run directory cleanup skipped: ${error instanceof Error ? error.message : String(error)}`)
+        return
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500)
+    }
   }
 }
 

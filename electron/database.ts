@@ -12,10 +12,12 @@ import { loadApplicationImportSourceSecret } from './services/import-source-iden
 import { countDraftUnits } from '../src/shared/draft-units'
 import { migrateDraftUnitCounts } from './services/draft-unit-migration'
 import { migrateWorldMapAtlas } from './services/world-map-atlas-migration'
+import { ensureWorldWorkbenchSchema } from './services/world-workbench-schema'
 
 const require = createRequire(import.meta.url)
 const Database = require('better-sqlite3') as typeof import('better-sqlite3')
 import type BetterSqlite3 from 'better-sqlite3'
+import { ensureCultivationSchema } from './repositories/cultivation-schema'
 import { ensureCharacterRosterSchema } from './repositories/character-roster-schema'
 import { ensureStoryDomainSchema } from './services/story-domain-schema'
 import { ensurePhase2To8Schema } from './services/phase2-8-schema'
@@ -218,6 +220,10 @@ export function initProjectDatabase(projectPath: string, importSourceSecret?: Bu
   ensureCharacterRelationshipSchema(projectDb)
   CharacterRelationshipRepository.migrateLegacyRelationships(projectDb)
 
+  // 世界资料（世界/势力/秘境/通道/规则/人物行踪）。幂等：只新增表与可空列，
+  // 不创建默认世界、不推断旧地图归属、不升级候选状态。
+  ensureWorldWorkbenchSchema(projectDb)
+
   console.log(`[Vela DB] 项目数据库已打开: ${dbPath}`)
 }
 
@@ -302,6 +308,26 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
       notes_updated_at TEXT DEFAULT '',           -- notes 提取时间
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
+    );
+    -- ============================================================
+    -- 2b. blueprint_details — 章节蓝图 v2 细纲（blueprint-v2-contract §5.1）
+    -- 分镜正文、规则、禁忌、检查条目的唯一权威。blueprints 表不加列不改列；
+    -- v2 保存时在同一事务内按 §6.3 投影四列。
+    -- ============================================================
+    CREATE TABLE IF NOT EXISTS blueprint_details (
+      chapter_number INTEGER PRIMARY KEY,         -- 与 blueprints.chapter_number 一一对应
+      schema_version INTEGER NOT NULL DEFAULT 2,
+      detail_json   TEXT NOT NULL,                -- ChapterBlueprintV2Detail 的 canonical JSON
+      raw_markdown  TEXT NOT NULL,                -- 最近一次导入/规范导出的完整原文，逐字，供核对
+      revision      INTEGER NOT NULL,             -- 冗余列：免解析 JSON 的乐观并发/摘要读取
+      content_hash  TEXT NOT NULL,                -- 冗余列：同上
+      created_at    TEXT DEFAULT (datetime('now')),
+      updated_at    TEXT DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS blueprint_detail_review_notices (
+      chapter_number INTEGER PRIMARY KEY,
+      notices_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE TABLE IF NOT EXISTS blueprint_volumes (
       id TEXT PRIMARY KEY,
@@ -647,6 +673,7 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       type TEXT NOT NULL,
+      marker_icon TEXT DEFAULT NULL,
       description TEXT NOT NULL DEFAULT '',
       parent_id TEXT DEFAULT NULL,
       map_id TEXT NOT NULL DEFAULT '',
@@ -726,8 +753,9 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
     );
     CREATE INDEX IF NOT EXISTS idx_story_timeline_events_order
       ON story_timeline_events(sort_order, created_at);
-    CREATE INDEX IF NOT EXISTS idx_story_timeline_events_branch
-      ON story_timeline_events(branch_id, sort_order);
+    -- branch_id 的索引不在这里建立：旧库的 story_timeline_events 还没有该列，
+    -- 会在 ensurePhase2To8Schema 增量补列之后再创建（与 world_map_nodes.map_id
+    -- 的索引同一处理方式）。否则打开旧项目会在这里直接失败。
 
     -- ============================================================
     -- 12. plot_canvas — 作者可编辑的剧情画布（跨章节剧情组织）
@@ -1649,6 +1677,7 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
 
   // 角色事实继续存放于 characters；这里仅建立 revision、迁移与幂等元数据。
   // 旧角色图谱原文在首次打开时只归档，不自动解析或改写。
+  ensureCultivationSchema(db)
   ensureCharacterRosterSchema(db)
   ensureStoryDomainSchema(db)
   ensurePhase2To8Schema(db)
@@ -2091,6 +2120,9 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
   )
   if (!nodeColumns.has('map_id')) {
     db.exec("ALTER TABLE world_map_nodes ADD COLUMN map_id TEXT NOT NULL DEFAULT ''")
+  }
+  if (!nodeColumns.has('marker_icon')) {
+    db.exec('ALTER TABLE world_map_nodes ADD COLUMN marker_icon TEXT DEFAULT NULL')
   }
   db.exec('CREATE INDEX IF NOT EXISTS idx_world_map_nodes_map ON world_map_nodes(map_id)')
 

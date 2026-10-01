@@ -50,6 +50,7 @@ describe('explicit Agent domain proposals', () => {
     expect(factMutationTools.map(tool => tool.name)).toEqual([
       'propose_novel_config',
       'propose_chapter_blueprint',
+      'import_chapter_blueprint_v2',
     ])
   })
 

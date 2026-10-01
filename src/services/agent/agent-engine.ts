@@ -32,6 +32,9 @@ const TOOL_TIMEOUT_MS = 30_000
 /** Tool 返回内容最大长度（字符） */
 const TOOL_RESULT_MAX_CHARS = 3000
 
+/** A single Blueprint v2 chapter read contains the complete authoring contract. */
+const BLUEPRINT_DETAIL_TOOL_RESULT_MAX_CHARS = 12_000
+
 // ===== 类型 =====
 
 /** Tool 调用信息 */
@@ -272,9 +275,12 @@ export async function runAgentLoop(
         )
 
         // 截断过长的结果
+        const isSingleChapterBlueprintDetail = tc.name === 'read_blueprint'
+          && Number.isSafeInteger(tc.arguments.chapter_number)
+          && tc.arguments.include_detail !== false
         const truncatedContent = truncateResult(
           result.content,
-          TOOL_RESULT_MAX_CHARS,
+          isSingleChapterBlueprintDetail ? BLUEPRINT_DETAIL_TOOL_RESULT_MAX_CHARS : TOOL_RESULT_MAX_CHARS,
           executionContext.writingLanguage,
         )
 

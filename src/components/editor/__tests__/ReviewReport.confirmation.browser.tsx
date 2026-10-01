@@ -10,6 +10,7 @@ import { useLLMStore } from '../../../stores/llm-store'
 import { useLocaleStore } from '../../../stores/locale-store'
 import { useProjectStore } from '../../../stores/project-store'
 import { useWorkflowStore } from '../../../stores/workflow-store'
+import { useEditorStore } from '../../../stores/editor-store'
 import ReviewReport from '../ReviewReport'
 
 const PROJECT_PATH = 'C:\\novels\\confirmed-review'
@@ -53,6 +54,7 @@ const originalLLMState = useLLMStore.getState()
 const originalLocaleState = useLocaleStore.getState()
 const originalProjectState = useProjectStore.getState()
 const originalWorkflowState = useWorkflowStore.getState()
+const originalEditorState = useEditorStore.getState()
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -105,8 +107,11 @@ function model(overrides: Partial<ModelProfile>): ModelProfile {
   }
 }
 
-function installIpc(confirmationId: number, currentDraftContent: string = REVIEW_SOURCE_DRAFT.content) {
+function installIpc(confirmationId: number, currentDraftContent: string = REVIEW_SOURCE_DRAFT.content, sourceReport = RAW_AI_REPORT) {
   let draftContent = currentDraftContent
+  let savedConfirmation = ''
+  let blueprintRevision = 1
+  const blueprintEvidence = JSON.parse(sourceReport).blueprintEvidence
   let latestReview: {
     id: number
     baseDraftId: number
@@ -115,7 +120,7 @@ function installIpc(confirmationId: number, currentDraftContent: string = REVIEW
     createdAt: string
     content: string
   } | null = null
-  invoke = vi.fn(async (channel: string) => {
+  invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
     if (channel === 'db:draft-get-meta') {
       return {
         id: 1,
@@ -124,23 +129,34 @@ function installIpc(confirmationId: number, currentDraftContent: string = REVIEW
         version: 1,
         status: 'draft',
         source: 'write',
+        ...(blueprintEvidence ? { blueprintChapterNumber: blueprintEvidence.chapterNumber } : {}),
       }
     }
     if (channel === 'db:draft-get-full') return { id: 1, content: draftContent }
     if (channel === 'db:review-next-index') return 2
-    if (channel === 'db:review-create') return { success: true, id: confirmationId }
+    if (channel === 'db:review-create') {
+      savedConfirmation = (args[0] as { content: string }).content
+      return { success: true, id: confirmationId }
+    }
     if (channel === 'db:review-get-full') {
+      if (args[0] === confirmationId) return {
+        id: confirmationId, baseDraftId: 1, reviewIndex: 2, contentId: 101,
+        createdAt: '2026-08-29T00:00:00.000Z', content: savedConfirmation,
+        sourceDraft: REVIEW_SOURCE_DRAFT,
+      }
       return {
         id: 41,
         baseDraftId: 1,
         reviewIndex: 1,
         contentId: 100,
         createdAt: '2026-08-28T00:00:00.000Z',
-        content: RAW_AI_REPORT,
+        content: sourceReport,
         sourceDraft: REVIEW_SOURCE_DRAFT,
       }
     }
     if (channel === 'db:review-get-latest') return latestReview
+    if (channel === 'db:blueprint-v2-get') return { ...blueprintEvidence, revision: blueprintRevision }
+    if (channel === 'db:foreshadowing-list-by-draft') return []
     throw new Error(`Unexpected IPC channel: ${channel}`)
   })
   Object.defineProperty(window, 'velaAPI', {
@@ -156,10 +172,13 @@ function installIpc(confirmationId: number, currentDraftContent: string = REVIEW
     },
   })
   return {
+    setSavedContent(content: string) { savedConfirmation = content },
+    setBlueprintRevision(revision: number) { blueprintRevision = revision },
     setDraftContent(content: string) {
       draftContent = content
     },
     setLatestReview(content: string) {
+      savedConfirmation = content
       latestReview = {
         id: confirmationId,
         baseDraftId: 1,
@@ -226,6 +245,7 @@ async function fillTextarea(selector: string, value: string, index = 0) {
 }
 
 beforeEach(() => {
+  useEditorStore.setState({ tabs: [], activeTabId: null })
   startWorkflow = vi.fn(async () => 'confirmed-review-run')
   setDefaultModel = vi.fn(async () => true)
   useLocaleStore.setState({ locale: 'zh-CN' })
@@ -270,9 +290,65 @@ afterEach(async () => {
   useLocaleStore.setState(originalLocaleState)
   useProjectStore.setState(originalProjectState)
   useWorkflowStore.setState(originalWorkflowState)
+  useEditorStore.setState(originalEditorState)
 })
 
 describe('ReviewReport human-confirmed revision flow', () => {
+  it('refuses unsaved edits in the open source draft before dispatching revision', async () => {
+    installIpc(101)
+    await renderReport()
+    await act(async () => {
+      await page.getByRole('button', { name: '确认审稿清单', exact: true }).click()
+      await vi.waitFor(() => expect(invoke.mock.calls.some(([channel]) => channel === 'db:review-create')).toBe(true))
+    })
+    await expect.element(page.getByRole('button', { name: '按确认意见修稿', exact: true })).toBeVisible()
+    useEditorStore.getState().openFile({ id: 'vela://draft/1', name: '源草稿', type: 'chapter', filePath: 'vela://draft/1', projectKey: PROJECT_PATH, content: '未保存的新正文', savedContent: REVIEW_SOURCE_DRAFT.content })
+    await act(async () => page.getByRole('button', { name: '按确认意见修稿', exact: true }).click())
+    await act(async () => page.getByRole('button', { name: '开始修稿', exact: true }).click())
+    await expect.element(page.getByRole('alert')).toHaveTextContent('源草稿有未保存修改')
+    expect(startWorkflow).not.toHaveBeenCalled()
+  })
+
+  it('requires reconfirmation after editing and never starts from unconfirmed changes', async () => {
+    installIpc(98)
+    await renderReport()
+    await act(async () => page.getByRole('button', { name: '确认审稿清单', exact: true }).click())
+    await expect.element(page.getByRole('button', { name: '按确认意见修稿', exact: true })).toBeVisible()
+    const original = confirmationCreateParams().content
+    await act(async () => page.getByRole('button', { name: '修改决策清单', exact: true }).click())
+    await fillTextarea('#review-author-guidance', '新的人工指导必须重新保存。')
+    expect(container!.textContent).not.toContain('按确认意见修稿')
+    expect(startWorkflow).not.toHaveBeenCalled()
+    invoke.mockClear()
+    await act(async () => page.getByRole('button', { name: '重新确认审稿清单', exact: true }).click())
+    expect(confirmationCreateParams().content).not.toBe(original)
+    expect(parseHumanConfirmedReviewSnapshot(original)!.authorGuidance).toBe('')
+  })
+
+  it('refuses a changed persisted confirmation before dispatching the workflow', async () => {
+    const ipc = installIpc(99)
+    await renderReport()
+    await act(async () => page.getByRole('button', { name: '确认审稿清单', exact: true }).click())
+    await act(async () => page.getByRole('button', { name: '按确认意见修稿', exact: true }).click())
+    ipc.setSavedContent(RAW_AI_REPORT)
+    await act(async () => page.getByRole('button', { name: '开始修稿', exact: true }).click())
+    await expect.element(page.getByRole('alert')).toHaveTextContent('已保存的确认清单不一致')
+    expect(startWorkflow).not.toHaveBeenCalled()
+  })
+
+  it('refuses a changed v2 blueprint after confirmation before dispatching revision', async () => {
+    const report = JSON.stringify({ ...JSON.parse(RAW_AI_REPORT), blueprintEvidence: { chapterNumber: 1, revision: 1, contentHash: 'a'.repeat(64) } })
+    const ipc = installIpc(100, REVIEW_SOURCE_DRAFT.content, report)
+    await renderReport(report)
+    await act(async () => page.getByRole('button', { name: '确认审稿清单', exact: true }).click())
+    expect(parseHumanConfirmedReviewSnapshot(confirmationCreateParams().content)!.blueprintEvidence).toMatchObject({ revision: 1 })
+    await act(async () => page.getByRole('button', { name: '按确认意见修稿', exact: true }).click())
+    ipc.setBlueprintRevision(2)
+    await act(async () => page.getByRole('button', { name: '开始修稿', exact: true }).click())
+    await expect.element(page.getByRole('alert')).toHaveTextContent('蓝图版本已变化')
+    expect(startWorkflow).not.toHaveBeenCalled()
+  })
+
   it('错误降级为待核实时先忽略，确认后只有主动再次纳入才进入修稿', async () => {
     installIpc(42)
     await renderReport(JSON.stringify({ summary: '', items: [
@@ -286,8 +362,8 @@ describe('ReviewReport human-confirmed revision flow', () => {
     })
     const ignored = parseHumanConfirmedReviewSnapshot(confirmationCreateParams().content)!
     expect(ignored.items[0]).toMatchObject({ severity: 'unknown', decision: 'ignore' })
-    await act(async () => page.getByRole('button', { name: '编辑清单', exact: true }).click())
-    await act(async () => page.getByRole('button', { name: '明确纳入修稿', exact: true }).click())
+    await act(async () => page.getByRole('button', { name: '修改决策清单', exact: true }).click())
+    await act(async () => page.getByRole('button', { name: '恢复', exact: true }).click())
     invoke.mockClear()
     await act(async () => {
       await page.getByRole('button', { name: '重新确认审稿清单', exact: true }).click()
@@ -329,9 +405,9 @@ describe('ReviewReport human-confirmed revision flow', () => {
     expect(ignored.goalReview).toEqual(goalReview)
     expect(ignored.items[2]).toMatchObject({ goalId: 'unmet', severity: 'error', decision: 'ignore' })
     expect(ignored.items[3]).toMatchObject({ severity: 'error', decision: 'apply' })
-    await act(async () => page.getByRole('button', { name: '编辑清单', exact: true }).click())
-    await act(async () => page.getByRole('button', { name: '明确纳入修稿', exact: true }).nth(0).click())
-    await act(async () => page.getByRole('button', { name: '明确纳入修稿', exact: true }).click())
+    await act(async () => page.getByRole('button', { name: '修改决策清单', exact: true }).click())
+    await act(async () => page.getByRole('button', { name: '恢复', exact: true }).nth(0).click())
+    await act(async () => page.getByRole('button', { name: '恢复', exact: true }).click())
     invoke.mockClear()
     await act(async () => {
       await page.getByRole('button', { name: '重新确认审稿清单', exact: true }).click()
@@ -535,7 +611,7 @@ describe('ReviewReport human-confirmed revision flow', () => {
       })
     })
     await expect.element(page.getByRole('button', { name: '按确认意见修稿' })).toBeVisible()
-    await act(async () => page.getByRole('button', { name: '编辑清单' }).click())
+    await act(async () => page.getByRole('button', { name: '修改决策清单' }).click())
     expect(document.querySelector<HTMLTextAreaElement>('textarea[aria-label="审稿问题"]')?.value)
       .toBe('角色位置冲突（作者确认版本）。')
     expect(document.querySelector<HTMLTextAreaElement>('#review-author-guidance')?.value)

@@ -1,6 +1,13 @@
 import { writingLanguageText, type WritingLanguage } from './writing-language'
 import type { ExpectedDraftSource } from './ipc-channels'
 import { parseChapterGoalReview, type ChapterGoalReview } from './chapter-goal-review'
+import {
+  parseBlueprintReviewEvidence,
+  parseChapterBlueprintReview,
+  type BlueprintReviewEvidence,
+  type ChapterBlueprintReview,
+} from './chapter-blueprint-review'
+import type { BlueprintV2CheckMode } from './blueprint-v2'
 
 /**
  * Immutable, user-confirmed review snapshot persisted in the existing
@@ -21,6 +28,9 @@ export interface HumanConfirmedReviewItem {
   stableFactKey?: string
   sourceChapter?: number
   goalId?: string
+  sceneId?: string
+  checkId?: string
+  checkMode?: BlueprintV2CheckMode
   decision: HumanConfirmedReviewDecision
   origin: HumanConfirmedReviewOrigin
 }
@@ -36,6 +46,8 @@ export interface HumanConfirmedReviewSnapshot {
   authorGuidance: string
   items: readonly HumanConfirmedReviewItem[]
   goalReview?: ChapterGoalReview
+  blueprintEvidence?: BlueprintReviewEvidence
+  blueprintReview?: ChapterBlueprintReview
 }
 
 export interface HumanConfirmedReviewSnapshotInput {
@@ -45,6 +57,8 @@ export interface HumanConfirmedReviewSnapshotInput {
   authorGuidance: string
   items: readonly HumanConfirmedReviewItem[]
   goalReview?: ChapterGoalReview
+  blueprintEvidence?: BlueprintReviewEvidence
+  blueprintReview?: ChapterBlueprintReview
 }
 
 function nonEmptyString(value: unknown): string | null {
@@ -88,6 +102,9 @@ function parseItem(value: unknown): HumanConfirmedReviewItem | null {
   const stableFactKey = record.stableFactKey === undefined ? undefined : nonEmptyString(record.stableFactKey)
   const sourceChapter = record.sourceChapter
   const goalId = record.goalId === undefined ? undefined : nonEmptyString(record.goalId)
+  const sceneId = record.sceneId === undefined ? undefined : nonEmptyString(record.sceneId)
+  const checkId = record.checkId === undefined ? undefined : nonEmptyString(record.checkId)
+  const checkMode = record.checkMode
   const decision = record.decision
   const origin = record.origin
 
@@ -101,6 +118,9 @@ function parseItem(value: unknown): HumanConfirmedReviewItem | null {
   if (quote === null) return null
   if (stableFactKey === null) return null
   if (goalId === null) return null
+  if (sceneId === null) return null
+  if (checkId === null) return null
+  if (checkMode !== undefined && checkMode !== 'must' && checkMode !== 'reference' && checkMode !== 'forbid') return null
   if (sourceChapter !== undefined && !positiveSafeInteger(sourceChapter)) return null
 
   return Object.freeze({
@@ -111,6 +131,9 @@ function parseItem(value: unknown): HumanConfirmedReviewItem | null {
     ...(stableFactKey === undefined ? {} : { stableFactKey }),
     ...(sourceChapter === undefined ? {} : { sourceChapter }),
     ...(goalId === undefined ? {} : { goalId }),
+    ...(sceneId === undefined ? {} : { sceneId }),
+    ...(checkId === undefined ? {} : { checkId }),
+    ...(checkMode === undefined ? {} : { checkMode }),
     decision,
     origin,
   })
@@ -139,6 +162,19 @@ export function validateHumanConfirmedReviewSnapshot(
   if (sourceDraft === null) return null
   const goalReview = record.goalReview === undefined ? undefined : parseChapterGoalReview(record.goalReview)
   if (goalReview === null) return null
+  const blueprintEvidence = record.blueprintEvidence === undefined
+    ? undefined
+    : parseBlueprintReviewEvidence(record.blueprintEvidence)
+  if (blueprintEvidence === null) return null
+  const blueprintReview = record.blueprintReview === undefined
+    ? undefined
+    : parseChapterBlueprintReview(record.blueprintReview)
+  if (blueprintReview === null) return null
+  if (blueprintEvidence && blueprintReview && (
+    blueprintEvidence.chapterNumber !== blueprintReview.evidence.chapterNumber
+    || blueprintEvidence.revision !== blueprintReview.evidence.revision
+    || blueprintEvidence.contentHash !== blueprintReview.evidence.contentHash
+  )) return null
 
   const items = record.items.map(parseItem)
   if (items.some(item => item === null)) return null
@@ -154,6 +190,26 @@ export function validateHumanConfirmedReviewSnapshot(
         ...item,
         evidence: Object.freeze(item.evidence.map(evidence => Object.freeze({ ...evidence }))),
       }))),
+    }) } : {}),
+    ...(blueprintEvidence ? { blueprintEvidence: Object.freeze({ ...blueprintEvidence }) } : {}),
+    ...(blueprintReview ? { blueprintReview: Object.freeze({
+      evidence: Object.freeze({ ...blueprintReview.evidence }),
+      scenes: Object.freeze(blueprintReview.scenes.map(scene => Object.freeze({
+        ...scene,
+        evidence: Object.freeze(scene.evidence.map(item => Object.freeze({ ...item }))),
+        searchRange: Object.freeze({ ...scene.searchRange }),
+      }))),
+      checks: Object.freeze(blueprintReview.checks.map(check => Object.freeze({
+        ...check,
+        evidence: Object.freeze(check.evidence.map(item => Object.freeze({ ...item }))),
+        searchRange: Object.freeze({ ...check.searchRange }),
+      }))),
+      chapterHook: Object.freeze({
+        ...blueprintReview.chapterHook,
+        evidence: Object.freeze(blueprintReview.chapterHook.evidence.map(item => Object.freeze({ ...item }))),
+        searchRange: Object.freeze({ ...blueprintReview.chapterHook.searchRange }),
+      }),
+      blueprintIssues: Object.freeze([...blueprintReview.blueprintIssues]),
     }) } : {}),
     summary,
     authorGuidance,
@@ -210,6 +266,15 @@ export function renderHumanConfirmedReviewBrief(
 ): string {
   const appliedItems = snapshot.items.filter(item => item.decision === 'apply')
   const sections: string[] = []
+  const authorGuidance = snapshot.authorGuidance.trim()
+
+  if (snapshot.blueprintEvidence && (appliedItems.length > 0 || authorGuidance)) {
+    sections.push(writingLanguageText(
+      writingLanguage,
+      `【已确认审查依据】第 ${snapshot.blueprintEvidence.chapterNumber} 章蓝图 v2 r${snapshot.blueprintEvidence.revision}，内容哈希 ${snapshot.blueprintEvidence.contentHash}。纳入项仅针对这版蓝图与冻结源稿。`,
+      `[Confirmed review basis] Chapter ${snapshot.blueprintEvidence.chapterNumber} blueprint v2 r${snapshot.blueprintEvidence.revision}, content hash ${snapshot.blueprintEvidence.contentHash}. Included items apply only to this blueprint version and frozen source draft.`,
+    ))
+  }
 
   if (appliedItems.some(item => item.severity === 'unknown')) {
     sections.push(writingLanguageText(
@@ -234,12 +299,16 @@ export function renderHumanConfirmedReviewBrief(
               `\n  Source excerpt: ${item.quote.trim()}`,
             )
           : ''
-        return `${index + 1}. [${item.category} / ${item.severity}] ${item.description}${quote}`
+        const identity = item.sceneId
+          ? ` [sceneId=${item.sceneId}]`
+          : item.checkId
+            ? ` [checkId=${item.checkId}${item.checkMode ? `; mode=${item.checkMode}` : ''}]`
+            : ''
+        return `${index + 1}. [${item.category} / ${item.severity}]${identity} ${item.description}${quote}`
       }),
     ].join('\n'))
   }
 
-  const authorGuidance = snapshot.authorGuidance.trim()
   if (authorGuidance) {
     sections.push(writingLanguageText(
       writingLanguage,

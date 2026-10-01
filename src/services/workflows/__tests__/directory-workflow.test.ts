@@ -6,6 +6,7 @@ import {
   parseTextBlueprints,
   parseTextBlueprintsStrict,
   createDirectoryWorkflow,
+  loadDirectoryBlueprintSummaries,
   saveAllBlueprints,
   saveChapterBlueprint,
   verifyBlueprintsPersisted,
@@ -62,6 +63,38 @@ afterEach(() => {
     currentRun: null,
     waitingForConfirm: false,
     waitingAfterStepIndex: -1,
+  })
+})
+
+describe('loadDirectoryBlueprints bounded projection', () => {
+  it('uses bounded summaries for the chapter list and includes v2-only chapters without loading full rows', async () => {
+    const invoke = stubIpcInvoke([])
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'db:blueprint-list-summary') return [{
+        chapterNumber: 1, volumeId: 'volume-1', title: '旧简纲',
+        purpose: '目的'.repeat(400), keyEvents: '事件'.repeat(600),
+      }]
+      if (channel === 'db:blueprint-v2-summary-list') return [{
+        chapterNumber: 2, revision: 1, contentHash: 'hash', origin: 'import',
+        updatedAt: '2026-09-30', sceneCount: 4,
+        sceneTitles: ['场景一：车站', '场景二：站台', '场景三：车厢', '场景四：隧道'],
+        wordBudget: 4200,
+      }]
+      throw new Error(`Unexpected channel: ${channel}`)
+    })
+
+    const summaries = await loadDirectoryBlueprintSummaries('C:/novels/A', {
+      projectId: 'project-A', leaseId: 'lease-A', projectPath: 'C:/novels/A',
+    })
+
+    expect(invoke.mock.calls.map(([channel]) => channel)).toEqual([
+      'db:blueprint-list-summary', 'db:blueprint-v2-summary-list',
+    ])
+    expect(summaries.map(item => item.chapterNumber)).toEqual([1, 2])
+    expect(summaries[0]?.purpose).toHaveLength(300)
+    expect(summaries[0]?.keyEvents).toHaveLength(800)
+    expect(summaries[1]?.title).toBe('场景一：车站')
+    expect(summaries[1]?.keyEvents).toContain('场景四：隧道')
   })
 })
 
@@ -425,7 +458,7 @@ describe('directory workflow project context', () => {
         cancelled: false,
       },
       { log: vi.fn(), setProgress: vi.fn(), appendText: vi.fn() },
-    )).resolves.toBe('已生成 0 章蓝图')
+    )).resolves.toBe('已生成 0 章简纲（详细细纲请逐章导入或编辑）')
     expect(execute).toHaveBeenCalledOnce()
   })
 
@@ -526,7 +559,7 @@ describe('directory workflow project context', () => {
 
     expect(useWorkflowStore.getState().history[0]).toMatchObject({
       uiLocale: 'en-US',
-      title: 'Generate chapter blueprints (all)',
+      title: 'Generate chapter blueprints (all, simple outlines)',
       status: 'completed',
       steps: [{
         name: 'Read architecture',
@@ -537,7 +570,7 @@ describe('directory workflow project context', () => {
       }],
     })
     const messages = useWorkflowStore.getState().globalLogs.map(entry => entry.message).join('\n')
-    expect(messages).toContain('[Started] Workflow "Generate chapter blueprints (all)" started')
+    expect(messages).toContain('[Started] Workflow "Generate chapter blueprints (all, simple outlines)" started')
     expect(messages).toContain('  Loading project architecture...')
     expect(messages).not.toMatch(/读取架构|生成蓝图|读取项目架构/u)
   })

@@ -1,3 +1,4 @@
+import { CultivationRepository } from './cultivation-repository'
 import { createHash } from 'node:crypto'
 import type BetterSqlite3 from 'better-sqlite3'
 
@@ -198,6 +199,7 @@ function normalizeEntry(
   allowLegacyRelationshipNotes: boolean,
 ): CharacterRosterEntry {
   if (!isObject(value)) throw new Error('角色名单条目格式无效')
+  if (allowLegacyRelationshipNotes && value.cultivationLevelId !== undefined && value.cultivationLevelId !== null && (typeof value.cultivationLevelId !== 'string' || !value.cultivationLevelId.trim())) throw new Error('Invalid cultivation binding / 等级绑定无效')
   const name = requiredText(value.name, '角色名')
   if (!name) throw new Error('角色名不能为空')
   if (!isRosterRole(value.role)) throw new Error(`角色「${name}」的定位无效`)
@@ -222,6 +224,7 @@ function normalizeEntry(
     arc: requiredText(value.arc, `角色「${name}」的弧光`),
     notes: requiredText(value.notes, `角色「${name}」的备注`),
     currentState: normalizeState(value.currentState),
+    ...(allowLegacyRelationshipNotes && value.cultivationLevelId !== undefined ? { cultivationLevelId: value.cultivationLevelId as string | null } : {}),
     ...(legacyRelationshipNotes ? { legacyRelationshipNotes } : {}),
   }
 }
@@ -307,12 +310,16 @@ function normalizeRequest(value: unknown): CharacterRosterCommitRequest {
 
 function canonicalEntries(entries: CharacterRosterEntry[]): CharacterRosterEntry[] {
   return [...entries]
-    .map(entry => ({
-      ...entry,
-      relationships: [...entry.relationships].sort((left, right) => (
-        compareText(left.target, right.target) || compareText(left.relation, right.relation)
-      )),
-    }))
+    .map(entry => {
+      const { cultivationLevelId, ...fields } = entry
+      return {
+        ...fields,
+        relationships: [...entry.relationships].sort((left, right) => (
+          compareText(left.target, right.target) || compareText(left.relation, right.relation)
+        )),
+        ...(cultivationLevelId ? { cultivationLevelId } : {}),
+      }
+    })
     .sort((left, right) => compareText(left.name, right.name))
 }
 
@@ -353,6 +360,7 @@ function entryFromCharacter(character: CharacterData): CharacterRosterEntry {
     : []
   return {
     name: character.name,
+    ...(character.cultivationLevelId ? { cultivationLevelId: character.cultivationLevelId } : {}),
     role: normalizeCharacterRole(character.role),
     gender: character.gender,
     age: character.age,
@@ -376,6 +384,7 @@ function entryFromCharacter(character: CharacterData): CharacterRosterEntry {
 function characterFromEntry(entry: CharacterRosterEntry): CharacterData {
   return {
     name: entry.name,
+    ...(entry.cultivationLevelId !== undefined ? { cultivationLevelId: entry.cultivationLevelId } : {}),
     role: entry.role,
     gender: entry.gender,
     age: entry.age,
@@ -653,7 +662,11 @@ function resolveManualEntries(
   const entries = request.entries.map((candidate) => {
     const originalName = renameByNew.get(candidate.name) ?? candidate.name
     const existing = existingByName.get(originalName)
-    const mapped = mapManualRelationshipTargets(candidate, renameByOriginal, finalNames)
+    const binding = candidate.cultivationLevelId === undefined ? existing?.cultivationLevelId : candidate.cultivationLevelId
+    const normalized = { ...candidate }
+    delete normalized.cultivationLevelId
+    if (binding) normalized.cultivationLevelId = binding
+    const mapped = mapManualRelationshipTargets(normalized, renameByOriginal, finalNames)
     const withLegacyNotes = existing?.legacyRelationshipNotes && !mapped.legacyRelationshipNotes
       ? { ...mapped, legacyRelationshipNotes: existing.legacyRelationshipNotes }
       : mapped
@@ -738,6 +751,7 @@ export function renderCharacterRosterMarkdown(
       ? CHARACTER_ROLE_LABELS[entry.role].enUS
       : CHARACTER_ROLE_LABELS[entry.role].zhCN
     const lines = [`## ${roleLabel}${english ? ': ' : '：'}${entry.name}`]
+    if (entry.cultivationLevelId) lines.push(`${english ? '- Cultivation level: ' : '- 修炼等级：'}${CultivationRepository.resolveName(entry.cultivationLevelId)}`)
     const fields: Array<[string, string]> = [
       [english ? 'Gender' : '性别', entry.gender],
       [english ? 'Age' : '年龄', entry.age],
@@ -893,7 +907,7 @@ export class CharacterRosterRepository {
     return readSnapshot(db)
   }
 
-  static commit(candidate: CharacterRosterCommitRequest): CharacterRosterCommitReceipt {
+  static commit(candidate: CharacterRosterCommitRequest, prepareCultivationFacts?: () => void): CharacterRosterCommitReceipt {
     const db = requiredDb()
     ensureCharacterRosterSchema(db)
     const request = normalizeRequest(candidate)
@@ -997,6 +1011,10 @@ export class CharacterRosterRepository {
                    request.source,
                  )
               : request.entries
+      prepareCultivationFacts?.()
+      for (const entry of committedEntries) {
+        if (entry.cultivationLevelId && !db.prepare('SELECT 1 FROM cultivation_levels WHERE id=?').get(entry.cultivationLevelId)) throw new Error('修炼等级已删除，请重新选择')
+      }
       const writingLanguage = ProjectCoreRepository.get()?.writingLanguage ?? DEFAULT_WRITING_LANGUAGE
       const projection = renderCharacterRosterMarkdown(committedEntries, writingLanguage)
       const projectionHash = hashText(projection)

@@ -12,6 +12,7 @@ import type {
 } from '../../electron/repositories/character-repository'
 import { normalizeCharacterRole, DEFAULT_CHARACTER_CREATION_ROLE, type CharacterRole } from '../shared/character-role'
 import { characterRosterIdentityKey } from '../shared/character-roster'
+import { cultivationLevels } from '../shared/cultivation'
 import {
   characterCardFromRosterEntry,
   characterRosterEntriesFromCards,
@@ -51,6 +52,25 @@ import {
 
 export type CharacterCurrentState = CharacterStateData
 export type CharacterCard = CharacterData
+
+/** Remote rebinding wins over an old draft, while unrelated profile edits survive. */
+export function reconcileCharacterCultivationDraft(
+  cards: CharacterCard[], base: CharacterCard[], remote: CharacterCard[],
+  validIds: ReadonlySet<string>, renames: { originalName: string; newName: string }[] = [],
+): CharacterCard[] {
+  return cards.map(card => {
+    const name = renames.find(rename => rename.newName === card.name)?.originalName ?? card.name
+    const persisted = remote.find(entry => entry.name === name)
+    if (!persisted) return card
+    const original = base.find(entry => entry.name === name)
+    if ((persisted.cultivationLevelId ?? null) === (original?.cultivationLevelId ?? null)
+      && (!card.cultivationLevelId || validIds.has(card.cultivationLevelId))) return card
+    const next = { ...card }
+    if (persisted.cultivationLevelId) next.cultivationLevelId = persisted.cultivationLevelId
+    else delete next.cultivationLevelId
+    return next
+  })
+}
 
 export const EMPTY_CARD: CharacterCard = {
   name: '', role: DEFAULT_CHARACTER_CREATION_ROLE, gender: '', age: '',
@@ -144,6 +164,7 @@ function normalizeCharacterCards(value: unknown): CharacterCard[] {
       relationships: textField(card, 'relationships'),
       arc: textField(card, 'arc'),
       notes: textField(card, 'notes'),
+      ...(card.cultivationLevelId !== undefined ? { cultivationLevelId: card.cultivationLevelId } : {}),
     } as CharacterCard
     if (currentState) normalizedCard.currentState = currentState
     else delete normalizedCard.currentState
@@ -279,6 +300,7 @@ interface CharacterState {
     expectedProjectSession?: ProjectSessionContext,
   ) => Promise<boolean>
   renameCharacter: (name: string, newName: string) => boolean
+  acceptCultivationSnapshot: (snapshot: import('../shared/character-roster').CharacterRosterSnapshot, session: ProjectSessionContext, validIds: ReadonlySet<string>) => void
   discardDraft: (projectPath: string, expectedProjectSession?: ProjectSessionContext) => void
   updateField: <K extends Exclude<keyof CharacterCard, 'name'>>(
     name: string,
@@ -382,15 +404,26 @@ export const useCharacterStore = create<CharacterState>()((set, get) => ({
       const renames = requestedProjectKey
         ? getCharacterDraftRenames(draftLedger, requestedProjectKey)
         : []
+      const projectDraft = getProjectEditorDraft(draftLedger, requestedProjectKey)
+      const hasBinding = [...cards, ...(projectDraft?.draftValue ?? [])].some(card => card.cultivationLevelId)
+      const validIds = hasBinding
+        ? new Set(cultivationLevels((await ipc.invokeWithProjectSession(projectSession, 'db:cultivation-read', requestedProjectKey)).realms).map(level => level.id))
+        : new Set<string>()
+      if (!isCharacterProjectSessionCurrent(projectSession) || requestSequence !== characterLoadSequence) return
+      if (sameProjectSessionContext(get().dataProjectSession, projectSession)
+        && get().rosterRevision !== null && roster.revision < get().rosterRevision!) {
+        set({ loadingProjectKey: null, loadingProjectSession: null })
+        return
+      }
       const restored = requestedProjectKey
         ? rebaseProjectEditorDraft(
             draftLedger,
             requestedProjectKey,
             cards,
             (base, draft, remote) => (
-              renames.length > 0
+              reconcileCharacterCultivationDraft(renames.length > 0
                 ? mergeCharacterDraftWithRemote(base, draft, remote, renames)
-                : mergeNamedRecordDraftWithRemote(base, draft, remote)
+                : mergeNamedRecordDraftWithRemote(base, draft, remote), base, remote, validIds, renames)
             ),
           )
         : { ledger: draftLedger, value: cards }
@@ -424,6 +457,13 @@ export const useCharacterStore = create<CharacterState>()((set, get) => ({
       }
 
       const syncedCards = syncCardsWithRelationships(visibleCards, sharedRels, identities)
+
+      if (!isCharacterProjectSessionCurrent(projectSession) || requestSequence !== characterLoadSequence) return
+      if (sameProjectSessionContext(get().dataProjectSession, projectSession)
+        && get().rosterRevision !== null && roster.revision < get().rosterRevision!) {
+        set({ loadingProjectKey: null, loadingProjectSession: null })
+        return
+      }
 
       const { selectedName } = get()
       set({
@@ -685,6 +725,25 @@ export const useCharacterStore = create<CharacterState>()((set, get) => ({
     return true
   },
 
+  acceptCultivationSnapshot: (snapshot, session, validIds) => {
+    if (!isCharacterProjectSessionCurrent(session)) return
+    if (!sameProjectSessionContext(get().dataProjectSession, session)) {
+      if (sameProjectSessionContext(get().loadingProjectSession, session)) void get().load(session.projectPath, session)
+      return
+    }
+    if (get().rosterRevision !== null && snapshot.revision < get().rosterRevision!) return
+    const remote = snapshot.entries.map(characterCardFromRosterEntry)
+    const draftLedger = readCharacterDraftLedger(session.projectPath)
+    const renames = getCharacterDraftRenames(draftLedger, session.projectPath)
+    const before = get().characters
+    const characters = reconcileCharacterCultivationDraft(before,
+      getProjectEditorDraft(draftLedger, session.projectPath)?.baseValue ?? before, remote, validIds, renames)
+    let nextLedger = settleProjectEditorSave(draftLedger, session.projectPath, remote, characters)
+    nextLedger = setCharacterDraftRenames(nextLedger, session.projectPath, renames)
+    persistCharacterDraftLedger(nextLedger)
+    set({ characters, rosterRevision: snapshot.revision })
+  },
+
   discardDraft: (projectPath, expectedProjectSession) => {
     const ledger = readCharacterDraftLedger(projectPath)
     const projectDraft = getProjectEditorDraft(ledger, projectPath)
@@ -813,6 +872,9 @@ export const useCharacterStore = create<CharacterState>()((set, get) => ({
         throw new Error(result.error ?? '角色卡保存失败')
       }
       if (!isCharacterProjectSessionCurrent(projectSession)) return
+      // A cultivation migration may already have committed a later roster while
+      // this request's receipt was in transit. Never restore its old binding/revision.
+      if (get().rosterRevision !== null && result.receipt.revision < get().rosterRevision!) return
       const savedRosterCards = result.receipt.snapshot.entries.map(characterCardFromRosterEntry)
       const ledger = readCharacterDraftLedger(projectKey)
       const currentProjectDraft = getProjectEditorDraft(ledger, projectKey)

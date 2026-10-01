@@ -1,0 +1,287 @@
+{
+  "scenario": "E01P-strict (cross-project isolation and save semantics)",
+  "runId": "vela-acc-e01p2-2026-10-01T11-58-42-670Z-68a64a9f",
+  "verdict": "PASS",
+  "failedSteps": [],
+  "steps": [
+    {
+      "name": "fixture.created",
+      "ok": true,
+      "data": {
+        "projectA": "6e12428b-46b6-45e0-9c49-6f98e0c4445b",
+        "projectB": "0a2bdf1c-2ea9-4a3c-9b7b-be0bd31ebaf4",
+        "distinctIdentities": true
+      }
+    },
+    {
+      "name": "build.current-source",
+      "ok": true,
+      "data": {
+        "script": "build",
+        "exitCode": 0,
+        "ok": true
+      }
+    },
+    {
+      "name": "build.gate",
+      "ok": true,
+      "data": {
+        "ok": true,
+        "missing": []
+      }
+    },
+    {
+      "name": "abi.rebuild-electron",
+      "ok": true,
+      "data": {
+        "script": "rebuild:electron",
+        "exitCode": 0,
+        "ok": true
+      }
+    },
+    {
+      "name": "a.explicit-save.readback-while-running",
+      "ok": true,
+      "data": {
+        "rows": 1,
+        "chapter": 2,
+        "version": 1,
+        "status": "draft",
+        "containsMarker": true
+      }
+    },
+    {
+      "name": "a.exit-save-and-exit",
+      "ok": true,
+      "data": {
+        "code": 0,
+        "signal": null,
+        "choiceStage": "save-and-exit"
+      }
+    },
+    {
+      "name": "a.exit-save.readback-after-quit",
+      "ok": true,
+      "data": {
+        "containsA1": true,
+        "containsA2": true
+      }
+    },
+    {
+      "name": "artifacts.unchanged-during-run-a",
+      "ok": true,
+      "data": {
+        "ok": true
+      }
+    },
+    {
+      "name": "b.write.readback",
+      "ok": true,
+      "data": {
+        "rows": 1,
+        "chapter": 2,
+        "containsB1": true
+      }
+    },
+    {
+      "name": "isolation.a-untouched-while-b-writes",
+      "ok": true,
+      "data": {
+        "aContainsA2": true,
+        "aContainsB1": false
+      }
+    },
+    {
+      "name": "b.discard-and-exit",
+      "ok": true,
+      "data": {
+        "code": 0,
+        "signal": null,
+        "choiceStage": "discard-and-exit"
+      }
+    },
+    {
+      "name": "b.discard.readback",
+      "ok": true,
+      "data": {
+        "containsB1": true,
+        "containsB2": false
+      }
+    },
+    {
+      "name": "a.return-ui-content",
+      "ok": true,
+      "data": {
+        "containsA2": true,
+        "containsB1": false
+      }
+    },
+    {
+      "name": "a.quit-final",
+      "ok": true,
+      "data": {
+        "exit": {
+          "code": 0,
+          "signal": null
+        },
+        "stages": {
+          "titlebarClose": "clicked",
+          "exitConfirm": "auto-proceed",
+          "gracefulKill": "skipped",
+          "forceKill": false
+        },
+        "forced": false,
+        "ok": true,
+        "reason": null
+      }
+    },
+    {
+      "name": "abi.restore-node",
+      "ok": true,
+      "data": {
+        "script": "prepare:native-node",
+        "exitCode": 0,
+        "ok": true,
+        "caveat": "isolated-runner: probes independent copy"
+      }
+    },
+    {
+      "name": "storage.manifests",
+      "ok": true,
+      "data": {
+        "a": true,
+        "b": true
+      }
+    },
+    {
+      "name": "storage.sqlite",
+      "ok": true,
+      "data": {
+        "aIntegrity": "ok",
+        "bIntegrity": "ok",
+        "aForeignKeys": 0,
+        "bForeignKeys": 0
+      }
+    },
+    {
+      "name": "storage.same-chapter-per-project-identity",
+      "ok": true,
+      "data": {
+        "aDraftId": 1,
+        "bDraftId": 1,
+        "aChapter": 2,
+        "bChapter": 2,
+        "projectIdsDiffer": true
+      }
+    },
+    {
+      "name": "storage.draft-fields",
+      "ok": true,
+      "data": {
+        "aVersion": 1,
+        "aStatus": "draft",
+        "aBlueprintChapter": null,
+        "bVersion": 1,
+        "bStatus": "draft",
+        "bBlueprintChapter": null
+      }
+    },
+    {
+      "name": "isolation.no-cross-markers",
+      "ok": true,
+      "data": {
+        "aHasB": false,
+        "bHasA": false
+      }
+    },
+    {
+      "name": "storage.global-home.recent-projects-both",
+      "ok": true,
+      "data": {
+        "containsBoth": true
+      }
+    },
+    {
+      "name": "artifacts.unchanged-after-run",
+      "ok": true,
+      "data": true
+    }
+  ],
+  "diagnostics": [
+    {
+      "at": "2026-10-01T11:59:35.765Z",
+      "kind": "main-stdout",
+      "text": "\r\n"
+    },
+    {
+      "at": "2026-10-01T11:59:36.444Z",
+      "kind": "main-stderr",
+      "text": "\r\nDevTools listening on ws://127.0.0.1:12742/devtools/browser/0da2c83d-d882-4078-aa40-38dd8b94ae59\r\n"
+    },
+    {
+      "at": "2026-10-01T11:59:36.456Z",
+      "kind": "main-stdout",
+      "text": "[Vela IPC] 所有 Controller 已注册完成 | 全局工作区: C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e01p2-2026-10-01T11-58-42-670Z-68a64a9f\\global-home\n"
+    },
+    {
+      "at": "2026-10-01T11:59:36.456Z",
+      "kind": "main-stdout",
+      "text": "[MCP] IPC 处理器已注册\n"
+    },
+    {
+      "at": "2026-10-01T11:59:37.258Z",
+      "kind": "main-stdout",
+      "text": "[Vela DB] 项目数据库已打开: C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e01p2-2026-10-01T11-58-42-670Z-68a64a9f\\project-a\\.vela\\vela.db\n"
+    },
+    {
+      "at": "2026-10-01T11:59:42.219Z",
+      "kind": "main-stdout",
+      "text": "\r\n"
+    },
+    {
+      "at": "2026-10-01T11:59:42.955Z",
+      "kind": "main-stderr",
+      "text": "\r\nDevTools listening on ws://127.0.0.1:6565/devtools/browser/50f9390e-4f5c-4cbd-8fe7-e33252de72dc\r\n"
+    },
+    {
+      "at": "2026-10-01T11:59:42.961Z",
+      "kind": "main-stdout",
+      "text": "[Vela IPC] 所有 Controller 已注册完成 | 全局工作区: C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e01p2-2026-10-01T11-58-42-670Z-68a64a9f\\global-home\n"
+    },
+    {
+      "at": "2026-10-01T11:59:42.961Z",
+      "kind": "main-stdout",
+      "text": "[MCP] IPC 处理器已注册\n"
+    },
+    {
+      "at": "2026-10-01T11:59:43.820Z",
+      "kind": "main-stdout",
+      "text": "[Vela DB] 项目数据库已打开: C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e01p2-2026-10-01T11-58-42-670Z-68a64a9f\\project-b\\.vela\\vela.db\n"
+    },
+    {
+      "at": "2026-10-01T11:59:48.886Z",
+      "kind": "main-stdout",
+      "text": "\r\n"
+    },
+    {
+      "at": "2026-10-01T11:59:49.605Z",
+      "kind": "main-stderr",
+      "text": "\r\nDevTools listening on ws://127.0.0.1:3651/devtools/browser/22b448fa-2e9d-4750-b5d5-3e60add7eb8f\r\n"
+    },
+    {
+      "at": "2026-10-01T11:59:49.614Z",
+      "kind": "main-stdout",
+      "text": "[Vela IPC] 所有 Controller 已注册完成 | 全局工作区: C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e01p2-2026-10-01T11-58-42-670Z-68a64a9f\\global-home\n"
+    },
+    {
+      "at": "2026-10-01T11:59:49.614Z",
+      "kind": "main-stdout",
+      "text": "[MCP] IPC 处理器已注册\n"
+    },
+    {
+      "at": "2026-10-01T11:59:50.467Z",
+      "kind": "main-stdout",
+      "text": "[Vela DB] 项目数据库已打开: C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e01p2-2026-10-01T11-58-42-670Z-68a64a9f\\project-a\\.vela\\vela.db\n"
+    }
+  ]
+}

@@ -76,6 +76,7 @@ import { toast } from '../ui/Toast'
 import { confirm } from '../ui/Confirm'
 import { useCanvasPersistence } from './canvas-persistence'
 import { PlotCanvasAIDialog } from './PlotCanvasAIDialog'
+import { projectPlotCanvasBlueprintSummaries, type PlotCanvasBlueprintSummary } from './plot-canvas-ai-prompt'
 import type { PlotCanvasAIMode } from './plot-canvas-ai-proposal'
 import {
   CanvasLabeledEdge,
@@ -108,7 +109,7 @@ import {
 } from './plot-graph'
 import './canvas-workbench.css'
 
-type BlueprintRow = DatabaseChannels['db:blueprint-get-all']['return'][number]
+type BlueprintRow = PlotCanvasBlueprintSummary
 type DraftRow = DatabaseChannels['db:draft-list-all']['return'][number]
 type ThreadRow = DatabaseChannels['db:narrative-thread-list']['return'][number]
 type ForeshadowingRow = DatabaseChannels['db:foreshadowing-list']['return'][number]
@@ -271,14 +272,15 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
   const loadReferences = useCallback(async () => {
     const session = captureProjectSession(useProjectStore.getState().currentProject)
     if (!session) return
-    const [nextBlueprints, nextDrafts, nextThreads, nextForeshadowings] = await Promise.all([
-      ipc.invokeWithProjectSession(session, 'db:blueprint-get-all', projectKey),
+    const [nextBlueprints, nextV2Summaries, nextDrafts, nextThreads, nextForeshadowings] = await Promise.all([
+      ipc.invokeWithProjectSession(session, 'db:blueprint-list-summary', projectKey),
+      ipc.invokeWithProjectSession(session, 'db:blueprint-v2-summary-list', projectKey),
       ipc.invokeWithProjectSession(session, 'db:draft-list-all', projectKey),
       ipc.invokeWithProjectSession(session, 'db:narrative-thread-list', projectKey),
       ipc.invokeWithProjectSession(session, 'db:foreshadowing-list', 'all', projectKey),
     ])
     if (!isProjectSessionCurrent(session)) return
-    setBlueprints(nextBlueprints)
+    setBlueprints(projectPlotCanvasBlueprintSummaries(nextBlueprints, nextV2Summaries))
     setDrafts(nextDrafts)
     setThreads(nextThreads)
     setForeshadowings(nextForeshadowings)

@@ -1,4 +1,5 @@
-import { X, FileText, Settings, Users, ArrowLeftRight, MoreHorizontal, BookOpen, History, ClipboardCheck, Globe, Save, ChevronLeft, ChevronRight, Check, Focus, Compass, LayoutDashboard, Clock3 } from 'lucide-react'
+import CultivationSettingsPage from '../pages/CultivationSettingsPage'
+import { X, FileText, Settings, Users, ArrowLeftRight, MoreHorizontal, BookOpen, History, ClipboardCheck, Globe, Save, ChevronLeft, ChevronRight, Check, Focus, Compass, LayoutDashboard, Clock3, Globe2 } from 'lucide-react'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
 import {
@@ -25,6 +26,7 @@ import KnowledgeOverview from '../pages/KnowledgeOverview'
 import WorkspaceHub from '../workspace/WorkspaceHub'
 import WorldMapView from '../map/WorldMapView'
 import StoryTimelineView from '../timeline/StoryTimelineView'
+import WorldWorkbenchView from '../world/WorldWorkbenchView'
 import ProjectOverviewPage from '../pages/ProjectOverviewPage'
 import { useProjectStore } from '../../stores/project-store'
 import { registerEditorExitSaveHandler, useEditorStore, type EditorTab } from '../../stores/editor-store'
@@ -512,6 +514,7 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
     if (type === 'world-building') return <Globe size={14} />
     if (type === 'world-map') return <Compass size={14} />
     if (type === 'story-timeline') return <Clock3 size={14} />
+    if (type === 'world') return <Globe2 size={14} />
     if (type === 'overview') return <LayoutDashboard size={14} />
     if (type === 'version-history') return <History size={14} />
     if (type === 'review-report') return <ClipboardCheck size={14} />
@@ -696,6 +699,7 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
             }}
           />
         )}
+        {activeTab?.type === 'cultivation' && activeTab.projectKey === currentProject.path && <CultivationSettingsPage key={activeTab.id} projectKey={activeTab.projectKey} />}
         {activeTab?.type === 'config' && activeTab.projectKey && (
           <NovelConfigEditor key={activeTab.id} projectKey={activeTab.projectKey} />
         )}
@@ -760,6 +764,9 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
         )}
         {activeTab?.type === 'story-timeline' && activeTab.projectKey === currentProject.path && (
           <StoryTimelineView key={activeTab.id} projectKey={activeTab.projectKey} />
+        )}
+        {activeTab?.type === 'world' && activeTab.projectKey === currentProject.path && (
+          <WorldWorkbenchView key={activeTab.id} projectKey={activeTab.projectKey} />
         )}
         {activeTab?.type === 'overview' && (
           <ProjectOverviewPage key={activeTab.id} />

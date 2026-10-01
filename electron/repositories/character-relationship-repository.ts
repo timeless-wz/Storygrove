@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type BetterSqlite3 from 'better-sqlite3'
 import { getProjectDb } from '../database'
+import { detachWorldReferencesForCharacter } from '../services/world-workbench-schema'
 import {
   classifyRelationshipStorage,
   structuredRelationshipRows,
@@ -507,6 +508,9 @@ export class CharacterRelationshipRepository {
       db.prepare('DELETE FROM character_shared_relationships WHERE character1_id = ? OR character2_id = ?')
         .run(characterId, characterId)
       db.prepare('DELETE FROM character_graph_positions WHERE character_id = ?').run(characterId)
+      // 世界资料里的新关联属于该角色自己的部分随角色一起解除；共享的世界、
+      // 势力、秘境、通道与历史事件一律保留。
+      detachWorldReferencesForCharacter(db, characterId)
       db.prepare('DELETE FROM character_identities WHERE character_id = ?').run(characterId)
       if (!projectLegacyField) return
       for (const otherId of affected) {

@@ -182,6 +182,28 @@ export class RefineFromReviewCommand extends BaseWorkflowCommand<string> {
         'The source draft changed. The model was not called; run AI review and confirm the checklist again.',
       ))
     }
+    const blueprintEvidence = persistedSnapshot.blueprintEvidence
+    if (blueprintEvidence) {
+      const currentBlueprint = currentDraft.blueprintChapterNumber === blueprintEvidence.chapterNumber
+        ? await ipc.invokeWithProjectSession(
+            projectSession,
+            'db:blueprint-v2-get',
+            blueprintEvidence.chapterNumber,
+            context.projectPath,
+          )
+        : null
+      this.assertNotCancelled(context)
+      if (
+        !currentBlueprint
+        || currentBlueprint.revision !== blueprintEvidence.revision
+        || currentBlueprint.contentHash !== blueprintEvidence.contentHash
+      ) {
+        throw new Error(text(
+          '人工确认所依据的章节蓝图或其版本绑定已变化，未调用模型；请重新运行审查并确认。',
+          'The chapter blueprint or its bound revision used by the confirmation changed. The model was not called; run and confirm the review again.',
+        ))
+      }
+    }
     if (!hasIncludedReviewItems(persistedSnapshot)) {
       throw new Error(text(
         '人工确认快照没有任何纳入项，未调用模型。',

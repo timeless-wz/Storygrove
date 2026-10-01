@@ -41,6 +41,11 @@ export interface ChapterCanvasNodeRefs {
   characterName?: string
   /** 伏笔节点：伏笔记录 ID。 */
   foreshadowingId?: string
+  /**
+   * 蓝图 v2 分镜 ID（bps-…，≤80 字符不透明串；blueprint-v2-contract §8.1）。
+   * 悬空（分镜已删除）时画布只显示「引用失效」，绝不自动清除或反向改写蓝图。
+   */
+  sceneId?: string
 }
 
 export interface ChapterCanvasMeta {
@@ -156,6 +161,14 @@ export function parseChapterCanvasNodeRefs(value: unknown): ChapterCanvasNodeRef
       throw new Error('章节画布伏笔引用无效')
     }
     if (record.foreshadowingId) refs.foreshadowingId = record.foreshadowingId
+  }
+  // 蓝图 v2 分镜引用（契约 §8.1）：≤80 字符的不透明串；缺失/为空等价于未绑定。
+  // 显式解析该字段，绝不依赖「未知 refs 字段被静默丢弃」的行为（契约缺口 §13.3）。
+  if (record.sceneId !== undefined && record.sceneId !== null) {
+    if (typeof record.sceneId !== 'string' || record.sceneId.length === 0 || record.sceneId.length > 80) {
+      throw new Error('章节画布分镜引用无效')
+    }
+    refs.sceneId = record.sceneId
   }
   return refs
 }

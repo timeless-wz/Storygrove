@@ -88,6 +88,7 @@ beforeEach(async () => {
       }
     }
     if (channel === 'db:blueprint-get-all') return [{ chapterNumber: 2, title: '风暴降临' }]
+    if (channel === 'db:blueprint-list-summary') return [{ chapterNumber: 2, title: '风暴降临' }]
     if (channel === 'db:draft-list') return [{ id: 10, version: 1 }]
     if (channel === 'db:foreshadowing-list-by-draft') return []
     if (channel === 'db:draft-get-latest') return args[0] === 3
@@ -276,6 +277,7 @@ describe('DraftEditor Vditor integration', () => {
         }
       }
       if (channel === 'db:blueprint-get-all') return [{ chapterNumber: 2, title: '风暴降临' }]
+      if (channel === 'db:blueprint-list-summary') return [{ chapterNumber: 2, title: '风暴降临' }]
       if (channel === 'db:draft-list') return [{ id: 10, version: 1 }]
       if (channel === 'db:revision-get-pending' || channel === 'db:review-list') return []
       return { success: true }

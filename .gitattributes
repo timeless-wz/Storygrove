@@ -20,3 +20,7 @@
 *.woff binary
 *.woff2 binary
 *.zip binary
+
+# Historical patch evidence and verbatim Markdown fixtures preserve source spaces.
+test/acceptance/evidence/baseline/baseline.diff whitespace=-blank-at-eol
+test/fixtures/blueprint-v2/chapter-01.md whitespace=-blank-at-eol

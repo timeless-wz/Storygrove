@@ -1,0 +1,213 @@
+/*
+ * 章节蓝图 v2（细纲）编辑视图样式。
+ * 只使用全局设计令牌（--color-*），与 planning-page 体系保持一致。
+ */
+
+.blueprint-v2 {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.blueprint-v2__section {
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-panel);
+  padding: 12px 14px;
+}
+
+.blueprint-v2__section--custom {
+  border-style: dashed;
+}
+
+.blueprint-v2__section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.blueprint-v2__section-icon {
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.blueprint-v2__section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.blueprint-v2__section-tag {
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.blueprint-v2__section-hint {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  opacity: 0.7;
+}
+
+.blueprint-v2__preamble summary,
+.blueprint-v2__postamble summary {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  margin-bottom: 6px;
+  user-select: none;
+}
+
+.blueprint-v2__preamble,
+.blueprint-v2__postamble {
+  margin-bottom: 10px;
+}
+
+.blueprint-v2__items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.blueprint-v2__empty {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  padding: 6px 2px;
+}
+
+.blueprint-v2__scene {
+  border: 1px solid color-mix(in srgb, var(--color-accent) 26%, var(--color-border));
+  border-radius: 8px;
+  background: var(--color-bg);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.blueprint-v2__scene-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.blueprint-v2__drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 26px;
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--color-text-muted);
+  cursor: grab;
+  background: transparent;
+}
+
+.blueprint-v2__drag-handle:hover,
+.blueprint-v2__drag-handle:focus-visible {
+  border-color: var(--color-border);
+  color: var(--color-text);
+  outline: none;
+}
+
+.blueprint-v2__drag-handle:active {
+  cursor: grabbing;
+}
+
+.blueprint-v2__scene-order {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  min-width: 26px;
+  text-align: right;
+}
+
+.blueprint-v2__scene-title {
+  flex: 1;
+  font-weight: 600;
+}
+
+.blueprint-v2__scene-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.blueprint-v2__presence {
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.blueprint-v2__presence.is-on-canvas {
+  border-color: color-mix(in srgb, var(--color-success) 42%, var(--color-border));
+  color: var(--color-success-text);
+  background: color-mix(in srgb, var(--color-success) 10%, transparent);
+}
+
+.blueprint-v2__scene-markdown {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.blueprint-v2__item {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg);
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.blueprint-v2__item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.blueprint-v2__item-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0;
+  flex: 1;
+}
+
+.blueprint-v2__check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.blueprint-v2__check-select {
+  height: 24px;
+  font-size: 11px;
+  padding: 0 4px;
+}
+
+.blueprint-v2__check-source {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.blueprint-v2__section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}

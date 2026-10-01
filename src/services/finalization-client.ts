@@ -1,10 +1,10 @@
-import type { FinalizationResult } from '../../electron/services/finalization-service'
+import type { FinalizationResult } from '../shared/finalization'
 import { getActiveProjectSessionContext, sameProjectSessionContext } from '../shared/project-session-context'
-import type { ProjectSessionContext } from '../shared/ipc-channels'
+import type { AllInvokeChannels, ProjectSessionContext } from '../shared/ipc-channels'
 import type { FinalizationSnapshot } from './finalization-snapshot'
 
 interface VelaInvokeApi {
-  invoke(channel: string, ...args: unknown[]): Promise<unknown>
+  invoke<C extends keyof AllInvokeChannels>(channel: C, ...args: AllInvokeChannels[C]['args']): Promise<AllInvokeChannels[C]['return']>
 }
 
 function getVelaApi(): VelaInvokeApi {

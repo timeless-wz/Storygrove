@@ -141,6 +141,8 @@ function stubIpcInvoke(handler: (channel: string, ...args: unknown[]) => unknown
   const invoke = vi.fn((channel: string, ...args: unknown[]) => Promise.resolve(
     channel === 'prompt:load-global' ? { templates: [], diagnostics: [] }
       : channel === 'fs:check-exists' && String(args[0]).endsWith('/.vela/prompts') ? false
+      // 默认项目没有任何 v2 细纲；覆盖守卫放行全部章节。
+      : channel === 'db:blueprint-v2-summary-list' ? []
         : handler(channel, ...args),
   ))
   vi.stubGlobal('window', {
@@ -441,8 +443,8 @@ describe('InferBlueprintsPerChapterCommand', () => {
       callbacks,
     })
 
-    expect(workflowContext.data.blueprintCommitReceipt).toMatchObject({ operationId: 'import-commit' })
-    expect(workflowContext.data.blueprintCharacterSyncReceipt).toMatchObject({ operationId: 'import-sync' })
+    expect((workflowContext.data.blueprintCommitReceipts as unknown[])[0]).toMatchObject({ operationId: 'import-commit' })
+    expect((workflowContext.data.blueprintCharacterSyncReceipts as unknown[])[0]).toMatchObject({ operationId: 'import-sync' })
     expect(generationPrompt).toContain('relationships 必须是数组')
     expect(generationPrompt).toContain('每项必须含非空 from、to、relation')
     expect(generationPrompt).not.toContain('relationshipHints（无关系时为空数组）')

@@ -26,6 +26,9 @@ import { Input } from '../ui/Input'
 import { Label } from '../ui/Label'
 import { NativeSelect } from '../ui/NativeSelect'
 import { Textarea } from '../ui/Textarea'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../ui/Dialog'
+import { useLLMStore } from '../../stores/llm-store'
+import { useWorkflowStore } from '../../stores/workflow-store'
 import { captureProjectSession, isProjectSessionCurrent, isProjectSessionPath } from '../project-session-gate'
 import { useProjectStore } from '../../stores/project-store'
 import { useLocaleStore } from '../../stores/locale-store'
@@ -34,7 +37,16 @@ import { requireIpcSuccess } from '../../services/ipc-result'
 import type { ExpectedDraftSource } from '../../shared/ipc-channels'
 import { parseChapterGoalReview, type ChapterGoalReview } from '../../shared/chapter-goal-review'
 import {
+  parseBlueprintReviewEvidence,
+  parseChapterBlueprintReview,
+  type BlueprintReviewEvidence,
+  type ChapterBlueprintReview,
+} from '../../shared/chapter-blueprint-review'
+import type { BlueprintV2CheckMode } from '../../shared/blueprint-v2'
+import {
   createHumanConfirmedReviewSnapshot,
+  hasIncludedReviewItems,
+  renderHumanConfirmedReviewBrief,
   parseHumanConfirmedReviewSnapshot,
   serializeHumanConfirmedReviewSnapshot,
   type HumanConfirmedReviewItem,
@@ -46,6 +58,9 @@ interface ReviewIssue {
   category: string
   severity: 'error' | 'warning' | 'pass' | 'unknown'
   goalId?: string
+  sceneId?: string
+  checkId?: string
+  checkMode?: BlueprintV2CheckMode
   description: string
   /** 引用的原文片段（有问题时提供） */
   quote?: string
@@ -60,12 +75,18 @@ interface ReviewJSON {
     category: string
     severity: string
     goalId?: string
+    sceneId?: string
+    checkId?: string
+    checkMode?: string
     description: string
     quote?: string
     stableFactKey?: string
     sourceChapter?: number
   }>
   summary: string
+  blueprintReview?: unknown
+  blueprintEvidence?: unknown
+  blueprintReviewUnavailable?: unknown
 }
 
 interface ReviewReportProps {
@@ -127,7 +148,14 @@ function extractJSON(text: string): string | null {
 }
 
 /** 解析审稿报告（优先 JSON，回退到旧版文本解析） */
-function parseReport(text: string, fallbackCategory: string): { issues: ReviewIssue[]; summary: string; goalReview?: ChapterGoalReview } {
+function parseReport(text: string, fallbackCategory: string): {
+  issues: ReviewIssue[]
+  summary: string
+  goalReview?: ChapterGoalReview
+  blueprintReview?: ChapterBlueprintReview
+  blueprintEvidence?: BlueprintReviewEvidence
+  blueprintReviewUnavailable?: 'corrupt' | 'needs-newer-app' | 'unavailable'
+} {
   const jsonStr = extractJSON(text)
   if (jsonStr) {
     try {
@@ -137,6 +165,11 @@ function parseReport(text: string, fallbackCategory: string): { issues: ReviewIs
           category: item.category || fallbackCategory,
           severity: normalizeSeverity(item.severity),
           goalId: item.goalId,
+          sceneId: item.sceneId,
+          checkId: item.checkId,
+          checkMode: item.checkMode === 'must' || item.checkMode === 'reference' || item.checkMode === 'forbid'
+            ? item.checkMode
+            : undefined,
           description: item.description || '',
           quote: item.quote || undefined,
           stableFactKey: item.stableFactKey || undefined,
@@ -144,7 +177,18 @@ function parseReport(text: string, fallbackCategory: string): { issues: ReviewIs
             ? item.sourceChapter
             : undefined,
         }))
-        return { issues, summary: data.summary || '', goalReview: parseChapterGoalReview(data.goalReview) ?? undefined }
+        return {
+          issues,
+          summary: data.summary || '',
+          goalReview: parseChapterGoalReview(data.goalReview) ?? undefined,
+          blueprintReview: parseChapterBlueprintReview(data.blueprintReview) ?? undefined,
+          blueprintEvidence: parseBlueprintReviewEvidence(data.blueprintEvidence) ?? undefined,
+          blueprintReviewUnavailable: data.blueprintReviewUnavailable === 'corrupt'
+            || data.blueprintReviewUnavailable === 'needs-newer-app'
+            || data.blueprintReviewUnavailable === 'unavailable'
+            ? data.blueprintReviewUnavailable
+            : undefined,
+        }
       }
     } catch {
       // JSON 解析失败，回退到文本解析
@@ -299,6 +343,9 @@ function editableItemsFromReview(
     ...(issue.stableFactKey ? { stableFactKey: issue.stableFactKey } : {}),
     ...(issue.sourceChapter ? { sourceChapter: issue.sourceChapter } : {}),
     ...(issue.goalId ? { goalId: issue.goalId } : {}),
+    ...(issue.sceneId ? { sceneId: issue.sceneId } : {}),
+    ...(issue.checkId ? { checkId: issue.checkId } : {}),
+    ...(issue.checkMode ? { checkMode: issue.checkMode } : {}),
     decision: !issue.goalId && (issue.severity === 'error' || issue.severity === 'warning') ? 'apply' : 'ignore',
     origin: 'ai',
   }))
@@ -367,10 +414,17 @@ function ReviewReportSession({
   const [editingChecklist, setEditingChecklist] = useState(() => !initialSnapshot || !isReviewId(reviewId))
   const [checklistError, setChecklistError] = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
+  const [revisionOpen, setRevisionOpen] = useState(false)
+  const [revisionModelId, setRevisionModelId] = useState('')
+  const [startingRevision, setStartingRevision] = useState(false)
+  const models = useLLMStore(s => s.models).filter(model => model.purposes.includes('generation'))
+  const writingLanguage = useProjectStore(s => s.currentProject?.novelConfig.writingLanguage) ?? 'zh-CN'
   const [showLegend, setShowLegend] = useState(false)
   const sourceReviewId = confirmationSourceReviewId(initialSnapshot, reviewId)
   const summary = initialSnapshot?.summary ?? parsedReport.summary
   const goalReview = confirmed?.snapshot.goalReview ?? initialSnapshot?.goalReview ?? parsedReport.goalReview
+  const blueprintReview = confirmed?.snapshot.blueprintReview ?? initialSnapshot?.blueprintReview ?? parsedReport.blueprintReview
+  const blueprintReviewUnavailable = parsedReport.blueprintReviewUnavailable
   const canManageChecklist = Boolean(draftPath && chapterDir)
 
   useEffect(() => {
@@ -534,14 +588,47 @@ function ReviewReportSession({
         return
       }
 
+      const sourceReviewData = parseReport(sourceReview.content, text('综合检查', 'General review'))
+      const sourceBlueprintEvidence = sourceReviewData.blueprintEvidence
+      const sourceBlueprintReview = sourceReviewData.blueprintReview
+      if (sourceBlueprintEvidence) {
+        if (draftMeta.blueprintChapterNumber !== sourceBlueprintEvidence.chapterNumber) {
+          setChecklistError(text(
+            '审查后草稿的蓝图绑定已变化，不能确认这份报告；请重新运行一致性审查。',
+            'The draft blueprint binding changed after review. This report cannot be confirmed; run the consistency review again.',
+          ))
+          return
+        }
+        const currentBlueprint = await ipc.invokeWithProjectSession(
+          projectSession,
+          'db:blueprint-v2-get',
+          sourceBlueprintEvidence.chapterNumber,
+          projectSession.projectPath,
+        )
+        if (!isProjectSessionCurrent(projectSession)) return
+        if (
+          !currentBlueprint
+          || currentBlueprint.revision !== sourceBlueprintEvidence.revision
+          || currentBlueprint.contentHash !== sourceBlueprintEvidence.contentHash
+        ) {
+          setChecklistError(text(
+            '审查依据的蓝图版本已变化，不能确认旧报告；请重新运行一致性审查。',
+            'The blueprint version used by this review has changed. Confirming the old report is blocked; run the consistency review again.',
+          ))
+          return
+        }
+      }
+
       const snapshot = createHumanConfirmedReviewSnapshot({
         sourceReviewId,
         sourceDraft: sourceReview.sourceDraft,
         summary,
         authorGuidance,
         ...(goalReview ? { goalReview } : {}),
+        ...(sourceBlueprintEvidence ? { blueprintEvidence: sourceBlueprintEvidence } : {}),
+        ...(sourceBlueprintReview ? { blueprintReview: sourceBlueprintReview } : {}),
         items: items.map(({
-          category, severity, description, quote, stableFactKey, sourceChapter, goalId, decision, origin,
+          category, severity, description, quote, stableFactKey, sourceChapter, goalId, sceneId, checkId, checkMode, decision, origin,
         }) => ({
           category,
           severity,
@@ -550,6 +637,9 @@ function ReviewReportSession({
           ...(stableFactKey ? { stableFactKey } : {}),
           ...(sourceChapter ? { sourceChapter } : {}),
           ...(goalId ? { goalId } : {}),
+          ...(sceneId ? { sceneId } : {}),
+          ...(checkId ? { checkId } : {}),
+          ...(checkMode ? { checkMode } : {}),
           decision,
           origin,
         })),
@@ -608,6 +698,82 @@ function ReviewReportSession({
         : text('确认审稿清单时发生错误。', 'An error occurred while confirming the review checklist.'))
     } finally {
       if (isProjectSessionCurrent(projectSession)) setConfirming(false)
+    }
+  }
+
+  const openRevision = () => {
+    if (!confirmed || editingChecklist) return
+    setChecklistError(null)
+    if (!hasIncludedReviewItems(confirmed.snapshot)) {
+      setChecklistError(text('未纳入任何审稿项，请先修改并重新确认清单。', 'No review items are included. Edit and confirm the checklist first.'))
+      return
+    }
+    const defaultId = useLLMStore.getState().defaultModelId
+    setRevisionModelId(models.find(model => model.id === defaultId)?.id ?? models[0]?.id ?? '')
+    setRevisionOpen(true)
+  }
+
+  const startRevision = async () => {
+    if (!confirmed || editingChecklist || !draftPath || startingRevision) return
+    const projectSession = captureProjectSession(useProjectStore.getState().currentProject)
+    if (!projectSession || !isProjectSessionPath(projectSession, projectKey)) return
+    setStartingRevision(true)
+    try {
+      if (!models.some(model => model.id === revisionModelId)) {
+        throw new Error(text('请选择可用于生成的模型。', 'Select a generation model.'))
+      }
+      const { parseDraftMeta, createRefineFromReviewWorkflow } = await import('../../services/workflows/chapter-workflow')
+      const draftMeta = await parseDraftMeta(draftPath, projectSession.projectPath, projectSession)
+      const persisted = await ipc.invokeWithProjectSession(projectSession, 'db:review-get-full', confirmed.reviewSourceId, projectSession.projectPath)
+      const { readDraftBody } = await import('../../stores/draft-store')
+      const body = await readDraftBody(draftPath, projectSession.projectPath, projectSession)
+      if (!isProjectSessionCurrent(projectSession)) return
+      const snapshot = persisted && parseHumanConfirmedReviewSnapshot(persisted.content)
+      if (!snapshot || serializeHumanConfirmedReviewSnapshot(snapshot) !== confirmed.content
+        || persisted?.id !== confirmed.reviewSourceId || persisted.baseDraftId !== draftMeta?.id
+        || !persisted.sourceDraft || !snapshot.sourceDraft
+        || !(['id', 'chapterNumber', 'version', 'status', 'content'] as const)
+          .every(key => persisted.sourceDraft![key] === snapshot.sourceDraft![key])) {
+        throw new Error(text('已保存的确认清单不一致，请重新确认。', 'The saved checklist does not match. Confirm it again.'))
+      }
+      if (!draftMeta || !matchesReviewSource(snapshot.sourceDraft, draftMeta, body)) {
+        throw new Error(text('源草稿已变化，请重新审稿并确认清单。', 'The source draft changed. Review and confirm it again.'))
+      }
+      const openDraft = useEditorStore.getState().tabs.find(tab => tab.projectKey === projectKey && tab.filePath === draftPath)
+      if (openDraft && openDraft.content !== body) {
+        throw new Error(text('源草稿有未保存修改，请先保存，再重新审稿并确认清单。', 'The source draft has unsaved edits. Save it, then review and confirm again.'))
+      }
+      if (!hasIncludedReviewItems(snapshot)) {
+        throw new Error(text('未纳入任何审稿项。', 'No review items are included.'))
+      }
+      if (snapshot.blueprintEvidence) {
+        const evidence = snapshot.blueprintEvidence
+        const current = draftMeta.blueprintChapterNumber === evidence.chapterNumber
+          ? await ipc.invokeWithProjectSession(projectSession, 'db:blueprint-v2-get', evidence.chapterNumber, projectSession.projectPath)
+          : null
+        if (!isProjectSessionCurrent(projectSession)) return
+        if (!current || current.revision !== evidence.revision || current.contentHash !== evidence.contentHash) {
+          throw new Error(text('审查依据的蓝图版本已变化，请重新审稿。', 'The reviewed blueprint changed. Run review again.'))
+        }
+      }
+      if (!isProjectSessionCurrent(projectSession)) return
+      await useWorkflowStore.getState().startWorkflow(createRefineFromReviewWorkflow({
+        projectPath: projectSession.projectPath,
+        chapterNumber: draftMeta.chapterNumber,
+        chapterTitle: draftMeta.chapterTitle ?? '',
+        draftPath,
+        draftContent: body,
+        confirmedReviewContent: confirmed.content,
+        reviewSourceId: confirmed.reviewSourceId,
+        generationModelId: revisionModelId,
+      }, projectSession), false)
+      if (isProjectSessionCurrent(projectSession)) setRevisionOpen(false)
+    } catch (error) {
+      if (!isProjectSessionCurrent(projectSession)) return
+      setRevisionOpen(false)
+      setChecklistError(error instanceof Error ? error.message : text('修稿启动失败。', 'Could not start revision.'))
+    } finally {
+      setStartingRevision(false)
     }
   }
 
@@ -753,6 +919,113 @@ function ReviewReportSession({
                 ? text('本章未配置可检查的目标，未进行目标验收。', 'No chapter goals are configured; goal acceptance was not performed.')
                 : text('本章目标检查不完整，尚有待核实项。', 'Chapter goal review is incomplete and needs verification.')}
           </p>
+        )}
+        {blueprintReviewUnavailable && (
+          <p className="mb-4 rounded-md border border-[var(--color-border)] px-3 py-2 text-xs text-[var(--color-text-muted)]">
+            {blueprintReviewUnavailable === 'corrupt'
+              ? text('绑定蓝图 v2 数据损坏，本次未据此下结论。', 'The bound v2 blueprint is corrupt; no conclusions were drawn from it.')
+              : blueprintReviewUnavailable === 'needs-newer-app'
+                ? text('绑定蓝图由较新版本写入，本次未据此下结论。', 'The bound blueprint requires a newer app; no conclusions were drawn from it.')
+                : text('绑定蓝图 v2 暂时不可读取，本次未据此下结论。', 'The bound v2 blueprint could not be read; no conclusions were drawn from it.')}
+          </p>
+        )}
+        {blueprintReview && (
+          <section className="mb-5 rounded-lg border border-[var(--color-border)] p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h4 className="text-sm font-semibold text-[var(--color-text)]">
+                {text('章节蓝图一致性', 'Chapter blueprint consistency')}
+              </h4>
+              <span className="text-[0.7rem] text-[var(--color-text-muted)]">
+                {text(
+                  `第 ${blueprintReview.evidence.chapterNumber} 章 · r${blueprintReview.evidence.revision}`,
+                  `Chapter ${blueprintReview.evidence.chapterNumber} · r${blueprintReview.evidence.revision}`,
+                )}
+              </span>
+            </div>
+            <p className="text-[0.7rem] text-[var(--color-text-muted)] break-all">
+              {text('蓝图内容哈希：', 'Blueprint content hash: ')}{blueprintReview.evidence.contentHash}
+            </p>
+            {blueprintReview.scenes.length > 0 && (
+              <div className="space-y-2">
+                <h5 className="text-xs font-semibold text-[var(--color-text-secondary)]">
+                  {text('分镜顺序与因果（建议）', 'Scene order and causality (advisory)')}
+                </h5>
+                {blueprintReview.scenes.map(scene => (
+                  <div key={scene.sceneId} className="rounded-md border border-[var(--color-border)] px-3 py-2 text-xs space-y-1">
+                    <div className="font-medium text-[var(--color-text)]">
+                      {scene.order}. {scene.title} <span className="font-mono text-[0.65rem] text-[var(--color-text-muted)]">{scene.sceneId}</span>
+                    </div>
+                    <div className="text-[var(--color-text-secondary)]">
+                      {text('出现：', 'Presence: ')}{scene.presence === 'present' ? text('找到', 'present') : scene.presence === 'missing' ? text('未找到（需人工判断）', 'not found (review manually)') : text('待核实', 'uncertain')}
+                      {' · '}{text('顺序：', 'Order: ')}{scene.sequence === 'in-order' ? text('合理', 'plausible') : scene.sequence === 'out-of-order' ? text('可能异常（需人工判断）', 'possibly out of order (review manually)') : text('待核实', 'uncertain')}
+                      {' · '}{text('因果：', 'Causality: ')}{scene.causality === 'supported' ? text('有正文支持', 'supported') : scene.causality === 'gap' ? text('可能有断点（需人工判断）', 'possible gap (review manually)') : text('待核实', 'uncertain')}
+                    </div>
+                    <p className="text-[var(--color-text-secondary)]">{scene.description}</p>
+                    {scene.evidence.map((evidence, index) => (
+                      <blockquote key={`${scene.sceneId}-evidence-${index}`} className="border-l-2 border-[var(--color-border)] pl-2 text-[var(--color-text-muted)]">
+                        {text(`正文第 ${evidence.startLine} 行：`, `Prose line ${evidence.startLine}: `)}{evidence.quote}
+                      </blockquote>
+                    ))}
+                    {scene.evidence.length === 0 && (
+                      <p className="text-[var(--color-text-muted)]">
+                        {text(`无直接引文，查找范围：正文第 ${scene.searchRange.startLine}–${scene.searchRange.endLine} 行。`, `No direct quote; searched prose lines ${scene.searchRange.startLine}–${scene.searchRange.endLine}.`)}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            {blueprintReview.checks.length > 0 && (
+              <div className="space-y-2">
+                <h5 className="text-xs font-semibold text-[var(--color-text-secondary)]">
+                  {text('必达、参考与禁写条目', 'Must, reference, and forbid checks')}
+                </h5>
+                {blueprintReview.checks.map(check => (
+                  <div key={check.checkId} className="rounded-md border border-[var(--color-border)] px-3 py-2 text-xs space-y-1">
+                    <div className="flex flex-wrap items-center gap-2 font-medium text-[var(--color-text)]">
+                      <span>{check.mode === 'must' ? text('必达', 'Must') : check.mode === 'forbid' ? text('禁写', 'Forbid') : text('参考', 'Reference')}</span>
+                      <span className="font-mono text-[0.65rem] text-[var(--color-text-muted)]">{check.checkId}</span>
+                      {check.mode === 'reference' && <span className="text-[var(--color-text-muted)]">{text('仅上下文，不计发现', 'Context only; no finding')}</span>}
+                    </div>
+                    <p className="whitespace-pre-wrap text-[var(--color-text-secondary)]">{check.requirement}</p>
+                    <p className="text-[var(--color-text-secondary)]">{check.description}</p>
+                    {check.evidence.map((evidence, index) => (
+                      <blockquote key={`${check.checkId}-evidence-${index}`} className="border-l-2 border-[var(--color-border)] pl-2 text-[var(--color-text-muted)]">
+                        {text(`正文第 ${evidence.startLine} 行：`, `Prose line ${evidence.startLine}: `)}{evidence.quote}
+                      </blockquote>
+                    ))}
+                    {check.mode !== 'reference' && check.evidence.length === 0 && (
+                      <p className="text-[var(--color-text-muted)]">
+                        {text(`无直接引文，查找范围：正文第 ${check.searchRange.startLine}–${check.searchRange.endLine} 行。`, `No direct quote; searched prose lines ${check.searchRange.startLine}–${check.searchRange.endLine}.`)}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            {blueprintReview.chapterHook.status !== 'not-configured' && (
+              <div className="rounded-md border border-[var(--color-border)] px-3 py-2 text-xs space-y-1">
+                <h5 className="font-semibold text-[var(--color-text-secondary)]">{text('章末钩子（建议）', 'Chapter-end hook (advisory)')}</h5>
+                <p className="whitespace-pre-wrap text-[var(--color-text-secondary)]">{blueprintReview.chapterHook.requirement}</p>
+                <p className="text-[var(--color-text-secondary)]">{blueprintReview.chapterHook.description}</p>
+                {blueprintReview.chapterHook.evidence.map((evidence, index) => (
+                  <blockquote key={`hook-evidence-${index}`} className="border-l-2 border-[var(--color-border)] pl-2 text-[var(--color-text-muted)]">
+                    {text(`正文第 ${evidence.startLine} 行：`, `Prose line ${evidence.startLine}: `)}{evidence.quote}
+                  </blockquote>
+                ))}
+                {blueprintReview.chapterHook.evidence.length === 0 && (
+                  <p className="text-[var(--color-text-muted)]">
+                    {text(`无直接引文，查找范围：正文第 ${blueprintReview.chapterHook.searchRange.startLine}–${blueprintReview.chapterHook.searchRange.endLine} 行。`, `No direct quote; searched prose lines ${blueprintReview.chapterHook.searchRange.startLine}–${blueprintReview.chapterHook.searchRange.endLine}.`)}
+                  </p>
+                )}
+              </div>
+            )}
+            {blueprintReview.blueprintIssues.map((issue, index) => (
+              <p key={`blueprint-issue-${index}`} className="rounded-md border border-[var(--color-border)] px-3 py-2 text-xs text-[var(--color-text-muted)]">
+                {text('蓝图自身问题（不是正文违背蓝图）：', 'Blueprint issue (not a prose violation): ')}{issue}
+              </p>
+            ))}
+          </section>
         )}
         {/* 分类展示 */}
         {items.length === 0 ? (
@@ -1065,6 +1338,9 @@ function ReviewReportSession({
                 <Pencil size={13} />
                 {text('修改决策清单', 'Edit decision checklist')}
               </Button>
+              <Button variant="ai" size="sm" onClick={openRevision}>
+                {text('按确认意见修稿', 'Revise from confirmed checklist')}
+              </Button>
               <Button variant="default" size="sm" onClick={jumpToDraft} disabled={!draftPath}>
                 <FileText size={13} />
                 {text('返回正文修改', 'Return to prose')}
@@ -1082,6 +1358,24 @@ function ReviewReportSession({
             </p>
           )}
         </section>
+
+        <Dialog open={revisionOpen} onOpenChange={setRevisionOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{text('按确认意见修稿', 'Revise from confirmed checklist')}</DialogTitle>
+              <DialogDescription>{text('仅使用已保存的作者确认清单，生成独立修订稿。', 'Use the saved author checklist to create a separate revision.')}</DialogDescription>
+            </DialogHeader>
+            <Label htmlFor="review-revision-model">{text('修稿模型', 'Revision model')}</Label>
+            <NativeSelect id="review-revision-model" value={revisionModelId} onChange={event => setRevisionModelId(event.target.value)}>
+              {models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
+            </NativeSelect>
+            <p className="text-sm">{text('发送给修稿的已确认指导', 'Confirmed guidance sent to revision')}</p>
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs">{confirmed && renderHumanConfirmedReviewBrief(confirmed.snapshot, writingLanguage)}</pre>
+            <DialogFooter>
+              <Button onClick={() => void startRevision()} disabled={startingRevision || !revisionModelId}>{text('开始修稿', 'Start revision')}</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* 原始文本折叠 */}
         <details className="mt-6">

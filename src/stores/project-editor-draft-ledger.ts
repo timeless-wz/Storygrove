@@ -15,7 +15,7 @@ export interface ProjectEditorDraftLedger<T> {
 export interface DraftTabDescriptor {
   id: string
   name: string
-  type: Extract<EditorTab['type'], 'character' | 'config'>
+  type: Extract<EditorTab['type'], 'character' | 'config' | 'cultivation'>
 }
 
 export interface DraftTabWriter {
@@ -23,7 +23,7 @@ export interface DraftTabWriter {
   draftLedgers: Record<string, string>
   setDraftLedger(key: string, content: string): void
   setProjectEditorDirty(
-    type: Extract<EditorTab['type'], 'character' | 'config' | 'chapter-card'>,
+    type: Extract<EditorTab['type'], 'character' | 'config' | 'chapter-card' | 'cultivation'>,
     projectKey: string,
     dirty: boolean,
   ): void

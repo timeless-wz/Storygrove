@@ -38,18 +38,23 @@ export default function VersionHistory({ projectKey }: { projectKey: string }) {
     if (!projectSession || !isProjectSessionPath(projectSession, projectKey)) return
     setLoading(true)
     try {
-      const blueprints = await ipc.invokeWithProjectSession(
-        projectSession,
-        'db:blueprint-get-all',
-        projectSession.projectPath,
-      )
+      const [blueprints, v2Summaries] = await Promise.all([
+        ipc.invokeWithProjectSession(projectSession, 'db:blueprint-list-summary', projectSession.projectPath),
+        ipc.invokeWithProjectSession(projectSession, 'db:blueprint-v2-summary-list', projectSession.projectPath),
+      ])
       if (!isProjectSessionCurrent(projectSession)) return
-      setChapters(blueprints.map(c => ({
-        id: String(c.chapterNumber),
-        chapter_number: c.chapterNumber,
-        title: c.title || text(`第 ${c.chapterNumber} 章`, `Chapter ${c.chapterNumber}`),
-        status: 'draft',
-      })))
+      const byChapter = new Map(blueprints.map(blueprint => [blueprint.chapterNumber, blueprint.title]))
+      for (const summary of v2Summaries) {
+        if (!byChapter.has(summary.chapterNumber)) byChapter.set(summary.chapterNumber, '')
+      }
+      setChapters([...byChapter]
+        .sort(([left], [right]) => left - right)
+        .map(([chapterNumber, title]) => ({
+          id: String(chapterNumber),
+          chapter_number: chapterNumber,
+          title: title || text(`第 ${chapterNumber} 章`, `Chapter ${chapterNumber}`),
+          status: 'draft',
+        })))
     } catch {
       if (isProjectSessionCurrent(projectSession)) setChapters([])
     } finally {

@@ -27,7 +27,7 @@ import { openBuiltinEditor, openChapterFile } from '../panels/sidebar/sidebar-fi
 import { ipc } from '../../services/ipc-client'
 import { globalEventBus } from '../../shared/event-bus'
 import { captureProjectSession, isProjectSessionCurrent } from '../project-session-gate'
-import type { ChapterBlueprint } from '../../services/workflows/directory-workflow'
+import type { DatabaseChannels } from '../../shared/ipc-channels'
 import { NewDraftDialog } from '../panels/sidebar/NewDraftDialog'
 import { openResumableDraft } from './workbench-draft-entry'
 import { AgentProposalReviewPanel } from '../workspace/AgentProposalReviewPanel'
@@ -37,6 +37,26 @@ import {
   readLastCreationLocation,
   type LastCreationLocation,
 } from '../../services/last-creation-location'
+
+type BlueprintListSummary = DatabaseChannels['db:blueprint-list-summary']['return'][number]
+
+function mergeBlueprintListSummaries(
+  blueprints: BlueprintListSummary[],
+  v2Summaries: DatabaseChannels['db:blueprint-v2-summary-list']['return'],
+): BlueprintListSummary[] {
+  const byChapter = new Map(blueprints.map(blueprint => [blueprint.chapterNumber, blueprint]))
+  for (const summary of v2Summaries) {
+    if (!byChapter.has(summary.chapterNumber)) {
+      byChapter.set(summary.chapterNumber, {
+        chapterNumber: summary.chapterNumber,
+        title: `第${summary.chapterNumber}章`,
+        purpose: '',
+        keyEvents: summary.sceneTitles.slice(0, 5).join('\n'),
+      })
+    }
+  }
+  return [...byChapter.values()].sort((left, right) => left.chapterNumber - right.chapterNumber)
+}
 
 export default function ProjectOverviewPage() {
   const text = useLocaleStore(s => s.text)
@@ -54,7 +74,7 @@ export default function ProjectOverviewPage() {
   const characters = useCharacterStore(s => s.characters)
   const loadCharacters = useCharacterStore(s => s.loadCharacters)
 
-  const [blueprints, setBlueprints] = useState<ChapterBlueprint[]>([])
+  const [blueprints, setBlueprints] = useState<DatabaseChannels['db:blueprint-list-summary']['return']>([])
   const [blueprintsProjectKey, setBlueprintsProjectKey] = useState<string | null>(null)
   const [stepperExpanded, setStepperExpanded] = useState(true)
   const [createDraftDialogOpen, setCreateDraftDialogOpen] = useState(false)
@@ -75,10 +95,13 @@ export default function ProjectOverviewPage() {
     if (!projectSession) return
 
     let cancelled = false
-    ipc.invokeWithProjectSession(projectSession, 'db:blueprint-get-all', projectPath)
-      .then((res: unknown) => {
-        if (!cancelled && Array.isArray(res)) {
-          setBlueprints(res as ChapterBlueprint[])
+    Promise.all([
+      ipc.invokeWithProjectSession(projectSession, 'db:blueprint-list-summary', projectPath),
+      ipc.invokeWithProjectSession(projectSession, 'db:blueprint-v2-summary-list', projectPath),
+    ])
+      .then(([res, v2Summaries]) => {
+        if (!cancelled && Array.isArray(res) && Array.isArray(v2Summaries)) {
+          setBlueprints(mergeBlueprintListSummaries(res, v2Summaries))
           setBlueprintsProjectKey(projectPath)
         }
       })
@@ -95,9 +118,14 @@ export default function ProjectOverviewPage() {
     if (!payload.resources.includes('blueprints')) return
     const projectSession = captureProjectSession(currentProject)
     if (!projectSession) return
-    ipc.invokeWithProjectSession(projectSession, 'db:blueprint-get-all', projectSession.projectPath)
-      .then((res: unknown) => {
-        if (isProjectSessionCurrent(projectSession) && Array.isArray(res)) setBlueprints(res as ChapterBlueprint[])
+    Promise.all([
+      ipc.invokeWithProjectSession(projectSession, 'db:blueprint-list-summary', projectSession.projectPath),
+      ipc.invokeWithProjectSession(projectSession, 'db:blueprint-v2-summary-list', projectSession.projectPath),
+    ])
+      .then(([res, v2Summaries]) => {
+        if (isProjectSessionCurrent(projectSession) && Array.isArray(res) && Array.isArray(v2Summaries)) {
+          setBlueprints(mergeBlueprintListSummaries(res, v2Summaries))
+        }
       })
       .catch(() => {})
   }), [currentProject]) // eslint-disable-line react-hooks/exhaustive-deps -- 仅当前项目会话需要监听
@@ -215,12 +243,16 @@ export default function ProjectOverviewPage() {
     }
     if ((location.kind === 'blueprint' || location.kind === 'chapter-canvas') && lastLocationValid) {
       try {
-        const currentBlueprints = await ipc.invokeWithProjectSession(
-          projectSession, 'db:blueprint-get-all', projectPath,
-        )
+        const [currentBlueprints, currentV2Summaries] = await Promise.all([
+          ipc.invokeWithProjectSession(projectSession, 'db:blueprint-list-summary', projectPath),
+          ipc.invokeWithProjectSession(projectSession, 'db:blueprint-v2-summary-list', projectPath),
+        ])
         if (!isProjectSessionCurrent(projectSession)) return
-        if (!Array.isArray(currentBlueprints) || !currentBlueprints.some(
-          (blueprint: ChapterBlueprint) => blueprint.chapterNumber === location.chapterNumber,
+        const allBlueprints = Array.isArray(currentBlueprints) && Array.isArray(currentV2Summaries)
+          ? mergeBlueprintListSummaries(currentBlueprints, currentV2Summaries)
+          : []
+        if (!allBlueprints.some(
+          blueprint => blueprint.chapterNumber === location.chapterNumber,
         )) {
           await handleResumeDrafting()
           return

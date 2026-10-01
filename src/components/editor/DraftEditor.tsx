@@ -319,7 +319,7 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
       if (cancelled || !isProjectSessionCurrent(projectSession) || !m) return
       const bps = await ipc.invokeWithProjectSession(
         projectSession,
-        'db:blueprint-get-all',
+        'db:blueprint-list-summary',
         projectSession.projectPath,
       )
       if (cancelled || !isProjectSessionCurrent(projectSession)) return

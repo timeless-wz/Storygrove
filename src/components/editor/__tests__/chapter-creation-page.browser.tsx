@@ -132,6 +132,7 @@ beforeEach(async () => {
       }
     }
     if (channel === 'db:blueprint-get-all') return [{ chapterNumber: 1, title: '接错的人' }]
+    if (channel === 'db:blueprint-list-summary') return [{ chapterNumber: 1, title: '接错的人' }]
     if (channel === 'db:draft-list') return [{ id: 1, version: 2 }]
     if (channel === 'db:revision-get-pending' || channel === 'db:review-list') return []
     if (channel === 'db:foreshadowing-list-by-draft') return [
@@ -313,8 +314,10 @@ describe('chapter creation page chrome', () => {
     const placeholder = getComputedStyle(paper(), '::before')
     expect(placeholder.fontStyle).toBe('normal')
     expect(placeholder.opacity).toBe('1')
-    // 纸面依然是最亮的一层，空格子也不该变成一块灰板
-    expect(relativeLuminance(getComputedStyle(paper()).backgroundColor)).toBeGreaterThan(
+    // 纸面不得比章节栏更暗（空格子不该变成一块灰板）。现行设计契约：
+    // 章节栏与正文工具栏共用同一块纸面（document-toolbar.css「共用一块纸面」），
+    // 因此两者同色即为达标，不再要求纸面严格更亮。
+    expect(relativeLuminance(getComputedStyle(paper()).backgroundColor)).toBeGreaterThanOrEqual(
       relativeLuminance(getComputedStyle(bar()).backgroundColor),
     )
 

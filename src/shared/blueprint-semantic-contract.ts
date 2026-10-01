@@ -59,7 +59,8 @@ newCharacterCandidates is optional. When present, include only important named c
 relationships is required and may be []; every item must contain non-empty from, to, and relation fields. from and to must exactly copy full names from the same item's characters array and may not self-reference.
 Keep keyEvents concise; aim for no more than 900 characters and never exceed the hard maximum of 1,200.
 Limits: title ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.titleCharacters} characters; role ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.roleCharacters}; purpose ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.purposeCharacters}; keyEvents ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.keyEventsCharacters}; suspenseHook ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.suspenseHookCharacters}; characters at most ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.characterItems} items with names at most ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.characterNameCharacters} characters; relationships at most ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.relationshipItems} items with relation at most ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.relationshipCharacters} characters.
-Do not omit required fields, combine chapters, rename fields, explain, or output Markdown or code fences.`
+Do not omit required fields, combine chapters, rename fields, explain, or output Markdown or code fences.
+These items are per-chapter SIMPLE outlines (chapter-level summary fields). Do not attempt scene-by-scene storyboard detail; the app keeps detailed outlines in a separate structure and will not accept them here.`
   }
   return `【不可变蓝图 JSON 合同】
 只输出 {"blueprints":[...]}，每项必须完整包含：${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.requiredFields.join('、')}。
@@ -71,7 +72,8 @@ relationships 必须是数组，无关系时传 []；每项必须含非空 from�
 from/to 必须逐字复制同一项 characters 中的完整字符串；任一端点不在 characters 时，删除该关系或使用 []，不得发明别名、简称或补写角色。
 keyEvents 保持精炼，目标为 100–150 字符，绝不得超过 1200 字符硬上限。
 每项长度上限：title ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.titleCharacters} 字符、role ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.roleCharacters} 字符、purpose ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.purposeCharacters} 字符、keyEvents ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.keyEventsCharacters} 字符、suspenseHook ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.suspenseHookCharacters} 字符；characters 最多 ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.characterItems} 项且姓名最多 ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.characterNameCharacters} 字符；relationships 最多 ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.relationshipItems} 项且 relation 最多 ${BLUEPRINT_SEMANTIC_CONTRACT_MANIFEST.outputLimits.relationshipCharacters} 字符。
-不得省略必填字段、合并章节、输出近义字段、解释、Markdown 或代码围栏。`
+不得省略必填字段、合并章节、输出近义字段、解释、Markdown 或代码围栏。
+本输出是逐章【简纲】（章节级摘要字段）。不要试图输出逐场分镜等细纲内容；细纲由应用的独立结构承载，此处不会接受。`
 }
 
 /**

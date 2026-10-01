@@ -1,0 +1,240 @@
+{
+  "scenario": "E01-draft-persistence (partial: manual free draft)",
+  "runId": "vela-acc-e01-2026-10-01T03-35-03-087Z-22653a18",
+  "verdict": "FAIL",
+  "failedSteps": [
+    "execution.error"
+  ],
+  "steps": [
+    {
+      "name": "fixture.created",
+      "ok": true,
+      "data": {
+        "projectId": "024877ea-0f08-465c-a3a6-83fa13e734e0",
+        "sources": 8
+      }
+    },
+    {
+      "name": "build.current-source",
+      "ok": true,
+      "data": {
+        "script": "build",
+        "exitCode": 0,
+        "ok": true
+      }
+    },
+    {
+      "name": "build.gate",
+      "ok": true,
+      "data": {
+        "ok": true,
+        "missing": []
+      }
+    },
+    {
+      "name": "abi.rebuild-electron",
+      "ok": true,
+      "data": {
+        "script": "rebuild:electron",
+        "exitCode": 0,
+        "ok": true,
+        "ms": 2225
+      }
+    },
+    {
+      "name": "isolation.profile-dir-used",
+      "ok": true,
+      "data": {
+        "files": 13
+      }
+    },
+    {
+      "name": "ui.launch1.project-opened",
+      "ok": true,
+      "data": {
+        "projectTreeVisible": true,
+        "visibleDialogCount": 0,
+        "failureText": null,
+        "ok": true,
+        "screenshotPath": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e01-2026-10-01T03-35-03-087Z-22653a18\\evidence\\01-launch-open-project-a.png"
+      }
+    },
+    {
+      "name": "ui.draft-created-and-edited",
+      "ok": true,
+      "data": {
+        "chapter": 1,
+        "proseLength": 62
+      }
+    },
+    {
+      "name": "ui.explicit-save",
+      "ok": true,
+      "data": {
+        "buttonAppeared": true,
+        "buttonCleared": true
+      }
+    },
+    {
+      "name": "app.quit1",
+      "ok": true,
+      "data": {
+        "code": 0,
+        "signal": null
+      }
+    },
+    {
+      "name": "ui.launch2.reopened",
+      "ok": true,
+      "data": {
+        "projectTreeVisible": true,
+        "visibleDialogCount": 0,
+        "failureText": null,
+        "ok": true,
+        "screenshotPath": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e01-2026-10-01T03-35-03-087Z-22653a18\\evidence\\04-relaunch-project-a.png"
+      }
+    },
+    {
+      "name": "main.relaunch-fresh-marker",
+      "ok": true,
+      "data": {
+        "ok": true,
+        "marker": {
+          "projectPath": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e01-2026-10-01T03-35-03-087Z-22653a18\\project-a",
+          "openedAt": "2026-10-01T03:35:57.343Z"
+        }
+      }
+    },
+    {
+      "name": "app.quit2",
+      "ok": true,
+      "data": {
+        "code": 0,
+        "signal": null
+      }
+    },
+    {
+      "name": "abi.restore-node",
+      "ok": true,
+      "data": {
+        "script": "prepare:native-node",
+        "exitCode": 0,
+        "ok": true,
+        "caveat": "isolated-runner: probes independent copy"
+      }
+    },
+    {
+      "name": "execution.error",
+      "ok": false,
+      "data": {
+        "error": "TimeoutError: locator.waitFor: Timeout 45000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('.writer-project-tree .tree-item').filter({ hasText: /第\\s*1\\s*章|第1章/ }).first() to be visible\u001b[22m\n"
+      }
+    },
+    {
+      "name": "storage.project-a.manifest",
+      "ok": true,
+      "data": {
+        "ok": true
+      }
+    },
+    {
+      "name": "storage.project-a.sqlite",
+      "ok": true,
+      "data": {
+        "integrity": "ok",
+        "foreignKeyViolations": 0,
+        "tableCount": 104
+      }
+    },
+    {
+      "name": "storage.draft-readback",
+      "ok": true,
+      "data": {
+        "draftCount": 1,
+        "chapterNumber": 1,
+        "containsMarker": true,
+        "bodyLength": 63
+      }
+    },
+    {
+      "name": "storage.no-project-b-marker-in-a",
+      "ok": true,
+      "data": {
+        "clean": true
+      }
+    },
+    {
+      "name": "isolation.project-b-untouched",
+      "ok": true,
+      "data": {
+        "dbExists": false
+      }
+    },
+    {
+      "name": "storage.global-home.recent-projects",
+      "ok": true,
+      "data": {
+        "containsProjectA": true
+      }
+    },
+    {
+      "name": "storage.source-fixtures.readonly",
+      "ok": true,
+      "data": {
+        "unchanged": true
+      }
+    }
+  ],
+  "diagnostics": [
+    {
+      "at": "2026-10-01T03:35:47.960Z",
+      "kind": "main-stdout",
+      "text": "\r\n"
+    },
+    {
+      "at": "2026-10-01T03:35:48.758Z",
+      "kind": "main-stderr",
+      "text": "\r\nDevTools listening on ws://127.0.0.1:10771/devtools/browser/a544dff1-a877-4b1c-8faf-4deac61fcd91\r\n"
+    },
+    {
+      "at": "2026-10-01T03:35:48.769Z",
+      "kind": "main-stdout",
+      "text": "[Vela IPC] 所有 Controller 已注册完成 | 全局工作区: C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e01-2026-10-01T03-35-03-087Z-22653a18\\global-home\n"
+    },
+    {
+      "at": "2026-10-01T03:35:48.769Z",
+      "kind": "main-stdout",
+      "text": "[MCP] IPC 处理器已注册\n"
+    },
+    {
+      "at": "2026-10-01T03:35:49.590Z",
+      "kind": "main-stdout",
+      "text": "[Vela DB] 项目数据库已打开: C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e01-2026-10-01T03-35-03-087Z-22653a18\\project-a\\.vela\\vela.db\n"
+    },
+    {
+      "at": "2026-10-01T03:35:54.888Z",
+      "kind": "main-stdout",
+      "text": "\r\n"
+    },
+    {
+      "at": "2026-10-01T03:35:55.606Z",
+      "kind": "main-stderr",
+      "text": "\r\nDevTools listening on ws://127.0.0.1:10616/devtools/browser/aeb35a7d-ab16-4a7e-9b80-0f28dff8189c\r\n"
+    },
+    {
+      "at": "2026-10-01T03:35:55.615Z",
+      "kind": "main-stdout",
+      "text": "[Vela IPC] 所有 Controller 已注册完成 | 全局工作区: C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e01-2026-10-01T03-35-03-087Z-22653a18\\global-home\n"
+    },
+    {
+      "at": "2026-10-01T03:35:55.616Z",
+      "kind": "main-stdout",
+      "text": "[MCP] IPC 处理器已注册\n"
+    },
+    {
+      "at": "2026-10-01T03:35:56.392Z",
+      "kind": "main-stdout",
+      "text": "[Vela DB] 项目数据库已打开: C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e01-2026-10-01T03-35-03-087Z-22653a18\\project-a\\.vela\\vela.db\n"
+    }
+  ]
+}

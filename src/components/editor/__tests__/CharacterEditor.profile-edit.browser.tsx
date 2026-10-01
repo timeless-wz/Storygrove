@@ -142,6 +142,7 @@ beforeEach(() => {
   commitPayload = undefined
   committedEntries = []
   invoke = vi.fn(async (channel: string, payload?: unknown) => {
+    if (channel === 'db:cultivation-read') return { revision: 0, realms: [] }
     if (channel === 'db:character-roster-read') {
       return {
         schemaVersion: 1,

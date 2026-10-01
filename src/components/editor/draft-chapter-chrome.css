@@ -44,6 +44,13 @@
   background-color: var(--editor-chrome-bg, var(--editor-page-bg, var(--color-editor-bg)));
   user-select: none;
   flex-shrink: 0;
+  /* 状态 chip 跟随栏所在纸面取墨色：混合主题（starlight：深壳+象牙纸）下，
+     全局语义色按深色外壳调校，在这块浅纸栏上仅 ~1.8–2:1。muted 直取纸面次级墨；
+     类别/成功色用 70% 纸面强墨 + 30% 原语义色保色相。实测各主题 ≥4.5:1。 */
+  --color-text-muted: var(--editor-ink-muted, var(--color-text-muted));
+  --color-category-progress-text: color-mix(in srgb, var(--editor-chrome-ink-strong, var(--editor-ink-strong, var(--color-text))) 70%, var(--color-category-progress-text));
+  --color-category-review-text: color-mix(in srgb, var(--editor-chrome-ink-strong, var(--editor-ink-strong, var(--color-text))) 70%, var(--color-category-review-text));
+  --color-success-text: color-mix(in srgb, var(--editor-chrome-ink-strong, var(--editor-ink-strong, var(--color-text))) 70%, var(--color-success-text));
   /* 次要动作要不要收起文字，取决于这条栏自己有多宽（编辑器宽度常被两侧面板
      压掉两三百像素），而不是窗口有多宽。 */
   container-type: inline-size;

@@ -9,7 +9,14 @@ const browserApiPort = Number(process.env.AI_NOVEL_VITEST_BROWSER_API_PORT || 63
 const packageJson = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
 
 export default defineConfig({
-  plugins: [tailwindcss(), react()],
+  plugins: [tailwindcss(), react(), {
+    name: 'cultivation-browser-test-database', enforce: 'pre',
+    resolveId(source, importer, options) {
+      if (options.ssr && importer?.replace(/\\/g, '/').includes('/electron/repositories/') && /^\.\.\/database$/.test(source)) {
+        return new URL('./test/cultivation-browser-database.ts', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
+      }
+    },
+  }],
   optimizeDeps: {
     include: ['zustand/middleware'],
   },
@@ -21,6 +28,12 @@ export default defineConfig({
     setupFiles: ['test/setup-locale.ts'],
     browser: {
       enabled: true,
+      commands: {
+        async cultivationIpc(context, channel: string, ...args: unknown[]) {
+          const backend = await context.project.vite.ssrLoadModule('/test/cultivation-browser-backend.ts')
+          return backend.cultivationTestIpc(channel, ...args)
+        },
+      },
       // 63315 is frequently reserved by Windows/HNS. Keep this overridable
       // for CI, but use an unreserved default for local browser regressions.
       api: { host: '127.0.0.1', port: browserApiPort },

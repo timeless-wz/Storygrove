@@ -1,0 +1,170 @@
+{
+  "scenario": "E01-draft-persistence (partial: manual free draft)",
+  "runId": "vela-acc-e01-2026-10-01T03-01-32-842Z-5236de5d",
+  "verdict": "FAIL",
+  "failedSteps": [
+    "app.quit1",
+    "execution.error",
+    "storage.draft-readback"
+  ],
+  "steps": [
+    {
+      "name": "fixture.created",
+      "ok": true,
+      "data": {
+        "projectId": "3c21c3f7-428a-4c49-8a1c-f200d119f430",
+        "sources": 8
+      }
+    },
+    {
+      "name": "build.current-source",
+      "ok": true,
+      "data": {
+        "script": "build",
+        "exitCode": 0,
+        "ok": true
+      }
+    },
+    {
+      "name": "build.gate",
+      "ok": true,
+      "data": {
+        "ok": true,
+        "missing": []
+      }
+    },
+    {
+      "name": "abi.rebuild-electron",
+      "ok": true,
+      "data": {
+        "script": "rebuild:electron",
+        "exitCode": 0,
+        "ok": true,
+        "ms": 1928
+      }
+    },
+    {
+      "name": "isolation.profile-dir-used",
+      "ok": true,
+      "data": {
+        "files": 13
+      }
+    },
+    {
+      "name": "ui.launch1.project-opened",
+      "ok": true,
+      "data": {
+        "projectTreeVisible": true,
+        "visibleDialogCount": 0,
+        "failureText": null,
+        "ok": true,
+        "screenshotPath": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e01-2026-10-01T03-01-32-842Z-5236de5d\\evidence\\01-launch-open-project-a.png"
+      }
+    },
+    {
+      "name": "app.quit1",
+      "ok": false,
+      "data": {
+        "error": "TypeError: Cannot read properties of undefined (reading 'once')"
+      }
+    },
+    {
+      "name": "abi.restore-node",
+      "ok": true,
+      "data": {
+        "script": "prepare:native-node",
+        "exitCode": 0,
+        "ok": true,
+        "caveat": "isolated-runner: probes independent copy"
+      }
+    },
+    {
+      "name": "execution.error",
+      "ok": false,
+      "data": {
+        "error": "TimeoutError: locator.waitFor: Timeout 45000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('[data-vditor-prose-editor=\"true\"]').locator('pre[contenteditable=\"true\"]').first() to be visible\u001b[22m\n\u001b[2m    89 × locator resolved to hidden <pre spellcheck=\"false\" class=\"vditor-reset\" placeholder=\"开始写这一章…\" contenteditable=\"true\"></pre>\u001b[22m\n"
+      }
+    },
+    {
+      "name": "storage.project-a.manifest",
+      "ok": true,
+      "data": {
+        "ok": true
+      }
+    },
+    {
+      "name": "storage.project-a.sqlite",
+      "ok": true,
+      "data": {
+        "integrity": "ok",
+        "foreignKeyViolations": 0,
+        "tableCount": 104
+      }
+    },
+    {
+      "name": "storage.draft-readback",
+      "ok": false,
+      "data": {
+        "draftCount": 1,
+        "chapterNumber": 1,
+        "containsMarker": false,
+        "bodyLength": 0
+      }
+    },
+    {
+      "name": "storage.no-project-b-marker-in-a",
+      "ok": true,
+      "data": {
+        "clean": true
+      }
+    },
+    {
+      "name": "isolation.project-b-untouched",
+      "ok": true,
+      "data": {
+        "dbExists": false
+      }
+    },
+    {
+      "name": "storage.global-home.recent-projects",
+      "ok": true,
+      "data": {
+        "containsProjectA": true
+      }
+    },
+    {
+      "name": "storage.source-fixtures.readonly",
+      "ok": true,
+      "data": {
+        "unchanged": true
+      }
+    }
+  ],
+  "diagnostics": [
+    {
+      "at": "2026-10-01T03:02:18.605Z",
+      "kind": "main-stdout",
+      "text": "\r\n"
+    },
+    {
+      "at": "2026-10-01T03:02:19.409Z",
+      "kind": "main-stderr",
+      "text": "\r\nDevTools listening on ws://127.0.0.1:3294/devtools/browser/1a1f1f02-dd11-4dd1-a56e-39c805199624\r\n"
+    },
+    {
+      "at": "2026-10-01T03:02:19.423Z",
+      "kind": "main-stdout",
+      "text": "[Vela IPC] 所有 Controller 已注册完成 | 全局工作区: C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e01-2026-10-01T03-01-32-842Z-5236de5d\\global-home\n"
+    },
+    {
+      "at": "2026-10-01T03:02:19.424Z",
+      "kind": "main-stdout",
+      "text": "[MCP] IPC 处理器已注册\n"
+    },
+    {
+      "at": "2026-10-01T03:02:20.285Z",
+      "kind": "main-stdout",
+      "text": "[Vela DB] 项目数据库已打开: C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e01-2026-10-01T03-01-32-842Z-5236de5d\\project-a\\.vela\\vela.db\n"
+    }
+  ]
+}

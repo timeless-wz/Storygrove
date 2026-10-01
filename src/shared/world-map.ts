@@ -24,11 +24,49 @@ export type WorldMapEdgeType =
 
 export type WorldMapEdgeStatus = 'active' | 'blocked' | 'hidden'
 
+export const WORLD_MAP_MARKER_ICON_LABELS = {
+  globe: { zh: '世界', en: 'World' },
+  mountain: { zh: '山脉', en: 'Mountains' },
+  castle: { zh: '城堡', en: 'Castle' },
+  house: { zh: '住宅', en: 'House' },
+  temple: { zh: '神殿', en: 'Temple' },
+  gate: { zh: '城门', en: 'Gate' },
+  port: { zh: '港口', en: 'Port' },
+  ruins: { zh: '遗迹', en: 'Ruins' },
+  signpost: { zh: '路标', en: 'Signpost' },
+  flag: { zh: '据点', en: 'Stronghold' },
+  forest: { zh: '森林', en: 'Forest' },
+  camp: { zh: '营地', en: 'Camp' },
+  mine: { zh: '矿场', en: 'Mine' },
+  shop: { zh: '商铺', en: 'Shop' },
+  inn: { zh: '旅店', en: 'Inn' },
+  tower: { zh: '高塔', en: 'Tower' },
+} as const
+
+export type WorldMapMarkerIcon = keyof typeof WORLD_MAP_MARKER_ICON_LABELS
+
+export function isWorldMapMarkerIcon(value: unknown): value is WorldMapMarkerIcon {
+  return typeof value === 'string' && Object.hasOwn(WORLD_MAP_MARKER_ICON_LABELS, value)
+}
+
+export const WORLD_MAP_DEFAULT_MARKER_ICONS: Record<WorldMapNodeType, WorldMapMarkerIcon> = {
+  world: 'globe', region: 'mountain', city: 'castle', relic: 'ruins',
+  route_node: 'signpost', landmark: 'temple', faction: 'flag',
+}
+
+export function getWorldMapMarkerIcon(node: Pick<WorldMapNode, 'type' | 'markerIcon'>): WorldMapMarkerIcon {
+  return isWorldMapMarkerIcon(node.markerIcon)
+    ? node.markerIcon
+    : WORLD_MAP_DEFAULT_MARKER_ICONS[node.type] || 'temple'
+}
+
 /** 属于某一张地图的地点。mapId 是不可变归属，一个地点只属于一张地图。 */
 export interface WorldMapNode {
   id: string
   name: string
   type: WorldMapNodeType
+  /** null 或未设置时随地点类型显示默认标识。 */
+  markerIcon?: WorldMapMarkerIcon | null
   description: string
   parentId: string | null
   /** 唯一归属地图。由仓库层在写入时校验，必须指向一张存在的地图。 */
@@ -66,6 +104,8 @@ export interface WorldMapImage {
 
 /**
  * 一张独立地图。每张地图可分别导入一张图片，并可通过 parentMapId 组成层级地图树。
+ * worldId 是这张地图归属的小说世界：一张地图最多归属一个世界，未关联时为 null
+ * （旧地图保持未关联，绝不按名称或结构推断归属）。
  */
 export interface WorldMap {
   id: string
@@ -73,6 +113,8 @@ export interface WorldMap {
   parentMapId: string | null
   sortOrder: number
   image: WorldMapImage | null
+  /** 归属世界；null 表示尚未关联，界面必须显式提供「关联到世界」操作。 */
+  worldId?: string | null
   createdAt?: string
   updatedAt?: string
 }

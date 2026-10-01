@@ -51,7 +51,9 @@ describe('agent project read tools', () => {
     })
     const invoke = vi.fn(async (channel: string) => {
       if (channel === 'db:project-core-get' || channel === 'db:blueprint-get') return null
-      if (channel === 'db:blueprint-get-all' || channel === 'db:character-get-all' || channel === 'db:draft-list') return []
+      if (channel === 'db:blueprint-list-summary' || channel === 'db:blueprint-v2-summary-list'
+        || channel === 'db:character-get-all' || channel === 'db:draft-list') return []
+      if (channel === 'db:blueprint-get' || channel === 'db:blueprint-v2-get') return null
       throw new Error(`Unexpected IPC channel: ${channel}`)
     })
     vi.stubGlobal('window', {
@@ -98,11 +100,12 @@ describe('agent project read tools', () => {
     expect(readFileTool.inputSchema.properties.file_path.description).not.toContain('02_architecture')
   })
 
-  it('lists sparse finalized chapters from one authoritative database read', async () => {
+    it('lists sparse chapters from bounded v1 and v2 blueprint summaries plus drafts', async () => {
     const invoke = vi.fn(async (channel: string) => {
-      if (channel === 'db:blueprint-get-all') {
+      if (channel === 'db:blueprint-list-summary') {
         return [{ chapterNumber: 3 }, { chapterNumber: 1 }, { chapterNumber: 3 }]
       }
+      if (channel === 'db:blueprint-v2-summary-list') return [{ chapterNumber: 7 }]
       if (channel === 'db:draft-list-all') {
         return [
           { chapterNumber: 10, status: 'finalized' },
@@ -119,18 +122,20 @@ describe('agent project read tools', () => {
 
     expect(result).toMatchObject({ success: true })
     expect(result.content).toContain('| 10 | ❌ | ✅ | ✅ |')
-    expect(result.content).toContain('总计：4 个章节，2 个蓝图，3 个草稿，2 个定稿')
-    const rowIndexes = [1, 2, 3, 10].map(chapter => result.content.indexOf(`| ${chapter} |`))
+    expect(result.content).toContain('总计：5 个章节，3 个蓝图，3 个草稿，2 个定稿')
+    const rowIndexes = [1, 2, 3, 7, 10].map(chapter => result.content.indexOf(`| ${chapter} |`))
     expect(rowIndexes).toEqual([...rowIndexes].sort((left, right) => left - right))
     expect(invoke.mock.calls.map(([channel]) => channel)).toEqual([
-      'db:blueprint-get-all',
+      'db:blueprint-list-summary',
+      'db:blueprint-v2-summary-list',
       'db:draft-list-all',
     ])
   })
 
   it('fails the chapter listing when the authoritative draft read fails', async () => {
     const invoke = vi.fn(async (channel: string) => {
-      if (channel === 'db:blueprint-get-all') return [{ chapterNumber: 1 }]
+      if (channel === 'db:blueprint-list-summary') return [{ chapterNumber: 1 }]
+      if (channel === 'db:blueprint-v2-summary-list') return []
       if (channel === 'db:draft-list-all') throw new Error('draft list failed')
       throw new Error(`Unexpected IPC channel: ${channel}`)
     })
@@ -141,7 +146,7 @@ describe('agent project read tools', () => {
       content: '',
       error: expect.stringContaining('draft list failed'),
     })
-    expect(invoke).toHaveBeenCalledTimes(2)
+    expect(invoke).toHaveBeenCalledTimes(3)
   })
 
   it('keeps a missing project file failure actionable without retrying or creating a file', async () => {

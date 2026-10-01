@@ -1,0 +1,189 @@
+ M electron/controllers/__tests__/db-controller-project-context.test.ts
+ M electron/controllers/db-controller.ts
+ M electron/database.ts
+ M electron/preload.ts
+ M electron/repositories/__tests__/character-repository.test.ts
+ M electron/repositories/__tests__/world-map-repository.test.ts
+ M electron/repositories/blueprint-repository.ts
+ M electron/repositories/chapter-deletion-repository.ts
+ M electron/repositories/character-relationship-repository.ts
+ M electron/repositories/character-repository.ts
+ M electron/repositories/character-roster-repository.ts
+ M electron/repositories/plot-tree-repository.ts
+ M electron/repositories/story-timeline-repository.ts
+ M electron/repositories/world-map-repository.ts
+ M electron/services/chapter-context-assembler.ts
+ M scripts/check-i18n-coverage.mjs
+ M src/App.tsx
+ M src/components/canvas/CanvasVisuals.tsx
+ M src/components/canvas/ChapterCanvasWorkbench.tsx
+ M src/components/canvas/PlotCanvasAIDialog.tsx
+ M src/components/canvas/PlotCanvasWorkbench.tsx
+ M src/components/canvas/__tests__/canvas-workbench.browser.tsx
+ M src/components/canvas/__tests__/plot-canvas-acceptance.browser.tsx
+ M src/components/canvas/canvas-workbench.css
+ M src/components/canvas/plot-canvas-ai-prompt.ts
+ M src/components/dialogs/DirectoryConfigDialog.tsx
+ M src/components/dialogs/ExportDialog.tsx
+ M src/components/dialogs/__tests__/markdown-export.browser.tsx
+ M src/components/editor/ChapterCardEditor.tsx
+ M src/components/editor/ChapterContextSidebar.tsx
+ D src/components/editor/ChapterOutlineSidebar.tsx
+ M src/components/editor/CharacterEditor.tsx
+ M src/components/editor/DraftEditor.tsx
+ M src/components/editor/NarrativeThreadEditor.tsx
+ M src/components/editor/ReviewReport.tsx
+ M src/components/editor/VersionHistory.tsx
+ M src/components/editor/__tests__/CharacterEditor.profile-edit.browser.tsx
+ M src/components/editor/__tests__/DraftEditor-chapter-context.browser.tsx
+ M src/components/editor/__tests__/NarrativeThreadEditor.browser.tsx
+ M src/components/editor/__tests__/VersionHistory.locale.browser.tsx
+ M src/components/editor/__tests__/chapter-card-draft-ledger.test.ts
+ D src/components/editor/__tests__/chapter-outline-model.test.ts
+ D src/components/editor/__tests__/chapter-outline-sidebar.browser.tsx
+ M src/components/editor/__tests__/screenshots/screenshot-dark.png
+ M src/components/editor/__tests__/screenshots/screenshot-light.png
+ M src/components/editor/__tests__/screenshots/screenshot-starlight-anime.png
+ M src/components/editor/__tests__/screenshots/screenshot-starlight-custom.png
+ M src/components/editor/__tests__/screenshots/screenshot-starlight.png
+ M src/components/editor/chapter-card-draft-ledger.ts
+ M src/components/editor/chapter-context.css
+ D src/components/editor/chapter-outline-model.ts
+ D src/components/editor/chapter-outline-sidebar.css
+ M src/components/editor/character-profile/CharacterProfileForm.tsx
+ M src/components/editor/character-profile/CharacterProfileOverview.tsx
+ M src/components/map/WorldMapCanvas.tsx
+ M src/components/map/WorldMapListView.tsx
+ M src/components/map/WorldMapNodeDialog.tsx
+ M src/components/map/WorldMapView.tsx
+ M src/components/map/__tests__/world-map-atlas.browser.tsx
+ M src/components/pages/ProjectOverviewPage.tsx
+ M src/components/pages/__tests__/output/resume-location-card.png
+ M src/components/pages/__tests__/project-overview-resume.browser.tsx
+ M src/components/pages/__tests__/screenshots/new-project-dialog.png
+ M src/components/pages/__tests__/screenshots/overview-compact.png
+ M src/components/panels/EditorArea.tsx
+ M src/components/panels/ProjectReferencePanel.tsx
+ M src/components/panels/__tests__/ProjectReferencePanel.browser.tsx
+ M src/components/panels/__tests__/home-sidebar-contrast.browser.tsx
+ M src/components/panels/__tests__/plot-tree-rail-navigation.browser.tsx
+ M src/components/panels/agent/ConfigImpactPreview.tsx
+ M src/components/panels/agent/DomainProposalDiff.tsx
+ M src/components/panels/agent/__tests__/domain-proposal-confirmation.browser.tsx
+ M src/components/panels/sidebar/BlueprintBindingDialog.tsx
+ M src/components/panels/sidebar/ProjectTree.tsx
+ M src/components/panels/sidebar/sidebar-file-openers.ts
+ M src/components/panels/sidebar/sidebar-icons.ts
+ M src/components/workspace/AgentProposalReviewPanel.tsx
+ M src/components/workspace/ChapterWorkflowPanel.tsx
+ M src/components/workspace/__tests__/ChapterWorkflowPanel.browser.tsx
+ M src/services/__tests__/chapter-context.test.ts
+ M src/services/__tests__/export-service-markdown.test.ts
+ M src/services/__tests__/narrative-thread-candidate-generator.test.ts
+ M src/services/__tests__/plot-tree-deterministic.test.ts
+ M src/services/__tests__/prompt-language-contract.test.ts
+ M src/services/agent/tools/__tests__/domain-proposal-tools.test.ts
+ M src/services/agent/tools/__tests__/project-read-tools.test.ts
+ M src/services/agent/tools/__tests__/read-project-state.tool.test.ts
+ M src/services/agent/tools/index.ts
+ M src/services/agent/tools/list-chapters.tool.ts
+ M src/services/agent/tools/propose-chapter-blueprint.tool.ts
+ M src/services/agent/tools/read-blueprint.tool.ts
+ M src/services/agent/tools/read-project-state.tool.ts
+ M src/services/architecture-service.ts
+ M src/services/chapter-context.ts
+ M src/services/character-roster-client.ts
+ M src/services/export-service.ts
+ M src/services/narrative-thread-candidate-generator.ts
+ M src/services/plot-tree-deterministic.ts
+ M src/services/project-clear-service.ts
+ M src/services/project-service.ts
+ M src/services/prompt-language.ts
+ M src/services/prompt-templates.ts
+ M src/services/version-service.ts
+ M src/services/workflow-guards.ts
+ M src/services/workflows/__tests__/directory-workflow.test.ts
+ M src/services/workflows/commands/__tests__/directory.command.test.ts
+ M src/services/workflows/commands/__tests__/generate-draft.command.test.ts
+ M src/services/workflows/commands/__tests__/import-novel.command.test.ts
+ M src/services/workflows/commands/__tests__/refine-draft.command.test.ts
+ M src/services/workflows/commands/directory.command.ts
+ M src/services/workflows/commands/generate-draft.command.ts
+ M src/services/workflows/commands/import-novel.command.ts
+ M src/services/workflows/commands/refine-draft.command.ts
+ M src/services/workflows/commands/refine-from-review.command.ts
+ M src/services/workflows/commands/review-chapter.command.ts
+ M src/services/workflows/directory-workflow.ts
+ M src/shared/__tests__/human-confirmed-review.test.ts
+ M src/shared/blueprint-semantic-contract.ts
+ M src/shared/chapter-canvas.ts
+ M src/shared/character-profile-presentation.ts
+ M src/shared/character-roster.ts
+ M src/shared/human-confirmed-review.ts
+ M src/shared/ipc-channels.ts
+ M src/shared/plot-tree.ts
+ M src/shared/story-timeline.ts
+ M src/shared/world-map.ts
+ M src/stores/character-store.ts
+ M src/stores/editor-store.ts
+ M src/stores/editor-unsaved.ts
+ M src/stores/project-editor-draft-ledger.ts
+ M src/stores/world-map-store.ts
+ M src/styles/literary-workbench.css
+ M vitest.browser.config.ts
+?? docs/blueprint-v2-contract.md
+?? docs/handoffs/world-workbench-implementation.md
+?? docs/plans/full-chain-functional-acceptance-2026-10-01.md
+?? electron/controllers/__tests__/cultivation-ipc.integration.test.ts
+?? electron/repositories/__tests__/blueprint-detail-repository.test.ts
+?? electron/repositories/__tests__/cultivation-repository.test.ts
+?? electron/repositories/__tests__/world-workbench-persistence.test.ts
+?? electron/repositories/__tests__/world-workbench-repository.test.ts
+?? electron/repositories/blueprint-detail-repository.ts
+?? electron/repositories/cultivation-repository.ts
+?? electron/repositories/cultivation-schema.ts
+?? electron/repositories/world-workbench-repository.ts
+?? electron/services/__tests__/world-workbench-migration.test.ts
+?? electron/services/world-workbench-schema.ts
+?? src/components/canvas/__tests__/chapter-canvas-blueprint.browser.tsx
+?? src/components/canvas/__tests__/plot-canvas-blueprint-projection.test.ts
+?? src/components/editor/BlueprintV2Editor.tsx
+?? src/components/editor/BlueprintV2ImportDialog.tsx
+?? src/components/editor/__tests__/BlueprintV2Editor.browser.tsx
+?? src/components/editor/__tests__/BlueprintV2ImportDialog.browser.tsx
+?? src/components/editor/chapter-blueprint-v2.css
+?? src/components/editor/character-profile/CharacterCultivationField.tsx
+?? src/components/map/world-map-marker-icons.ts
+?? src/components/map/world-map-markers.css
+?? src/components/pages/CultivationSettingsPage.tsx
+?? src/components/pages/__tests__/cultivation-settings.browser.tsx
+?? src/components/pages/__tests__/output/cultivation-character-overview.png
+?? src/components/pages/__tests__/output/cultivation-settings-desktop.png
+?? src/components/pages/__tests__/output/cultivation-settings-english-dark.png
+?? src/components/pages/__tests__/output/cultivation-settings-narrow.png
+?? src/components/pages/__tests__/screenshots/codex-home-redesign-empty.png
+?? src/components/world/
+?? src/services/agent/tools/__tests__/propose-chapter-blueprint-v2.test.ts
+?? src/services/agent/tools/__tests__/read-blueprint.tool.test.ts
+?? src/services/agent/tools/import-chapter-blueprint-v2.tool.ts
+?? src/services/workflows/commands/__tests__/blueprint-v2-writing.test.ts
+?? src/services/workflows/commands/blueprint-v2-writing.ts
+?? src/shared/__tests__/blueprint-v2-checks.test.ts
+?? src/shared/__tests__/blueprint-v2-markdown.test.ts
+?? src/shared/__tests__/blueprint-v2-read-paths.test.ts
+?? src/shared/__tests__/blueprint-v2.test.ts
+?? src/shared/__tests__/chapter-blueprint-review.test.ts
+?? src/shared/blueprint-v2-checks.ts
+?? src/shared/blueprint-v2-markdown.ts
+?? src/shared/blueprint-v2.ts
+?? src/shared/chapter-blueprint-review.ts
+?? src/shared/cultivation.ts
+?? src/shared/world-workbench.ts
+?? src/stores/__tests__/cultivation-store.test.ts
+?? src/stores/__tests__/world-workbench-store.browser.tsx
+?? src/stores/cultivation-store.ts
+?? src/stores/world-workbench-store.ts
+?? test/cultivation-browser-backend.ts
+?? test/cultivation-browser-database.ts
+?? test/fixtures/
+?? vitest.cultivation.browser.config.ts

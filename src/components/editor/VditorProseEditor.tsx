@@ -17,6 +17,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Sparkles, Check, Bookmark, CheckCircle2, Circle, ExternalLink, X } from 'lucide-react'
 
 import Vditor from 'vditor'
+// 随包语言包：避免依赖运行时脚本注入（注入悬挂时 init 永不执行且无报错）。
+import 'vditor/dist/js/i18n/zh_CN.js'
 import 'vditor/dist/index.css'
 import './vditor-prose.css'
 import './document-toolbar.css'
@@ -940,6 +942,8 @@ export default function VditorProseEditor({
         // 本地资源目录，绝不指向公网 CDN。
         cdn: VDITOR_ASSET_BASE,
         lang: 'zh_CN',
+        // 显式传入随包语言包；未提供时 Vditor 才会走运行时脚本注入。
+        i18n: (window as unknown as { VditorI18n?: never }).VditorI18n,
         // 默认即时渲染（IR）；工具栏的 edit-mode 仍可切到所见即所得与分屏预览。
         mode: 'ir',
         value: pendingContentRef.current,

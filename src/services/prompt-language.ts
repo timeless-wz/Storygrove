@@ -331,8 +331,10 @@ Produce a complete outline made of structural turning points rather than chapter
 {{step_guidance}}`,
   },
   chapter_blueprint: {
-    systemRole: 'You are an experienced chapter architect. Turn author facts into concrete scenes, character actions, resistance, turns, and chapter hooks. Do not reveal reasoning.',
-    content: `Generate complete chapter blueprints from chapter 1 through chapter {{number_of_chapters}} using the established story architecture.
+    systemRole: 'You are an experienced chapter architect. Turn author facts into concise chapter-level outline summaries. Do not claim to create full scene-by-scene detailed outlines or reveal reasoning.',
+    content: `Generate simple chapter-level outlines from chapter 1 through chapter {{number_of_chapters}} using the established story architecture.
+
+This workflow produces only the legacy chapter-level outline fields. It does not produce scene storyboards, complete Markdown outlines, or blueprint v2. Do not describe the result as a complete detailed outline; authors import or edit detailed outlines per chapter.
 
 [Authoritative project settings]
 - Genre: {{genre}}
@@ -350,14 +352,17 @@ Produce a complete outline made of structural turning points rather than chapter
 
 [JSON output contract]
 Return exactly one object with a blueprints array. Every item must contain chapterNumber, title, role, purpose, characters, relationships, keyEvents, and suspenseHook. relationships contains only relationships established in that chapter and is [] when empty. keyEvents must concisely state actions, reversals, consequences, and relevant use of the central advantage.
+This workflow produces a simple outline only; do not add scene-by-scene storyboard fields or claim it is a complete detailed outline.
 Return JSON only, with no Markdown, preface, analysis, plan, code fence, or reasoning.
 
 [Author pacing and style guidance — highest priority when present]
 {{pacing_guidance}}`,
   },
   chapter_blueprint_chunk: {
-    systemRole: 'You are an experienced chapter architect. Preserve long-form continuity through concrete events, motivated choices, causal links, and controlled pacing. Do not reveal reasoning.',
-    content: `Generate chapter blueprints from chapter {{n}} through chapter {{m}} by continuing the established story architecture and prior blueprint progress.
+    systemRole: 'You are an experienced chapter architect. Preserve long-form continuity through concise chapter-level outline summaries, motivated choices, causal links, and controlled pacing. Do not claim to create full scene-by-scene detailed outlines or reveal reasoning.',
+    content: `Generate simple chapter-level outlines from chapter {{n}} through chapter {{m}} by continuing the established story architecture and prior blueprint progress.
+
+This workflow produces only the legacy chapter-level outline fields. It does not produce scene storyboards, complete Markdown outlines, or blueprint v2. Do not describe the result as a complete detailed outline; authors import or edit detailed outlines per chapter.
 
 [Authoritative project settings]
 - Genre: {{genre}}
@@ -377,6 +382,7 @@ Return JSON only, with no Markdown, preface, analysis, plan, code fence, or reas
 3. Resolve or intensify relevant open threats and planted clues.
 4. Give every chapter a material event change; do not add filler.
 5. Return exactly one JSON object with a blueprints array and no analysis, plan, explanation, Markdown, or code fence.
+This workflow produces a simple outline only; do not add scene-by-scene storyboard fields or claim it is a complete detailed outline.
 
 [Author pacing and style guidance]
 {{pacing_guidance}}`,

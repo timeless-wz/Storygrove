@@ -382,7 +382,8 @@ describe('project refresh context', () => {
       if (channel === 'db:character-roster-read') {
         return Promise.resolve({ status: 'empty', renderedMarkdown: '' })
       }
-      if (channel === 'db:blueprint-get-all') return Promise.resolve([{ chapterNumber: 1 }])
+      if (channel === 'db:blueprint-list-summary') return Promise.resolve([{ chapterNumber: 1 }])
+      if (channel === 'db:blueprint-v2-summary-list') return Promise.resolve([])
       return Promise.resolve(null)
     })
 
@@ -398,6 +399,7 @@ describe('project refresh context', () => {
     await expect(getBlueprintCount(projectSession)).resolves.toBe(1)
     expect(invoke).toHaveBeenCalledWith('db:project-core-get', project('A').path)
     expect(invoke).toHaveBeenCalledWith('db:character-roster-read', project('A').path)
-    expect(invoke).toHaveBeenCalledWith('db:blueprint-get-all', project('A').path)
+    expect(invoke).toHaveBeenCalledWith('db:blueprint-list-summary', project('A').path)
+    expect(invoke).toHaveBeenCalledWith('db:blueprint-v2-summary-list', project('A').path)
   })
 })

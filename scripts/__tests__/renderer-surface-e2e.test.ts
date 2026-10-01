@@ -257,10 +257,9 @@ describe('renderer surface E2E runner contract', () => {
       panelsVisible: {
         projectTree: true,
         aiPanel: true,
-        taskTable: true,
       },
       visibleDialogCount: 0,
-      bodyText: '小说配置',
+      bodyText: '创作参数',
       theme: 'dark',
       imageSkin: 'custom',
       imageDecoded: true,
@@ -298,9 +297,9 @@ describe('renderer surface E2E runner contract', () => {
       projectPath: expectedProject,
       markerOpenedAt: new Date(launchStartedAt + 10).toISOString(),
       routeTitleVisible: true,
-      panelsVisible: { projectTree: true, aiPanel: true, taskTable: true },
+      panelsVisible: { projectTree: true, aiPanel: true },
       visibleDialogCount: 0,
-      bodyText: '小说配置',
+      bodyText: '创作参数',
       theme: 'paper',
       imageSkin: 'classic',
       imageDecoded: null,
@@ -320,7 +319,7 @@ describe('renderer surface E2E runner contract', () => {
       ...classicObservation,
       imageSkin: 'anime',
       imageDecoded: true,
-      workspaceAlpha: 0.6,
+      workspaceAlpha: 0.88,
     }
     const expectedImage = { ...expectedClassic, imageSkin: 'anime', imageSurface: 'decoded' }
     expect(() => assertVisualEvidenceObservation(imageObservation, expectedImage)).not.toThrow()
@@ -342,8 +341,8 @@ describe('renderer surface E2E runner contract', () => {
       ],
       themes: ['light', 'galaxy', 'paper', 'dark'],
       surfaces: {
-        sidebar: { selector: '.skin-workspace-panel', alpha: 0.56 },
-        page: { selector: '.skin-workspace-page', alpha: 0.60 },
+        sidebar: { selector: '.skin-workspace-panel', alpha: 0.66 },
+        page: { selector: '.skin-workspace-page', alpha: 0.88 },
         solid: { selector: '.skin-solid-surface', alpha: 0.88 },
       },
       routes: ['project', 'workspace', 'knowledge', 'characters'],
@@ -385,40 +384,11 @@ describe('renderer surface E2E runner contract', () => {
         paper: 'paper',
         surfaces: {
           topbar: { selector: '.writer-topbar', token: '--color-titlebar', textToken: '--color-titlebar-text', minHeight: 24 },
-          leftRail: { selector: '.writer-left-rail', token: '--color-activity-bar', textToken: '--color-text-secondary', minWidth: 40 },
           projectTree: { selector: '.writer-project-tree', token: '--color-sidebar', textToken: '--color-text' },
           aiPanel: { selector: '.writer-ai-panel', token: '--color-panel', textToken: '--color-text' },
-          taskTable: { selector: '.writer-task-table', token: '--color-panel', textToken: '--color-text' },
           workspacePage: { selector: '.skin-workspace-page', token: '--color-editor-bg', textToken: '--color-text' },
-          statusbar: { selector: '.writer-statusbar', token: '--color-statusbar', textToken: '--color-text-secondary', minHeight: 20 },
         },
-        statusbarHover: { selector: '.writer-statusbar-segment', token: '--color-hover' },
-        approvedComputed: {
-          light: {
-            topbar: ['#FCFAF3', '#2B2A26'], leftRail: ['#F0EADA', '#6E6A5F'],
-            projectTree: ['#F0EADA', '#2B2A26'], aiPanel: ['#F0EADA', '#2B2A26'],
-            taskTable: ['#F0EADA', '#2B2A26'], workspacePage: ['#FCFAF3', '#2B2A26'],
-            statusbar: ['#FCFAF3', '#6E6A5F'], statusbarHover: '#EAE3D2',
-          },
-          galaxy: {
-            topbar: ['#0A1628', '#8BA4BE'], leftRail: ['#071220', '#8BA4BE'],
-            projectTree: ['#0E1B30', '#E0ECF4'], aiPanel: ['#0E1B30', '#E0ECF4'],
-            taskTable: ['#0E1B30', '#E0ECF4'], workspacePage: ['#091525', '#E0ECF4'],
-            statusbar: ['#071220', '#8BA4BE'], statusbarHover: '#142640',
-          },
-          paper: {
-            topbar: ['#FCFAF3', '#2B2A26'], leftRail: ['#F0EADA', '#6E6A5F'],
-            projectTree: ['#F0EADA', '#2B2A26'], aiPanel: ['#F0EADA', '#2B2A26'],
-            taskTable: ['#F0EADA', '#2B2A26'], workspacePage: ['#FCFAF3', '#2B2A26'],
-            statusbar: ['#FCFAF3', '#6E6A5F'], statusbarHover: '#EAE3D2',
-          },
-          dark: {
-            topbar: ['#181818', '#CCCCCC'], leftRail: ['#333333', '#A0A0A0'],
-            projectTree: ['#252526', '#D4D4D4'], aiPanel: ['#252526', '#D4D4D4'],
-            taskTable: ['#252526', '#D4D4D4'], workspacePage: ['#1E1E1E', '#D4D4D4'],
-            statusbar: ['#181818', '#A0A0A0'], statusbarHover: '#2A2D2E',
-          },
-        },
+        statusbarHover: { selector: '.writer-topbar-segment', token: '--color-hover' },
       },
     })
   })

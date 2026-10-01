@@ -166,6 +166,10 @@ export type ChapterSceneCardNodeData = {
   roleLabel: string
   order: number | null
   wordLabel: string
+  /** 已绑定蓝图 v2 分镜（refs.sceneId 在蓝图中存在）。 */
+  linked?: boolean
+  /** 引用失效：refs.sceneId 指向的分镜已从蓝图删除；只显示状态，绝不反向改写蓝图。 */
+  dangling?: boolean
   dimmed: boolean
   searchHit: boolean
   onDelete?: (nodeId: string) => void
@@ -208,6 +212,16 @@ function ChapterSceneCardNodeView({ id, data, selected }: NodeProps<ChapterScene
           )}
           {data.role && (
             <span className="canvas-node__badge" data-variant="role">{data.roleLabel}</span>
+          )}
+          {data.linked && !data.dangling && (
+            <span className="canvas-node__badge" data-variant="linked" data-testid="chapter-canvas-linked-badge">
+              {text('蓝图', 'Blueprint')}
+            </span>
+          )}
+          {data.dangling && (
+            <span className="canvas-node__badge" data-variant="dangling" data-testid="chapter-canvas-dangling-badge">
+              {text('引用失效', 'Broken ref')}
+            </span>
           )}
         </div>
         <span className="canvas-node__title">{data.title}</span>

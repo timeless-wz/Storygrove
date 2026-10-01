@@ -45,6 +45,9 @@ beforeEach(() => {
     if (channel === 'db:blueprint-get-all') {
       return blueprintChapterNumbers.map(chapterNumber => ({ chapterNumber }))
     }
+    if (channel === 'db:blueprint-list-summary') {
+      return blueprintChapterNumbers.map(chapterNumber => ({ chapterNumber }))
+    }
     if (channel === 'db:draft-authority-sequence') return authorityGap === null
       ? {
           status: authoritativeNextChapter === 1 ? 'empty' : 'continuous',
@@ -362,6 +365,7 @@ describe('workflow launch dialogs', () => {
     }
     invoke.mockImplementation(async (channel: string, ...args: unknown[]) => {
       if (channel === 'db:blueprint-get-all') return []
+      if (channel === 'db:blueprint-list-summary') return []
       if (channel === 'db:draft-authority-sequence') return {
         status: 'empty',
         lastChapterNumber: 0,

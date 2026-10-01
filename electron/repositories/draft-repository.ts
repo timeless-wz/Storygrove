@@ -347,6 +347,8 @@ export class DraftRepository {
      */
     static create(params: {
         chapterNumber: number
+        /** Explicit chapter-blueprint binding; omitted for free/unbound drafts. */
+        blueprintChapterNumber?: number | null
         version?: number
         source: 'write' | 'rewrite'
         content: string
@@ -358,6 +360,15 @@ export class DraftRepository {
 
         // 事务内原子分配 version，避免 getNextVersion + create 竞态
         const tx = db.transaction(() => {
+            const blueprintChapterNumber = params.blueprintChapterNumber ?? null
+            if (blueprintChapterNumber !== null) {
+                if (!Number.isSafeInteger(blueprintChapterNumber) || blueprintChapterNumber < 1) {
+                    throw new Error('蓝图章节号无效')
+                }
+                const blueprint = db.prepare('SELECT 1 FROM blueprints WHERE chapter_number = ?')
+                    .get(blueprintChapterNumber)
+                if (!blueprint) throw new Error(`未找到第 ${blueprintChapterNumber} 章蓝图`)
+            }
             const serializedDependencies = JSON.stringify(params.sourceDependencies ?? [])
             const parsedDependencies = parseDependencies(serializedDependencies)
             if (!parsedDependencies.valid) throw new Error('草稿来源依赖无效')
@@ -377,10 +388,11 @@ export class DraftRepository {
             const contentId = ContentRepository.create(params.content)
             const result = db.prepare(`
         INSERT INTO drafts (
-          chapter_number, version, source, content_id, word_count, source_dependencies
-        ) VALUES (?, ?, ?, ?, ?, ?)
+          chapter_number, blueprint_chapter_number, version, source, content_id, word_count, source_dependencies
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
       `).run(
                 params.chapterNumber,
+                blueprintChapterNumber,
                 version,
                 params.source,
                 contentId,

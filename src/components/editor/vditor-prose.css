@@ -48,7 +48,7 @@
   width: 100%;
   display: flex;
   flex-direction: column;
-  background-color: var(--editor-desk-bg, var(--color-editor-bg));
+  background-color: var(--editor-desk-bg, var(--bg-base, var(--color-editor-bg)));
 }
 
 .vditor-prose-host .vditor-ir,

@@ -7,6 +7,7 @@ import electronRenderer from 'vite-plugin-electron-renderer';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 
 // ESM 中不存在 __dirname，需要用 import.meta.url 来模拟
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -19,7 +20,27 @@ export default defineConfig({
   // BrowserWindow.loadFile() serves the renderer through file://.  Keep public
   // and bundled asset URLs relative to dist/ rather than the filesystem root.
   base: './',
-  plugins: [tailwindcss(), react(), electron({
+  plugins: [{
+    name: 'renderer-build-csp',
+    apply: 'build',
+    transformIndexHtml: {
+      order: 'post',
+      handler(html) {
+        // Keep the synchronous theme bootstrap without allowing arbitrary inline
+        // scripts or eval. Hash the emitted text, including its exact whitespace.
+        const inlineHashes = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)]
+          .filter(([, attributes]) => !/\bsrc\s*=/i.test(attributes))
+          .map(([, , code]) => `'sha256-${createHash('sha256').update(code).digest('base64')}'`);
+        // Vditor synchronously loads its bundled icon sprite through XHR and
+        // inserts that exact file as an inline script. Authorize only this asset.
+        inlineHashes.push(`'sha256-${createHash('sha256').update(readFileSync(path.join(__dirname, 'public/vditor/dist/js/icons/ant.js'))).digest('base64')}'`);
+        return [{ tag: 'meta', injectTo: 'head-prepend', attrs: {
+          'http-equiv': 'Content-Security-Policy',
+          content: `default-src 'self'; script-src 'self' ${inlineHashes.join(' ')}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'`,
+        } }];
+      },
+    },
+  }, tailwindcss(), react(), electron({
     main: {
       // Shortcut of `build.lib.entry`.
       entry: 'electron/main.ts',

@@ -33,6 +33,8 @@ export const I18N_COVERAGE_BOUNDARIES = Object.freeze({
     'src/components/editor/ChapterCardEditor.tsx',
     'src/components/editor/CharacterEditor.tsx',
     'src/components/editor/ReviewReport.tsx',
+    // 世界资料工作台：所有面向作者的文案都必须走 text()/t()。
+    'src/components/world',
     'src/components/panels/sidebar/CharactersView.tsx',
     'src/components/ErrorBoundary.tsx',
     'src/components/ui/ActionToast.tsx',

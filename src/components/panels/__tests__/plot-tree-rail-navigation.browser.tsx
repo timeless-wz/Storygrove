@@ -1,6 +1,11 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import { page } from 'vitest/browser'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { Panel, Group as PanelGroup } from 'react-resizable-panels'
+
+import '../../../index.css'
+import '../../../styles/literary-workbench.css'
 
 import { setActiveProjectSessionContext } from '../../../shared/project-session-context'
 import type { ProjectData } from '../../../shared/ipc-channels'
@@ -45,6 +50,8 @@ function setInputValue(input: HTMLInputElement, value: string): void {
 }
 
 beforeEach(async () => {
+  await page.viewport(1280, 800)
+  document.documentElement.setAttribute('data-theme', 'storyforge')
   const project: ProjectData = {
     id: 'plot-tree-rail-project',
     name: '剧情树导航测试',
@@ -100,7 +107,9 @@ beforeEach(async () => {
         if (channel === 'db:narrative-thread-list') return []
         if (channel === 'db:draft-list-all') return []
         if (channel === 'db:blueprint-get-all') return []
+        if (channel === 'db:blueprint-volume-list') return []
         if (channel === 'db:map-get-all') return []
+        if (channel === 'story-data:list-agent-proposals') return []
         if (channel === 'db:timeline-get-all') {
           return {
             settings: { title: '故事时间线', rulerLabel: '故事时间', rulerUnit: '刻度' },
@@ -115,12 +124,17 @@ beforeEach(async () => {
     },
   })
   container = document.createElement('div')
+  container.style.cssText = 'width:100vw;height:100vh;display:flex;background:var(--color-bg)'
   document.body.append(container)
   root = createRoot(container)
   await act(async () => root?.render(
-    <div>
+    <div className="app-skin-root" data-theme="storyforge" style={{ display: 'flex', width: '100%', height: '100%' }}>
       <LeftToolWindowBar />
-      <EditorArea onNewProject={vi.fn()} />
+      <PanelGroup orientation="horizontal" style={{ flex: 1, minWidth: 0 }}>
+        <Panel id="editor" className="writer-project-editor-panel">
+          <EditorArea onNewProject={vi.fn()} />
+        </Panel>
+      </PanelGroup>
     </div>,
   ))
 })
@@ -135,9 +149,29 @@ afterEach(async () => {
   useLLMStore.setState(originalLLMState)
   useProjectStore.setState(originalProjectState)
   useStoryTimelineStore.setState(originalStoryTimelineState)
+  document.documentElement.removeAttribute('data-theme')
 })
 
 describe('plot-tree left rail navigation', () => {
+  it('rounds the shared editor surface on project overview and chapter blueprint', async () => {
+    const editor = container!.querySelector<HTMLElement>('.writer-project-editor-panel')!
+    expect(getComputedStyle(editor).borderTopLeftRadius).toBe('12px')
+    expect(getComputedStyle(editor).borderBottomLeftRadius).toBe('12px')
+    expect(getComputedStyle(editor).overflow).toBe('hidden')
+    expect(selectedTab('项目总览')).toBe(true)
+    await page.screenshot({ path: '../../../../output/playwright/project-editor-overview-rounded.png' })
+
+    await act(async () => button('章节蓝图').click())
+    await vi.waitFor(() => expect(selectedTab('章节蓝图')).toBe(true))
+    expect(getComputedStyle(editor).borderTopRightRadius).toBe('12px')
+    expect(getComputedStyle(editor).borderBottomRightRadius).toBe('12px')
+    await page.screenshot({ path: '../../../../output/playwright/project-editor-blueprint-rounded.png' })
+
+    document.documentElement.setAttribute('data-theme', 'starlight-dark')
+    container!.firstElementChild?.setAttribute('data-theme', 'starlight-dark')
+    expect(getComputedStyle(editor).borderTopLeftRadius).toBe('12px')
+    expect(getComputedStyle(editor).borderBottomRightRadius).toBe('12px')
+  })
   it('places story timeline in the project overview as a primary card', async () => {
     const timelineCard = container?.querySelector<HTMLElement>('[aria-label="打开故事时间线"]')
     expect(timelineCard?.textContent).toContain('故事时间线')

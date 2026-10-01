@@ -707,6 +707,11 @@
   --color-warning: #CCA700;
   --color-warning-text: #E5B567;
   --color-info: #7EC8E3;
+  /* 类别标签文字（草稿状态“已修订/已审稿”等）：浅色基础块的 #355B72/#634A72
+     在本主题深色外壳上仅 ~2:1；取深色基础块同色调值，实测（#101722/#1b2532/#111923）
+     progress 7.78–8.29、review ≥7.5，与 error/success 覆盖同模式。 */
+  --color-category-progress-text: #7EC8E3;
+  --color-category-review-text: #C7A4E8;
 }
 
 /* 米黄底主题 — 继承自浅色基础块的语义色在这三套底色上未达 AA：

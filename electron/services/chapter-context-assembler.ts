@@ -1,3 +1,4 @@
+import { CultivationRepository } from '../repositories/cultivation-repository'
 import { createHash } from 'node:crypto'
 import { getProjectDb } from '../database'
 import { CharacterRosterRepository } from '../repositories/character-roster-repository'
@@ -523,6 +524,7 @@ export class ChapterContextAssembler {
       background: string
       abilities: string
       motivation: string
+      cultivationLevelId?: string | null
       notes?: string
     }> = []
 
@@ -545,6 +547,7 @@ export class ChapterContextAssembler {
           + `- 性格与特质: ${c.personality}\n`
           + `- 身份与背景: ${c.background}\n`
           + `- 能力与动机: ${c.abilities}；${c.motivation}\n`
+          + (c.cultivationLevelId ? `- Cultivation: ${CultivationRepository.resolveName(c.cultivationLevelId)}\n` : '')
           + (c.notes ? `- 备忘: ${c.notes}\n` : '')
         )).join('\n')
         const sources: ChapterContextSourceRef[] = relevantCharacters.map(c => ({

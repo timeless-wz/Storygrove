@@ -31,13 +31,21 @@ export interface VersionRecord {
 
 /** 获取项目的所有章节 (现在从蓝图获取) */
 export async function getChapters(expectedProjectPath: string): Promise<ChapterRecord[]> {
-  const blueprints = (await ipc.invoke('db:blueprint-get-all', expectedProjectPath)) as unknown as Array<Record<string, unknown>>
-  return blueprints.map(bp => ({
-    chapter_id: String(bp.chapterNumber),
+  const [blueprints, v2Summaries] = await Promise.all([
+    ipc.invoke('db:blueprint-list-summary', expectedProjectPath),
+    ipc.invoke('db:blueprint-v2-summary-list', expectedProjectPath),
+  ])
+  const titleByChapter = new Map(blueprints.map(blueprint => [blueprint.chapterNumber, blueprint.title]))
+  const chapters = [...new Set([
+    ...blueprints.map(blueprint => blueprint.chapterNumber),
+    ...v2Summaries.map(summary => summary.chapterNumber),
+  ])].sort((left, right) => left - right)
+  return chapters.map(chapterNumber => ({
+    chapter_id: String(chapterNumber),
     file_path: '',
-    file_name: String(bp.title || `第 ${bp.chapterNumber} 章`),
+    file_name: String(titleByChapter.get(chapterNumber) || `第 ${chapterNumber} 章`),
     updated_at: '',
-    chapter_number: bp.chapterNumber as number,
+    chapter_number: chapterNumber,
     status: 'draft',
   }))
 }

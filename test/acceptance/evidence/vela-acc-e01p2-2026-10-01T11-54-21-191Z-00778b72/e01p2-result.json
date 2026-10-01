@@ -1,0 +1,37 @@
+{
+  "scenario": "E01P-strict",
+  "runId": "vela-acc-e01p2-2026-10-01T11-54-21-191Z-00778b72",
+  "verdict": "FAIL",
+  "failedSteps": [
+    "execution.crashed"
+  ],
+  "steps": [
+    {
+      "name": "fixture.created",
+      "ok": true,
+      "data": {
+        "projectA": "ab19fdd2-ca1b-459a-8f6f-69aae254e7c0",
+        "projectB": "e502c0dd-cdf5-4b0d-8995-2afc9cf9ac5e",
+        "distinctIdentities": true
+      }
+    },
+    {
+      "name": "build.current-source",
+      "ok": true,
+      "data": {
+        "script": "build",
+        "exitCode": 0,
+        "ok": true
+      }
+    },
+    {
+      "name": "build.gate",
+      "ok": true,
+      "data": {
+        "ok": true,
+        "missing": []
+      }
+    }
+  ],
+  "error": "Error: artifact missing: dist-electron/preload.js"
+}

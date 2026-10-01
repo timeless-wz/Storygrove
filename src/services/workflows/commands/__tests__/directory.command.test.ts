@@ -43,6 +43,8 @@ const projectSnapshot = {
 }
 
 let authoritySequenceResult: Record<string, unknown>
+/** 默认项目没有任何 v2 细纲；需要覆盖守卫场景时由用例覆写。 */
+let v2SummaryListResult: unknown = []
 
 function workflowContext(): WorkflowContext {
   return {
@@ -181,8 +183,10 @@ function stubIpcInvoke(handler: (channel: string, ...args: unknown[]) => unknown
   const invoke = vi.fn((channel: string, ...args: unknown[]) => Promise.resolve(
     channel === 'prompt:load-global' ? { templates: [], diagnostics: [] }
       : channel === 'fs:check-exists' && String(args[0]).endsWith('/.vela/prompts') ? false
-        : channel === 'db:draft-authority-sequence' ? authoritySequenceResult
-        : handler(channel, ...args),
+      : channel === 'db:draft-authority-sequence' ? authoritySequenceResult
+      // 默认项目没有任何 v2 细纲；覆盖守卫放行全部章节。
+      : channel === 'db:blueprint-v2-summary-list' ? v2SummaryListResult
+      : handler(channel, ...args),
   ))
   vi.stubGlobal('window', {
     velaAPI: {
@@ -287,6 +291,7 @@ beforeEach(() => {
     duplicateChapterNumbers: [],
     authorityFingerprint: 'f'.repeat(64),
   }
+  v2SummaryListResult = []
   useProjectStore.setState({
     currentProject: {
       id: 'project-1',
@@ -718,6 +723,50 @@ describe('GenerateDirectoryCommand', () => {
         endChapter: 3,
         blueprints: [{ chapterNumber: 2 }, { chapterNumber: 3 }],
       })
+  })
+
+  it('skips chapters with v2 detailed outlines and commits the rest as replace-range sub-ranges', async () => {
+    const invoke = stubIpcInvoke(successfulCommitHandler())
+    v2SummaryListResult = [{ chapterNumber: 2, revision: 1, contentHash: 'a'.repeat(64), origin: 'import', updatedAt: '', sceneCount: 4, sceneTitles: [], wordBudget: 4200 }]
+    const callbacks = stepCallbacks()
+    const session = generationSession(async task => {
+      const range = taskRange(task)
+      const chapters = Array.from(
+        { length: range[1] - range[0] + 1 },
+        (_, index) => range[0] + index,
+      )
+      return {
+        status: 'completed',
+        content: blueprintJson(chapters),
+        finishReason: 'stop',
+        receipt: generationReceipt(1, 'stop'),
+      }
+    })
+    const command = new GenerateDirectoryCommand(
+      { mode: 'append', startChapter: 1, count: 3 },
+      { ...projectSnapshot, novelConfig: { ...projectSnapshot.novelConfig, totalChapters: 3 } },
+      { createRuntime: vi.fn(async () => testRuntime(session)) },
+    )
+
+    const result = await command.execute({
+      step: {},
+      context: workflowContext(),
+      callbacks,
+    })
+
+    // 第 2 章已有 v2 细纲：不参与提交，也不触发角色同步；其余章按子范围提交。
+    const commits = invoke.mock.calls.filter(([channel]) => channel === 'db:blueprint-commit-range')
+    expect(commits).toHaveLength(2)
+    expect(commits[0]?.[1]).toMatchObject({
+      mode: 'replace-range', startChapter: 1, endChapter: 1, blueprints: [{ chapterNumber: 1 }],
+    })
+    expect(commits[1]?.[1]).toMatchObject({
+      mode: 'replace-range', startChapter: 3, endChapter: 3, blueprints: [{ chapterNumber: 3 }],
+    })
+    expect(result.map(item => item.chapterNumber)).toEqual([1, 3])
+    const logs = vi.mocked(callbacks.log).mock.calls.map(call => call.join('\n')).join('\n')
+    expect(logs).toContain('已跳过 1 章已有 v2 完整细纲的章')
+    expect(logs).toContain('第2章 第2章')
   })
 
   it('writes nothing when a later five-item semantic batch fails', async () => {
@@ -1382,8 +1431,9 @@ describe('GenerateDirectoryCommand', () => {
       projectSnapshot.expectedProjectPath,
       context.projectSession,
     )
-    expect(context.data.blueprintCommitReceipt).toMatchObject({ chapterNumbers: [1] })
-    expect(context.data.blueprintCharacterSyncReceipt).toMatchObject({
+    expect(context.data.blueprintCommitReceipts).toHaveLength(1)
+    expect((context.data.blueprintCommitReceipts as unknown[])[0]).toMatchObject({ chapterNumbers: [1] })
+    expect((context.data.blueprintCharacterSyncReceipts as unknown[])[0]).toMatchObject({
       blueprintCommitOperationId: 'directory-test-run-1-1',
       operationId: 'blueprint-sync-directory-test-run-1-1',
       status: 'already-satisfied',

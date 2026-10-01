@@ -5,6 +5,8 @@ import {
   type WorldMapNodeType,
   WORLD_MAP_NODE_TYPE_LABELS,
   WORLD_MAP_EDGE_TYPE_LABELS,
+  getWorldMapMarkerIcon,
+  WORLD_MAP_MARKER_ICON_LABELS,
 } from '../../shared/world-map'
 import { useLocaleStore } from '../../stores/locale-store'
 import {
@@ -13,6 +15,8 @@ import {
   MAX_MAP_ZOOM,
   MIN_MAP_ZOOM,
 } from './world-map-canvas-fit'
+import { WORLD_MAP_MARKER_ICONS } from './world-map-marker-icons'
+import './world-map-markers.css'
 
 interface Props {
   /** 当前地图自己的地点；画布绝不显示其他地图的地点。 */
@@ -24,21 +28,30 @@ interface Props {
   backgroundImage?: string | null
   /** 外层会改变画布可用宽度的布局状态（例如“管理地图”面板）。 */
   layoutKey?: string | number | boolean
+  /**
+   * 一次性「把某个地点带到视图中央」的请求。世界资料跳转到地图时使用；
+   * token 变化即视为一次新的定位请求，处理完通过 onFocusHandled 回执。
+   */
+  focusNodeRequest?: { nodeId: string; token: number } | null
+  onFocusHandled?: (token: number) => void
   onSelectNode: (id: string | null) => void
   onSelectEdge: (id: string | null) => void
   onUpdateNodePosition: (id: string, x: number, y: number) => void
   onDoubleNodeClick?: (node: WorldMapNode) => void
 }
 
-const TYPE_COLORS: Record<WorldMapNodeType, { bg: string; border: string; text: string }> = {
-  world: { bg: 'rgba(99, 102, 241, 0.25)', border: 'rgb(99, 102, 241)', text: 'rgb(165, 180, 252)' },
-  region: { bg: 'rgba(14, 165, 233, 0.25)', border: 'rgb(14, 165, 233)', text: 'rgb(125, 211, 252)' },
-  city: { bg: 'rgba(234, 179, 8, 0.25)', border: 'rgb(234, 179, 8)', text: 'rgb(253, 224, 71)' },
-  relic: { bg: 'rgba(239, 68, 68, 0.25)', border: 'rgb(239, 68, 68)', text: 'rgb(252, 165, 165)' },
-  route_node: { bg: 'rgba(168, 85, 247, 0.25)', border: 'rgb(168, 85, 247)', text: 'rgb(216, 180, 254)' },
-  landmark: { bg: 'rgba(34, 197, 94, 0.25)', border: 'rgb(34, 197, 94)', text: 'rgb(134, 239, 172)' },
-  faction: { bg: 'rgba(249, 115, 22, 0.25)', border: 'rgb(249, 115, 22)', text: 'rgb(253, 186, 116)' },
+const TYPE_COLORS: Record<WorldMapNodeType, { fill: string; ink: string }> = {
+  world: { fill: '#6366f1', ink: '#ffffff' },
+  region: { fill: '#0ea5e9', ink: '#142033' },
+  city: { fill: '#eab308', ink: '#142033' },
+  relic: { fill: '#ef4444', ink: '#ffffff' },
+  route_node: { fill: '#a855f7', ink: '#ffffff' },
+  landmark: { fill: '#22c55e', ink: '#142033' },
+  faction: { fill: '#f97316', ink: '#142033' },
 }
+
+// 图标位于箭头上部；尖端 (0, 0) 始终对应地点原有坐标。
+const MARKER_PATH = 'M -17 -42 H 17 Q 21 -42 21 -38 V -23 Q 21 -19 17 -16 L 0 0 L -17 -16 Q -21 -19 -21 -23 V -38 Q -21 -42 -17 -42 Z'
 
 const EDGE_STYLES: Record<string, { stroke: string; dash?: string; marker: string }> = {
   route: { stroke: 'rgba(125, 211, 252, 0.7)', marker: 'arrow-route' },
@@ -55,6 +68,8 @@ export default function WorldMapCanvas({
   selectedEdgeId,
   backgroundImage,
   layoutKey,
+  focusNodeRequest,
+  onFocusHandled,
   onSelectNode,
   onSelectEdge,
   onUpdateNodePosition,
@@ -118,6 +133,27 @@ export default function WorldMapCanvas({
     image.src = backgroundImage
     return () => { cancelled = true }
   }, [backgroundImage])
+
+  // 世界资料跳转过来时把目标地点移到视图中央：只选中而不移动视图，
+  // 作者在地图上仍然看不到被定位的地点。
+  const handledFocusTokenRef = useRef<number | null>(null)
+  useEffect(() => {
+    const request = focusNodeRequest
+    if (!request || handledFocusTokenRef.current === request.token) return
+    const node = nodes.find(item => item.id === request.nodeId)
+    const container = containerRef.current
+    if (!node || !container) return
+    handledFocusTokenRef.current = request.token
+    hasManualViewportRef.current = true
+    const zoomLevel = zoom < MIN_MAP_ZOOM ? 1 : zoom
+    const { width, height } = container.getBoundingClientRect()
+    setZoom(zoomLevel)
+    setPan({
+      x: width / 2 - zoomLevel * node.x,
+      y: height / 2 - zoomLevel * node.y,
+    })
+    onFocusHandled?.(request.token)
+  }, [focusNodeRequest, nodes, zoom, onFocusHandled])
 
   // ResizeObserver covers application sidebars as well as window resizes. Do
   // not undo a deliberate author pan/zoom merely because another panel moved.
@@ -347,48 +383,55 @@ export default function WorldMapCanvas({
         {visibleNodes.map(node => {
           const isSelected = node.id === selectedNodeId
           const color = TYPE_COLORS[node.type] || TYPE_COLORS.landmark
+          const markerIcon = getWorldMapMarkerIcon(node)
+          const MarkerIcon = WORLD_MAP_MARKER_ICONS[markerIcon]
+          const markerLabel = WORLD_MAP_MARKER_ICON_LABELS[markerIcon]
 
           return (
             <g
               id={`map-node-${node.id}`}
               key={node.id}
               transform={`translate(${node.x}, ${node.y})`}
-              className="cursor-move"
+              className="world-map-node cursor-move"
+              data-selected={isSelected}
+              role="button"
+              tabIndex={0}
+              aria-label={`${node.name} · ${text(markerLabel.zh, markerLabel.en)}`}
+              aria-pressed={isSelected}
               onMouseDown={e => startDragNode(e, node)}
               onDoubleClick={() => onDoubleNodeClick?.(node)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  onSelectNode(node.id)
+                }
+              }}
             >
-              {/* Selected halo */}
-              {isSelected && (
-                <circle
-                  r={26}
-                  fill="none"
-                  stroke="var(--color-accent)"
-                  strokeWidth="2.5"
-                  strokeDasharray="4,2"
-                />
-              )}
-
-              {/* Node background circle */}
-              <circle
-                r={18}
-                fill={color.bg}
-                stroke={isSelected ? 'var(--color-accent)' : color.border}
-                strokeWidth={isSelected ? 2.5 : 1.5}
-              />
-
-              {/* Center point */}
-              <circle
-                r={4}
-                fill={color.border}
-              />
+              <title>{`${node.name} · ${text(markerLabel.zh, markerLabel.en)}`}</title>
+              {/* 保留宽松命中区，图标内部的线条不会影响选择和拖动。 */}
+              <rect data-map-marker-hit x={-27} y={-50} width={54} height={82} fill="transparent" />
+              <g className="world-map-marker-outline" transform="scale(1.18)" pointerEvents="none" fill="none" strokeLinejoin="round">
+                <path d={MARKER_PATH} stroke="#142033" strokeWidth={7} />
+                <path d={MARKER_PATH} stroke="#ffffff" strokeWidth={5} />
+                <path d={MARKER_PATH} stroke="var(--color-accent)" strokeWidth={2.5} />
+              </g>
+              <g className="world-map-marker-body" pointerEvents="none" strokeLinejoin="round">
+                <path d={MARKER_PATH} fill={color.fill} stroke="#142033" strokeWidth={5} />
+                <path d={MARKER_PATH} fill={color.fill} stroke="#ffffff" strokeWidth={2.5} />
+                <MarkerIcon x={-12} y={-39} width={24} height={24} color={color.ink} strokeWidth={2} aria-hidden="true" />
+              </g>
 
               {/* Node Name */}
               <text
-                y={30}
+                y={18}
                 textAnchor="middle"
-                fontSize="11"
+                fontSize="12"
                 fontWeight="600"
-                fill={isSelected ? 'var(--color-accent)' : 'var(--color-text)'}
+                fill="var(--color-text)"
+                stroke="var(--color-panel)"
+                strokeWidth={4}
+                strokeLinejoin="round"
+                paintOrder="stroke"
                 className="pointer-events-none"
               >
                 {node.name}
@@ -396,10 +439,14 @@ export default function WorldMapCanvas({
 
               {/* Node Type Badge */}
               <text
-                y={42}
+                y={32}
                 textAnchor="middle"
-                fontSize="9"
-                fill={color.text}
+                fontSize="10"
+                fill="var(--color-text-secondary)"
+                stroke="var(--color-panel)"
+                strokeWidth={3}
+                strokeLinejoin="round"
+                paintOrder="stroke"
                 className="pointer-events-none"
               >
                 {text(WORLD_MAP_NODE_TYPE_LABELS[node.type]?.zh || node.type, node.type)}

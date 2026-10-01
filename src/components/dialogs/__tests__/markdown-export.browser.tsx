@@ -79,11 +79,12 @@ beforeEach(() => {
       meta(101, 1, 1, 'draft', '跨海'), meta(102, 1, 2, 'reviewed', '跨海'),
       ...(includeUnassignedProse ? [meta(304, 3, 1, 'draft', '未归卷章节')] : []),
     ]
-    if (channel === 'db:blueprint-get-all') return [
-      { chapterNumber: 1, volumeId: 'volume-a', title: '跨海' },
-      { chapterNumber: 2, volumeId: 'volume-a', title: '回声' },
-      ...(includeBlueprintWithoutVersion ? [{ chapterNumber: 3, volumeId: 'volume-a', title: '尚无版本' }] : []),
+    if (channel === 'db:blueprint-list-summary') return [
+      { chapterNumber: 1, volumeId: 'volume-a', title: '跨海', purpose: '', keyEvents: '' },
+      { chapterNumber: 2, volumeId: 'volume-a', title: '回声', purpose: '', keyEvents: '' },
+      ...(includeBlueprintWithoutVersion ? [{ chapterNumber: 3, volumeId: 'volume-a', title: '尚无版本', purpose: '', keyEvents: '' }] : []),
     ]
+    if (channel === 'db:blueprint-v2-summary-list') return []
     if (channel === 'db:blueprint-volume-list') return [{ id: 'volume-a', name: '第一卷', sortOrder: 1 }]
     if (channel === 'db:draft-export-snapshot') return [{
       draftId: 203, chapterNumber: 2, version: 1, title: '回声', content: '当前正文 v1', finalizationId: 'final-203', contentHash: 'c'.repeat(64),

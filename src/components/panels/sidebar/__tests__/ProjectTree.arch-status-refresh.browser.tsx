@@ -83,6 +83,7 @@ beforeEach(() => {
       return { status: 'ready', revision: 1, entries: [], renderedMarkdown: 'Character roster' }
     }
     if (channel === 'chapter:list-incomplete-deletions') return { success: true, operations: [] }
+    if (channel === 'db:foreshadowing-list-by-draft') return []
     throw new Error(`Unexpected IPC channel in ProjectTree refresh test: ${channel}`)
   })
   Object.defineProperty(window, 'velaAPI', {

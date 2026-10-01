@@ -21,16 +21,24 @@ export const listChaptersTool = buildAgentTool({
     const text = (zhCN: string, enUS: string) => agentToolText(context, zhCN, enUS)
 
     try {
-      const blueprints = await ipc.invokeWithProjectSession(projectSession, 'db:blueprint-get-all', project.path)
+      const [blueprints, v2Summaries] = await Promise.all([
+        ipc.invokeWithProjectSession(projectSession, 'db:blueprint-list-summary', project.path),
+        ipc.invokeWithProjectSession(projectSession, 'db:blueprint-v2-summary-list', project.path),
+      ])
       assertAgentProjectCurrent(context)
       const drafts = await ipc.invokeWithProjectSession(projectSession, 'db:draft-list-all', project.path)
       assertAgentProjectCurrent(context)
       const blueprintRows = Array.isArray(blueprints) ? blueprints : []
+      const v2Rows = Array.isArray(v2Summaries) ? v2Summaries : []
       const draftRows = Array.isArray(drafts) ? drafts : []
       const chapterNumber = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) > 0
       const bpNums = new Set<number>(blueprintRows
         .map((row: unknown) => (row as { chapterNumber?: unknown }).chapterNumber)
         .filter(chapterNumber))
+      for (const row of v2Rows) {
+        const number = (row as { chapterNumber?: unknown }).chapterNumber
+        if (chapterNumber(number)) bpNums.add(number)
+      }
       const draftNums = new Set<number>(draftRows
         .map((row: unknown) => (row as { chapterNumber?: unknown }).chapterNumber)
         .filter(chapterNumber))

@@ -16,6 +16,7 @@ import { promptLanguageText } from '../../prompt-language'
 import { assertMateriallyCompleteRevision } from './refinement-completeness'
 import { countDraftUnits } from '../../../shared/draft-units'
 import { throwIfSourceDraftChanged } from '../source-draft-changed'
+import { assembleBlueprintV2WritingBlock, isWritableBlueprintV2Detail } from './blueprint-v2-writing'
 
 import type { ChapterInfo, FrozenDraftSourceIdentity } from '../chapter-workflow'
 
@@ -70,18 +71,68 @@ export class RefineDraftCommand extends BaseWorkflowCommand<string> {
         )
       : ''
 
+    // 本章 v2 细纲（契约 §9）：存在时按同一路径注入，修稿不得偏离分镜与禁忌。
+    let blueprintV2Text = ''
+    let blueprintWordBudget: number | null = null
+    let hasBlueprintV2Content = false
+    let detail
+    try {
+      detail = await ipc.invokeWithProjectSession(
+        projectSession, 'db:blueprint-v2-get', this.params.chapterNumber, context.projectPath,
+      )
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      const message = text(
+        `读取第 ${this.params.chapterNumber} 章 v2 细纲失败，已停止修稿以免漏用细纲：${reason}`,
+        `Could not read Chapter ${this.params.chapterNumber}'s v2 detailed outline. Revision stopped to avoid omitting it: ${reason}`,
+      )
+      callbacks.log(message)
+      throw new Error(message)
+    }
+    if (detail && !isWritableBlueprintV2Detail(detail)) {
+      const status = (detail as { readStatus?: string }).readStatus
+      const message = text(
+        status === 'needs-newer-app'
+          ? '本章 v2 细纲由更新版本的应用写入，已停止修稿。'
+          : '本章 v2 细纲存储已损坏，已停止修稿；请先修复或重新导入。',
+        status === 'needs-newer-app'
+          ? 'The chapter v2 detailed outline was written by a newer app version. Revision stopped.'
+          : 'The chapter v2 detailed outline is corrupted. Revision stopped; repair or re-import it first.',
+      )
+      callbacks.log(message)
+      throw new Error(message)
+    }
+    if (detail && detail.chapterNumber !== this.params.chapterNumber) {
+      const message = text(
+        `读取到第 ${detail.chapterNumber} 章 v2 细纲，但当前修稿绑定第 ${this.params.chapterNumber} 章；已停止以防串章。`,
+        `The v2 outline read is for Chapter ${detail.chapterNumber}, but this revision is bound to Chapter ${this.params.chapterNumber}. Revision stopped to prevent a chapter mismatch.`,
+      )
+      callbacks.log(message)
+      throw new Error(message)
+    }
+    if (isWritableBlueprintV2Detail(detail)) {
+      const block = assembleBlueprintV2WritingBlock(detail, writingLanguage)
+      if (block) {
+        blueprintV2Text = block.text
+        blueprintWordBudget = block.wordBudget
+        hasBlueprintV2Content = true
+      }
+    }
+
     const promptBuilder = new ChapterPromptBuilder(template, writingLanguage)
       .withDraftContent(draft)
-      .withChapterInfo(this.params.chapterInfo)
+      .withChapterInfo(hasBlueprintV2Content
+        ? { ...this.params.chapterInfo, purpose: '', keyEvents: '', suspenseHook: '' }
+        : this.params.chapterInfo)
       .withGlobalGuidance(mergedGuidance)
       .withGlobalSummary(this.params.shortSummary || '')
       .withShortSummary(this.params.shortSummary || '')
-      .withWordNumber(novelConfig.wordsPerChapter)
+      .withWordNumber(blueprintWordBudget ?? novelConfig.wordsPerChapter)
       .withWritingStyle(novelConfig.writingStyle || '')
       .withUserRefinePrompt(userPromptBlock)
 
     const refined = await this.callLLMWithBoundedCompletion(
-      promptBuilder.build(),
+      [promptBuilder.build(), blueprintV2Text].filter(Boolean).join('\n\n'),
       promptBuilder.getSystemRole(),
       callbacks,
       { mode: 'append-visible-text', maxContinuations: 3 },

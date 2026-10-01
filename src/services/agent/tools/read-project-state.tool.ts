@@ -80,18 +80,13 @@ export const readProjectStateTool = buildAgentTool({
       // 读取最近 5 章蓝图的 notes 字段作为进度摘要
       const notesParts: string[] = []
       try {
-        const bps = await ipc.invokeWithProjectSession(projectSession, 'db:blueprint-get-all', project.path)
+        const recentNotes = await ipc.invokeWithProjectSession(projectSession, 'db:blueprint-recent-notes', project.path)
         assertAgentProjectCurrent(context)
-        if (bps && Array.isArray(bps)) {
-          // 倒序遍历
-          const sorted = bps.sort((a, b) => b.chapterNumber - a.chapterNumber)
-          for (const bp of sorted) {
-            if (bp.notes && bp.notes.trim()) {
-              notesParts.unshift(english
-                ? `### Chapter ${bp.chapterNumber} ${bp.title || ''}\n${bp.notes}`
-                : `### 第${bp.chapterNumber}章 ${bp.title || ''}\n${bp.notes}`)
-              if (notesParts.length >= 5) break
-            }
+        if (Array.isArray(recentNotes)) {
+          for (const note of recentNotes) {
+            notesParts.push(english
+              ? `### Chapter ${note.chapterNumber} ${note.title || ''}\n${note.notes}`
+              : `### 第${note.chapterNumber}章 ${note.title || ''}\n${note.notes}`)
           }
         }
       } catch { /* 忽略 */ }

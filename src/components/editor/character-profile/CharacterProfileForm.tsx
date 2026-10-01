@@ -1,3 +1,4 @@
+import CharacterCultivationField from './CharacterCultivationField'
 import { Sparkles, BookOpen, Users, Activity } from 'lucide-react'
 import type { CharacterCard, CharacterCurrentState } from '../../../stores/character-store'
 import { EMPTY_STATE } from '../../../stores/character-store'
@@ -69,6 +70,7 @@ export default function CharacterProfileForm({
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-5 space-y-4" data-testid="character-profile-form">
+      <CharacterCultivationField card={card} onChange={id => onUpdateField('cultivationLevelId', id)} />
       {/* 基础身份卡片 */}
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-editor-bg)]/80 p-4 space-y-4 shadow-xs">
         <div className="flex items-center gap-3">

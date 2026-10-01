@@ -1,6 +1,7 @@
 import { getProjectDb } from '../database'
 import { invalidateContinuityProjectionFrom } from './summary-repository'
 import { ChapterCanvasRepository } from './chapter-canvas-repository'
+import { BlueprintDetailRepository } from './blueprint-detail-repository'
 import type {
   ChapterDeletionOperation,
   ChapterDeletionProjectionStatus,
@@ -116,6 +117,13 @@ function deleteChapterFacts(
     ChapterCanvasRepository.deleteByChapter(target.chapter_number)
   } catch {
     // 章节画布尚未建表（极端旧库）时跳过；删除操作本身不受影响。
+  }
+  // 章节蓝图 v2 细纲行同理：章节号是稳定标识，章删除必须连带清理，
+  // 否则章号复用后会复活上一轮的正式分镜（blueprint-v2-contract §7.3）。
+  try {
+    BlueprintDetailRepository.delete(target.chapter_number)
+  } catch {
+    // blueprint_details 尚未建表（极端旧库）时跳过；删除操作本身不受影响。
   }
   db.prepare('DELETE FROM drafts WHERE id = ?').run(target.id)
   for (const contentId of contentIds) {

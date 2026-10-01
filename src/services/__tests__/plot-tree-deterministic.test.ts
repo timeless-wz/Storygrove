@@ -10,7 +10,6 @@ describe('rebuildPlotTreeDeterministic', () => {
       title: `第 ${i + 1} 章标题`,
       purpose: `第 ${i + 1} 章的核心剧情目的`,
       keyEvents: `第 ${i + 1} 章发生的关键事件`,
-      userGuidance: i === 1 ? '## 本章大纲摘要\n主角在藏书阁偶遇神秘碎片并解开初层封印' : '',
     }))
 
     const sources: PlotTreeSourceBundle = {
@@ -71,10 +70,10 @@ describe('rebuildPlotTreeDeterministic', () => {
       { type: 'finalized-chapter', draftId: 101, chapterNumber: 1 },
     ])
 
-    // Chapter 2 is blueprint -> planned, and uses userGuidance outline summary
+    // Chapter 2 is blueprint -> planned, and uses only its bounded v1 projection.
     const ch2Event = mainTrack.events.find(e => e.chapterNumber === 2)!
     expect(ch2Event.status).toBe('planned')
-    expect(ch2Event.summary).toContain('主角在藏书阁偶遇神秘碎片并解开初层封印')
+    expect(ch2Event.summary).toContain('第 2 章的核心剧情目的')
     expect(ch2Event.sources).toEqual([
       { type: 'blueprint', chapterNumber: 2 },
     ])
@@ -170,14 +169,14 @@ describe('rebuildPlotTreeDeterministic', () => {
     expect(subplotTrack.parentTrackId).toBe('track-main-vol2')
   })
 
-  it('prioritizes userGuidance outline summary over purpose/keyEvents', () => {
-    const summaryFromGuidance = extractBlueprintOutlineSummary({
+  it('never reads author guidance for cross-chapter plot summaries', () => {
+    const blueprintWithLongGuidance = {
       title: '第 10 章',
       purpose: '交代世界观设定',
       keyEvents: '发生了一场普通对话',
       userGuidance: '### 核心大纲\n主角在黑市识破了暗杀者的伪装并获得关键地图\n次要提示：注意暗色调氛围',
-    })
-    expect(summaryFromGuidance).toBe('主角在黑市识破了暗杀者的伪装并获得关键地图')
+    }
+    expect(extractBlueprintOutlineSummary(blueprintWithLongGuidance)).toBe('交代世界观设定')
 
     const summaryFallback = extractBlueprintOutlineSummary({
       title: '第 11 章',

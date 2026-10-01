@@ -1,0 +1,17 @@
+.world-map-node {
+  outline: none;
+}
+
+.world-map-marker-outline {
+  opacity: 0;
+}
+
+.world-map-node[data-selected='true'] .world-map-marker-outline,
+.world-map-node:hover .world-map-marker-outline,
+.world-map-node:focus-visible .world-map-marker-outline {
+  opacity: 1;
+}
+
+.world-map-marker-body {
+  filter: drop-shadow(0 2px 2px rgb(0 0 0 / 28%));
+}

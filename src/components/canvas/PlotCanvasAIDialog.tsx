@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Sparkles } from 'lucide-react'
 
-import type { DatabaseChannels } from '../../shared/ipc-channels'
 import type { PlotCanvasGraph } from '../../shared/plot-canvas'
 import { useLLMStore } from '../../stores/llm-store'
 import { useLocaleStore } from '../../stores/locale-store'
@@ -14,15 +13,13 @@ import { Label } from '../ui/Label'
 import { NativeSelect } from '../ui/NativeSelect'
 import { Textarea } from '../ui/Textarea'
 import { buildPlotCanvasAIProposal, type PlotCanvasAIMode, type PlotCanvasAIProposal } from './plot-canvas-ai-proposal'
-import { createPlotCanvasAIMessages } from './plot-canvas-ai-prompt'
+import { createPlotCanvasAIMessages, type PlotCanvasBlueprintSummary } from './plot-canvas-ai-prompt'
 import './plot-shell/plot-shell.css'
-
-type Blueprint = DatabaseChannels['db:blueprint-get-all']['return'][number]
 
 interface Props {
   mode: PlotCanvasAIMode
   graph: PlotCanvasGraph
-  blueprints: Blueprint[]
+  blueprints: PlotCanvasBlueprintSummary[]
   projectKey: string
   hasPendingWrites: boolean
   onClose: () => void

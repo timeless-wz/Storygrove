@@ -243,7 +243,13 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
   const renameCurrentCharacter = (name: string, nextName: string) => {
     const projectSession = captureProjectSession(currentProject)
     if (!projectSession || !isProjectSessionPath(projectSession, projectKey)) return
-    renameCharacter(name, nextName)
+    const renamed = renameCharacter(name, nextName)
+    if (renamed && name !== nextName) {
+      toast.info(text(
+        `角色已改名。「${name}」在章节细纲 Markdown 中的同名用法不会自动替换；相关蓝图待核对。`,
+        `Character renamed. Matching uses of “${name}” in chapter outline Markdown were not changed; review related blueprints.`,
+      ))
+    }
   }
 
   /** 关系行与图谱节点都只是“选中并打开”某张已有角色卡的入口。 */

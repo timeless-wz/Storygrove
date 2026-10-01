@@ -158,4 +158,17 @@ describe('core model prompt language contract', () => {
     expect(prompt).toContain('Chapter 1: Rowan refuses the bargain.')
     expect(prompt).toContain('Never reverse established traits.')
   })
+
+  it('labels full and chunked legacy chapter generation as simple outlines in both languages', () => {
+    for (const key of ['chapter_blueprint', 'chapter_blueprint_chunk'] as const) {
+      const zhCN = getBuiltinPromptTemplate(key, 'zh-CN')!
+      const enUS = getBuiltinPromptTemplate(key, 'en-US')!
+      expect(zhCN.name).toContain('简纲')
+      expect(zhCN.description).toContain('不生成逐场分镜')
+      expect(zhCN.content).toContain('不生成逐场分镜')
+      expect(enUS.content).toContain('simple chapter-level outline')
+      expect(enUS.content).toContain('does not produce scene storyboards')
+      expect(enUS.content).not.toContain('complete chapter blueprints')
+    }
+  })
 })

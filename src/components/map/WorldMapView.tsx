@@ -62,6 +62,8 @@ export default function WorldMapView({ projectKey }: { projectKey: string }) {
   const selectedEdgeId = useWorldMapStore(s => s.selectedEdgeId)
   const viewMode = useWorldMapStore(s => s.viewMode)
   const candidatesLoading = useWorldMapStore(s => s.candidatesLoading)
+  const focusNodeRequest = useWorldMapStore(s => s.focusNodeRequest)
+  const consumeFocusNodeRequest = useWorldMapStore(s => s.consumeFocusNodeRequest)
   const loadAll = useWorldMapStore(s => s.loadAll)
   const loadCandidates = useWorldMapStore(s => s.loadCandidates)
   const upsertMap = useWorldMapStore(s => s.upsertMap)
@@ -97,6 +99,12 @@ export default function WorldMapView({ projectKey }: { projectKey: string }) {
     void loadAll(projectKey)
     void loadCandidates(projectKey)
   }, [projectKey, loadAll, loadCandidates])
+
+  // 世界资料跳转到某个地点时，无论作者上次停在哪一种视图，都切回画布并定位；
+  // 否则「跳转到地图地点」只会落在列表页上。
+  useEffect(() => {
+    if (focusNodeRequest) setViewMode('canvas')
+  }, [focusNodeRequest, setViewMode])
 
   const selectedMap = maps.find(map => map.id === selectedMapId) ?? null
 
@@ -470,7 +478,7 @@ export default function WorldMapView({ projectKey }: { projectKey: string }) {
           <div className="flex min-h-0 flex-1 overflow-hidden">
             <div className="min-w-0 flex-1 overflow-hidden">
               {viewMode === 'canvas'
-                ? <WorldMapCanvas nodes={mapNodes} edges={mapEdges} selectedNodeId={selectedNodeId} selectedEdgeId={selectedEdgeId} backgroundImage={mapImage} layoutKey={showAtlas} onSelectNode={setSelectedNodeId} onSelectEdge={setSelectedEdgeId} onUpdateNodePosition={updateNodePosition} onDoubleNodeClick={node => setNodeDialogTarget(node.id)} />
+                ? <WorldMapCanvas nodes={mapNodes} edges={mapEdges} selectedNodeId={selectedNodeId} selectedEdgeId={selectedEdgeId} backgroundImage={mapImage} layoutKey={showAtlas} focusNodeRequest={focusNodeRequest} onFocusHandled={consumeFocusNodeRequest} onSelectNode={setSelectedNodeId} onSelectEdge={setSelectedEdgeId} onUpdateNodePosition={updateNodePosition} onDoubleNodeClick={node => setNodeDialogTarget(node.id)} />
                 : <WorldMapListView nodes={mapNodes} edges={mapEdges} selectedNodeId={selectedNodeId} selectedEdgeId={selectedEdgeId} onSelectNode={setSelectedNodeId} onSelectEdge={setSelectedEdgeId} onEditNode={node => setNodeDialogTarget(node.id)} onDeleteNode={removeNode} onEditEdge={edge => setEdgeDialogTarget(edge)} onDeleteEdge={removeEdge} />}
             </div>
             {(selectedNode || selectedEdge) && (

@@ -48,6 +48,7 @@ function LeftNavButton({
     <div className="relative w-full px-1">
       <IconTooltip label={title ?? label} side="right">
         <button
+          aria-label={label}
           onClick={onClick}
           className={`left-nav-button${active ? ' is-active' : ''}`}
         >

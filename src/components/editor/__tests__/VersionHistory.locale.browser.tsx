@@ -68,7 +68,8 @@ describe('VersionHistory locale', () => {
       resolveBlueprints = resolve
     })
     invoke.mockImplementation(async (channel: string, ...args: unknown[]) => {
-      if (channel === 'db:blueprint-get-all') return blueprints
+      if (channel === 'db:blueprint-list-summary') return blueprints
+      if (channel === 'db:blueprint-v2-summary-list') return []
       if (channel === 'db:draft-list') {
         return args[0] === 2
           ? [
@@ -113,13 +114,32 @@ describe('VersionHistory locale', () => {
 
   it('renders the chapter-list empty state in English', async () => {
     invoke.mockImplementation(async (channel: string) => {
-      if (channel === 'db:blueprint-get-all') return []
+      if (channel === 'db:blueprint-list-summary' || channel === 'db:blueprint-v2-summary-list') return []
       throw new Error(`unexpected IPC: ${channel}`)
     })
 
     await act(async () => root.render(<VersionHistory projectKey={PROJECT_PATH} />))
 
     await vi.waitFor(() => expect(container.textContent).toContain('No chapters yet'))
+    expect(container.textContent).not.toMatch(/[\u4e00-\u9fff]/u)
+  })
+
+  it('includes v2-only chapters while loading only bounded summary channels', async () => {
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'db:blueprint-list-summary') return []
+      if (channel === 'db:blueprint-v2-summary-list') return [{
+        chapterNumber: 8, revision: 2, contentHash: 'hash', origin: 'import', updatedAt: '',
+        sceneCount: 4, sceneTitles: ['场景一'], wordBudget: 4200,
+      }]
+      if (channel === 'db:draft-list') return []
+      throw new Error(`unexpected IPC: ${channel}`)
+    })
+
+    await act(async () => root.render(<VersionHistory projectKey={PROJECT_PATH} />))
+
+    await vi.waitFor(() => expect(container.textContent).toContain('Chapter 8'))
+    expect(invoke.mock.calls.map(([channel]) => channel)).toContain('db:blueprint-v2-summary-list')
+    expect(invoke.mock.calls.map(([channel]) => channel)).not.toContain('db:blueprint-get-all')
     expect(container.textContent).not.toMatch(/[\u4e00-\u9fff]/u)
   })
 })

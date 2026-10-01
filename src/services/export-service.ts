@@ -32,6 +32,7 @@ import type {
 import type { ProjectCoreData } from '../../electron/repositories/project-core-repository'
 import type { CharacterData } from '../../electron/repositories/character-repository'
 import type { CharacterRosterSnapshot } from '../shared/character-roster'
+import { cultivationLevels, type CultivationSystem } from '../shared/cultivation'
 
 
 export type ExportFormat = 'merged-md' | 'split-md' | 'txt' | 'word'
@@ -41,6 +42,7 @@ export interface BasicSettingsExportSnapshot {
   core: ProjectCoreData | null
   roster: CharacterRosterSnapshot
   characters: CharacterData[]
+  cultivation?: CultivationSystem | null
 }
 
 export interface SelectedMarkdownExportOptions {
@@ -549,7 +551,10 @@ export async function loadBasicSettingsExportSnapshot(
     ipc.invokeWithProjectSession(projectSession, 'db:character-roster-read', projectSession.projectPath),
     ipc.invokeWithProjectSession(projectSession, 'db:character-get-all', projectSession.projectPath),
   ])
-  return { core, roster, characters }
+  const cultivation = characters.some(character => character.cultivationLevelId)
+    ? await ipc.invokeWithProjectSession(projectSession, 'db:cultivation-read', projectSession.projectPath)
+    : null
+  return { core, roster, characters, ...(cultivation ? { cultivation } : {}) }
 }
 
 function textFor(locale: Locale, zh: string, en: string): string {
@@ -595,6 +600,14 @@ function settingSection(
       ]
       const profiles = snapshot.characters.map(character => {
         const lines = [`## ${character.name} · ${roleLabels[character.role] ?? character.role}`]
+        if (character.cultivationLevelId) {
+          const level = cultivationLevels(snapshot.cultivation?.realms ?? []).find(entry => entry.id === character.cultivationLevelId)
+          const label = textFor(locale, '修炼等级', 'Cultivation level')
+          const value = level
+            ? `${level.number} = ${level.name}`
+            : textFor(locale, `未解析的等级绑定（${character.cultivationLevelId}）`, `Unresolved level binding (${character.cultivationLevelId})`)
+          lines.push(`- ${label}: ${value}`)
+        }
         for (const [field, zhLabel, enLabel] of fields) {
           const value = character[field]
           if (typeof value === 'string' && value.trim()) lines.push(`- ${textFor(locale, zhLabel, enLabel)}: ${value.trim()}`)
@@ -602,7 +615,7 @@ function settingSection(
         if (character.currentState) {
           lines.push(`- ${textFor(locale, '当前状态', 'Current state')}:`)
           for (const [field, zhLabel, enLabel] of [
-            ['location', '所在位置', 'Location'], ['powerLevel', '能力状态', 'Power level'],
+            ['location', '所在位置', 'Location'], ['powerLevel', '修为描述（自由文本）', 'Power description (free text)'],
             ['physicalState', '身体状态', 'Physical state'], ['mentalState', '心理状态', 'Mental state'],
             ['keyItems', '关键物品', 'Key items'], ['recentEvents', '近期事件', 'Recent events'],
           ] as const) {
@@ -697,7 +710,7 @@ export async function exportSelectedMarkdown(
       }
       const [volumes, blueprints] = await Promise.all([
         ipc.invokeWithProjectSession(projectSession, 'db:blueprint-volume-list', projectSession.projectPath),
-        ipc.invokeWithProjectSession(projectSession, 'db:blueprint-get-all', projectSession.projectPath),
+        ipc.invokeWithProjectSession(projectSession, 'db:blueprint-list-summary', projectSession.projectPath),
       ])
       if (!isProjectSessionCurrent(projectSession)) return staleExportResult(locale)
       if (!volumes.some(volume => volume.id === options.volumeId)) return exportSelectionChanged(locale)

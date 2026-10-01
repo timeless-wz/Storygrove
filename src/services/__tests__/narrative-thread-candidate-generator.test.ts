@@ -5,6 +5,9 @@ import type { GenerationTask } from '../generation/generation-harness'
 import {
   createNarrativeThreadCandidateGenerator,
   NARRATIVE_THREAD_CANDIDATE_BUDGET,
+  NARRATIVE_THREAD_FINALIZED_EXCERPT_MAX_CHARS,
+  boundedFinalizedExcerpt,
+  mergeNarrativeThreadBlueprintSummaries,
   parseNarrativeThreadEventCandidates,
   parseNarrativeThreadPlanCandidates,
 } from '../narrative-thread-candidate-generator'
@@ -42,9 +45,8 @@ describe('narrative thread AI candidate boundary', () => {
         modelId: 'test-model', writingLanguage,
         totalChapters: 4,
         blueprint: {
-          chapterNumber: 1, title: 'Opening', role: 'setup', purpose: 'begin',
-          keyEvents: '', characters: [], suspenseHook: '', userGuidance: '',
-          notes: '', notesUpdatedAt: '',
+          chapterNumber: 1, title: 'Opening', purpose: 'begin', keyEvents: '',
+          sceneTitles: [],
         },
         signal,
       })
@@ -73,6 +75,55 @@ describe('narrative thread AI candidate boundary', () => {
     }), 20)
 
     expect(candidates).toHaveLength(8)
+  })
+
+  it('sends only a bounded finalized-text excerpt to event-candidate generation', async () => {
+    const observation: { task?: GenerationTask } = {}
+    const runtime = {
+      execute: vi.fn(async operation => operation({
+        session: {
+          budget: {
+            maxAttempts: 1, maxRequestedOutputTokens: 4096,
+            maxRequestedOutputTokensPerAttempt: 4096, deadlineAt: Date.now() + 120_000,
+          },
+          complete: vi.fn(async (task: GenerationTask) => {
+            observation.task = task
+            return {
+              status: 'completed' as const,
+              content: JSON.stringify({ candidates: [{
+                type: 'progressing', evidence: 'START-EVIDENCE', reason: 'The supplied excerpt advances the clue.',
+              }] }),
+              finishReason: 'stop' as const,
+              receipt: {} as never,
+            }
+          }),
+        },
+      })),
+      close: vi.fn().mockResolvedValue(undefined),
+    } as unknown as GenerationRuntime
+    const generator = createNarrativeThreadCandidateGenerator({
+      createRuntime: vi.fn().mockResolvedValue(runtime),
+    })
+    const fullText = `START-EVIDENCE${'M'.repeat(9_000)}OMITTED-MIDDLE-MARKER${'T'.repeat(9_000)}TAIL-EVIDENCE`
+
+    await expect(generator.generateEventCandidates({
+      modelId: 'test-model', writingLanguage: 'en-US',
+      plan: {
+        id: 7, title: 'Missing log', type: 'clue', targetStartChapter: 1,
+        targetEndChapter: 4, authorIntent: 'Resolve later.', status: 'planted',
+        dormantChapters: 0, overdue: false, events: [], createdAt: '', updatedAt: '',
+      },
+      draftId: 3, chapterNumber: 2, finalizedContent: fullText,
+      signal: new AbortController().signal,
+    })).resolves.toHaveLength(1)
+
+    const userMessage = observation.task?.messages.find(message => message.role === 'user')
+    const payload = JSON.parse(userMessage?.content ?? '{}') as { finalizedContent: string }
+    expect(payload.finalizedContent.length).toBeLessThanOrEqual(NARRATIVE_THREAD_FINALIZED_EXCERPT_MAX_CHARS)
+    expect(payload.finalizedContent).toContain('START-EVIDENCE')
+    expect(payload.finalizedContent).toContain('TAIL-EVIDENCE')
+    expect(payload.finalizedContent).not.toContain('OMITTED-MIDDLE-MARKER')
+    expect(boundedFinalizedExcerpt(fullText)).toBe(payload.finalizedContent)
   })
 
   it('keeps blueprint analysis as plan-only candidates even when the model claims an event already happened', () => {
@@ -162,9 +213,9 @@ describe('narrative thread AI candidate boundary', () => {
       writingLanguage: 'zh-CN',
       totalChapters: 12,
       blueprint: {
-        chapterNumber: 2, title: '日志失踪', role: '发展', purpose: '引出伪造者',
-        keyEvents: '航海日志从保险柜消失。', characters: ['林岚'], suspenseHook: '',
-        userGuidance: '', notes: '', notesUpdatedAt: '',
+        chapterNumber: 2, title: '日志失踪', purpose: '引出伪造者',
+        keyEvents: '航海日志从保险柜消失。',
+        sceneTitles: ['A'.repeat(500), '保险柜被打开', '目击者改口', '日志失踪', '追问被打断', '超出上限的分镜'],
       },
       signal: new AbortController().signal,
     })).resolves.toHaveLength(1)
@@ -179,8 +230,34 @@ describe('narrative thread AI candidate boundary', () => {
       output: 'structured-data',
     })
     expect(observedTask?.messages.find(message => message.role === 'system')?.content).toContain('1..12')
-    expect(JSON.parse(observedTask?.messages.find(message => message.role === 'user')?.content ?? '{}'))
-      .toMatchObject({ totalChapters: 12 })
+    const payload = JSON.parse(observedTask?.messages.find(message => message.role === 'user')?.content ?? '{}') as {
+      totalChapters: number
+      blueprint: { sceneTitles: string[]; keyEvents: string }
+    }
+    expect(payload).toMatchObject({ totalChapters: 12 })
+    expect(payload.blueprint.sceneTitles).toHaveLength(5)
+    expect(payload.blueprint.sceneTitles[0]).toHaveLength(120)
+    expect(payload.blueprint.keyEvents).toBe('航海日志从保险柜消失。')
+    expect(JSON.stringify(payload)).not.toContain('超出上限的分镜')
+  })
+
+  it('merges v2-only chapters into a bounded candidate source without Markdown detail', () => {
+    const merged = mergeNarrativeThreadBlueprintSummaries([], [{
+      chapterNumber: 1,
+      revision: 2,
+      contentHash: 'a'.repeat(64),
+      origin: 'import',
+      updatedAt: '',
+      sceneCount: 12,
+      sceneTitles: Array.from({ length: 12 }, (_, index) => `${index + 1} ${'场景标题'.repeat(40)}`),
+      wordBudget: 4200,
+    }])
+
+    expect(merged).toHaveLength(1)
+    expect(merged[0]).toMatchObject({ chapterNumber: 1, title: '第1章细纲', purpose: '', keyEvents: '' })
+    expect(merged[0].sceneTitles).toHaveLength(5)
+    expect(merged[0].sceneTitles.every(title => title.length <= 120)).toBe(true)
+    expect(merged[0]).not.toHaveProperty('rawMarkdown')
   })
 
   it('binds an event candidate to the supplied finalized source instead of trusting model identity fields', async () => {

@@ -37,10 +37,22 @@ export function BlueprintBindingDialog({
     let cancelled = false
     const projectSession = captureProjectSession(currentProject)
     if (!projectSession) return
-    void ipc.invokeWithProjectSession(projectSession, 'db:blueprint-get-all', projectSession.projectPath)
-      .then(items => {
+    void Promise.all([
+      ipc.invokeWithProjectSession(projectSession, 'db:blueprint-list-summary', projectSession.projectPath),
+      ipc.invokeWithProjectSession(projectSession, 'db:blueprint-v2-summary-list', projectSession.projectPath),
+    ])
+      .then(([items, v2Summaries]) => {
         if (!cancelled && isProjectSessionCurrent(projectSession)) {
-          setBlueprints(items.map(item => ({ chapterNumber: item.chapterNumber, title: item.title })))
+          const byChapter = new Map(items.map(item => [item.chapterNumber, item.title]))
+          for (const summary of v2Summaries) {
+            if (!byChapter.has(summary.chapterNumber)) {
+              const sceneHint = summary.sceneTitles[0]
+              byChapter.set(summary.chapterNumber, sceneHint ? `${sceneHint}（v2）` : `第${summary.chapterNumber}章（v2）`)
+            }
+          }
+          setBlueprints([...byChapter]
+            .sort(([left], [right]) => left - right)
+            .map(([chapterNumber, title]) => ({ chapterNumber, title })))
         }
       })
       .catch(() => {

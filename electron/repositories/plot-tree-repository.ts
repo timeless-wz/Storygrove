@@ -35,15 +35,26 @@ export class PlotTreeRepository {
     } | undefined
     if (!core) throw new Error('项目配置不存在')
 
+    const volumeRows = db.prepare(`
+      SELECT id, name FROM blueprint_volumes ORDER BY sort_order ASC, created_at ASC
+    `).all() as Array<{ id: string; name: string }>
+    const volumeById = new Map(volumeRows.map((volume, index) => [volume.id, {
+      volumeNumber: index + 1,
+      volumeTitle: volume.name,
+    }]))
     const blueprintRows = db.prepare(`
-      SELECT chapter_number, title, purpose, key_events, user_guidance
-      FROM blueprints ORDER BY chapter_number ASC
+      SELECT b.chapter_number, b.volume_id,
+             substr(b.title, 1, 160) AS title,
+             substr(b.purpose, 1, 300) AS purpose,
+             substr(b.key_events, 1, 800) AS key_events
+      FROM blueprints b ORDER BY b.chapter_number ASC
+      LIMIT 200
     `).all() as Array<{
       chapter_number: number
+      volume_id: string
       title: string
       purpose: string
       key_events: string
-      user_guidance?: string
     }>
     const finalizedRows = db.prepare(`
       SELECT drafts.id AS draft_id,
@@ -67,6 +78,7 @@ export class PlotTreeRepository {
               OR (newer.version = drafts.version AND newer.id > drafts.id))
         )
       ORDER BY drafts.chapter_number ASC
+      LIMIT 200
     `).all() as Array<{
       draft_id: number
       chapter_number: number
@@ -94,7 +106,7 @@ export class PlotTreeRepository {
       title: row.title,
       purpose: row.purpose,
       keyEvents: row.key_events,
-      userGuidance: row.user_guidance || '',
+      ...volumeById.get(row.volume_id),
     }))
     const finalizedChapters = finalizedRows.map(row => ({
       draftId: row.draft_id,

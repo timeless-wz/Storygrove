@@ -113,6 +113,24 @@ describe('DraftRepository published manuscript behavior', () => {
     expect(DraftRepository.getMeta(1)?.blueprintChapterNumber).toBeUndefined()
   })
 
+  it('creates a generated draft with its explicit blueprint binding in the same insert', () => {
+    db.prepare('INSERT INTO blueprints (chapter_number, title) VALUES (?, ?)').run(1, '接错的人')
+
+    const draftId = DraftRepository.create({
+      chapterNumber: 1,
+      blueprintChapterNumber: 1,
+      source: 'write',
+      content: '临时验收正文。',
+      wordCount: 8,
+    })
+
+    expect(DraftRepository.getMeta(draftId)).toMatchObject({
+      chapterNumber: 1,
+      blueprintChapterNumber: 1,
+      chapterTitle: '接错的人',
+    })
+  })
+
   it('does not allow a generic status update to reopen finalized fact', () => {
     expect(() => DraftRepository.updateStatus(1, 'draft'))
       .toThrow('不可变事实')

@@ -24,7 +24,7 @@ import {
 } from '../project-session-gate'
 import type { ProjectSessionContext } from '../../shared/ipc-channels'
 import type { DraftMeta } from '../../../electron/repositories/draft-repository'
-import type { BlueprintData, BlueprintVolumeData } from '../../../electron/repositories/blueprint-repository'
+import type { BlueprintListSummary, BlueprintVolumeData } from '../../../electron/repositories/blueprint-repository'
 import type {
   FinalizedDraftExportSnapshot,
 } from '../../../electron/repositories/finalization-repository'
@@ -37,7 +37,7 @@ import { resolveWritingLanguage } from '../../shared/writing-language'
 type ExportScope = 'full-book' | 'chapter' | 'volume' | 'settings'
 type SelectionCatalog = {
   drafts: DraftMeta[]
-  blueprints: BlueprintData[]
+  blueprints: BlueprintListSummary[]
   volumes: BlueprintVolumeData[]
   finalized: FinalizedDraftExportSnapshot[]
 }
@@ -100,7 +100,7 @@ export default function ExportDialog({ isOpen, onClose }: { isOpen: boolean; onC
     try {
       const [drafts, blueprints, volumes, finalized] = await Promise.all([
         ipc.invokeWithProjectSession(session, 'db:draft-list-all', session.projectPath),
-        ipc.invokeWithProjectSession(session, 'db:blueprint-get-all', session.projectPath),
+        ipc.invokeWithProjectSession(session, 'db:blueprint-list-summary', session.projectPath),
         ipc.invokeWithProjectSession(session, 'db:blueprint-volume-list', session.projectPath),
         ipc.invokeWithProjectSession(session, 'db:draft-export-snapshot', session.projectPath),
       ])

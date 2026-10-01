@@ -172,6 +172,8 @@ function installIpc() {
           chapterNumber: 2, title: '刻痕之谜', role: '发展', purpose: '', keyEvents: '',
           characters: [], suspenseHook: '', userGuidance: '', notes: '', notesUpdatedAt: '',
         }]
+      case 'db:blueprint-list-summary':
+        return [{ chapterNumber: 2, title: '刻痕之谜', purpose: '', keyEvents: '' }]
       case 'db:draft-list-all':
         return [{ id: 7, chapterNumber: 2, version: 1, status: 'finalized', source: 'write', contentId: 1, wordCount: 8, createdAt: '', updatedAt: '' }]
       case 'db:narrative-thread-list':
@@ -233,6 +235,11 @@ function installIpc() {
       case 'db:chapter-canvas-viewport-save':
       case 'db:plot-canvas-viewport-save':
         return { success: true }
+      case 'db:blueprint-v2-get':
+        // 本章没有 v2 细纲：画布保持旧版手工场景卡行为。
+        return null
+      case 'db:blueprint-v2-summary-list':
+        return []
       default:
         throw new Error(`unexpected IPC ${channel}`)
     }

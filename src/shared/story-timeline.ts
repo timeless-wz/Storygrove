@@ -129,6 +129,16 @@ export interface StoryTimelineEvent {
   characterNames: string[]
   locationNodeIds: string[]
   status: StoryTimelineEventStatus
+  /**
+   * 重要历史事件标识。历史可以早于故事开端，也可以晚于开端；
+   * 它只是一段资料的分类，绝不改变故事范围设置，也不改动原排序。
+   * 旧事件迁移后该字段为 false，不会被自动标为历史。
+   */
+  isHistorical?: boolean
+  /** 事件结果；允许为空。 */
+  outcome?: string
+  /** 后续影响；允许为空。 */
+  aftermath?: string
   createdAt?: string
   updatedAt?: string
 }

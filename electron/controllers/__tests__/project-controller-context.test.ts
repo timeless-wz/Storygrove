@@ -1,4 +1,5 @@
 import path from 'node:path'
+import fs from 'node:fs'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type IpcHandler = (...args: unknown[]) => Promise<unknown>
@@ -302,6 +303,7 @@ describe('project controller project identity', () => {
     expect(mocks.projectAccess.probeExistingProject).toHaveBeenCalledWith(projectB)
     expect(mocks.projectAccess.adoptLegacyProject).toHaveBeenCalled()
     expect(mocks.projectAccess.beginSession).toHaveBeenCalled()
+    expect(fs.mkdirSync).toHaveBeenCalledWith(path.join(projectB, '.vela/prompts'), { recursive: true })
   })
 
   it('reopens the same project with a new lease while preserving its stable ProjectId', async () => {

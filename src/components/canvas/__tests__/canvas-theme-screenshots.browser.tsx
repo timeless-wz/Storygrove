@@ -91,6 +91,16 @@ function seedIpc() {
           chapterNumber, title: `第${chapterNumber}章蓝图`, role: '发展', purpose: '', keyEvents: '',
           characters: [], suspenseHook: '', userGuidance: '', notes: '', notesUpdatedAt: '',
         }))
+      // 画布改用轻量投影读取章节引用（PlotCanvasWorkbench 的 loadReferences）。
+      case 'db:blueprint-list-summary':
+        return [1, 2, 3, 4, 5].map(chapterNumber => ({
+          chapterNumber, title: `第${chapterNumber}章蓝图`, purpose: '', keyEvents: '',
+        }))
+      case 'db:blueprint-v2-summary-list':
+        return []
+      // 本截图夹具的第 2 章没有 v2 细纲：章节画布保持手工场景卡形态。
+      case 'db:blueprint-v2-get':
+        return null
       case 'db:draft-list-all':
         return [{ id: 11, chapterNumber: 1, version: 1, status: 'finalized', source: 'write', contentId: 1, wordCount: 800, createdAt: '', updatedAt: '' }]
       case 'db:narrative-thread-list':

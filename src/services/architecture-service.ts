@@ -103,12 +103,14 @@ export async function checkArchStatusWithWordCount(projectSession: ProjectSessio
  */
 export async function getBlueprintCount(projectSession: ProjectSessionContext): Promise<number> {
   try {
-    const blueprints = await ipc.invokeWithProjectSession(
-      projectSession,
-      'db:blueprint-get-all',
-      projectSession.projectPath,
-    )
-    return blueprints.length
+    const [blueprints, v2Summaries] = await Promise.all([
+      ipc.invokeWithProjectSession(projectSession, 'db:blueprint-list-summary', projectSession.projectPath),
+      ipc.invokeWithProjectSession(projectSession, 'db:blueprint-v2-summary-list', projectSession.projectPath),
+    ])
+    return new Set([
+      ...blueprints.map(blueprint => blueprint.chapterNumber),
+      ...v2Summaries.map(summary => summary.chapterNumber),
+    ]).size
   } catch {
     return 0
   }

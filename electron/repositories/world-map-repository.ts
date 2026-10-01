@@ -1,6 +1,12 @@
 import { getProjectDb } from '../database'
 import {
+  collectMapWorldBlockers,
+  collectNodeWorldReferences,
+  hasWorldWorkbenchTables,
+} from './world-workbench-repository'
+import {
   isSafeWorldMapId,
+  isWorldMapMarkerIcon,
   type WorldMap,
   type WorldMapAtlas,
   type WorldMapCandidate,
@@ -12,6 +18,7 @@ import {
   type WorldMapNode,
   type WorldMapNodeType,
 } from '../../src/shared/world-map'
+import type { WorldDeleteBlocker } from '../../src/shared/world-workbench'
 
 function requireDb(): NonNullable<ReturnType<typeof getProjectDb>> {
   const db = getProjectDb()
@@ -33,6 +40,22 @@ export interface WorldMapDeletePlan {
   edgeCount: number
   /** 需要随之清理的项目托管图片副本。 */
   images: Array<{ mapId: string; fileName: string }>
+  /**
+   * 世界资料（出生地、目前所在地、秘境位置、势力驻地、规则范围、通道端点、
+   * 人物行踪）对这些地图地点的引用。非空时删除被默认阻止。
+   */
+  worldReferences: WorldDeleteBlocker[]
+}
+
+/** 地点删除的影响预览：原有级联之外补充世界资料引用。 */
+export interface WorldMapNodeDeletePlan {
+  nodeId: string
+  nodeName: string
+  /** 会随地点一起被删除的同图连线数量。 */
+  edgeCount: number
+  /** 会失去父级而提升到顶层的地点数量。 */
+  childNodeCount: number
+  worldReferences: WorldDeleteBlocker[]
 }
 
 interface MapRow {
@@ -43,6 +66,7 @@ interface MapRow {
   image_file_name: string | null
   image_mime_type: string | null
   image_bytes: number | null
+  world_id?: string | null
   created_at: string
   updated_at: string
 }
@@ -51,6 +75,7 @@ interface NodeRow {
   id: string
   name: string
   type: string
+  marker_icon: string | null
   description: string
   parent_id: string | null
   map_id: string
@@ -76,14 +101,21 @@ function toMap(row: MapRow): WorldMap {
     parentMapId: row.parent_map_id,
     sortOrder: row.sort_order,
     image,
+    worldId: row.world_id ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
 }
 
+/** 旧库可能尚未补出 world_id 列；按列是否存在动态选取，读取保持可用。 */
+function mapSelectColumns(db: NonNullable<ReturnType<typeof getProjectDb>>): string {
+  const base = 'id, name, parent_map_id, sort_order, image_file_name, image_mime_type, image_bytes, created_at, updated_at'
+  return hasWorldWorkbenchTables(db) ? `${base}, world_id` : base
+}
+
 function listMaps(db: NonNullable<ReturnType<typeof getProjectDb>>): WorldMap[] {
   const rows = db.prepare(`
-    SELECT id, name, parent_map_id, sort_order, image_file_name, image_mime_type, image_bytes, created_at, updated_at
+    SELECT ${mapSelectColumns(db)}
     FROM world_maps
     ORDER BY sort_order ASC, created_at ASC
   `).all() as MapRow[]
@@ -92,7 +124,7 @@ function listMaps(db: NonNullable<ReturnType<typeof getProjectDb>>): WorldMap[] 
 
 function requireMap(db: NonNullable<ReturnType<typeof getProjectDb>>, mapId: string): WorldMap {
   const row = db.prepare(`
-    SELECT id, name, parent_map_id, sort_order, image_file_name, image_mime_type, image_bytes, created_at, updated_at
+    SELECT ${mapSelectColumns(db)}
     FROM world_maps WHERE id = ?
   `).get(mapId) as MapRow | undefined
   if (!row) throw new Error('地点必须绑定一张存在的地图')
@@ -201,7 +233,14 @@ function mapDeletePlan(
     .filter(map => removed.has(map.id) && map.image)
     .map(map => ({ mapId: map.id, fileName: (map.image as WorldMapImage).fileName }))
 
-  return { mapIds: removedIds, childMapIds, nodeCount, edgeCount, images }
+  return {
+    mapIds: removedIds,
+    childMapIds,
+    nodeCount,
+    edgeCount,
+    images,
+    worldReferences: hasWorldWorkbenchTables(db) ? collectMapWorldBlockers(db, removedIds) : [],
+  }
 }
 
 export class WorldMapRepository {
@@ -211,7 +250,7 @@ export class WorldMapRepository {
     const maps = listMaps(db)
 
     const nodeRows = db.prepare(`
-      SELECT id, name, type, description, parent_id, map_id, x, y, source_refs, created_at, updated_at
+      SELECT id, name, type, marker_icon, description, parent_id, map_id, x, y, source_refs, created_at, updated_at
       FROM world_map_nodes
       ORDER BY created_at ASC
     `).all() as NodeRow[]
@@ -244,6 +283,7 @@ export class WorldMapRepository {
         id: row.id,
         name: row.name,
         type: row.type as WorldMapNodeType,
+        markerIcon: isWorldMapMarkerIcon(row.marker_icon) ? row.marker_icon : null,
         description: row.description,
         parentId: row.parent_id,
         mapId: row.map_id,
@@ -337,12 +377,22 @@ export class WorldMapRepository {
    * 整棵子树一起删除（cascade）；两种情况都会同时删除该地图内部的地点、连接
    * 与其项目托管图片副本。调用方必须先把计划展示给作者。
    */
-  static deleteMap(mapId: string, strategy: WorldMapDeleteStrategy): WorldMapDeletePlan {
+  static deleteMap(
+    mapId: string,
+    strategy: WorldMapDeleteStrategy,
+    options: { allowWorldReferenceBreak?: boolean } = {},
+  ): WorldMapDeletePlan {
     const db = requireDb()
     if (strategy !== 'promote-children' && strategy !== 'cascade') {
       throw new Error('删除地图必须显式指定对子地图的处理方式')
     }
     const plan = mapDeletePlan(db, mapId, strategy)
+    // 世界资料引用默认阻止破坏性删除：删除地点不会删除秘境或势力资料，
+    // 但会让它们的引用悬空，因此必须由作者先显式处理。
+    if (plan.worldReferences.length > 0 && !options.allowWorldReferenceBreak) {
+      const total = plan.worldReferences.reduce((sum, item) => sum + item.count, 0)
+      throw new Error(`该地图的地点仍被 ${total} 项世界资料引用（出生地、位置、秘境、驻地、规则、通道、行踪），已拒绝删除；请先解除这些引用`)
+    }
     const removed = new Set(plan.mapIds)
     const parentMapId = (db.prepare('SELECT parent_map_id FROM world_maps WHERE id = ?').get(mapId) as { parent_map_id: string | null })
       .parent_map_id
@@ -393,16 +443,26 @@ export class WorldMapRepository {
     if (!isSafeWorldMapId(node.mapId)) throw new Error('地点必须绑定一张有效地图')
     requireMap(db, node.mapId)
     assertNodeParentWithinMap(db, node.id, node.parentId || null, node.mapId)
+    if (node.markerIcon != null && !isWorldMapMarkerIcon(node.markerIcon)) {
+      throw new Error('地图标识图标无效')
+    }
+    // 旧调用方仅更新坐标等字段时保留作者已选图标；显式 null 才恢复默认。
+    const existing = db.prepare('SELECT marker_icon FROM world_map_nodes WHERE id = ?')
+      .get(node.id) as { marker_icon: string | null } | undefined
+    const markerIcon = node.markerIcon === undefined
+      ? (isWorldMapMarkerIcon(existing?.marker_icon) ? existing.marker_icon : null)
+      : node.markerIcon
 
     const sourceRefsJson = JSON.stringify(node.sourceRefs || [])
     const now = new Date().toISOString()
 
     db.prepare(`
-      INSERT INTO world_map_nodes (id, name, type, description, parent_id, map_id, x, y, source_refs, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO world_map_nodes (id, name, type, marker_icon, description, parent_id, map_id, x, y, source_refs, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         type = excluded.type,
+        marker_icon = excluded.marker_icon,
         description = excluded.description,
         parent_id = excluded.parent_id,
         map_id = excluded.map_id,
@@ -414,6 +474,7 @@ export class WorldMapRepository {
       node.id,
       node.name.trim(),
       node.type,
+      markerIcon,
       node.description || '',
       node.parentId || null,
       node.mapId,
@@ -426,13 +487,47 @@ export class WorldMapRepository {
 
     return {
       ...node,
+      markerIcon,
       updatedAt: now,
       createdAt: node.createdAt || now,
     }
   }
 
-  static deleteNode(id: string): void {
+  /** 删除地点前的影响预览：世界资料引用、同图连线与子地点。 */
+  static planNodeDelete(id: string): WorldMapNodeDeletePlan {
     const db = requireDb()
+    const node = db.prepare('SELECT id, name FROM world_map_nodes WHERE id = ?').get(id) as
+      | { id: string; name: string }
+      | undefined
+    if (!node) throw new Error('要删除的地点不存在')
+    const edgeCount = (db.prepare(
+      'SELECT COUNT(*) AS count FROM world_map_edges WHERE from_node_id = ? OR to_node_id = ?',
+    ).get(id, id) as { count: number }).count
+    const childNodeCount = (db.prepare(
+      'SELECT COUNT(*) AS count FROM world_map_nodes WHERE parent_id = ?',
+    ).get(id) as { count: number }).count
+    const references = hasWorldWorkbenchTables(db) ? collectNodeWorldReferences(db, [id]) : []
+    return {
+      nodeId: node.id,
+      nodeName: node.name,
+      edgeCount,
+      childNodeCount,
+      worldReferences: references.map(reference => ({
+        kind: reference.kind,
+        label: reference.label,
+        count: reference.ids.length,
+        ids: reference.ids,
+      })),
+    }
+  }
+
+  static deleteNode(id: string, options: { allowWorldReferenceBreak?: boolean } = {}): void {
+    const db = requireDb()
+    const plan = WorldMapRepository.planNodeDelete(id)
+    if (plan.worldReferences.length > 0 && !options.allowWorldReferenceBreak) {
+      const total = plan.worldReferences.reduce((sum, item) => sum + item.count, 0)
+      throw new Error(`「${plan.nodeName}」仍被 ${total} 项世界资料引用，已拒绝删除；请先解除这些引用`)
+    }
     const tx = db.transaction(() => {
       db.prepare(`DELETE FROM world_map_edges WHERE from_node_id = ? OR to_node_id = ?`).run(id, id)
       db.prepare(`UPDATE world_map_nodes SET parent_id = NULL WHERE parent_id = ?`).run(id)

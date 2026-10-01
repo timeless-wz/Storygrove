@@ -207,6 +207,63 @@ describe('Agent raw tool-call compatibility', () => {
     )
   })
 
+  it('keeps a full single-chapter Blueprint v2 detail within its dedicated bounded result limit', async () => {
+    const tailSentinel = 'LAST_TABOO_SENTINEL'
+    const detail = `${'x'.repeat(3500)}${tailSentinel}`
+    toolRegistry.register({
+      name: 'read_blueprint',
+      description: 'read blueprints',
+      source: 'builtin',
+      inputSchema: { type: 'object', properties: {} },
+      requiresConfirmation: false,
+      isReadOnly: true,
+      execute: async () => ({ success: true, content: detail }),
+    })
+    const sink = callbacks(true)
+    const generate = vi.fn()
+      .mockResolvedValueOnce('read_blueprint\n{"chapter_number":1,"include_detail":true}')
+      .mockResolvedValueOnce('完整细纲已读取。')
+
+    await runAgentLoop('system', [], '读取第一章完整细纲', 'model', generate, sink)
+
+    const secondRequest = generate.mock.calls[1]?.[0] as Array<{ role: string; content: string }>
+    const observation = secondRequest.at(-1)?.content ?? ''
+    expect(observation).toContain(tailSentinel)
+    expect(observation).not.toContain('内容已截断')
+    expect(sink.onToolCallComplete).toHaveBeenCalledWith(expect.objectContaining({
+      toolName: 'read_blueprint',
+      result: detail,
+    }))
+  })
+
+  it('keeps summary and other Agent tool results at the standard 3000-character cap', async () => {
+    const content = `${'x'.repeat(3500)}LIST_TAIL_SENTINEL`
+    toolRegistry.register({
+      name: 'read_blueprint',
+      description: 'read blueprints',
+      source: 'builtin',
+      inputSchema: { type: 'object', properties: {} },
+      requiresConfirmation: false,
+      isReadOnly: true,
+      execute: async () => ({ success: true, content }),
+    })
+    const sink = callbacks(true)
+    const generate = vi.fn()
+      .mockResolvedValueOnce('read_blueprint\n{}')
+      .mockResolvedValueOnce('摘要已读取。')
+
+    await runAgentLoop('system', [], '列出蓝图', 'model', generate, sink)
+
+    const secondRequest = generate.mock.calls[1]?.[0] as Array<{ role: string; content: string }>
+    const observation = secondRequest.at(-1)?.content ?? ''
+    expect(observation).not.toContain('LIST_TAIL_SENTINEL')
+    expect(observation).toContain(`内容已截断，完整内容共 ${content.length} 字符`)
+    expect(sink.onToolCallComplete).toHaveBeenCalledWith(expect.objectContaining({
+      toolName: 'read_blueprint',
+      result: expect.stringContaining('内容已截断'),
+    }))
+  })
+
   it.each([
     ['unknown tool', '<tool_call><unknown_tool>\n</unknown_tool></tool_call>'],
     ['non-empty content', '<tool_call><read_blueprint>chapter 1</read_blueprint></tool_call>'],

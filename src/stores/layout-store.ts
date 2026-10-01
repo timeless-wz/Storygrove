@@ -229,9 +229,7 @@ export const useLayoutStore = create<LayoutState>()((set) => ({
   closeExport: () => set({ exportOpen: false }),
   openImportNovel: () => set({ importNovelOpen: true }),
   closeImportNovel: () => set({ importNovelOpen: false }),
-  openChapterCreation: () => {
-    // Disabled in Codex Creative Workbench: generation popups are deactivated
-  },
+  openChapterCreation: (prefill = null) => set({ chapterCreationOpen: true, chapterCreationPrefill: prefill }),
   closeChapterCreation: () => set({ chapterCreationOpen: false, chapterCreationPrefill: null }),
   openCharacterProfile: (view = 'overview') =>
     set((s) => ({

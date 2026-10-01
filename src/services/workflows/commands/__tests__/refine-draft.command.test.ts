@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -8,6 +10,8 @@ import {
   type HumanConfirmedReviewSnapshotInput,
 } from '../../../../shared/human-confirmed-review'
 import type { ModelExecutionLeaseReceipt } from '../../../../shared/ipc-channels'
+import { computeBlueprintV2ContentHash, type ChapterBlueprintV2DetailRead } from '../../../../shared/blueprint-v2'
+import { parseChapterBlueprintMarkdown } from '../../../../shared/blueprint-v2-markdown'
 import { useEditorStore } from '../../../../stores/editor-store'
 import { useProjectStore } from '../../../../stores/project-store'
 import type { StepCallbacks, WorkflowContext } from '../../../../stores/workflow-store'
@@ -153,6 +157,7 @@ function command(
   completeWithLease: GenerationRuntimeEnvironment['completeWithLease'],
   draftContent: string,
   sourceDraft?: NonNullable<ConstructorParameters<typeof RefineDraftCommand>[0]['sourceDraft']>,
+  chapterInfoOverrides: Partial<ConstructorParameters<typeof RefineDraftCommand>[0]['chapterInfo']> = {},
 ): RefineDraftCommand {
   return new RefineDraftCommand({
     draftPath: 'vela://draft/1',
@@ -167,6 +172,7 @@ function command(
       purpose: '建立冲突',
       keyEvents: '事件',
       characters: [],
+      ...chapterInfoOverrides,
     },
   }, runtimeDependencies(completeWithLease))
 }
@@ -206,12 +212,18 @@ function successfulRevisionIpc(options: {
   reviewBaseDraftId?: number
   currentDraftContent?: string
   revisionResult?: { success: boolean; id?: number; revisionIndex?: number; errorCode?: 'SOURCE_DRAFT_CHANGED'; error?: string }
+  blueprintV2Detail?: ChapterBlueprintV2DetailRead | null
+  blueprintV2ReadError?: Error
 } = {}) {
   const reviewContent = options.reviewContent ?? DEFAULT_CONFIRMED_REVIEW_CONTENT
   const reviewId = options.reviewId ?? CONFIRMATION_REVIEW_ID
   const reviewBaseDraftId = options.reviewBaseDraftId ?? 1
   return vi.fn(async (channel: string, ...args: unknown[]) => {
     void args
+    if (channel === 'db:blueprint-v2-get') {
+      if (options.blueprintV2ReadError) throw options.blueprintV2ReadError
+      return options.blueprintV2Detail ?? null
+    }
     if (channel === 'db:draft-get-meta') {
       return { id: 1, chapterNumber: 1, version: 1, status: 'draft', source: 'write' }
     }
@@ -299,6 +311,67 @@ describe('RefineDraftCommand bounded visible completion', () => {
     expect(request).toContain(priorityBoundary)
   })
 
+  it('applies the complete v2 detailed outline during revision without duplicating v1 projection fields', async () => {
+    const source = '原稿正文。'.repeat(250)
+    const revision = '修订正文。'.repeat(250)
+    const completeWithLease = vi.fn<GenerationRuntimeEnvironment['completeWithLease']>()
+      .mockResolvedValue({ content: revision, finishReason: 'stop' })
+    const markdown = readFileSync(resolve(__dirname, '../../../../../test/fixtures/blueprint-v2/chapter-01.md'), 'utf8')
+    const { content } = parseChapterBlueprintMarkdown(markdown)
+    const detail: ChapterBlueprintV2DetailRead = {
+      ...content,
+      revision: 4,
+      contentHash: computeBlueprintV2ContentHash(content),
+    }
+    stubIpc(successfulRevisionIpc({ blueprintV2Detail: detail }))
+
+    await command(completeWithLease, source, undefined, {
+      purpose: 'V1_PURPOSE_DUPLICATION_SENTINEL',
+      keyEvents: 'V1_EVENTS_DUPLICATION_SENTINEL',
+      suspenseHook: 'V1_HOOK_DUPLICATION_SENTINEL',
+    }).execute({ step: {}, context: workflowContext(), callbacks: callbacks() })
+
+    const prompt = completeWithLease.mock.calls[0]?.[0].messages.map(message => message.content).join('\n') ?? ''
+    expect(prompt).toContain('场景一：02:14的冷汗与声学隔离席')
+    expect(prompt).toContain('场景四：开出地图的末班车')
+    expect(prompt).toContain('正文字数预算：4200 字（蓝图明确值，优先生效）。')
+    expect(prompt).toContain('严禁在第1章解释前世事故、原身死因全貌')
+    expect(prompt).not.toContain('V1_PURPOSE_DUPLICATION_SENTINEL')
+    expect(prompt).not.toContain('V1_EVENTS_DUPLICATION_SENTINEL')
+    expect(prompt).not.toContain('V1_HOOK_DUPLICATION_SENTINEL')
+  })
+
+  it('stops revision when reading v2 fails instead of silently using the v1 brief', async () => {
+    const completeWithLease = vi.fn<GenerationRuntimeEnvironment['completeWithLease']>()
+    stubIpc(successfulRevisionIpc({ blueprintV2ReadError: new Error('temporary v2 read failure') }))
+
+    await expect(command(completeWithLease, '原稿正文。'.repeat(250)).execute({
+      step: {}, context: workflowContext(), callbacks: callbacks(),
+    })).rejects.toThrow('temporary v2 read failure')
+
+    expect(completeWithLease).not.toHaveBeenCalled()
+  })
+
+  it('stops revision if the v2 detail belongs to a different chapter', async () => {
+    const completeWithLease = vi.fn<GenerationRuntimeEnvironment['completeWithLease']>()
+    const markdown = readFileSync(resolve(__dirname, '../../../../../test/fixtures/blueprint-v2/chapter-01.md'), 'utf8')
+    const { content } = parseChapterBlueprintMarkdown(markdown)
+    stubIpc(successfulRevisionIpc({
+      blueprintV2Detail: {
+        ...content,
+        chapterNumber: 2,
+        revision: 4,
+        contentHash: computeBlueprintV2ContentHash(content),
+      },
+    }))
+
+    await expect(command(completeWithLease, '原稿正文。'.repeat(250)).execute({
+      step: {}, context: workflowContext(), callbacks: callbacks(),
+    })).rejects.toThrow('当前修稿绑定第 1 章')
+
+    expect(completeWithLease).not.toHaveBeenCalled()
+  })
+
   it('uses the frozen English UI locale for visible refinement logs and the diff tab independently of Chinese writing', async () => {
     const source = 'Original chapter. '.repeat(120)
     const revision = 'Revised chapter. '.repeat(120)
@@ -347,6 +420,7 @@ describe('RefineDraftCommand bounded visible completion', () => {
       throw new Error('captured request')
     })
     stubIpc(vi.fn(async (channel: string) => {
+      if (channel === 'db:blueprint-v2-get') return null
       if (channel === 'db:draft-get-meta') {
         return { id: 1, chapterNumber: 1, version: 1, status: 'draft', source: 'write' }
       }
@@ -371,7 +445,7 @@ describe('RefineDraftCommand bounded visible completion', () => {
     const context = { ...workflowContext(), writingLanguage: 'en-US' as const }
     const commands = [
       command(completeWithLease, confirmedSource),
-      chapterReviewCommand(completeWithLease),
+      chapterReviewCommand(completeWithLease, confirmedSource),
       reviewCommand(completeWithLease, confirmedSource, { confirmedReviewContent: confirmedContent }),
     ]
     for (const target of commands) {
@@ -460,7 +534,8 @@ describe('RefineDraftCommand bounded visible completion', () => {
     })).rejects.toThrow('续写未增加新的可见正文')
 
     expect(completeWithLease).toHaveBeenCalledTimes(2)
-    expect(invoke).not.toHaveBeenCalled()
+    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel !== 'db:blueprint-v2-get'))
+      .toEqual([])
     expect(useEditorStore.getState().tabs).toEqual([])
   })
 
@@ -481,7 +556,8 @@ describe('RefineDraftCommand bounded visible completion', () => {
     })).rejects.toThrow(message)
 
     expect(completeWithLease).toHaveBeenCalledOnce()
-    expect(invoke).not.toHaveBeenCalled()
+    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel !== 'db:blueprint-v2-get'))
+      .toEqual([])
     expect(useEditorStore.getState().tabs).toEqual([])
   })
 
@@ -503,7 +579,8 @@ describe('RefineDraftCommand bounded visible completion', () => {
       callbacks: callbacks(),
     })).rejects.toThrow()
 
-    expect(invoke).not.toHaveBeenCalled()
+    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel !== 'db:blueprint-v2-get'))
+      .toEqual([])
     expect(useEditorStore.getState().tabs).toEqual([])
   })
 
@@ -523,7 +600,8 @@ describe('RefineDraftCommand bounded visible completion', () => {
     })).rejects.toThrow('已自动续写 3 次，尚未完整生成')
 
     expect(completeWithLease).toHaveBeenCalledTimes(4)
-    expect(invoke).not.toHaveBeenCalled()
+    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel !== 'db:blueprint-v2-get'))
+      .toEqual([])
   })
 
   it('persists nothing when cancellation happens after the first length result', async () => {
@@ -542,7 +620,8 @@ describe('RefineDraftCommand bounded visible completion', () => {
       callbacks: callbacks(),
     })).rejects.toThrow('工作流已取消')
 
-    expect(invoke).not.toHaveBeenCalled()
+    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel !== 'db:blueprint-v2-get'))
+      .toEqual([])
   })
 
   it('rejects a project-session switch during continuation before any revision IPC', async () => {
@@ -571,7 +650,8 @@ describe('RefineDraftCommand bounded visible completion', () => {
       callbacks: callbacks(),
     })).rejects.toThrow('当前项目已切换')
 
-    expect(invoke).not.toHaveBeenCalled()
+    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel !== 'db:blueprint-v2-get'))
+      .toEqual([])
     expect(useEditorStore.getState().tabs).toEqual([])
   })
 
@@ -581,6 +661,7 @@ describe('RefineDraftCommand bounded visible completion', () => {
     const completeWithLease = vi.fn<GenerationRuntimeEnvironment['completeWithLease']>()
       .mockResolvedValue({ content: revision, finishReason: 'stop' })
     const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'db:blueprint-v2-get') return null
       if (channel === 'db:revision-replace-pending') {
         return { success: false, errorCode: 'SOURCE_DRAFT_CHANGED', error: 'SOURCE_DRAFT_CHANGED' }
       }
@@ -605,9 +686,8 @@ describe('RefineDraftCommand bounded visible completion', () => {
       message: 'The source draft changed during AI refinement. The revision was not saved. Reopen the current draft and run AI refinement again.',
     })
 
-    expect(invoke.mock.calls).toEqual([[
-      'db:revision-replace-pending',
-      expect.objectContaining({
+    expect(invoke).toHaveBeenNthCalledWith(1, 'db:blueprint-v2-get', 1, PROJECT_PATH, PROJECT_SESSION)
+    expect(invoke).toHaveBeenNthCalledWith(2, 'db:revision-replace-pending', expect.objectContaining({
         baseDraftId: 1,
         expectedSource: {
           id: 1,
@@ -616,10 +696,7 @@ describe('RefineDraftCommand bounded visible completion', () => {
           status: 'draft',
           content: source,
         },
-      }),
-      PROJECT_PATH,
-      PROJECT_SESSION,
-    ]])
+      }), PROJECT_PATH, PROJECT_SESSION)
   })
 
   it('rejects a final stop that is materially shorter than the source before any revision IPC', async () => {
@@ -634,7 +711,8 @@ describe('RefineDraftCommand bounded visible completion', () => {
       callbacks: callbacks(),
     })).rejects.toThrow('修稿结果明显短于原稿')
 
-    expect(invoke).not.toHaveBeenCalled()
+    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel !== 'db:blueprint-v2-get'))
+      .toEqual([])
     expect(useEditorStore.getState().tabs).toEqual([])
   })
 
@@ -1063,6 +1141,125 @@ describe('RefineFromReviewCommand bounded visible completion', () => {
 })
 
 describe('ReviewChapterCommand reasoning stage', () => {
+  it('pins review evidence to the draft-bound chapter and the blueprint revision read before generation', async () => {
+    const source = '顾舟扣紧安全带，按下录音键，屏幕亮起红色计时。'
+    const markdown = readFileSync(resolve(__dirname, '../../../../../test/fixtures/blueprint-v2/chapter-01.md'), 'utf8')
+    const { content } = parseChapterBlueprintMarkdown(markdown)
+    const storyboard = content.sections.find(section => section.kind === 'canonical' && section.id === 'storyboard')
+    const firstScene = storyboard?.kind === 'canonical'
+      ? storyboard.items.find(item => item.kind === 'scene')
+      : undefined
+    expect(firstScene?.kind).toBe('scene')
+    if (firstScene?.kind !== 'scene') throw new Error('Fixture is missing its first storyboard scene')
+
+    const frozenContent = {
+      ...content,
+      chapterNumber: 2,
+      sections: content.sections.map(section => section.kind === 'canonical' && section.id === 'storyboard'
+        ? {
+            ...section,
+            items: section.items.map(item => item.kind === 'scene' && item.id === firstScene.id
+              ? { ...item, markdown: `${item.markdown}\nBOUND_BLUEPRINT_REVISION_4` }
+              : item),
+          }
+        : section),
+    }
+    const frozenDetail: ChapterBlueprintV2DetailRead = {
+      ...frozenContent,
+      revision: 4,
+      contentHash: computeBlueprintV2ContentHash(frozenContent),
+    }
+    const newerDetail: ChapterBlueprintV2DetailRead = {
+      ...frozenDetail,
+      revision: 5,
+      contentHash: 'b'.repeat(64),
+    }
+    let currentDetail = frozenDetail
+    const reportPayloads: Array<{ content: string }> = []
+    let observedPrompt = ''
+    const reviewJson = JSON.stringify({
+      summary: '已根据冻结蓝图核对场景与正文证据。',
+      items: [{
+        category: '正文证据', severity: 'pass', description: '场景动作有原文支持。',
+        quote: '顾舟扣紧安全带，按下录音键',
+      }],
+      blueprintReview: {
+        scenes: [{
+          sceneId: firstScene.id,
+          presence: 'present',
+          sequence: 'in-order',
+          causality: 'supported',
+          description: '正文包含场景动作。',
+          evidenceQuotes: ['顾舟扣紧安全带，按下录音键'],
+          searchRange: { startLine: 1, endLine: 1 },
+        }],
+        checks: [],
+        chapterHook: { status: 'uncertain', description: '待核对章末钩子。', evidenceQuotes: [], searchRange: { startLine: 1, endLine: 1 } },
+        blueprintIssues: [],
+      },
+    })
+    const completeWithLease = vi.fn<GenerationRuntimeEnvironment['completeWithLease']>(async request => {
+      currentDetail = newerDetail
+      observedPrompt = request.messages.map(message => message.content).join('\n')
+      return { content: reviewJson, finishReason: 'stop' }
+    })
+    const invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
+      if (channel === 'db:draft-get-full') {
+        return {
+          id: 1, chapterNumber: 1, blueprintChapterNumber: 2,
+          version: 1, status: 'draft', content: source,
+        }
+      }
+      if (channel === 'db:blueprint-get') {
+        expect(args[0]).toBe(2)
+        return {
+          chapterNumber: 2, title: '绑定章', role: '发展', purpose: '绑定章旧字段', keyEvents: '',
+          characters: [], suspenseHook: '', userGuidance: '', notes: '', notesUpdatedAt: '',
+        }
+      }
+      if (channel === 'db:blueprint-v2-get') {
+        expect(args[0]).toBe(2)
+        return currentDetail
+      }
+      if (channel === 'db:project-core-get' || channel === 'db:character-get-all'
+        || channel === 'db:continuity-list-before' || channel === 'db:blueprint-get-all'
+        || channel === 'db:blueprint-v2-summary-list' || channel === 'db:consistency-exemption-list') return []
+      if (channel === 'db:review-next-index') return 1
+      if (channel === 'db:review-create') {
+        reportPayloads.push(args[0] as { content: string })
+        return { success: true, id: 77, reviewIndex: 1 }
+      }
+      throw new Error(`unexpected IPC: ${channel}`)
+    })
+    stubIpc(invoke)
+
+    await chapterReviewCommand(completeWithLease, source, 1, {
+      id: 1,
+      chapterNumber: 1,
+      version: 1,
+      contentRevision: 1,
+      status: 'draft',
+    }).execute({ step: {}, context: workflowContext(), callbacks: callbacks() })
+
+    expect(observedPrompt).toContain('BOUND_BLUEPRINT_REVISION_4')
+    expect(observedPrompt).not.toContain('BOUND_BLUEPRINT_REVISION_5')
+    expect(invoke.mock.calls.filter(([channel]) => channel === 'db:blueprint-v2-get'))
+      .toEqual([['db:blueprint-v2-get', 2, PROJECT_PATH, PROJECT_SESSION]])
+    const report = JSON.parse(reportPayloads[0]!.content)
+    expect(report.blueprintEvidence).toEqual({
+      chapterNumber: 2,
+      revision: 4,
+      contentHash: frozenDetail.contentHash,
+    })
+    expect(report.blueprintReview.evidence).toEqual(report.blueprintEvidence)
+    expect(report.blueprintReview.scenes[0].evidence[0]).toMatchObject({
+      quote: '顾舟扣紧安全带，按下录音键',
+      startLine: 1,
+      endLine: 1,
+    })
+    expect(currentDetail.revision).toBe(5)
+  })
+
   it('refuses to persist a review when the frozen source changes during generation', async () => {
     const source = '待审章节正文。'.repeat(120)
     const completeWithLease = vi.fn<GenerationRuntimeEnvironment['completeWithLease']>()
@@ -1070,6 +1267,7 @@ describe('ReviewChapterCommand reasoning stage', () => {
     const invoke = vi.fn(async (channel: string) => {
       if (channel === 'db:continuity-list-before' || channel === 'db:character-get-all' || channel === 'db:blueprint-get-all') return []
       if (channel === 'db:project-core-get') return {}
+      if (channel === 'db:draft-get-full') return { id: 1, chapterNumber: 1, version: 1, status: 'draft', content: source }
       if (channel === 'db:blueprint-get') return null
       if (channel === 'db:review-create') {
         return { success: false, errorCode: 'SOURCE_DRAFT_CHANGED', error: 'SOURCE_DRAFT_CHANGED' }
@@ -1095,12 +1293,7 @@ describe('ReviewChapterCommand reasoning stage', () => {
       message: '源草稿在 AI 审稿期间已变化。审稿报告未保存，请重新打开当前草稿后再次执行 AI 审稿。',
     })
 
-    expect(invoke.mock.calls.filter(([channel]) => (
-      channel === 'db:draft-get-full'
-      || channel === 'db:draft-get-meta'
-      || channel === 'db:review-next-index'
-      || channel === 'db:review-create'
-    ))).toEqual([[
+    expect(invoke.mock.calls.filter(([channel]) => channel === 'db:review-create')).toEqual([[
       'db:review-create',
       expect.objectContaining({
         baseDraftId: 1,
@@ -1132,6 +1325,7 @@ describe('ReviewChapterCommand reasoning stage', () => {
       if (channel === 'kb:search' || channel === 'db:character-get-all') return []
       if (channel === 'db:project-core-get') return {}
       if (channel === 'db:draft-get-meta') return { id: 1, chapterNumber: 1, version: 1, status: 'draft', source: 'write' }
+      if (channel === 'db:draft-get-full') return { id: 1, chapterNumber: 1, version: 1, status: 'draft', content: sourceDraft }
       if (channel === 'db:review-next-index') return 1
       if (channel === 'db:review-create') return { success: true, id: 77 }
       if (channel === 'db:blueprint-get') return null
@@ -1202,9 +1396,15 @@ describe('ReviewChapterCommand reasoning stage', () => {
         notes: '',
         notesUpdatedAt: '',
       }]
+      if (channel === 'db:blueprint-list-summary') return [{
+        chapterNumber: 3, title: '潮门之后', purpose: '揭示新目标',
+        keyEvents: 'FUTURE_BLUEPRINT_PLAN：顾舟将在下一章调查潮门。',
+      }]
+      if (channel === 'db:blueprint-v2-summary-list') return []
       if (channel === 'db:character-get-all') return []
       if (channel === 'db:project-core-get') return {}
-      if (channel === 'db:draft-get-meta') return { id: 2, chapterNumber: 2, version: 1, status: 'draft', source: 'write' }
+      if (channel === 'db:draft-get-meta') return { id: 2, chapterNumber: 2, blueprintChapterNumber: 2, version: 1, status: 'draft', source: 'write' }
+      if (channel === 'db:draft-get-full') return { id: 2, chapterNumber: 2, blueprintChapterNumber: 2, version: 1, status: 'draft', content: '顾舟检查码头的潮汐钟。' }
       if (channel === 'db:review-next-index') return 1
       if (channel === 'db:review-create') return { success: true, id: 77 }
       if (channel === 'db:blueprint-get') return null
@@ -1244,12 +1444,14 @@ describe('ReviewChapterCommand reasoning stage', () => {
     stubIpc(vi.fn(async (channel: string, ...args: unknown[]) => {
       if (channel === 'kb:search' || channel === 'db:character-get-all') return []
       if (channel === 'db:project-core-get') return {}
-      if (channel === 'db:draft-get-meta') return { id: 1, chapterNumber: 2, version: 1, status: 'draft', source: 'write' }
+      if (channel === 'db:draft-get-meta') return { id: 1, chapterNumber: 1, blueprintChapterNumber: 2, version: 1, status: 'draft', source: 'write' }
+      if (channel === 'db:draft-get-full') return { id: 1, chapterNumber: 1, blueprintChapterNumber: 2, version: 1, status: 'draft', content: '待审章节正文。' }
       if (channel === 'db:review-next-index') return 1
       if (channel === 'db:blueprint-get') return {
         chapterNumber: 2, title: '重逢', role: '发展', purpose: '顾舟归来', keyEvents: '顾舟敲门',
         characters: ['顾舟'], suspenseHook: '他为何归来', userGuidance: '', notes: '', notesUpdatedAt: '',
       }
+      if (channel === 'db:blueprint-v2-get') return null
       if (channel === 'db:consistency-exemption-list') return []
       if (channel === 'db:continuity-list-before') return [{
         draftId: 9, chapterNumber: 1, chapterTitle: '终局', chapterNotes: '顾舟死亡', sourceStatus: 'current',
@@ -1282,12 +1484,14 @@ describe('ReviewChapterCommand reasoning stage', () => {
     stubIpc(vi.fn(async (channel: string, ...args: unknown[]) => {
       if (channel === 'kb:search' || channel === 'db:character-get-all') return []
       if (channel === 'db:project-core-get') return {}
-      if (channel === 'db:draft-get-meta') return { id: 1, chapterNumber: 2, version: 1, status: 'draft', source: 'write' }
+      if (channel === 'db:draft-get-meta') return { id: 1, chapterNumber: 1, blueprintChapterNumber: 2, version: 1, status: 'draft', source: 'write' }
+      if (channel === 'db:draft-get-full') return { id: 1, chapterNumber: 1, blueprintChapterNumber: 2, version: 1, status: 'draft', content: '待审章节正文。' }
       if (channel === 'db:review-next-index') return 1
       if (channel === 'db:blueprint-get') return {
         chapterNumber: 2, title: '重逢', role: '发展', purpose: '顾舟归来', keyEvents: '顾舟敲门',
         characters: ['顾舟'], suspenseHook: '他为何归来', userGuidance: '', notes: '', notesUpdatedAt: '',
       }
+      if (channel === 'db:blueprint-v2-get') return null
       if (channel === 'db:consistency-exemption-list') return []
       if (channel === 'db:continuity-list-before') throw new Error('projection unavailable')
       if (channel === 'db:review-create') {
@@ -1302,14 +1506,16 @@ describe('ReviewChapterCommand reasoning stage', () => {
       step: {}, context: workflowContext(), callbacks: stepCallbacks,
     })).resolves.toContain('AI review')
 
-    expect(JSON.parse(createParams[0]!.content)).toMatchObject({
+    const savedReport = JSON.parse(createParams[0]!.content)
+    expect(savedReport).toMatchObject({
       summary: '审稿包含待核实项目，不能视为全部通过。',
       goalReview: { coverage: 'unknown' },
-      items: [
-        { category: 'continuity', severity: 'pass', description: 'No conflict found.' },
-        { severity: 'unknown' },
-      ],
     })
+    expect(savedReport.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ category: 'continuity', severity: 'pass', description: 'No conflict found.' }),
+      expect.objectContaining({ category: '本章目标', goalId: 'ch2:keyEvents:1', severity: 'unknown' }),
+      expect.objectContaining({ category: '本章目标', severity: 'unknown' }),
+    ]))
     expect(stepCallbacks.log).toHaveBeenCalledWith('一致性证据暂时不可用；AI 审稿仍会继续。')
   })
 
@@ -1322,6 +1528,7 @@ describe('ReviewChapterCommand reasoning stage', () => {
       if (channel === 'db:draft-get-meta') {
         return { id: 1, chapterNumber: 1, version: 1, status: 'draft', source: 'write' }
       }
+      if (channel === 'db:draft-get-full') return { id: 1, chapterNumber: 1, version: 1, status: 'draft', content: '待审章节正文。' }
       if (channel === 'db:review-next-index') return 1
       if (channel === 'db:review-create') return { success: true, id: 77 }
       if (channel === 'db:blueprint-get') return null
@@ -1353,6 +1560,7 @@ describe('ReviewChapterCommand reasoning stage', () => {
       if (channel === 'db:draft-get-meta') {
         return { id: 1, chapterNumber: 1, version: 1, status: 'draft', source: 'write' }
       }
+      if (channel === 'db:draft-get-full') return { id: 1, chapterNumber: 1, version: 1, status: 'draft', content: '待审章节正文。' }
       if (channel === 'db:review-next-index') return 1
       if (channel === 'db:review-create') return { success: true }
       if (channel === 'db:blueprint-get') return null

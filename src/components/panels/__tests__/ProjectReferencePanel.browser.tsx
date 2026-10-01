@@ -36,6 +36,25 @@ const originalWorldMapState = useWorldMapStore.getState()
 let root: Root
 let container: HTMLDivElement
 
+function blueprintV2Detail(chapterNumber: number) {
+  return {
+    schemaVersion: 2,
+    chapterNumber,
+    chapterTitle: `第${chapterNumber}章｜逆境崛起`,
+    docPreamble: '',
+    sections: [{
+      kind: 'canonical', id: 'storyboard', title: '【逐场分镜拆解】', level: 4,
+      preamble: '',
+      items: [{
+        kind: 'scene', id: 'bps-ref-1', level: 5, title: '场景一：清晨离村',
+        markdown: '完整分镜正文：林默带着残印走出青石村。', presence: 'on-canvas',
+      }],
+      postamble: '',
+    }],
+    origin: 'manual', revision: 1, contentHash: 'reference-test-hash',
+  }
+}
+
 function findButton(label: string) {
   return [...container.querySelectorAll('button')].find(button => button.textContent?.includes(label))
 }
@@ -94,6 +113,7 @@ beforeEach(async () => {
   })
 
   const invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
+    if (channel === 'db:draft-get-meta') return { blueprintChapterNumber: args[0] === 1 ? 1 : undefined }
     if (channel === 'db:blueprint-get') {
       const chapterNumber = args[0]
       return {
@@ -105,6 +125,7 @@ beforeEach(async () => {
         characters: ['林默'],
       }
     }
+    if (channel === 'db:blueprint-v2-get') return blueprintV2Detail(Number(args[0]))
     if (channel === 'db:review-get-latest') {
       return {
         id: 99,
@@ -285,6 +306,8 @@ describe('ProjectReferencePanel writer desktop workbench', () => {
     expect(container.textContent).toContain('林默偶得青石残印，离开青石村前往玄剑宗')
     expect(container.textContent).toContain('创作指导与细纲 (user_guidance)')
     expect(container.textContent).toContain('着重刻画青石村的环境与清晨出发的气氛')
+    expect(container.textContent).toContain('阅读完整 v2 细纲（1 个分区）')
+    expect(container.textContent).toContain('完整分镜正文：林默带着残印走出青石村。')
     expect(container.textContent).toContain('关联地图节点')
     expect(container.textContent).toContain('青石村')
     expect(container.textContent).toContain('一致性审核发现')

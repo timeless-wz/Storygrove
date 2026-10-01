@@ -900,6 +900,102 @@
   .literary-home-sidebar-more { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; color: var(--color-text-secondary); font-size: 12px; }
   .literary-home-sidebar-bottom { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--color-border); }
   .literary-home-sidebar button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+  /* One frost pass covers title bar, sidebar, and the exposed corner wedges.
+     Independent backdrop filters leave bright compositor seams at their edges. */
+  .app-skin-root[data-literary-theme='true'] {
+    --writer-content-corner: var(--literary-home-radius);
+    --writer-content-corner-small: 2px;
+    --writer-sidebar-width: 260px;
+  }
+
+  .app-skin-root[data-literary-theme='true'] > .writer-chrome-frost {
+    position: absolute;
+    inset: 0;
+    z-index: 0 !important;
+    pointer-events: none;
+    background: var(--literary-chrome-frost-surface, var(--color-sidebar));
+    backdrop-filter: var(--surface-blur, blur(16px));
+    -webkit-backdrop-filter: var(--surface-blur, blur(16px));
+    -webkit-mask-image:
+      linear-gradient(#000 0 0), linear-gradient(#000 0 0),
+      radial-gradient(circle at bottom right, transparent calc(var(--writer-content-corner) - .5px), #000 calc(var(--writer-content-corner) + .5px)),
+      radial-gradient(circle at top right, transparent calc(var(--writer-content-corner) - .5px), #000 calc(var(--writer-content-corner) + .5px)),
+      radial-gradient(circle at bottom left, transparent calc(var(--writer-content-corner) - .5px), #000 calc(var(--writer-content-corner) + .5px)),
+      radial-gradient(circle at top left, transparent calc(var(--writer-content-corner-small) - .5px), #000 calc(var(--writer-content-corner-small) + .5px));
+    mask-image:
+      linear-gradient(#000 0 0), linear-gradient(#000 0 0),
+      radial-gradient(circle at bottom right, transparent calc(var(--writer-content-corner) - .5px), #000 calc(var(--writer-content-corner) + .5px)),
+      radial-gradient(circle at top right, transparent calc(var(--writer-content-corner) - .5px), #000 calc(var(--writer-content-corner) + .5px)),
+      radial-gradient(circle at bottom left, transparent calc(var(--writer-content-corner) - .5px), #000 calc(var(--writer-content-corner) + .5px)),
+      radial-gradient(circle at top left, transparent calc(var(--writer-content-corner-small) - .5px), #000 calc(var(--writer-content-corner-small) + .5px));
+    /* The sidebar mask runs from the top, overlapping the titlebar mask so no pixel seam can open between them. */
+    -webkit-mask-position: 0 0, 0 0, calc(var(--writer-sidebar-width) - 1px) var(--height-titlebar), calc(var(--writer-sidebar-width) - 1px) 100%, 100% var(--height-titlebar), 100% 100%;
+    mask-position: 0 0, 0 0, calc(var(--writer-sidebar-width) - 1px) var(--height-titlebar), calc(var(--writer-sidebar-width) - 1px) 100%, 100% var(--height-titlebar), 100% 100%;
+    -webkit-mask-size:
+      100% var(--height-titlebar), var(--writer-sidebar-width) 100%,
+      calc(var(--writer-content-corner) + 1px) var(--writer-content-corner), calc(var(--writer-content-corner) + 1px) var(--writer-content-corner),
+      var(--writer-content-corner) var(--writer-content-corner), var(--writer-content-corner-small) var(--writer-content-corner-small);
+    mask-size:
+      100% var(--height-titlebar), var(--writer-sidebar-width) 100%,
+      calc(var(--writer-content-corner) + 1px) var(--writer-content-corner), calc(var(--writer-content-corner) + 1px) var(--writer-content-corner),
+      var(--writer-content-corner) var(--writer-content-corner), var(--writer-content-corner-small) var(--writer-content-corner-small);
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+  }
+
+  .app-skin-root[data-literary-theme='true']:has(> .writer-chrome-frost) :is(.writer-topbar, .literary-sidebar, .literary-sidebar .writer-project-tree) {
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  .app-skin-root[data-literary-theme='true']:has(> .writer-chrome-frost) .literary-sidebar {
+    border-right: 0 !important;
+  }
+
+  /* Every view of an open project shares one clipped outer surface. */
+  .writer-project-editor-panel {
+    border-radius: var(--literary-home-radius);
+    overflow: hidden !important;
+  }
+
+  .writer-sidebar-resize-handle[data-separator] {
+    width: 1px !important;
+    position: relative;
+    z-index: 2;
+    background: transparent !important;
+    cursor: col-resize;
+  }
+
+  .writer-sidebar-resize-handle[data-separator]::before {
+    content: '';
+    position: absolute;
+    inset: 0 -4px;
+  }
+
+  .writer-sidebar-resize-handle[data-separator]:hover,
+  .writer-sidebar-resize-handle[data-separator][data-separator='dragging'] {
+    background: transparent !important;
+  }
+
+  .writer-sidebar-resize-handle[data-separator]:focus-visible {
+    outline: none;
+  }
+
+  .writer-sidebar-resize-handle[data-separator]:focus-visible::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 3px;
+    height: 22px;
+    border-radius: 3px;
+    background: var(--color-text-muted);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+  }
+
   @container (max-width: 900px) {
     .literary-hero-engines { grid-template-columns: 1fr; gap: 10px; }
     .literary-continue-card { clip-path: none; border-radius: var(--literary-home-radius); padding-right: 36px; }

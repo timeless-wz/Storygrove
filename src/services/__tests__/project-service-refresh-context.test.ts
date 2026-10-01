@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('../ipc-client', () => ({
-  ipc: { invoke: mocks.invoke },
+  ipc: { invoke: mocks.invoke, on: vi.fn(() => vi.fn()) },
 }))
 
 const projectAPath = 'C:\\novels\\A'

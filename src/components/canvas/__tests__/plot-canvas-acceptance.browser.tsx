@@ -116,11 +116,12 @@ beforeEach(() => {
       }
       case 'llm:generate':
         return { success: true, content: aiReply, finishReason: 'stop' }
-      case 'db:blueprint-get-all':
+      case 'db:blueprint-list-summary':
         return [{
-          chapterNumber: 2, title: '验牌', role: '发展', purpose: '', keyEvents: '',
-          characters: [], suspenseHook: '', userGuidance: '', notes: '', notesUpdatedAt: '',
+          chapterNumber: 2, title: '验牌', purpose: '', keyEvents: '',
         }]
+      case 'db:blueprint-v2-summary-list':
+        return []
       case 'db:draft-list-all':
         return [{ id: 7, chapterNumber: 2, version: 1, status: 'finalized', source: 'write', contentId: 1, wordCount: 800, createdAt: '', updatedAt: '' }]
       case 'db:narrative-thread-list':

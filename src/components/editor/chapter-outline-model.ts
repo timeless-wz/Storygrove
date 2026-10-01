@@ -1,9 +1,9 @@
-import type { BlueprintData, BlueprintVolumeData } from '../../../electron/repositories/blueprint-repository'
+import type { BlueprintListSummary, BlueprintVolumeData } from '../../../electron/repositories/blueprint-repository'
 import type { DraftMeta } from '../../../electron/repositories/draft-repository'
 
 export interface OutlineData {
   volumes: BlueprintVolumeData[]
-  blueprints: BlueprintData[]
+  blueprints: BlueprintListSummary[]
   drafts: DraftMeta[]
 }
 

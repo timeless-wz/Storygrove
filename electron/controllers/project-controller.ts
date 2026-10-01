@@ -470,6 +470,9 @@ export function registerProjectController() {
         )
         const resolvedProjectPath = trustedProject.rootPath
         initProjectDatabase(resolvedProjectPath)
+        // 老项目和最小 manifest 项目可能尚无可选模板目录。
+        // 仅在项目身份验证和数据库初始化成功后补齐，避免写稿读取模板时 ENOENT。
+        fs.mkdirSync(path.join(resolvedProjectPath, DIR_PROMPTS), { recursive: true })
 
         // 从数据库读取配置
         const coreData = ProjectCoreRepository.get()

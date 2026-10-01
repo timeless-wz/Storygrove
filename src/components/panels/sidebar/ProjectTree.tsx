@@ -16,6 +16,7 @@ import { useDraftStore } from '../../../stores/draft-store'
 import { useEditorStore } from '../../../stores/editor-store'
 import { useLayoutStore } from '../../../stores/layout-store'
 import { useWorldMapStore } from '../../../stores/world-map-store'
+import { useWorldWorkbenchStore } from '../../../stores/world-workbench-store'
 import { ipc } from '../../../services/ipc-client'
 import { Button } from '../../ui/Button'
 import { IconTooltip } from '../../ui/Tooltip'
@@ -72,6 +73,7 @@ export default function ProjectTree() {
   const [backupBusy, setBackupBusy] = useState(false)
   const refreshRequestGate = useRef(new LatestRequestGate())
   const mapNodes = useWorldMapStore(s => s.nodes)
+  const worldCount = useWorldWorkbenchStore(s => s.data.worlds.length)
   const setSidebarView = useLayoutStore(s => s.setSidebarView)
   const projectTreeGroupOpen = useLayoutStore(s => s.projectTreeGroupOpen)
   const setProjectTreeGroupOpen = useLayoutStore(s => s.setProjectTreeGroupOpen)
@@ -98,6 +100,7 @@ export default function ProjectTree() {
         checkArchStatus(projectSession),
         getBlueprintCount(projectSession),
         useWorldMapStore.getState().loadAll(projectPath),
+        useWorldWorkbenchStore.getState().loadAll(projectPath),
       ])
       if (
         !refreshRequestGate.current.isLatest(requestId)
@@ -250,6 +253,7 @@ export default function ProjectTree() {
 
   const openOverview = () => openBuiltinEditor('project-overview', text('项目总览', 'Project overview'), 'overview')
   const openWorldMap = () => openBuiltinEditor('world-map-editor', text('多地图地图册', 'Map atlas'), 'world-map')
+  const openWorldWorkbench = () => openBuiltinEditor('world-workbench', text('世界', 'Worlds'), 'world')
   const openStoryTimeline = () => openBuiltinEditor('story-timeline-editor', text('故事时间线', 'Story timeline'), 'story-timeline')
   const openForeshadowing = () => openBuiltinEditor('foreshadowing-manager', text('伏笔管理', 'Foreshadowing'), 'foreshadowing')
   const openConfigEditor = () => useEditorStore.getState().openFile({
@@ -257,6 +261,10 @@ export default function ProjectTree() {
     name: text('创作参数', 'Creative parameters'),
     type: 'config',
     projectKey: currentProject.path,
+  })
+  const openCultivationEditor = () => useEditorStore.getState().openFile({
+    id: 'cultivation-settings', name: text('修炼等级设置', 'Cultivation settings'),
+    type: 'cultivation', projectKey: currentProject.path,
   })
 
   const handleBackup = async () => {
@@ -432,6 +440,17 @@ export default function ProjectTree() {
             onClick={openWorldMap}
           />
         </SidebarMenuItem>
+        <SidebarMenuItem>
+          <LeafItem
+            iconName="globe-2"
+            label={text('世界', 'Worlds')}
+            desc={text('多世界资料：势力、秘境、通道、规则、历史事件与人物行踪', 'Multi-world records: factions, relics, portals, rules, history, and trails')}
+            badge={worldCount > 0 ? text(`${worldCount} 个世界`, `${worldCount} worlds`) : text('待创建', 'Empty')}
+            badgeColor={worldCount > 0 ? 'var(--color-accent)' : undefined}
+            badgeDone={worldCount > 0}
+            onClick={openWorldWorkbench}
+          />
+        </SidebarMenuItem>
       </ProjectTreeCollapsibleGroup>
 
       {/* 2. 正文创作：紧跟创作规划，让写正文的入口在项目树上半部分就能看到 */}
@@ -486,6 +505,9 @@ export default function ProjectTree() {
               },
             ], e)}
           />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <LeafItem iconName="settings" label={text('修炼等级设置', 'Cultivation settings')} desc={text('项目境界体系、等级顺序与角色绑定', 'Project realms, level order and character bindings')} onClick={openCultivationEditor} />
         </SidebarMenuItem>
         <SidebarMenuItem>
           <WorldBuildingGroup archStatus={archStatus} archDone={archDone} onCleared={refreshAll} />

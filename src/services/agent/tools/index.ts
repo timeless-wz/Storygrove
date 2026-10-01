@@ -19,6 +19,7 @@ import { openEditorTool } from './open-editor.tool'
 import { startWorkflowTool } from './start-workflow.tool'
 import { proposeNovelConfigTool } from './propose-novel-config.tool'
 import { proposeChapterBlueprintTool } from './propose-chapter-blueprint.tool'
+import { importChapterBlueprintV2Tool } from './import-chapter-blueprint-v2.tool'
 import { inspectWritingSkillTool } from './inspect-writing-skill.tool'
 import { installWritingSkillTool } from './install-writing-skill.tool'
 import { bindWritingSkillTool } from './bind-writing-skill.tool'
@@ -41,6 +42,7 @@ export const builtinTools = [
   startWorkflowTool,
   proposeNovelConfigTool,
   proposeChapterBlueprintTool,
+  importChapterBlueprintV2Tool,
   installWritingSkillTool,
   bindWritingSkillTool,
 ]

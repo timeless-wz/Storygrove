@@ -1,5 +1,7 @@
 import { ipcRenderer, contextBridge, webFrame } from 'electron'
 
+const CULTIVATION_INVOKE_CHANNELS = new Set(['db:cultivation-read', 'db:cultivation-save'])
+
 /**
  * Vela Preload Script — 安全地暴露 IPC 通信能力到渲染进程
  *
@@ -9,6 +11,9 @@ contextBridge.exposeInMainWorld('velaAPI', {
   // ===== 双向请求/响应（invoke/handle） =====
   /** 调用主进程并等待结果 */
   invoke: (channel: string, ...args: unknown[]) => {
+    if (channel.startsWith('db:cultivation-') && !CULTIVATION_INVOKE_CHANNELS.has(channel)) {
+      return Promise.reject(new Error('Unknown cultivation IPC channel'))
+    }
     return ipcRenderer.invoke(channel, ...args)
   },
 

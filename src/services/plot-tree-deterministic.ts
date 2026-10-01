@@ -10,29 +10,10 @@ export function extractBlueprintOutlineSummary(bp: {
   title?: string
   purpose?: string
   keyEvents?: string
-  userGuidance?: string
 }): string {
-  if (bp.userGuidance && typeof bp.userGuidance === 'string') {
-    const lines = bp.userGuidance.split('\n').map(l => l.trim()).filter(Boolean)
-    const genericHeadings = new Set([
-      '大纲', '本章大纲', '核心大纲', '剧情大纲', '大纲摘要', '大纲指引', '大纲核心',
-      '摘要', '本章摘要', '核心摘要', '剧情规划', '章节规划', '写作指引', '提示',
-    ])
-    for (const line of lines) {
-      let clean = line.replace(/^[#*\-•\d.、\s]+/, '').replace(/^【(.*?)】$/, '$1').trim()
-      if (
-        genericHeadings.has(clean) ||
-        /^(?:本章|核心|剧情|章节|写作)?(?:大纲|摘要|规划|指引|提示)(?:核心|指引|摘要|规划)?[：:]?$/.test(clean)
-      ) {
-        continue
-      }
-      clean = clean.replace(/^(?:本章)?(?:核心)?(?:剧情)?(?:大纲|摘要|规划|指引|提示)[：:]\s*/, '').trim()
-      if (clean.length >= 2) {
-        return clean
-      }
-    }
-  }
-  return bp.purpose?.trim() || bp.keyEvents?.trim() || ''
+  // Cross-chapter plot summaries consume only the v1 projection. Never pull
+  // author guidance or chapter-canvas scene lifecycle into the plot canvas.
+  return (bp.purpose?.trim() || bp.keyEvents?.trim() || '').slice(0, 500)
 }
 
 interface VolumeInfo {
@@ -79,7 +60,6 @@ interface ChapterVolumeSource {
   title?: string
   purpose?: string
   keyEvents?: string
-  userGuidance?: string
   volumeNumber?: number
   volumeTitle?: string
   volume?: number | string
@@ -117,18 +97,6 @@ function detectChapterVolume(
     }
     if (bp.title && typeof bp.title === 'string') {
       const match = bp.title.match(/(?:第([0-9]+|[一二三四五六七八九十]+)卷|卷([0-9]+|[一二三四五六七八九十]+))([^\n:：]*)/)
-      if (match) {
-        const rawNum = match[1] || match[2]
-        const num = parseVolumeNumber(rawNum)
-        const suffix = (match[3] || '').trim()
-        return {
-          volumeNumber: num,
-          volumeTitle: suffix ? `第${rawNum}卷 ${suffix}` : `第${rawNum}卷`,
-        }
-      }
-    }
-    if (bp.userGuidance && typeof bp.userGuidance === 'string') {
-      const match = bp.userGuidance.match(/(?:【第([0-9]+|[一二三四五六七八九十]+)卷】|第([0-9]+|[一二三四五六七八九十]+)卷\s*[:：])([^\n】]*)/)
       if (match) {
         const rawNum = match[1] || match[2]
         const num = parseVolumeNumber(rawNum)

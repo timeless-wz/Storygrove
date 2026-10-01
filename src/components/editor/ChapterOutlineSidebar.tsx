@@ -36,7 +36,7 @@ export default function ChapterOutlineSidebar({ tab }: { tab: EditorTab }) {
     try {
       const [volumes, blueprints, drafts] = await Promise.all([
         ipc.invokeWithProjectSession(session, 'db:blueprint-volume-list', session.projectPath),
-        ipc.invokeWithProjectSession(session, 'db:blueprint-get-all', session.projectPath),
+        ipc.invokeWithProjectSession(session, 'db:blueprint-list-summary', session.projectPath),
         ipc.invokeWithProjectSession(session, 'db:draft-list-all', session.projectPath),
       ])
       if (!isProjectSessionCurrent(session)) return

@@ -6,6 +6,7 @@ import type {
   StoryTimelineSnapshot,
 } from '../../src/shared/story-timeline'
 import { DEFAULT_TIMELINE_SETTINGS, STORY_TIMELINE_MAIN_BRANCH_ID } from '../../src/shared/story-timeline'
+import { tableExists } from '../services/world-workbench-schema'
 
 function requireDb(): NonNullable<ReturnType<typeof getProjectDb>> {
   const db = getProjectDb()
@@ -64,6 +65,9 @@ function mapEvent(row: {
   character_names: string
   location_node_ids: string
   status: StoryTimelineEvent['status']
+  is_historical?: number | null
+  outcome?: string | null
+  aftermath?: string | null
   created_at: string
   updated_at: string
 }): StoryTimelineEvent {
@@ -81,6 +85,9 @@ function mapEvent(row: {
     characterNames: parseStringList(row.character_names),
     locationNodeIds: parseStringList(row.location_node_ids),
     status: row.status,
+    isHistorical: Boolean(row.is_historical),
+    outcome: row.outcome ?? '',
+    aftermath: row.aftermath ?? '',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -130,7 +137,8 @@ export class StoryTimelineRepository {
 
     const rows = db.prepare(`
       SELECT id, branch_id, parent_event_id, title, time_label, sort_order, precision, range_end_label, description,
-             chapter_numbers, character_names, location_node_ids, status, created_at, updated_at
+             chapter_numbers, character_names, location_node_ids, status,
+             is_historical, outcome, aftermath, created_at, updated_at
       FROM story_timeline_events
       ORDER BY sort_order ASC, created_at ASC
     `).all() as Parameters<typeof mapEvent>[0][]
@@ -297,8 +305,9 @@ export class StoryTimelineRepository {
     db.prepare(`
       INSERT INTO story_timeline_events (
         id, branch_id, parent_event_id, title, time_label, sort_order, precision, range_end_label, description,
-        chapter_numbers, character_names, location_node_ids, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        chapter_numbers, character_names, location_node_ids, status,
+        is_historical, outcome, aftermath, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         branch_id = excluded.branch_id,
         parent_event_id = excluded.parent_event_id,
@@ -312,6 +321,9 @@ export class StoryTimelineRepository {
         character_names = excluded.character_names,
         location_node_ids = excluded.location_node_ids,
         status = excluded.status,
+        is_historical = excluded.is_historical,
+        outcome = excluded.outcome,
+        aftermath = excluded.aftermath,
         updated_at = excluded.updated_at
     `).run(
       event.id,
@@ -327,6 +339,9 @@ export class StoryTimelineRepository {
       JSON.stringify(characterNames),
       JSON.stringify(locationNodeIds),
       event.status,
+      event.isHistorical ? 1 : 0,
+      event.outcome?.trim() || '',
+      event.aftermath?.trim() || '',
       event.createdAt || now,
       now,
     )
@@ -341,6 +356,9 @@ export class StoryTimelineRepository {
       chapterNumbers,
       characterNames,
       locationNodeIds,
+      isHistorical: Boolean(event.isHistorical),
+      outcome: event.outcome?.trim() || '',
+      aftermath: event.aftermath?.trim() || '',
       createdAt: event.createdAt || now,
       updatedAt: now,
     }
@@ -359,6 +377,11 @@ export class StoryTimelineRepository {
         StoryTimelineRepository.deleteBranch(branch.id)
       }
 
+      // 世界资料引用必须一起处理，绝不留下指向已删除事件的隐藏有效引用。
+      // 关联的实体本身（势力/秘境/通道/人物/地点）一律保留，只解除关系。
+      if (tableExists(db, 'world_trails')) {
+        db.prepare('UPDATE world_trails SET event_id = NULL, updated_at = ? WHERE event_id = ?').run(new Date().toISOString(), id)
+      }
       db.prepare('DELETE FROM story_timeline_events WHERE id = ?').run(id)
     })
     tx()

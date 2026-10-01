@@ -4,6 +4,7 @@ import type BetterSqlite3 from 'better-sqlite3'
 
 import { getProjectDb } from '../../database'
 import { BlueprintRepository, type BlueprintData } from '../blueprint-repository'
+import { BlueprintDetailRepository } from '../blueprint-detail-repository'
 import {
   CharacterRepository,
   type CharacterData,
@@ -134,6 +135,36 @@ describe('CharacterRepository transactional rename', () => {
       keyEvents: '旧名做出决定',
       notes: '旧名的章节备注',
     })
+  })
+
+  it('marks a v2 outline for review when a renamed name occurs in Markdown without changing the text', () => {
+    CharacterRepository.upsert(character('旧名'))
+    BlueprintRepository.upsert(blueprint(['旧名']))
+    db.exec(`
+      CREATE TABLE blueprint_details (
+        chapter_number INTEGER PRIMARY KEY,
+        schema_version INTEGER NOT NULL DEFAULT 2,
+        detail_json TEXT NOT NULL,
+        raw_markdown TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        content_hash TEXT NOT NULL,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+      INSERT INTO blueprint_details
+        (chapter_number, detail_json, raw_markdown, revision, content_hash)
+      VALUES (1, '{"schemaVersion":2,"chapterNumber":1,"chapterTitle":"","docPreamble":"","sections":[],"origin":"import","revision":1,"contentHash":"hash"}', '## 逐场分镜拆解' || char(10) || '旧名抬头看向窗外。', 1, 'hash');
+    `)
+    const originalMarkdown = (db.prepare('SELECT raw_markdown FROM blueprint_details WHERE chapter_number = 1').get() as { raw_markdown: string }).raw_markdown
+
+    CharacterRepository.saveAll([character('新名')], [{ originalName: '旧名', newName: '新名' }])
+
+    expect((db.prepare('SELECT raw_markdown FROM blueprint_details WHERE chapter_number = 1').get() as { raw_markdown: string }).raw_markdown)
+      .toBe(originalMarkdown)
+    expect(BlueprintDetailRepository.get(1)?.reviewNotices).toEqual([
+      expect.objectContaining({ oldName: '旧名', newName: '新名' }),
+    ])
+    expect(BlueprintRepository.getByChapter(1)?.characters).toEqual(['新名'])
   })
 
   it('rolls back the whole transaction when the target name conflicts', () => {

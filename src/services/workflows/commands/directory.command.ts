@@ -13,9 +13,10 @@ import {
   type StructuredBatchContract,
 } from '../structured-batch-executor'
 import {
+  DirectoryBlueprintSummary,
   DirectoryWorkflowParams,
   ChapterBlueprint,
-  commitDirectoryBlueprintRange,
+  commitDirectoryBlueprintsWithV2Guard,
   parseTextBlueprintsStrict,
   type DirectoryWorkflowProjectSnapshot,
 } from '../directory-workflow'
@@ -238,7 +239,7 @@ function decodeGeneratedBlueprints(
 function buildCompactBlueprintTask(input: {
   chapterNumber: number
   architecture: string
-  previous: readonly ChapterBlueprint[]
+  previous: readonly (DirectoryBlueprintSummary | ChapterBlueprint)[]
   totalChapters: number
   wordsPerChapter: number
   genre: string
@@ -258,7 +259,7 @@ function buildCompactBlueprintTask(input: {
       chapterNumber: chapter.chapterNumber,
       title: boundedFactText(chapter.title, 240),
       keyEvents: boundedFactText(chapter.keyEvents, 1_200),
-      suspenseHook: boundedFactText(chapter.suspenseHook, 480),
+      suspenseHook: boundedFactText('suspenseHook' in chapter ? chapter.suspenseHook : '', 480),
     })),
     globalGuidance: input.globalGuidance,
     pacingGuidance: input.pacingGuidance,
@@ -349,7 +350,7 @@ export class GenerateDirectoryCommand extends BaseWorkflowCommand<ChapterBluepri
     const projectSession = requireWorkflowProjectSession(context)
     const writingLanguage = workflowWritingLanguage(context)
     const architecture = context.data.architecture as string
-    const existingBlueprints = (context.data.existingBlueprints || []) as ChapterBlueprint[]
+    const existingBlueprints = (context.data.existingBlueprints || []) as DirectoryBlueprintSummary[]
     const { expectedProjectPath, novelConfig } = this.projectSnapshot
     const modelFacts = localizeNovelConfigFacts(novelConfig, writingLanguage)
     const totalChapters = novelConfig.totalChapters
@@ -539,7 +540,9 @@ export class GenerateDirectoryCommand extends BaseWorkflowCommand<ChapterBluepri
 
       this.assertNotCancelled(context)
       const generatedBlueprints = [...batchResult.items]
-      const commitReceipt = await commitDirectoryBlueprintRange(
+      // v2 覆盖守卫（契约 §7.4）：已有 v2 完整细纲的章一律跳过并明示，
+      // 批量简纲生成绝不覆盖人工/导入细纲（含其投影字段）。
+      const guardedCommit = await commitDirectoryBlueprintsWithV2Guard(
         generatedBlueprints,
         expectedProjectPath,
         {
@@ -550,29 +553,54 @@ export class GenerateDirectoryCommand extends BaseWorkflowCommand<ChapterBluepri
         `directory-${context.runId}-${startChapter}-${endChapter}`,
         context.projectSession,
       )
-      const newBlueprints = [...commitReceipt.snapshot]
-      context.data.blueprintCommitReceipt = commitReceipt
+      if (guardedCommit.skippedChapters.length > 0) {
+        const skippedLabels = guardedCommit.skippedChapters
+          .map(chapter => `第${chapter.chapterNumber}章${chapter.title ? ` ${chapter.title}` : ''}`)
+          .join('、')
+        callbacks.log(workflowUiText(
+          context,
+          `已跳过 ${guardedCommit.skippedChapters.length} 章已有 v2 完整细纲的章，未做任何覆盖：${skippedLabels}`,
+          `Skipped ${guardedCommit.skippedChapters.length} chapter(s) that already have v2 detailed outlines; nothing was overwritten: ${skippedLabels}`,
+        ))
+      }
+      const commitReceipts = guardedCommit.receipts
+      const newBlueprints = commitReceipts.flatMap(receipt => [...receipt.snapshot])
+      context.data.blueprintCommitReceipts = commitReceipts
 
       if (context.cancelled) {
-        throw new DirectoryPostCommitCancellationError(commitReceipt)
+        throw commitReceipts[0]
+          ? new DirectoryPostCommitCancellationError(commitReceipts[0])
+          : new Error(workflowUiText(context, '工作流已取消', 'Workflow was cancelled.'))
       }
-      try {
-        const syncReceipt = await retryDirectoryCharacterSync(
-          commitReceipt.characterSyncOperation.operationId,
-          expectedProjectPath,
-          context.projectSession,
-        )
-        context.data.blueprintCharacterSyncReceipt = syncReceipt
-      } catch {
-        throw new DirectoryPostCommitSyncError(commitReceipt)
+      if (commitReceipts.length > 0) {
+        try {
+          const syncReceipts = []
+          for (const receipt of commitReceipts) {
+            syncReceipts.push(await retryDirectoryCharacterSync(
+              receipt.characterSyncOperation.operationId,
+              expectedProjectPath,
+              context.projectSession,
+            ))
+          }
+          context.data.blueprintCharacterSyncReceipts = syncReceipts
+        } catch {
+          throw new DirectoryPostCommitSyncError(commitReceipts[0])
+        }
       }
 
       context.data.newBlueprints = newBlueprints
       context.data.existingBlueprints = existingBlueprints
+      context.data.skippedV2Chapters = guardedCommit.skippedChapters
       callbacks.log(workflowUiText(
         context,
-        `共生成 ${newBlueprints.length} 章蓝图`,
-        `Generated ${newBlueprints.length} chapter blueprint${newBlueprints.length === 1 ? '' : 's'}`,
+        `共生成 ${newBlueprints.length} 章简纲蓝图` +
+          (guardedCommit.skippedChapters.length > 0
+            ? `；跳过 ${guardedCommit.skippedChapters.length} 章已有完整细纲`
+            : ''),
+        `Generated ${newBlueprints.length} simple-outline chapter blueprint(s)` +
+          (guardedCommit.skippedChapters.length > 0
+            ? `; skipped ${guardedCommit.skippedChapters.length} chapter(s) with detailed outlines`
+            : ''),
       ))
       return newBlueprints
     } finally {

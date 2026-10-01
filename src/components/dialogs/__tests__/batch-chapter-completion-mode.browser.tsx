@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { page } from 'vitest/browser'
+import { page, userEvent } from 'vitest/browser'
 import { act, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 
@@ -253,6 +253,12 @@ function installIpc() {
         queueMicrotask(complete)
       }
       return { requestId, started: true }
+    }
+    if (channel === 'db:map-get-all') return []
+    // 该 fixture 只有 v1 蓝图；v2 缺失是合法状态（组件会回退 v1），null 不是掩蔽缺接口
+    if (channel === 'db:blueprint-v2-get') return null
+    if (channel === 'db:blueprint-list-summary') {
+      return importedFinalizedDrafts ? [] : [blueprint(), blueprint(2)].map(b => ({ chapterNumber: b.chapterNumber, title: b.title }))
     }
     if (channel === 'fs:check-exists') return false
     if (channel === 'fs:list-dir') return args[0] === PROJECT_PATH ? fileTree() : []
@@ -551,7 +557,7 @@ describe('batch chapter completion mode browser flow', () => {
       taskLog: '开始第1章：生成草稿、自动定稿并完成后处理。',
       treeSection: '正文章节',
       chapterLabel: '第1章 雨夜来信',
-      editorState: '已定稿（只读）',
+      editorState: '已发布',
       reviewLabel: 'AI 审稿',
     },
     {
@@ -562,7 +568,7 @@ describe('batch chapter completion mode browser flow', () => {
       taskLog: 'Starting Chapter 1: generate, auto-finalize, and post-process.',
       treeSection: 'Manuscript chapters',
       chapterLabel: 'Chapter 1 雨夜来信',
-      editorState: 'Finalized (read-only)',
+      editorState: 'Published',
       reviewLabel: 'AI review',
     },
   ] as const)(
@@ -597,21 +603,49 @@ describe('batch chapter completion mode browser flow', () => {
         expect(treeText).toContain(chapterLabel)
         expect(editor?.textContent).toContain(editorState)
         if (mode === 'draft_review') {
+          // 待审模式：章节栏提供 AI 审稿入口
           expect(editor?.textContent).toContain(reviewLabel)
-        } else {
-          expect(editor?.textContent).not.toContain(reviewLabel)
         }
+        // 实质断言：两种完成模式都不会自动落审稿记录（审稿由作者显式发起）
+        expect(invoke.mock.calls.some(([channel]) => channel === 'db:review-create')).toBe(false)
       })
 
-      const prose = page.getByTestId('chapter-editor').getByRole('textbox')
+      // Vditor IR 正文面：contenteditable 不暴露 textbox role（HTML-AAM），
+      // 定位方式与 VditorProseEditor.browser.tsx 的既有选择器一致（取可见面）。
+      let proseEl: HTMLElement | null = null
+      await vi.waitFor(() => {
+        const candidates = Array.from(
+          container?.querySelectorAll<HTMLElement>('.vditor-ir pre.vditor-reset, pre.vditor-reset') ?? [],
+        )
+        proseEl = candidates.sort((a, b) => b.getBoundingClientRect().height - a.getBoundingClientRect().height)[0] ?? null
+        expect(proseEl).toBeTruthy()
+      })
+      expect(proseEl).toBeTruthy()
       if (mode === 'draft_review') {
         const editedText = locale === 'en-US'
           ? 'Author-editable batch draft prose.'
           : '作者可编辑的批量草稿正文。'
-        await act(async () => prose.fill(editedText))
-        await expect.element(prose).toHaveTextContent(editedText)
+        // 通过 execCommand 触发浏览器的真实 beforeinput/input 事件链，
+        // 让 Vditor 的输入处理 → onChange → 编辑 store 全程参与。
+        await act(async () => { await userEvent.click(proseEl!) })
+        await act(async () => {
+          proseEl!.focus()
+          const selection = window.getSelection()
+          const range = document.createRange()
+          range.selectNodeContents(proseEl!)
+          selection?.removeAllRanges()
+          selection?.addRange(range)
+          document.execCommand('insertText', false, editedText)
+        })
+        await vi.waitFor(() => {
+          expect(proseEl!.textContent).toContain(editedText)
+          expect(useEditorStore.getState().tabs.find(tab => tab.id === useEditorStore.getState().activeTabId)?.content ?? '')
+            .toContain(editedText)
+        })
       } else {
-        await expect.element(prose).toHaveTextContent(DRAFT_TEXT)
+        // 自动定稿后的正文已落正文章节；编辑器仍可打开并展示正文
+        // （产品只对「已归档」草稿只读：DraftEditor isReadonly=archived）。
+        expect(proseEl!.textContent).toContain(DRAFT_TEXT)
       }
     },
   )

@@ -36,6 +36,7 @@ import { globalEventBus } from '../../shared/event-bus'
 import { shouldRefreshBlueprints } from './blueprint-refresh'
 import { useLocaleStore } from '../../stores/locale-store'
 import { registerEditorExitSaveHandler, useEditorStore } from '../../stores/editor-store'
+import { useLayoutStore } from '../../stores/layout-store'
 import {
   CHAPTER_CARD_TAB_ID,
   captureBlueprintSnapshots,
@@ -51,6 +52,29 @@ import {
   type DraftState,
   type EditableChapterBlueprintField,
 } from './chapter-card-draft-ledger'
+import {
+  CHAPTER_CARD_V2_TAB_ID,
+  discardChapterCardV2Draft,
+  getChapterCardV2Draft,
+  getChapterCardV2ProjectDraft,
+  parseChapterCardV2DraftLedger,
+  persistChapterCardV2DraftLedger,
+  updateChapterCardV2Draft,
+  type ChapterCardBlueprintV2Draft,
+} from './chapter-card-draft-ledger'
+import {
+  assertNoLossOnSerialize,
+} from '../../shared/blueprint-v2-markdown'
+import {
+  buildBlueprintV2UpgradeScaffold,
+  extractBlueprintV2WordBudget,
+  getBlueprintV2Scenes,
+  projectV2ToV1,
+  type ChapterBlueprintV2Content,
+  type ChapterBlueprintV2DetailRead,
+} from '../../shared/blueprint-v2'
+import BlueprintV2Editor from './BlueprintV2Editor'
+import BlueprintV2ImportDialog from './BlueprintV2ImportDialog'
 import { LatestRequestGate } from './latest-request-gate'
 import ChapterCanvasWorkbench from '../canvas/ChapterCanvasWorkbench'
 import {
@@ -69,6 +93,32 @@ import {
 
 const ROLES = ['建置', '铺垫', '发展', '冲突', '高潮', '转折', '收尾']
 const DEFAULT_VOLUME_ID = 'volume-1'
+
+function blueprintV2DetailToContent(detail: ChapterBlueprintV2DetailRead): ChapterBlueprintV2Content {
+  return {
+    schemaVersion: detail.schemaVersion,
+    chapterNumber: detail.chapterNumber,
+    chapterTitle: detail.chapterTitle,
+    ...(detail.chapterTitleLevel === undefined ? {} : { chapterTitleLevel: detail.chapterTitleLevel }),
+    docPreamble: detail.docPreamble,
+    ...(detail.chapterPostamble === undefined ? {} : { chapterPostamble: detail.chapterPostamble }),
+    sections: detail.sections,
+    origin: detail.origin,
+  }
+}
+
+async function copyTextToClipboard(value: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value)
+    return
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = value
+  document.body.appendChild(textarea)
+  textarea.select()
+  document.execCommand('copy')
+  textarea.remove()
+}
 
 function blueprintVolumeId(blueprint: ChapterBlueprint): string {
   return blueprint.volumeId?.trim() || DEFAULT_VOLUME_ID
@@ -164,6 +214,19 @@ export default function ChapterCardEditor({
   const [legacyImportedTextRecoveryChapter, setLegacyImportedTextRecoveryChapter] = useState<number | null>(null)
 
   const [recoveringLegacyImportedText, setRecoveringLegacyImportedText] = useState(false)
+
+  // ===== 章节蓝图 v2（细纲）状态 =====
+  // v2Detail：所选章的数据库事实（只作为基底，不直接编辑）。
+  // v2Draft：本地未保存的编辑副本（镜像到 draftLedgers 的独立 v2 账本；
+  // 切章 / 切蓝图-画布视图 / 列表刷新都不会丢失输入）。
+  const [v2Detail, setV2Detail] = useState<ChapterBlueprintV2DetailRead | null>(null)
+  const [v2Draft, setV2Draft] = useState<ChapterCardBlueprintV2Draft | null>(null)
+  const [v2Saving, setV2Saving] = useState(false)
+  const [v2Loading, setV2Loading] = useState(false)
+  const [v2LoadError, setV2LoadError] = useState<string | null>(null)
+  const [v2ReloadNonce, setV2ReloadNonce] = useState(0)
+  const [v2ImportOpen, setV2ImportOpen] = useState(false)
+  const v2LoadGateRef = useRef(new LatestRequestGate())
 
   useEffect(() => {
     if (loading || initialChapterNumber === undefined) return
@@ -437,6 +500,383 @@ export default function ChapterCardEditor({
 
   const selected = projectDataReady ? blueprints[selectedIdx] ?? null : null
 
+  // ===== 章节蓝图 v2：读取 / 编辑 / 保存 =====
+
+  const selectedChapterNumber = selected?.chapterNumber ?? null
+  const v2SelectedChapterRef = useRef<number | null>(selectedChapterNumber)
+  v2SelectedChapterRef.current = selectedChapterNumber
+
+  const readV2Ledger = useCallback(() => parseChapterCardV2DraftLedger(
+    useEditorStore.getState().draftLedgers[CHAPTER_CARD_V2_TAB_ID],
+  ), [])
+
+  const persistV2Ledger = useCallback((draft: ChapterCardBlueprintV2Draft | null, chapterNumber: number) => {
+    const store = useEditorStore.getState()
+    let ledger = parseChapterCardV2DraftLedger(store.draftLedgers[CHAPTER_CARD_V2_TAB_ID])
+    if (draft) ledger = updateChapterCardV2Draft(ledger, projectKey, draft)
+    else ledger = discardChapterCardV2Draft(ledger, projectKey, chapterNumber)
+    persistChapterCardV2DraftLedger(store, ledger)
+  }, [projectKey])
+
+  // 所选章变化（或从画布视图返回）时：拉取数据库事实 + 恢复本地未保存草稿。
+  useEffect(() => {
+    if (!projectDataReady || selectedChapterNumber === null || chapterView === 'canvas') {
+      v2LoadGateRef.current.begin()
+      return
+    }
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (!projectSession) return
+    const requestId = v2LoadGateRef.current.begin()
+    let stale = false
+    setV2Loading(true)
+    setV2LoadError(null)
+    void (async () => {
+      try {
+        const detail = await ipc.invokeWithProjectSession(
+          projectSession, 'db:blueprint-v2-get', selectedChapterNumber, projectKey,
+        )
+        if (stale || !v2LoadGateRef.current.isLatest(requestId)) return
+        setV2Detail(detail)
+      } catch (error) {
+        if (!stale && v2LoadGateRef.current.isLatest(requestId)) {
+          setV2Detail(null)
+          setV2LoadError(error instanceof Error ? error.message : String(error))
+        }
+      } finally {
+        if (!stale && v2LoadGateRef.current.isLatest(requestId)) setV2Loading(false)
+      }
+    })()
+    // 本地草稿（若有）优先于数据库事实展示；保存时以 baseRevision 乐观并发。
+    setV2Draft(getChapterCardV2Draft(readV2Ledger(), projectKey, selectedChapterNumber) ?? null)
+    return () => { stale = true }
+    // chapterView 变化（从画布返回蓝图）需要重取，画布可能改过 presence / 顺序。
+  }, [chapterView, projectDataReady, projectKey, readV2Ledger, selectedChapterNumber, v2ReloadNonce])
+
+  const v2Content = v2Draft
+    ? v2Draft.content
+    : (v2Detail && v2Detail.readStatus === undefined ? blueprintV2DetailToContent(v2Detail) : null)
+  const v2BaseRevision = v2Draft?.baseRevision ?? (v2Detail && v2Detail.readStatus === undefined ? v2Detail.revision : 0)
+  const v2ConflictRevision = v2Draft?.conflictCurrentRevision ?? null
+  const v2Dirty = v2Draft !== null
+
+  /** 更新 v2 细纲内容：写入本地草稿 + 持久到账本（输入永不因视图切换丢失）。 */
+  const updateV2Content = useCallback((next: ChapterBlueprintV2Content) => {
+    if (selectedChapterNumber === null) return
+    const draft: ChapterCardBlueprintV2Draft = {
+      chapterNumber: selectedChapterNumber,
+      content: next,
+      baseRevision: v2BaseRevision,
+      conflictCurrentRevision: v2ConflictRevision,
+    }
+    persistV2Ledger(draft, selectedChapterNumber)
+    setV2Draft(draft)
+  }, [persistV2Ledger, selectedChapterNumber, v2BaseRevision, v2ConflictRevision])
+
+  /** v2 细纲保存：乐观并发；失败/冲突保持当前输入与当前章节。 */
+  const handleSaveV2 = useCallback(async (overrideBaseRevision?: number) => {
+    if (!selected || !v2Content) return
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (!projectSession || !projectMatches) return
+    const baseRevision = overrideBaseRevision ?? v2BaseRevision
+    const chapterNumber = selected.chapterNumber
+    const contentSnapshot = v2Content
+    setV2Saving(true)
+    try {
+      const result = await ipc.invokeWithProjectSession(projectSession, 'db:blueprint-v2-save', {
+        chapterNumber,
+        baseRevision,
+        content: contentSnapshot,
+      }, projectKey)
+      if (!isCurrentProjectSession(projectSession)) return
+      if (!result.success) {
+        if (result.conflict) {
+          const latestDraft = getChapterCardV2Draft(readV2Ledger(), projectKey, chapterNumber)
+          const conflicted: ChapterCardBlueprintV2Draft = {
+            chapterNumber,
+            content: latestDraft?.content ?? contentSnapshot,
+            baseRevision: latestDraft?.baseRevision ?? baseRevision,
+            conflictCurrentRevision: result.currentRevision ?? null,
+          }
+          persistV2Ledger(conflicted, chapterNumber)
+          if (v2SelectedChapterRef.current === chapterNumber) setV2Draft(conflicted)
+          toast.error(text(
+            `第 ${chapterNumber} 章细纲已被其他窗口修改（当前 r${result.currentRevision ?? '?'}）。可选择「覆盖保存」或「放弃本地并重载」。`,
+            `The outline for Chapter ${chapterNumber} changed elsewhere (current r${result.currentRevision ?? '?'}). Choose “Overwrite” or “Discard local and reload”.`,
+          ))
+        } else {
+          toast.error(text(
+            `保存细纲失败\n\n${result.error ?? '未知错误'}`,
+            `Could not save the outline.\n\n${result.error ?? 'Unknown error'}`,
+          ))
+        }
+        return // 保持输入与当前章节（不回滚、不重置）
+      }
+      const savedRevision = result.revision ?? baseRevision + 1
+      const latestDraft = getChapterCardV2Draft(readV2Ledger(), projectKey, chapterNumber)
+      let retainedDraft: ChapterCardBlueprintV2Draft | null = null
+      if (latestDraft && JSON.stringify(latestDraft.content) !== JSON.stringify(contentSnapshot)) {
+        retainedDraft = { ...latestDraft, baseRevision: savedRevision, conflictCurrentRevision: null }
+        persistV2Ledger(retainedDraft, chapterNumber)
+      } else {
+        persistV2Ledger(null, chapterNumber)
+      }
+      if (v2SelectedChapterRef.current === chapterNumber) {
+        setV2Detail({ ...contentSnapshot, revision: savedRevision, contentHash: result.contentHash ?? '' })
+        setV2Draft(retainedDraft)
+      }
+      // 本地同步 v1 投影四列（title/purpose/keyEvents/suspenseHook），不整页重载，
+      // 避免选中章跳回第一章；其余章节由下次读取自然刷新。
+      const currentBlueprint = blueprintsRef.current.find(blueprint => blueprint.chapterNumber === chapterNumber) ?? selected
+      const projection = projectV2ToV1(contentSnapshot, currentBlueprint)
+      const nextBlueprints = blueprintsRef.current.map(blueprint => (
+        blueprint.chapterNumber === chapterNumber ? { ...blueprint, ...projection } : blueprint
+      ))
+      blueprintsRef.current = nextBlueprints
+      setBlueprints(nextBlueprints)
+      addLog('info', text(
+        `第 ${chapterNumber} 章细纲已保存（r${savedRevision}）`,
+        `Saved the outline for Chapter ${chapterNumber} (r${savedRevision})`,
+      ))
+      toast.success(text(
+        `第 ${chapterNumber} 章细纲已保存`,
+        `Saved the outline for Chapter ${chapterNumber}`,
+      ))
+    } catch (error) {
+      if (!isCurrentProjectSession(projectSession)) return
+      const message = error instanceof Error ? error.message : String(error)
+      toast.error(text(`保存细纲失败\n\n${message}`, `Could not save the outline.\n\n${message}`))
+    } finally {
+      if (isCurrentProjectSession(projectSession)) setV2Saving(false)
+    }
+  }, [addLog, persistV2Ledger, projectKey, projectMatches, readV2Ledger, selected, text, v2BaseRevision, v2Content])
+
+  /** 冲突恢复：放弃本地编辑并重载最新细纲。 */
+  const handleDiscardV2Draft = useCallback(async () => {
+    if (selectedChapterNumber === null) return
+    const chapterNumber = selectedChapterNumber
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (!projectSession) return
+    persistV2Ledger(null, chapterNumber)
+    setV2Draft(null)
+    try {
+      const detail = await ipc.invokeWithProjectSession(
+        projectSession, 'db:blueprint-v2-get', chapterNumber, projectKey,
+      )
+      if (!isCurrentProjectSession(projectSession) || v2SelectedChapterRef.current !== chapterNumber) return
+      setV2Detail(detail)
+      setV2LoadError(null)
+    } catch {
+      // 保留已有 detail；用户可手动刷新。
+    }
+  }, [persistV2Ledger, projectKey, selectedChapterNumber])
+
+  /** v1-only 章 → v2 细纲的显式升级脚手架（契约 §7.4；分镜留空，不伪造）。 */
+  const handleUpgradeToV2 = useCallback(async () => {
+    if (!selected) return
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (!projectSession || !projectMatches) return
+    const ok = await confirm(text(
+      '将基于当前简纲生成 v2 细纲脚手架：章题、核心使命与番茄追读钩子会带入对应分区；逐场分镜留空待补（不会把关键事件伪造成分镜）；role、出场角色与作者微操指导会逐字存档到「旧版简纲字段」分区。v1 字段本身不变。继续？',
+      'This creates a v2 outline scaffold from the simple outline: the chapter title, mission, and hook map to their sections; the storyboard starts empty (key events are never faked into scenes); role, characters, and author guidance are archived verbatim into an “legacy outline fields” section. The v1 fields themselves stay unchanged. Continue?',
+    ), {
+      title: text('升级为 v2 细纲', 'Upgrade to v2 outline'),
+      confirmText: text('生成脚手架', 'Create scaffold'),
+    })
+    if (!ok || !isCurrentProjectSession(projectSession)) return
+    setV2Saving(true)
+    try {
+      const scaffold = buildBlueprintV2UpgradeScaffold(selected)
+      const result = await ipc.invokeWithProjectSession(projectSession, 'db:blueprint-v2-save', {
+        chapterNumber: selected.chapterNumber,
+        baseRevision: v2Detail && v2Detail.readStatus === undefined ? v2Detail.revision : 0,
+        content: scaffold,
+      }, projectKey)
+      if (!isCurrentProjectSession(projectSession)) return
+      if (!result.success) {
+        toast.error(text(`升级失败\n\n${result.error ?? '未知错误'}`, `Could not upgrade.\n\n${result.error ?? 'Unknown error'}`))
+        return
+      }
+      persistV2Ledger(null, selected.chapterNumber)
+      if (v2SelectedChapterRef.current === selected.chapterNumber) {
+        setV2Detail({ ...scaffold, revision: result.revision ?? 1, contentHash: result.contentHash ?? '' })
+        setV2Draft(null)
+      }
+      toast.success(text(
+        `第 ${selected.chapterNumber} 章已升级为 v2 细纲脚手架，请补写逐场分镜。`,
+        `Chapter ${selected.chapterNumber} is upgraded to a v2 outline scaffold; fill in the storyboard next.`,
+      ))
+    } finally {
+      if (isCurrentProjectSession(projectSession)) setV2Saving(false)
+    }
+  }, [persistV2Ledger, projectKey, projectMatches, selected, v2Detail])
+
+  /** 导出规范 Markdown（先无损自检，再复制到剪贴板）。 */
+  const handleExportV2 = useCallback(async () => {
+    if (!v2Content) return
+    try {
+      const markdown = assertNoLossOnSerialize(v2Content)
+      await copyTextToClipboard(markdown)
+      toast.success(text(
+        '已通过无损自检并复制规范 Markdown 到剪贴板',
+        'Lossless check passed; the canonical Markdown is copied to the clipboard',
+      ))
+    } catch (error) {
+      toast.error(text(
+        `导出自检失败：${error instanceof Error ? error.message : String(error)}`,
+        `Export check failed: ${error instanceof Error ? error.message : String(error)}`,
+      ))
+    }
+  }, [v2Content])
+
+  /** 删除 v2 细纲（独立用户动作；v1 字段保留投影值，画布卡保留并显示引用失效）。 */
+  const handleDeleteV2Detail = useCallback(async () => {
+    if (!selected) return
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (!projectSession || !projectMatches) return
+    const ok = await confirm(text(
+      `确认删除第 ${selected.chapterNumber} 章的 v2 正式细纲（含分镜正文、规则与禁忌）？\n\n此操作不可撤销；v1 蓝图字段保留删除前的投影值；画布上已关联的场景卡会保留并显示「引用失效」。`,
+      `Delete the v2 formal outline for Chapter ${selected.chapterNumber} (including scene bodies, rules, and taboos)?\n\nThis cannot be undone; the v1 fields keep their last projected values; linked canvas cards stay and show a “broken reference” badge.`,
+    ), {
+      title: text('删除 v2 细纲', 'Delete v2 outline'),
+      confirmText: text('删除细纲', 'Delete outline'),
+      danger: true,
+    })
+    if (!ok || !isCurrentProjectSession(projectSession)) return
+    try {
+      const result = await ipc.invokeWithProjectSession(
+        projectSession, 'db:blueprint-v2-delete', selected.chapterNumber, projectKey,
+      )
+      if (!isCurrentProjectSession(projectSession)) return
+      if (!result.success) {
+        toast.error(text(`删除失败\n\n${result.error ?? '未知错误'}`, `Could not delete.\n\n${result.error ?? 'Unknown error'}`))
+        return
+      }
+      persistV2Ledger(null, selected.chapterNumber)
+      if (v2SelectedChapterRef.current === selected.chapterNumber) {
+        setV2Draft(null)
+        setV2Detail(null)
+      }
+      toast.success(text(`已删除第 ${selected.chapterNumber} 章 v2 细纲`, `Deleted the v2 outline for Chapter ${selected.chapterNumber}`))
+    } catch (error) {
+      toast.error(text(
+        `删除失败\n\n${error instanceof Error ? error.message : String(error)}`,
+        `Could not delete.\n\n${error instanceof Error ? error.message : String(error)}`,
+      ))
+    }
+  }, [persistV2Ledger, projectKey, projectMatches, selected])
+
+  /** 画布侧改过蓝图（排上/移出/删除/重排）后刷新数据库事实；本地草稿保留。 */
+  const handleV2DetailRefresh = useCallback(async (chapterNumber: number) => {
+    if (chapterNumber !== selectedChapterNumber) return
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (!projectSession) return
+    try {
+      const detail = await ipc.invokeWithProjectSession(
+        projectSession, 'db:blueprint-v2-get', chapterNumber, projectKey,
+      )
+      if (!isCurrentProjectSession(projectSession) || v2SelectedChapterRef.current !== chapterNumber) return
+      setV2Detail(detail)
+      setV2LoadError(null)
+    } catch {
+      // 下次进入页面会重新读取。
+    }
+  }, [projectKey, selectedChapterNumber])
+
+  /** 导入完成：若目标即当前章，重取事实。 */
+  const handleV2Imported = useCallback(async (chapterNumber: number) => {
+    if (chapterNumber !== selectedChapterNumber) return
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (!projectSession) return
+    try {
+      const detail = await ipc.invokeWithProjectSession(
+        projectSession, 'db:blueprint-v2-get', chapterNumber, projectKey,
+      )
+      if (!isCurrentProjectSession(projectSession) || v2SelectedChapterRef.current !== chapterNumber) return
+      setV2Detail(detail)
+      setV2LoadError(null)
+      persistV2Ledger(null, chapterNumber)
+      setV2Draft(null)
+    } catch {
+      // 下次进入页面会重新读取。
+    }
+  }, [persistV2Ledger, projectKey, selectedChapterNumber])
+
+  /** 「保存全部」/退出保存的前半段：先落所有 v2 细纲草稿（失败保留草稿）。 */
+  const handleSaveAllV2Drafts = useCallback(async () => {
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (!projectSession || !projectMatches) return
+    const drafts = [...(getChapterCardV2ProjectDraft(readV2Ledger(), projectKey)?.drafts ?? [])]
+    for (const draft of drafts) {
+      try {
+        const result = await ipc.invokeWithProjectSession(projectSession, 'db:blueprint-v2-save', {
+          chapterNumber: draft.chapterNumber,
+          baseRevision: draft.baseRevision,
+          content: draft.content,
+        }, projectKey)
+        if (!isCurrentProjectSession(projectSession)) return
+        if (result.success) {
+          const savedRevision = result.revision ?? draft.baseRevision + 1
+          const latestDraft = getChapterCardV2Draft(readV2Ledger(), projectKey, draft.chapterNumber)
+          if (latestDraft && JSON.stringify(latestDraft.content) !== JSON.stringify(draft.content)) {
+            persistV2Ledger({ ...latestDraft, baseRevision: savedRevision, conflictCurrentRevision: null }, draft.chapterNumber)
+          } else {
+            persistV2Ledger(null, draft.chapterNumber)
+          }
+          // 同步本地 v1 投影，避免随后的 v1 全量保存把陈旧投影写回数据库。
+          const blueprint = blueprintsRef.current.find(item => item.chapterNumber === draft.chapterNumber)
+          if (blueprint) {
+            const projection = projectV2ToV1(draft.content, blueprint)
+            blueprintsRef.current = blueprintsRef.current.map(item => (
+              item.chapterNumber === draft.chapterNumber ? { ...item, ...projection } : item
+            ))
+            setBlueprints(blueprintsRef.current)
+          }
+          if (draft.chapterNumber === v2SelectedChapterRef.current) {
+            const currentDraft = getChapterCardV2Draft(readV2Ledger(), projectKey, draft.chapterNumber)
+            const unchanged = !currentDraft || JSON.stringify(currentDraft.content) === JSON.stringify(draft.content)
+            setV2Draft(unchanged ? null : { ...currentDraft!, baseRevision: savedRevision, conflictCurrentRevision: null })
+            setV2Detail({ ...draft.content, revision: savedRevision, contentHash: result.contentHash ?? '' })
+          }
+        } else if (result.conflict) {
+          const latestDraft = getChapterCardV2Draft(readV2Ledger(), projectKey, draft.chapterNumber) ?? draft
+          const conflicted = { ...latestDraft, conflictCurrentRevision: result.currentRevision ?? null }
+          persistV2Ledger(conflicted, draft.chapterNumber)
+          if (draft.chapterNumber === v2SelectedChapterRef.current) setV2Draft(conflicted)
+          toast.error(text(
+            `第 ${draft.chapterNumber} 章细纲冲突（当前 r${result.currentRevision ?? '?'}），已保留本地编辑。`,
+            `The outline for Chapter ${draft.chapterNumber} conflicts (current r${result.currentRevision ?? '?'}); local edits are kept.`,
+          ))
+        } else {
+          toast.error(text(
+            `第 ${draft.chapterNumber} 章细纲保存失败：${result.error ?? '未知错误'}（草稿已保留）`,
+            `Could not save the outline for Chapter ${draft.chapterNumber}: ${result.error ?? 'Unknown error'} (draft kept)`,
+          ))
+        }
+      } catch (error) {
+        if (!isCurrentProjectSession(projectSession)) return
+        toast.error(text(
+          `第 ${draft.chapterNumber} 章细纲保存失败：${error instanceof Error ? error.message : String(error)}（草稿已保留）`,
+          `Could not save the outline for Chapter ${draft.chapterNumber}: ${error instanceof Error ? error.message : String(error)} (draft kept)`,
+        ))
+      }
+    }
+  }, [persistV2Ledger, projectKey, projectMatches, readV2Ledger, text])
+
+  // 独立 ref 持有 v1 全量保存（每渲染同步），供组合保存调用，避免互相递归。
+  // ref 只声明不初始化；赋值 effect 位于 handleSaveAll 声明之后。
+  const saveAllRef = useRef<(() => Promise<void>) | null>(null)
+
+  const handleSaveAllWithV2 = useCallback(async () => {
+    await handleSaveAllV2Drafts()
+    await saveAllRef.current?.()
+  }, [handleSaveAllV2Drafts])
+
+  // 后注册的赋值生效：退出保存 = v2 草稿 → v1 蓝图。
+  useEffect(() => {
+    exitSaveRef.current = handleSaveAllWithV2
+  })
+
+
   /** 更新选中章节蓝图的字段 */
   const updateField = <K extends EditableChapterBlueprintField>(
     key: K,
@@ -448,6 +888,16 @@ export default function ChapterCardEditor({
     )), selected.chapterNumber)
   }
 
+  /**
+   * 章有未保存 v2 细纲草稿时，v1 行的四个投影列必须先按草稿重算再写库，
+   * 否则旧的本地投影会把 v2 刚保存的投影值覆盖回去（契约 §6.3）。
+   */
+  const reconcileProjectedFields = useCallback((blueprint: ChapterBlueprint): ChapterBlueprint => {
+    const draft = getChapterCardV2Draft(readV2Ledger(), projectKey, blueprint.chapterNumber)
+    if (!draft) return blueprint
+    return { ...blueprint, ...projectV2ToV1(draft.content, blueprint) }
+  }, [projectKey, readV2Ledger])
+
   /** 保存当前章节蓝图 */
   const handleSaveOne = async () => {
     const projectSession = currentProjectSessionForPath(projectKey)
@@ -457,10 +907,11 @@ export default function ChapterCardEditor({
       || !selected
       || !sameProjectSessionContext(dataProjectSessionRef.current, projectSession)
     ) return
-    const savedSnapshots = captureBlueprintSnapshots([selected])
+    const target = reconcileProjectedFields(selected)
+    const savedSnapshots = captureBlueprintSnapshots([target])
     setSaving(true)
     try {
-      await saveChapterBlueprint(selected, projectKey, projectSession)
+      await saveChapterBlueprint(target, projectKey, projectSession)
       if (!isCurrentProjectSession(projectSession)) return
       // 真实保存完成 → 记录“上次创作位置”（只写导航辅助，不动权威数据）。
       recordLastCreationLocation(projectKey, {
@@ -487,7 +938,7 @@ export default function ChapterCardEditor({
     }
   }
 
-  /** 全量保存到 SQLite */
+  /** 全量保存到 SQLite（含全部 v2 细纲草稿 + v1 蓝图） */
   const handleSaveAll = async () => {
     const projectSession = currentProjectSessionForPath(projectKey)
     if (
@@ -495,7 +946,7 @@ export default function ChapterCardEditor({
       || !projectSession
       || !sameProjectSessionContext(dataProjectSessionRef.current, projectSession)
     ) return
-    const saveInput = blueprintsRef.current
+    const saveInput = blueprintsRef.current.map(reconcileProjectedFields)
     const savedSnapshots = captureBlueprintSnapshots(saveInput)
     setSaving(true)
     try {
@@ -532,6 +983,7 @@ export default function ChapterCardEditor({
   const exitSaveRef = useRef(handleSaveAll)
   useEffect(() => {
     exitSaveRef.current = handleSaveAll
+    saveAllRef.current = handleSaveAll
   })
   useEffect(() => {
     registerEditorExitSaveHandler({
@@ -635,8 +1087,8 @@ export default function ChapterCardEditor({
     ) return
     const deletedSnapshots = captureBlueprintSnapshots([selected])
     const ok = await confirm(text(
-      `确认删除第 ${selected.chapterNumber} 章蓝图？\n此操作不可撤销。`,
-      `Delete the blueprint for Chapter ${selected.chapterNumber}?\nThis cannot be undone.`,
+      `确认删除第 ${selected.chapterNumber} 章蓝图？\n此操作不可撤销。${v2Detail || v2Draft ? '\n该章的 v2 正式细纲（含分镜正文）将一并删除。' : ''}`,
+      `Delete the blueprint for Chapter ${selected.chapterNumber}?\nThis cannot be undone.${v2Detail || v2Draft ? '\nThe v2 formal outline (including scene bodies) will be deleted with it.' : ''}`,
     ), {
       title: text('删除章节蓝图', 'Delete chapter blueprint'),
       confirmText: text('删除', 'Delete'),
@@ -661,6 +1113,10 @@ export default function ChapterCardEditor({
       deletedSnapshots,
     )
     persistProjectDraftState(projectKey, projectSession, next.blueprints, next.dirtyChapterNumbers)
+    // 章删除已级联清理 v2 细纲行（db:blueprint-delete）；本地 v2 状态同步清空。
+    persistV2Ledger(null, selected.chapterNumber)
+    setV2Draft(null)
+    setV2Detail(null)
     if (isCurrentProjectSession(projectSession)) {
       setSelectedIdx(index => Math.max(0, Math.min(index, next.blueprints.length - 1)))
     }
@@ -717,6 +1173,19 @@ export default function ChapterCardEditor({
   /**
    * 新建或打开此章正文草稿 — 直达正文写作
    */
+  const handleAIWriting = (bp: ChapterBlueprint) => {
+    const session = currentProjectSessionForPath(projectKey)
+    if (!session || !sameProjectSessionContext(dataProjectSessionRef.current, session)
+      || bp.chapterNumber !== nextWriteChapter || dirty || v2Dirty || v2Loading
+      || v2Detail?.readStatus) return
+    useLayoutStore.getState().openChapterCreation({
+      chapterNumber: bp.chapterNumber, title: bp.title, role: bp.role,
+      purpose: bp.purpose, keyEvents: bp.keyEvents,
+      characters: bp.characters.join('、'), userGuidance: bp.userGuidance,
+      wordsTarget: v2Content ? extractBlueprintV2WordBudget(v2Content) ?? undefined : undefined,
+    })
+  }
+
   const handleOpenOrNewDraft = async (bp: ChapterBlueprint) => {
     const projectSession = currentProjectSessionForPath(projectKey)
     if (
@@ -759,6 +1228,7 @@ export default function ChapterCardEditor({
         'db:draft-create',
         {
           chapterNumber: bp.chapterNumber,
+          blueprintChapterNumber: bp.chapterNumber,
           version: 1,
           source: 'write',
           content: '',
@@ -944,9 +1414,9 @@ export default function ChapterCardEditor({
             <Trash2 size={12} />
             {text('清空全部蓝图', 'Clear all')}
           </Button>
-          {visibleDirty && (
-            <Button variant="outline" size="sm" onClick={handleSaveAll} disabled={saving || !projectDataReady}>
-            <Save size={12} /> {saving ? text('保存中...', 'Saving...') : text('保存全部', 'Save all')}
+          {(visibleDirty || v2Dirty) && (
+            <Button variant="outline" size="sm" onClick={handleSaveAllWithV2} disabled={saving || v2Saving || !projectDataReady}>
+            <Save size={12} /> {saving || v2Saving ? text('保存中...', 'Saving...') : text('保存全部', 'Save all')}
             </Button>
           )}
         </>
@@ -1192,7 +1662,217 @@ export default function ChapterCardEditor({
                 ? text(`打开第${selected.chapterNumber}章正文`, `Open Chapter ${selected.chapterNumber}`)
                 : text(`新建第${selected.chapterNumber}章正文`, `New Chapter ${selected.chapterNumber}`)}
               onOpenDraft={() => void handleOpenOrNewDraft(selected)}
+              onBlueprintChanged={() => void handleV2DetailRefresh(selected.chapterNumber)}
             />
+          ) : selected && v2Detail?.readStatus ? (
+            <div className="max-w-3xl mx-auto px-5 py-4 space-y-3" data-testid="blueprint-v2-readonly-recovery">
+              <div className="planning-page__banner flex-wrap items-start justify-between gap-3" style={{ color: 'var(--color-error-text)' }}>
+                <div>
+                  <h3 className="text-sm font-bold">
+                    {v2Detail.readStatus === 'corrupt'
+                      ? text('细纲数据损坏，原始 Markdown 已保留', 'Outline data is corrupt; raw Markdown is preserved')
+                      : text(`细纲来自较新版本（schema ${v2Detail.storedSchemaVersion ?? '?'}）`, `Outline is from a newer version (schema ${v2Detail.storedSchemaVersion ?? '?'})`)}
+                  </h3>
+                  <p className="text-xs mt-1">
+                    {text('为避免把无法读取的数据当作旧简纲覆盖，当前只显示原始内容。', 'This read-only view prevents unreadable outline data from being mistaken for a legacy simple outline.')}
+                  </p>
+                </div>
+                <Button variant="destructive" size="sm" onClick={() => void handleDeleteV2Detail()} data-testid="blueprint-v2-delete-unreadable">
+                  <Trash2 size={12} /> {text('确认删除此细纲记录', 'Delete this outline record')}
+                </Button>
+              </div>
+              <div>
+                <Label>{text('保留的原始 Markdown', 'Preserved raw Markdown')}</Label>
+                <pre className="mt-2 max-h-[65vh] overflow-auto whitespace-pre-wrap rounded-md border p-3 text-xs" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-panel)' }} data-testid="blueprint-v2-preserved-raw">
+                  {v2Detail.rawMarkdown ?? text('此记录未附原始 Markdown。', 'No raw Markdown was attached to this record.')}
+                </pre>
+              </div>
+            </div>
+          ) : selected && v2LoadError ? (
+            <div className="max-w-2xl mx-auto px-5 py-8" role="alert" data-testid="blueprint-v2-load-error">
+              <p className="text-sm" style={{ color: 'var(--color-error-text)' }}>
+                {text(`读取第 ${selected.chapterNumber} 章细纲失败：${v2LoadError}`, `Could not read the outline for Chapter ${selected.chapterNumber}: ${v2LoadError}`)}
+              </p>
+              <Button className="mt-3" variant="outline" size="sm" onClick={() => setV2ReloadNonce(value => value + 1)}>
+                {text('重试读取', 'Retry read')}
+              </Button>
+            </div>
+          ) : selected && v2Content ? (
+            <div className="max-w-3xl mx-auto px-5 py-4" data-testid="blueprint-v2-view">
+              {/* v2 编辑区头部 */}
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>
+                    {text(
+                      `第 ${selected.chapterNumber} 章：${v2Content.chapterTitle || selected.title || '未命名'}`,
+                      `Chapter ${selected.chapterNumber}: ${v2Content.chapterTitle || selected.title || 'Untitled'}`,
+                    )}
+                  </h3>
+                  <p className="text-[0.7rem] mt-0.5" style={{ color: 'var(--color-text-muted)' }} data-testid="blueprint-v2-status">
+                    {v2Loading
+                      ? text('读取细纲…', 'Loading outline…')
+                      : text(
+                        `v2 正式细纲 r${v2BaseRevision} · ${getBlueprintV2Scenes(v2Content).length} 个分镜 · 字数预算 ${extractBlueprintV2WordBudget(v2Content) ?? '—'}${v2Dirty ? ' · 有未保存修改' : ''}`,
+                        `v2 outline r${v2BaseRevision} · ${getBlueprintV2Scenes(v2Content).length} scene(s) · word budget ${extractBlueprintV2WordBudget(v2Content) ?? '—'}${v2Dirty ? ' · unsaved changes' : ''}`,
+                      )}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap justify-end">
+                  <Button variant="ai" size="sm" onClick={() => handleAIWriting(selected)} disabled={selected.chapterNumber !== nextWriteChapter || dirty || v2Dirty || v2Loading || !!v2Detail?.readStatus} title={text('保存修改后从此章蓝图启动 AI 写作', 'Save changes, then start AI writing from this blueprint')}>
+                    {text('写作此章', 'Write this chapter')}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setV2ImportOpen(true)} data-testid="blueprint-v2-import">
+                    {text('导入 Markdown', 'Import Markdown')}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => void handleExportV2()} title={text('先无损自检，再复制规范 Markdown', 'Run the lossless check, then copy the canonical Markdown')}>
+                    {text('导出', 'Export')}
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => void handleDeleteV2Detail()} title={text('仅删除 v2 细纲；v1 字段与画布卡保留', 'Delete the v2 outline only; v1 fields and canvas cards remain')}>
+                    <Trash2 size={12} />
+                    {text('删除细纲', 'Delete outline')}
+                  </Button>
+                  <Button variant="default" size="sm" onClick={() => void handleSaveV2()} disabled={v2Saving} data-testid="blueprint-v2-save">
+                    <Save size={12} />
+                    {v2Saving ? text('保存中...', 'Saving...') : v2Dirty ? text('保存细纲', 'Save outline') : text('已同步', 'Synced')}
+                  </Button>
+                </div>
+              </div>
+
+              {v2ConflictRevision !== null && (
+                <div
+                  className="planning-page__banner flex-wrap items-center justify-between gap-3 mb-3"
+                  style={{
+                    borderColor: 'color-mix(in srgb, var(--color-warning) 42%, var(--color-border))',
+                    backgroundColor: 'color-mix(in srgb, var(--color-warning) 8%, transparent)',
+                  }}
+                  data-testid="blueprint-v2-conflict-banner"
+                >
+                  <p className="leading-5">
+                    {text(
+                      `细纲已被其他窗口修改（当前 r${v2ConflictRevision}）。本地编辑仍保留：`,
+                      `The outline changed elsewhere (current r${v2ConflictRevision}). Local edits are kept:`,
+                    )}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" onClick={() => void handleSaveV2(v2ConflictRevision)}>{text('覆盖保存', 'Overwrite')}</Button>
+                    <Button size="sm" variant="ghost" onClick={() => void handleDiscardV2Draft()}>{text('放弃本地并重载', 'Discard local & reload')}</Button>
+                  </div>
+                </div>
+              )}
+
+              {v2Detail && v2Detail.readStatus && (
+                <div
+                  className="planning-page__banner mb-3"
+                  style={{
+                    color: 'var(--color-error-text)',
+                    borderColor: 'color-mix(in srgb, var(--color-error) 42%, var(--color-border))',
+                    backgroundColor: 'color-mix(in srgb, var(--color-error) 8%, transparent)',
+                  }}
+                  data-testid="blueprint-v2-readstatus-banner"
+                >
+                  <AlertTriangle size={15} className="mt-0.5 flex-shrink-0" />
+                  <p className="leading-5">
+                    {v2Detail.readStatus === 'corrupt'
+                      ? text(
+                        '该章细纲结构化数据损坏；原始 Markdown 已完整保留，可先「导出」核对。重新导入可重建细纲。',
+                        'The structured outline data is corrupt; the raw Markdown is intact. Export to inspect it first; re-import to rebuild.',
+                      )
+                      : text(
+                        `该章细纲由更新版本的应用写入（schema ${v2Detail.storedSchemaVersion ?? '?'}），请先升级应用再编辑；原始 Markdown 未丢失。`,
+                        `This outline was written by a newer app version (schema ${v2Detail.storedSchemaVersion ?? '?'}); upgrade the app before editing. The raw Markdown is intact.`,
+                      )}
+                  </p>
+                </div>
+              )}
+
+              {/* 章题（H3 行；保存时按契约投影为 v1 标题） */}
+              <div className="mb-3">
+                <Label>{text('章题（细纲 H3 行）', 'Chapter title (outline H3 line)')}</Label>
+                <Input
+                  value={v2Content.chapterTitle}
+                  onChange={event => updateV2Content({ ...v2Content, chapterTitle: event.target.value })}
+                  placeholder={text('如：第1章｜接错的人', 'e.g. 第1章｜接错的人')}
+                  data-testid="blueprint-v2-chapter-title"
+                />
+              </div>
+
+              <BlueprintV2Editor content={v2Content} onChange={updateV2Content} />
+
+              {/* v1 独立字段（v2 永不投影/覆盖） */}
+              <div className="mt-5 p-3 rounded-lg border" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-panel)' }}>
+                <Label className="flex items-center gap-1.5 font-medium">
+                  {text('v1 独立字段', 'v1-only fields')}
+                  <span className="text-[0.7rem] font-normal" style={{ color: 'var(--color-text-muted)' }}>
+                    {text('（细纲不投影这些字段；修改后单独保存）', '(never projected from the outline; save separately)')}
+                  </span>
+                </Label>
+                <div className="grid grid-cols-3 gap-3 mt-2">
+                  <div>
+                    <Label>{text('所属卷', 'Volume')}</Label>
+                    <NativeSelect
+                      value={blueprintVolumeId(selected)}
+                      onChange={event => {
+                        const volumeId = event.target.value
+                        updateField('volumeId', volumeId)
+                        setSelectedVolumeId(volumeId)
+                      }}
+                    >
+                      {volumes.map(volume => <option key={volume.id} value={volume.id}>{volume.name}</option>)}
+                    </NativeSelect>
+                  </div>
+                  <div>
+                    <Label>{text('章节定位', 'Chapter role')}</Label>
+                    <NativeSelect value={selected.role} onChange={e => updateField('role', e.target.value)}>
+                      {ROLES.map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
+                    </NativeSelect>
+                  </div>
+                  <div>
+                    <Label>{text('出场关键人（逗号分隔）', 'Key characters (comma-separated)')}</Label>
+                    <Input
+                      value={selected.characters.join('、')}
+                      onChange={e => updateField('characters', e.target.value.split(/[,，、\s]+/).filter(Boolean))}
+                    />
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <Label>{text('作者微操指导', 'Author guidance')}</Label>
+                  <Textarea
+                    value={selected.userGuidance}
+                    onChange={e => updateField('userGuidance', e.target.value)}
+                    rows={3}
+                  />
+                </div>
+                <div className="mt-3">
+                  <Label>{text('章节要点', 'Chapter notes')}</Label>
+                  <span className="text-[0.7rem]" style={{ color: 'var(--color-text-muted)' }}>
+                    {text('（定稿后自动生成，也可手动填写）', '(Generated after finalization, or enter it manually.)')}
+                  </span>
+                  <Textarea
+                    value={selected.notes || ''}
+                    onChange={e => updateField('notes', e.target.value)}
+                    rows={3}
+                  />
+                </div>
+                {dirty && (
+                  <div className="mt-3 flex justify-end">
+                    <Button variant="outline" size="sm" onClick={handleSaveOne} disabled={saving}>
+                      <Save size={12} /> {saving ? text('保存中...', 'Saving...') : text('保存 v1 字段', 'Save v1 fields')}
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              {/* v1 投影预览（只读） */}
+              <details className="mt-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                <summary className="cursor-pointer select-none">{text('v1 投影预览（保存细纲时自动刷新）', 'v1 projection preview (refreshed when the outline is saved)')}</summary>
+                <div className="mt-2 space-y-1 whitespace-pre-wrap" data-testid="blueprint-v2-projection-preview">
+                  <p><b>{text('标题', 'Title')}:</b> {selected.title || text('（空）', '(empty)')}</p>
+                  <p><b>{text('核心目的', 'Purpose')}:</b> {selected.purpose || text('（空）', '(empty)')}</p>
+                  <p><b>{text('关键事件', 'Key events')}:</b> {selected.keyEvents || text('（空）', '(empty)')}</p>
+                  <p><b>{text('悬念钩子', 'Suspense hook')}:</b> {selected.suspenseHook || text('（空）', '(empty)')}</p>
+                </div>
+              </details>
+            </div>
           ) : selected ? (
             <div className="max-w-2xl mx-auto px-5 py-4">
               {/* 编辑区头部 */}
@@ -1204,6 +1884,9 @@ export default function ChapterCardEditor({
                   )}
                 </h3>
                 <div className="flex items-center gap-1.5">
+                  <Button variant="ai" size="sm" onClick={() => handleAIWriting(selected)} disabled={selected.chapterNumber !== nextWriteChapter || dirty || v2Loading} title={text('保存修改后从此章蓝图启动 AI 写作', 'Save changes, then start AI writing from this blueprint')}>
+                    {text('写作此章', 'Write this chapter')}
+                  </Button>
                   {canOpenOrCreateDraft(selected) && <Button
                     variant="default"
                     size="sm"
@@ -1219,6 +1902,24 @@ export default function ChapterCardEditor({
                       ? text('打开正文草稿', 'Open draft')
                       : text('新建正文草稿', 'New draft')}
                   </Button>}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setV2ImportOpen(true)}
+                    title={text('导入完整 Markdown 细纲（解析预览 + 确认后写入）', 'Import a full Markdown outline (parse preview, writes only after confirmation)')}
+                    data-testid="blueprint-v2-import-v1"
+                  >
+                    {text('导入 Markdown 细纲', 'Import Markdown outline')}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleUpgradeToV2()}
+                    title={text('基于当前简纲生成 v2 细纲脚手架（分镜留空）', 'Create a v2 outline scaffold from the simple outline (storyboard starts empty)')}
+                    data-testid="blueprint-v2-upgrade"
+                  >
+                    {text('升级为 v2 细纲', 'Upgrade to v2 outline')}
+                  </Button>
                   <Button variant="destructive" size="sm" onClick={handleDeleteChapter} title={text('删除此章', 'Delete this chapter')}>
                     <Trash2 size={12} />
                     {text('删除此章', 'Delete chapter')}
@@ -1228,6 +1929,12 @@ export default function ChapterCardEditor({
                   </Button>
                 </div>
               </div>
+              <p className="text-xs mb-3 -mt-2" style={{ color: 'var(--color-text-muted)' }} data-testid="blueprint-v1-hint">
+                {text(
+                  '此章还是旧版简纲（未建立七项分区细纲）。可直接编辑下方字段，或导入 Markdown 细纲 / 升级为 v2 细纲；细纲一经建立，标题、目的、关键事件与钩子将以细纲为准。',
+                  'This chapter still uses the legacy simple outline (no seven-section outline yet). Edit the fields below, import a Markdown outline, or upgrade to a v2 outline; once the v2 outline exists, title, purpose, key events, and the hook follow the outline.',
+                )}
+              </p>
 
               <div className="space-y-3">
                 {/* 基本信息 */}
@@ -1479,6 +2186,19 @@ export default function ChapterCardEditor({
             />
           )}
       </main>
+      {projectDataReady && currentProjectSession && (
+        <BlueprintV2ImportDialog
+          open={v2ImportOpen}
+          onClose={() => setV2ImportOpen(false)}
+          chapters={blueprints.map(blueprint => ({
+            chapterNumber: blueprint.chapterNumber,
+            title: blueprint.title,
+          }))}
+          projectSession={currentProjectSession}
+          projectKey={projectKey}
+          onImported={chapterNumber => void handleV2Imported(chapterNumber)}
+        />
+      )}
     </PlanningPageShell>
   )
 }

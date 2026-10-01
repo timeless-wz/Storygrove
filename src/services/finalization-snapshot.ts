@@ -1,4 +1,6 @@
 import type { ProjectSessionContext } from '../shared/ipc-channels'
+import type { FinalizationSnapshot } from '../shared/finalization'
+export type { FinalizationSnapshot } from '../shared/finalization'
 import {
   sameProjectPathKey,
   sameProjectSessionContext,
@@ -11,17 +13,6 @@ export type FinalizationPublicationStatus = 'pending' | 'published'
  * 定稿输入在用户确认时冻结：后续异步流程只能消费这里的内容与会话，
  * 不允许回读数据库正文来替换编辑器可见内容。
  */
-export interface FinalizationSnapshot {
-  tabId: string
-  projectPath: string
-  projectSession: ProjectSessionContext
-  draftId: number
-  chapterNumber: number
-  chapterTitle: string
-  content: string
-  contentRevision: number
-}
-
 export interface FinalizationCompletion {
   finalizationId: string
   contentHash: string

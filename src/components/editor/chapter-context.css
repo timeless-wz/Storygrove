@@ -210,9 +210,6 @@
 /* ===== 场景顺序 ===== */
 
 .chapter-context-scene {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
   padding: 5px 6px;
   border-radius: var(--radius-sm, 4px);
   background-color: var(--editor-selection-bg, var(--color-hover));
@@ -242,10 +239,24 @@
 }
 
 .chapter-context-scene-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  cursor: pointer;
   font-size: 12px;
   font-weight: 600;
   line-height: 1.6;
   overflow-wrap: break-word;
+}
+
+.chapter-context-scene-body {
+  margin: 6px 0 2px 21px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--editor-ink-muted, var(--color-text-secondary));
 }
 
 .chapter-context-scene-role {

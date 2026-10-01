@@ -84,6 +84,7 @@ export interface CharacterRosterEntry {
   relationships: CharacterRosterRelationship[]
   arc: string
   notes: string
+  cultivationLevelId?: string | null
   currentState?: CharacterRosterCharacterState
   /**
    * 旧 characters.relationships 的自由文本证据。只会由 read 返回，或由

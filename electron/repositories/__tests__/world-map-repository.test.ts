@@ -5,7 +5,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { closeProjectDatabase, initProjectDatabase, getProjectDb } from '../../database'
 import { WorldMapRepository } from '../world-map-repository'
 import { ProjectCoreRepository } from '../project-core-repository'
-import type { WorldMap, WorldMapNode } from '../../../src/shared/world-map'
+import type { WorldMap, WorldMapNode, WorldMapMarkerIcon } from '../../../src/shared/world-map'
 
 let projectRoot = ''
 const testRoot = path.resolve('.runtime/.cache/world-map-repository-tests')
@@ -70,6 +70,34 @@ describe('WorldMapRepository on a fresh project', () => {
 
 describe('WorldMapRepository', () => {
   beforeEach(seedMaps)
+
+  it('persists building markers across reopening, coordinate edits and resetting to auto', () => {
+    WorldMapRepository.upsertNode(node({ id: 'node-temple', name: '白塔神殿', markerIcon: 'temple' }))
+    closeProjectDatabase()
+    initProjectDatabase(projectRoot)
+    expect(WorldMapRepository.getAll().nodes[0].markerIcon).toBe('temple')
+
+    // 兼容未携带新字段的旧调用方，拖动不能丢失已选标识。
+    WorldMapRepository.upsertNode(node({ id: 'node-temple', name: '白塔神殿', x: 120, y: 80 }))
+    expect(WorldMapRepository.getAll().nodes[0]).toMatchObject({ markerIcon: 'temple', x: 120, y: 80 })
+    WorldMapRepository.upsertNode(node({ id: 'node-temple', name: '白塔神殿', markerIcon: null }))
+    expect(WorldMapRepository.getAll().nodes[0].markerIcon).toBeNull()
+  })
+
+  it('adds the marker column to an existing map database without changing its locations', () => {
+    WorldMapRepository.upsertNode(node({ id: 'node-old', name: '旧城', x: 18, y: 36 }))
+    getProjectDb()!.exec('ALTER TABLE world_map_nodes DROP COLUMN marker_icon')
+    closeProjectDatabase()
+    initProjectDatabase(projectRoot)
+    expect(WorldMapRepository.getAll().nodes[0]).toMatchObject({ id: 'node-old', x: 18, y: 36, markerIcon: null })
+  })
+
+  it('rejects unknown building icons without replacing a saved marker', () => {
+    const location = node({ id: 'node-castle', name: '北境要塞', markerIcon: 'castle' })
+    WorldMapRepository.upsertNode(location)
+    expect(() => WorldMapRepository.upsertNode({ ...location, markerIcon: 'unknown' as WorldMapMarkerIcon })).toThrow('图标无效')
+    expect(WorldMapRepository.getAll().nodes[0].markerIcon).toBe('castle')
+  })
 
   it('creates map trees and keeps the parent/child hierarchy', () => {
     const maps = WorldMapRepository.getAll().maps

@@ -20,7 +20,7 @@ export interface ClearProjectDataResult {
 }
 
 const AFFECTED_TAB_TYPES: Record<ProjectClearScope, EditorTab['type'][]> = {
-  creativeFields: ['config', 'world-building', 'arch-file'],
+  creativeFields: ['config', 'world-building', 'arch-file', 'world'],
   blueprints: ['chapter-card'],
   generatedText: ['chapter', 'diff', 'version-history', 'review-report'],
 }

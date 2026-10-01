@@ -37,6 +37,7 @@ import type { ModelProfile, ProjectSessionContext } from '../../shared/ipc-chann
 import ConsistencyPreflightPanel from './ConsistencyPreflightPanel'
 
 const CHAPTER_ROLES = [
+  { value: '建置', en: 'Establishment' },
   { value: '开篇', en: 'Opening' },
   { value: '铺垫', en: 'Setup' },
   { value: '发展', en: 'Development' },
@@ -223,7 +224,7 @@ function ChapterCreationDialogSession({ isOpen, onClose, prefill }: Props) {
         setKeyEvents(String(prefill.keyEvents || ''))
         setCharacters(String(prefill.characters || ''))
         setUserGuidance(String(prefill.userGuidance || ''))
-        setWordsTarget(defaultWordsTarget)
+        setWordsTarget(normalizeChapterWordsTarget(prefill.wordsTarget, defaultWordsTarget))
         setLoadedFromBlueprint(true)
         setLoadedFromHistory(false)
       } else {

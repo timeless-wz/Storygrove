@@ -1,6 +1,8 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { page } from 'vitest/browser'
+import '../../../index.css'
 import { setActiveProjectSessionContext } from '../../../shared/project-session-context'
 import { useLocaleStore } from '../../../stores/locale-store'
 import { useProjectStore } from '../../../stores/project-store'
@@ -12,7 +14,7 @@ import ChapterOutlineSidebar from '../ChapterOutlineSidebar'
 
 const invoke = vi.fn(async (channel: string) => {
   if (channel === 'db:blueprint-volume-list') return [{ id: 'volume-1', name: '第一卷', sortOrder: 1 }]
-  if (channel === 'db:blueprint-get-all') return [
+  if (channel === 'db:blueprint-list-summary') return [
     { chapterNumber: 1, volumeId: 'volume-1', title: '雨夜' },
     { chapterNumber: 2, volumeId: 'volume-1', title: '回声' },
   ]
@@ -72,7 +74,9 @@ describe('chapter outline sidebar', () => {
     await act(async () => root.render(<ChapterOutlineSidebar tab={tab} />))
     const expand = container.querySelector<HTMLButtonElement>('.chapter-outline-toggle')
     expect(expand).toBeTruthy()
-    await act(async () => expand?.click())
+    if (expand?.getAttribute('aria-label') === '展开卷章目录') {
+      await act(async () => expand.click())
+    }
     await act(async () => {
       await vi.waitFor(() => expect(container.textContent).toContain('第一卷'))
     })
@@ -116,5 +120,29 @@ describe('chapter outline sidebar', () => {
     expect(openBuiltinEditor).toHaveBeenCalledWith(
       'chapter-card-editor', '章节蓝图', 'chapter-card', undefined, 2,
     )
+  })
+
+  it('keeps the outline beside prose on desktop and opens a drawer on narrow screens', async () => {
+    document.documentElement.setAttribute('data-theme', 'light')
+    container.style.cssText = 'height:500px;display:flex;position:relative;overflow:hidden'
+    await page.viewport(1440, 900)
+    await renderExpanded()
+    const sidebar = container.querySelector<HTMLElement>('.chapter-outline-sidebar')!
+    expect(getComputedStyle(sidebar).position).not.toBe('absolute')
+    expect(Math.round(sidebar.getBoundingClientRect().width)).toBe(238)
+    await page.screenshot({ path: '../../../../output/playwright/chapter-outline-restored-desktop.png' })
+    await act(async () => {
+      await page.viewport(800, 700)
+      await vi.waitFor(() => {
+        window.dispatchEvent(new Event('resize'))
+        expect(window.innerWidth).toBeLessThan(1024)
+      })
+    })
+    expect(sidebar.classList.contains('is-narrow')).toBe(true)
+    expect(getComputedStyle(sidebar).position).toBe('absolute')
+    await page.screenshot({ path: '../../../../output/playwright/chapter-outline-restored-narrow.png' })
+    await act(async () => container.querySelector<HTMLButtonElement>('.chapter-outline-toggle')?.click())
+    expect(sidebar.classList.contains('is-collapsed')).toBe(true)
+    expect(container.querySelector('.chapter-outline-backdrop')).toBeNull()
   })
 })

@@ -290,7 +290,10 @@ describe('chapter-card draft ledger', () => {
       'sameProjectSessionContext(dataProjectSessionRef.current, projectSession)',
     )
     expect(componentSource).toContain('loadRemote: () => loadDirectoryBlueprints(projectKey, projectSession)')
-    expect(componentSource).toContain('await saveChapterBlueprint(selected, projectKey, projectSession)')
+    // handleSaveOne 保存的是 reconcileProjectedFields 之后的 target：
+    // 有未保存 v2 细纲草稿时，v1 行的投影列必须先按草稿重算（契约 §6.3）。
+    expect(componentSource).toContain('const target = reconcileProjectedFields(selected)')
+    expect(componentSource).toContain('await saveChapterBlueprint(target, projectKey, projectSession)')
     expect(componentSource).toContain('await saveAllBlueprints(saveInput, projectKey, projectSession)')
     expect(componentSource).toContain(
       "'db:blueprint-delete',\n      selected.chapterNumber,\n      projectKey,",

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/Dialog'
+import WorldNodeReferences from '../world/WorldNodeReferences'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
 import { Label } from '../ui/Label'
@@ -10,7 +11,11 @@ import {
   type WorldMapNode,
   type WorldMapNodeType,
   WORLD_MAP_NODE_TYPE_LABELS,
+  WORLD_MAP_MARKER_ICON_LABELS,
+  getWorldMapMarkerIcon,
+  type WorldMapMarkerIcon,
 } from '../../shared/world-map'
+import { WORLD_MAP_MARKER_ICONS } from './world-map-marker-icons'
 
 interface Props {
   open: boolean
@@ -37,6 +42,7 @@ export default function WorldMapNodeDialog({
 
   const [name, setName] = useState('')
   const [type, setType] = useState<WorldMapNodeType>('city')
+  const [markerIcon, setMarkerIcon] = useState<WorldMapMarkerIcon | null>(null)
   const [parentId, setParentId] = useState<string>('')
   const [description, setDescription] = useState('')
   const [x, setX] = useState(250)
@@ -49,6 +55,7 @@ export default function WorldMapNodeDialog({
       if (node) {
         setName(node.name)
         setType(node.type)
+        setMarkerIcon(node.markerIcon || null)
         setParentId(node.parentId || '')
         setDescription(node.description || '')
         setX(node.x ?? 250)
@@ -57,6 +64,7 @@ export default function WorldMapNodeDialog({
       } else {
         setName('')
         setType('city')
+        setMarkerIcon(null)
         setParentId('')
         setDescription('')
         setX(250 + Math.floor(Math.random() * 80))
@@ -79,6 +87,7 @@ export default function WorldMapNodeDialog({
       id: node?.id || `node-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       name: name.trim(),
       type,
+      markerIcon,
       // 归属地图不可编辑：一个地点必须且只能绑定一张地图。
       mapId,
       parentId: parentId || null,
@@ -102,8 +111,8 @@ export default function WorldMapNodeDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
+      <DialogContent className="max-w-md flex flex-col overflow-hidden" style={{ maxHeight: 'min(90vh, calc(100vh - 32px))' }}>
+        <DialogHeader className="shrink-0">
           <DialogTitle>
             {isEditing
               ? text(`编辑地点：${node?.name}`, `Edit location: ${node?.name}`)
@@ -111,7 +120,7 @@ export default function WorldMapNodeDialog({
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-3 py-2 text-xs">
+        <div className="vela-dialog-body min-h-0 overflow-y-auto space-y-3 text-xs">
           <p className="text-[var(--color-text-muted)]">
             {text(
               `这个地点属于「${mapName}」，只会在该地图上出现。父地点与本地图内的连接都限制在同一张地图。`,
@@ -150,6 +159,33 @@ export default function WorldMapNodeDialog({
             </div>
           </div>
 
+          <fieldset>
+            <legend className="mb-1 font-medium text-[var(--color-text)]">{text('地图标识', 'Map marker')}</legend>
+            <div className="grid grid-cols-6 gap-1">
+              {[null, ...Object.keys(WORLD_MAP_MARKER_ICON_LABELS) as WorldMapMarkerIcon[]].map(value => {
+                const icon = value || getWorldMapMarkerIcon({ type, markerIcon: null })
+                const Icon = WORLD_MAP_MARKER_ICONS[icon]
+                const label = value ? WORLD_MAP_MARKER_ICON_LABELS[value] : { zh: '自动', en: 'Auto' }
+                const selected = value === markerIcon
+                return (
+                  <button
+                    key={value || 'auto'}
+                    type="button"
+                    aria-label={text(label.zh, label.en)}
+                    aria-pressed={selected}
+                    title={text(label.zh, label.en)}
+                    onClick={() => setMarkerIcon(value)}
+                    className={`flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-md border text-[10px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] ${selected ? 'border-[var(--color-accent)] bg-[var(--color-active)] text-[var(--color-accent)]' : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-hover)]'}`}
+                  >
+                    <Icon size={20} aria-hidden="true" />
+                    <span>{text(label.zh, label.en)}</span>
+                  </button>
+                )
+              })}
+            </div>
+            <p className="mt-1 text-[10px] text-[var(--color-text-muted)]">{text('自动随地点类型显示；也可以为建筑单独选择标识。', 'Auto follows the location type. Choose a specific marker for each building.')}</p>
+          </fieldset>
+
           <div>
             <Label>{text('父级地点（可选，仅限本地图）', 'Parent location (optional, this map only)')}</Label>
             <NativeSelect
@@ -185,7 +221,10 @@ export default function WorldMapNodeDialog({
           </div>
         </div>
 
-        <DialogFooter className="gap-2">
+        {/* 这个地点在世界资料里被谁引用：作者不必先记住它属于哪个世界。 */}
+        {isEditing && node && <WorldNodeReferences nodeId={node.id} />}
+
+        <DialogFooter className="shrink-0 gap-2">
           <Button variant="ghost" onClick={onClose} disabled={saving}>
             {text('取消', 'Cancel')}
           </Button>

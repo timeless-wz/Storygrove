@@ -123,7 +123,7 @@ export default function TitleBar() {
       >
         <div className="writer-topbar-brand flex shrink-0 items-center gap-2">
           <div className="writer-brand-mark flex h-5 w-5 items-center justify-center rounded-[var(--radius-sm)]">
-            <img className="writer-brand-image" src="/brand-icon.png" alt="" />
+            <img className="writer-brand-image" src={`${import.meta.env.BASE_URL}brand-icon.png`} alt="" />
           </div>
           <span className="brand-gradient text-[12px] font-semibold">
             {locale === 'zh-CN' ? APP_BRAND.zhName : APP_BRAND.enName}

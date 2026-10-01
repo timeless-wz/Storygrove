@@ -817,53 +817,98 @@ export class InferBlueprintsPerChapterCommand extends BaseWorkflowCommand<void> 
     ))
 
     this.assertNotCancelled(context)
-    const commitRequest: BlueprintRangeCommitRequest = {
-        mode: 'replace-range',
-        operationId: `import-blueprints-${context.runId}-${startChapter}-${endChapter}`,
-        startChapter,
-        endChapter,
-        blueprints: [...batch.items],
-      }
-    let commitReceipt: BlueprintRangeCommitReceipt
-    if (this.commitBlueprintRange) {
-      commitReceipt = await this.commitBlueprintRange(commitRequest)
-    } else {
-      const commit = await ipc.invokeWithProjectSession(
-        projectSession,
-        'db:blueprint-commit-range',
-        commitRequest,
-        context.projectPath,
-      )
-      if (!commit.success || !commit.receipt) {
-        throw new Error(commit.error || text(
-          '导入蓝图未能作为完整范围一次提交并回读。',
-          'The imported blueprints could not be committed and read back as one complete range.',
-        ))
-      }
-      commitReceipt = commit.receipt
-    }
-    if (commitReceipt.snapshot.length !== orderedChapters.length) {
-      throw new Error(text(
-        '导入蓝图提交回执覆盖不完整。',
-        'The imported blueprint commit receipt is incomplete.',
+    // v2 覆盖守卫（契约 §7.4）：已有 v2 完整细纲的章一律跳过并明示；
+    // 简纲推演绝不覆盖人工/导入细纲（含其投影字段）。通道签名冻结（契约缺口
+    // §15.1），防护只能落在调用方。
+    const v2SummaryList = await ipc.invokeWithProjectSession(
+      projectSession, 'db:blueprint-v2-summary-list', context.projectPath,
+    )
+    const v2ChapterNumbers = new Set(v2SummaryList.map(summary => summary.chapterNumber))
+    const writableBlueprints = batch.items.filter(item => !v2ChapterNumbers.has(item.chapterNumber))
+    const skippedBlueprints = batch.items.filter(item => v2ChapterNumbers.has(item.chapterNumber))
+    if (skippedBlueprints.length > 0) {
+      const skippedLabels = skippedBlueprints
+        .map(item => `第${item.chapterNumber}章${item.title ? ` ${item.title}` : ''}`)
+        .join('、')
+      callbacks.log(text(
+        `已跳过 ${skippedBlueprints.length} 章已有 v2 完整细纲的章，推演结果未写入这些章：${skippedLabels}`,
+        `Skipped ${skippedBlueprints.length} chapter(s) that already have v2 detailed outlines; inferred results were not written: ${skippedLabels}`,
       ))
     }
-    context.data.blueprintCommitReceipt = commitReceipt
+    const commitReceipts: BlueprintRangeCommitReceipt[] = []
+    const contiguousRangesOf = (chapterNumbers: readonly number[]) => {
+      const sorted = [...chapterNumbers].sort((left, right) => left - right)
+      const ranges: Array<{ startChapter: number; endChapter: number }> = []
+      for (const chapterNumber of sorted) {
+        const last = ranges[ranges.length - 1]
+        if (last && chapterNumber === last.endChapter + 1) last.endChapter = chapterNumber
+        else ranges.push({ startChapter: chapterNumber, endChapter: chapterNumber })
+      }
+      return ranges
+    }
+    for (const subRange of contiguousRangesOf(writableBlueprints.map(item => item.chapterNumber))) {
+      const subBlueprints = writableBlueprints.filter(item => (
+        item.chapterNumber >= subRange.startChapter && item.chapterNumber <= subRange.endChapter
+      ))
+      const commitRequest: BlueprintRangeCommitRequest = {
+        mode: 'replace-range',
+        operationId: `import-blueprints-${context.runId}-${subRange.startChapter}-${subRange.endChapter}`,
+        startChapter: subRange.startChapter,
+        endChapter: subRange.endChapter,
+        blueprints: [...subBlueprints],
+      }
+      let commitReceipt: BlueprintRangeCommitReceipt
+      if (this.commitBlueprintRange) {
+        commitReceipt = await this.commitBlueprintRange(commitRequest)
+      } else {
+        const commit = await ipc.invokeWithProjectSession(
+          projectSession,
+          'db:blueprint-commit-range',
+          commitRequest,
+          context.projectPath,
+        )
+        if (!commit.success || !commit.receipt) {
+          throw new Error(commit.error || text(
+            '导入蓝图未能作为完整范围一次提交并回读。',
+            'The imported blueprints could not be committed and read back as one complete range.',
+          ))
+        }
+        commitReceipt = commit.receipt
+      }
+      if (commitReceipt.snapshot.length !== subBlueprints.length) {
+        throw new Error(text(
+          '导入蓝图提交回执覆盖不完整。',
+          'The imported blueprint commit receipt is incomplete.',
+        ))
+      }
+      commitReceipts.push(commitReceipt)
+    }
+    context.data.blueprintCommitReceipt = commitReceipts[0]
+    context.data.blueprintCommitReceipts = commitReceipts
+    context.data.skippedV2Chapters = skippedBlueprints.map(item => ({
+      chapterNumber: item.chapterNumber,
+      title: item.title,
+    }))
     try {
-      const syncReceipt = await retryDirectoryCharacterSync(
-        commitReceipt.characterSyncOperation.operationId,
-        context.projectPath,
-        projectSession,
-      )
-      context.data.blueprintCharacterSyncReceipt = syncReceipt
+      const syncReceipts = []
+      for (const receipt of commitReceipts) {
+        syncReceipts.push(await retryDirectoryCharacterSync(
+          receipt.characterSyncOperation.operationId,
+          context.projectPath,
+          projectSession,
+        ))
+      }
+      context.data.blueprintCharacterSyncReceipts = syncReceipts
     } catch {
-      throw new ImportBlueprintPostCommitSyncError(commitReceipt, text)
+      throw new ImportBlueprintPostCommitSyncError(commitReceipts[0], text)
     }
 
-    const committedChapterCount = commitReceipt.snapshot.length
+    const committedChapterCount = commitReceipts.reduce((sum, receipt) => sum + receipt.snapshot.length, 0)
     callbacks.log(text(
-      `蓝图推演完成：${committedChapterCount} 章已一次提交`,
-      `Blueprint inference complete: ${committedChapterCount} ${committedChapterCount === 1 ? 'chapter was' : 'chapters were'} committed in one operation`,
+      `简纲推演完成：${committedChapterCount} 章已提交（详细细纲请逐章导入或编辑）` +
+        (skippedBlueprints.length > 0 ? `；跳过 ${skippedBlueprints.length} 章已有完整细纲` : ''),
+      `Simple-outline inference complete: ${committedChapterCount} ${committedChapterCount === 1 ? 'chapter was' : 'chapters were'} committed (import or edit detailed outlines per chapter)` +
+        (skippedBlueprints.length > 0 ? `; skipped ${skippedBlueprints.length} chapter(s) with detailed outlines` : ''),
     ))
     callbacks.setProgress(100)
     this.notifyRefresh(['fileTree', 'blueprints'], context.projectPath, projectSession)

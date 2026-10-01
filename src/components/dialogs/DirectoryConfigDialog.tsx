@@ -58,7 +58,7 @@ async function readHighestBlueprintChapter(
 ): Promise<number> {
   const blueprints = await ipc.invokeWithProjectSession(
     projectSession,
-    'db:blueprint-get-all',
+    'db:blueprint-list-summary',
     projectPath,
   )
   return blueprints.reduce(

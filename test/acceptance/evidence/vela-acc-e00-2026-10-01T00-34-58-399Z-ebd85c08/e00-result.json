@@ -1,0 +1,177 @@
+{
+  "scenario": "E00-project-persistence",
+  "runId": "vela-acc-e00-2026-10-01T00-34-58-399Z-ebd85c08",
+  "verdict": "PASS",
+  "failedSteps": [],
+  "steps": [
+    {
+      "name": "fixture.created",
+      "ok": true,
+      "data": {
+        "projectId": "e0bded68-1b1f-4993-89d9-80e748a3a602",
+        "sources": 8
+      }
+    },
+    {
+      "name": "build.gate",
+      "ok": true,
+      "data": {
+        "ok": true,
+        "missing": []
+      }
+    },
+    {
+      "name": "abi.rebuild-electron",
+      "ok": true,
+      "data": {
+        "script": "rebuild:electron",
+        "exitCode": 0,
+        "ok": true,
+        "ms": 2855
+      }
+    },
+    {
+      "name": "isolation.main-process-readback",
+      "ok": true,
+      "data": {
+        "velaHome": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e00-2026-10-01T00-34-58-399Z-ebd85c08\\global-home",
+        "userData": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e00-2026-10-01T00-34-58-399Z-ebd85c08\\electron-profile",
+        "cwd": "D:\\ai\\AI-Novel-Writer-master"
+      }
+    },
+    {
+      "name": "ui.launch1.project-opened",
+      "ok": true,
+      "data": {
+        "projectTreeVisible": true,
+        "visibleDialogCount": 0,
+        "failureText": null,
+        "ok": true,
+        "screenshotPath": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e00-2026-10-01T00-34-58-399Z-ebd85c08\\evidence\\01-launch-open-project-a.png"
+      }
+    },
+    {
+      "name": "main.smoke-open-marker",
+      "ok": true,
+      "data": {
+        "ok": true,
+        "marker": {
+          "projectPath": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e00-2026-10-01T00-34-58-399Z-ebd85c08\\project-a",
+          "openedAt": "2026-10-01T00:35:04.031Z"
+        },
+        "expected": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e00-2026-10-01T00-34-58-399Z-ebd85c08\\project-a"
+      }
+    },
+    {
+      "name": "app.quit1",
+      "ok": true,
+      "data": {
+        "code": 0,
+        "signal": null
+      }
+    },
+    {
+      "name": "ui.launch2.reopened",
+      "ok": true,
+      "data": {
+        "projectTreeVisible": true,
+        "visibleDialogCount": 0,
+        "failureText": null,
+        "ok": true,
+        "screenshotPath": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e00-2026-10-01T00-34-58-399Z-ebd85c08\\evidence\\02-relaunch-reopen-project-a.png"
+      }
+    },
+    {
+      "name": "app.quit2",
+      "ok": true,
+      "data": {
+        "code": 0,
+        "signal": null
+      }
+    },
+    {
+      "name": "abi.restore-node",
+      "ok": true,
+      "data": {
+        "script": "prepare:native-node",
+        "exitCode": 0,
+        "ok": true
+      }
+    },
+    {
+      "name": "storage.project-a.sqlite",
+      "ok": true,
+      "data": {
+        "integrity": "ok",
+        "foreignKeyViolations": 0,
+        "tableCount": 104
+      }
+    },
+    {
+      "name": "storage.project-a.manifest",
+      "ok": true,
+      "data": {
+        "ok": true
+      }
+    },
+    {
+      "name": "storage.global-home.recent-projects",
+      "ok": true,
+      "data": {
+        "path": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e00-2026-10-01T00-34-58-399Z-ebd85c08\\global-home\\recent-projects.json",
+        "containsProjectA": true,
+        "recentData": [
+          {
+            "name": "project-a",
+            "path": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-e00-2026-10-01T00-34-58-399Z-ebd85c08\\project-a",
+            "updatedAt": "2026-10-01T00:35:06.017Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "isolation.project-b-untouched",
+      "ok": true,
+      "data": {
+        "dbExists": false
+      }
+    },
+    {
+      "name": "storage.source-fixtures.readonly",
+      "ok": true,
+      "data": {
+        "before": 8,
+        "unchanged": true
+      }
+    },
+    {
+      "name": "isolation.electron-profile-used",
+      "ok": true,
+      "data": {
+        "files": 14
+      }
+    }
+  ],
+  "diagnostics": [
+    {
+      "at": "2026-10-01T00:35:02.594Z",
+      "kind": "renderer-console-error",
+      "text": "Failed to load resource: net::ERR_FILE_NOT_FOUND"
+    },
+    {
+      "at": "2026-10-01T00:35:02.603Z",
+      "kind": "renderer-console-warning",
+      "text": "%cElectron Security Warning (Insecure Content-Security-Policy) font-weight: bold; This renderer process has either no Content Security\n  Policy set or a policy with \"unsafe-eval\" enabled. This exposes users of\n  this app to unnecessary security risks.\n\nFor more information and help, consult\nhttps://electronjs.org/docs/tutorial/security.\nThis warning will not show up\nonce the app is packaged."
+    },
+    {
+      "at": "2026-10-01T00:35:05.760Z",
+      "kind": "renderer-console-error",
+      "text": "Failed to load resource: net::ERR_FILE_NOT_FOUND"
+    },
+    {
+      "at": "2026-10-01T00:35:05.857Z",
+      "kind": "renderer-console-warning",
+      "text": "%cElectron Security Warning (Insecure Content-Security-Policy) font-weight: bold; This renderer process has either no Content Security\n  Policy set or a policy with \"unsafe-eval\" enabled. This exposes users of\n  this app to unnecessary security risks.\n\nFor more information and help, consult\nhttps://electronjs.org/docs/tutorial/security.\nThis warning will not show up\nonce the app is packaged."
+    }
+  ]
+}

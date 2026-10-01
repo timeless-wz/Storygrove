@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto'
+import type { FinalizationResult } from '../../src/shared/finalization'
+export type { FinalizationResult } from '../../src/shared/finalization'
 
 import {
   FinalizationRepository,
   type FinalizationRecord,
-  type PublicationStatus,
 } from '../repositories/finalization-repository'
 import {
   manuscriptPublisher,
@@ -25,18 +26,6 @@ export interface FinalizationRetryRequest {
   /** 已由 ProjectAccess 验证并 canonicalize 的项目根目录。 */
   projectRoot: string
   finalizationId: string
-}
-
-export interface FinalizationResult {
-  success: boolean
-  /** false 代表数据库事务从未提交；true 则数据库定稿事实已存在。 */
-  committed: boolean
-  finalizationId?: string
-  contentHash?: string
-  contentRevision?: number
-  draftId?: number
-  publicationStatus?: PublicationStatus
-  error?: string
 }
 
 export interface FinalizationPublisher {

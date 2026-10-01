@@ -4,6 +4,7 @@ import { page } from 'vitest/browser'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { setActiveProjectSessionContext } from '../../../shared/project-session-context'
+import { assertNoLossOnSerialize, parseChapterBlueprintMarkdown } from '../../../shared/blueprint-v2-markdown'
 import { useEditorStore } from '../../../stores/editor-store'
 import { useLayoutStore } from '../../../stores/layout-store'
 import { useProjectStore } from '../../../stores/project-store'
@@ -16,6 +17,7 @@ import {
   resetDraftEditorPositions,
 } from '../../../services/draft-editor-position'
 import DraftEditor from '../DraftEditor'
+import chapterOneMarkdown from '../../../../test/fixtures/blueprint-v2/chapter-01.md?raw'
 
 vi.mock('../../ui/Confirm', () => ({
   confirm: vi.fn(async () => true),
@@ -80,16 +82,26 @@ function blueprintRow(overrides: Record<string, unknown> = {}) {
   }
 }
 
-const SCENE_NODES = [
-  {
-    id: 'scene-2', canvasId: 'cha-4', type: 'scene', title: '被巡查撞见', summary: '冲突升级',
-    colorKey: 'default', role: '冲突', order: 2, refs: {}, x: 200, y: 0,
-  },
-  {
-    id: 'scene-1', canvasId: 'cha-4', type: 'scene', title: '夜探码头', summary: '',
-    colorKey: 'default', role: '铺垫', order: 1, refs: {}, x: 0, y: 0,
-  },
-]
+function blueprintV2Detail(chapterNumber = 4, sceneItems = [
+  { id: 'bps-1', title: '分镜一：夜探码头', markdown: '环境与动作正文', presence: 'on-canvas' as const },
+  { id: 'bps-2', title: '分镜二：被巡查撞见', markdown: '冲突升级正文', presence: 'off-canvas' as const },
+]) {
+  return {
+    schemaVersion: 2,
+    chapterNumber,
+    chapterTitle: `第${chapterNumber}章｜风暴降临`,
+    docPreamble: '',
+    sections: [{
+      kind: 'canonical', id: 'storyboard', title: '【逐场分镜拆解】', level: 4,
+      preamble: '',
+      items: sceneItems.map(scene => ({
+        kind: 'scene', level: 5, ...scene, markdown: scene.markdown,
+      })),
+      postamble: '',
+    }],
+    origin: 'manual', revision: 1, contentHash: 'test-hash',
+  }
+}
 
 function installApi(handler: (channel: string, args: unknown[]) => unknown) {
   invoke = vi.fn(async (channel: string, ...args: unknown[]) => handler(channel, args))
@@ -118,7 +130,7 @@ function installIpc(options: {
   draftId?: number
   chapterNumber?: number
   blueprintValue?: Record<string, unknown> | null
-  scenes?: unknown[]
+  blueprintV2Value?: Record<string, unknown> | null
   delayBlueprintGet?: boolean
 } = {}) {
   const {
@@ -126,7 +138,7 @@ function installIpc(options: {
     draftId = DRAFT_ID,
     chapterNumber = 4,
     blueprintValue,
-    scenes = SCENE_NODES,
+    blueprintV2Value,
     delayBlueprintGet = false,
   } = options
 
@@ -134,15 +146,22 @@ function installIpc(options: {
     if (channel === 'db:draft-get-meta') {
       return { ...draftMeta(boundBlueprintChapter), id: draftId, chapterNumber }
     }
-    if (channel === 'db:blueprint-get-all') {
-      return boundBlueprintChapter === undefined ? [] : [{ chapterNumber: boundBlueprintChapter, title: '风暴降临' }]
+    if (channel === 'db:blueprint-list-summary') {
+      return boundBlueprintChapter === undefined ? [] : [{
+        chapterNumber: boundBlueprintChapter, title: '风暴降临', purpose: '', keyEvents: '',
+      }]
     }
+    if (channel === 'db:blueprint-v2-summary-list') return []
     if (channel === 'db:blueprint-get') {
       if (blueprintValue === null) return null
       if (blueprintValue !== undefined) return blueprintValue
       return delayBlueprintGet ? new Promise(() => {}) : blueprintRow()
     }
-    if (channel === 'db:chapter-canvas-get') return { canvas: null, nodes: scenes, edges: [] }
+    if (channel === 'db:blueprint-v2-get') {
+      return blueprintV2Value === undefined
+        ? blueprintV2Detail(boundBlueprintChapter ?? chapterNumber)
+        : blueprintV2Value
+    }
     if (channel === 'db:draft-list') return [{ id: draftId, version: 1 }]
     if (channel === 'db:review-list') return []
     if (channel === 'db:foreshadowing-list-by-draft') return []
@@ -285,11 +304,13 @@ afterEach(async () => {
   useWorkflowStore.setState(originalWorkflowState)
   useLayoutStore.setState(originalLayoutState)
   setActiveProjectSessionContext(null)
+  vi.restoreAllMocks()
   Reflect.deleteProperty(window, 'velaAPI')
 })
 
 describe('DraftEditor 本章创作上下文', () => {
-  it('已绑定：展示真实的目标、节拍、场景顺序与章尾悬念，且全程只读', async () => {
+  it('已绑定 v2：展示真实目标、正式分镜正文与章尾悬念，不读取旧画布场景', async () => {
+    installIpc({ boundBlueprintChapter: 4, blueprintV2Value: blueprintV2Detail() })
     await renderEditor()
     await waitForVditorReady()
     await waitForSidebar('chapter-context-purpose')
@@ -297,21 +318,18 @@ describe('DraftEditor 本章创作上下文', () => {
     expect(sidebarRoot()?.textContent).toContain('让主角在码头拿到账本')
     expect(sidebarRoot()?.textContent).toContain('账本缺了最后一页')
 
-    // 节拍按换行与分号拆开，不做改写。
-    const beats = container.querySelectorAll('[data-testid="chapter-context-beats"] li')
-    expect(Array.from(beats).map(beat => beat.textContent)).toEqual([
-      '夜探码头', '拿到账本', '被巡查撞见',
-    ])
-
-    // 场景顺序按 order 升序，而不是按画布返回顺序。
+    // 场景顺序与正文来自正式 v2 分镜条目。
     const scenes = container.querySelectorAll('[data-testid="chapter-context-scenes"] li')
     expect(scenes.length).toBe(2)
-    expect(scenes[0].textContent).toContain('夜探码头')
-    expect(scenes[1].textContent).toContain('被巡查撞见')
+    expect(scenes[0].textContent).toContain('分镜一：夜探码头')
+    expect(scenes[0].textContent).toContain('环境与动作正文')
+    expect(scenes[1].textContent).toContain('冲突升级正文')
+    expect(scenes[1].textContent).toContain('未排上画布')
 
     // 读取用的是草稿绑定的章号。
     expect(invoke.mock.calls).toContainEqual(['db:blueprint-get', 4, PROJECT_PATH, PROJECT_SESSION])
-    expect(invoke.mock.calls).toContainEqual(['db:chapter-canvas-get', 4, PROJECT_PATH, PROJECT_SESSION])
+    expect(invoke.mock.calls).toContainEqual(['db:blueprint-v2-get', 4, PROJECT_PATH, PROJECT_SESSION])
+    expect(invoke.mock.calls.some(([channel]) => channel === 'db:chapter-canvas-get')).toBe(false)
 
     // 侧栏是只读的：期间没有写入草稿、蓝图或画布。
     const writeChannels = invoke.mock.calls
@@ -320,11 +338,44 @@ describe('DraftEditor 本章创作上下文', () => {
     expect(writeChannels).toEqual([])
   })
 
+  it('从创作上下文导出完整 v2 Markdown，保留章节原文与四场正文', async () => {
+    const { content } = parseChapterBlueprintMarkdown(chapterOneMarkdown)
+    const detail = { ...content, revision: 3, contentHash: 'fixture-hash' }
+    installIpc({
+      boundBlueprintChapter: 1,
+      chapterNumber: 1,
+      blueprintValue: blueprintRow({ chapterNumber: 1 }),
+      blueprintV2Value: detail,
+    })
+    openDraftTab({ filePath: FILE_PATH, draftId: DRAFT_ID, chapterNumber: 1, blueprintChapterNumber: 1 })
+    await renderEditor()
+    await waitForVditorReady()
+    await waitForSidebar('chapter-context-purpose')
+
+    let downloadedBlob: Blob | null = null
+    let downloadedName = ''
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(blob => {
+      if (blob instanceof Blob) downloadedBlob = blob
+      return 'blob:blueprint-export'
+    })
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      downloadedName = this.download
+    })
+
+    await clickTestId('chapter-context-download-markdown')
+
+    expect(downloadedName).toBe('第1章-章节蓝图.md')
+    expect(downloadedBlob).not.toBeNull()
+    expect(await downloadedBlob!.text()).toBe(assertNoLossOnSerialize(detail))
+    expect(await downloadedBlob!.text()).toContain('场景四：开出地图的末班车')
+    expect(await downloadedBlob!.text()).toContain('周晓：“……值守员同志，我想报警。”')
+  })
+
   it('蓝图字段缺失时显示空状态，不编造内容', async () => {
     installIpc({
       boundBlueprintChapter: 4,
       blueprintValue: blueprintRow({ purpose: '', keyEvents: '', suspenseHook: '', role: '', characters: [] }),
-      scenes: [],
+      blueprintV2Value: null,
     })
 
     await renderEditor()
@@ -334,12 +385,24 @@ describe('DraftEditor 本章创作上下文', () => {
     const body = sidebarRoot()?.textContent ?? ''
     expect(body).toContain('蓝图未填写本章目标')
     expect(body).toContain('蓝图未填写关键事件')
-    expect(body).toContain('本章还没有场景卡')
     expect(body).toContain('蓝图未填写章尾悬念')
   })
 
+  it('v1-only 旧简纲仍显示关键事件', async () => {
+    installIpc({ boundBlueprintChapter: 4, blueprintV2Value: null })
+    await renderEditor()
+    await waitForVditorReady()
+    await waitForSidebar('chapter-context-beats')
+
+    const beats = container.querySelectorAll('[data-testid="chapter-context-beats"] li')
+    expect(Array.from(beats).map(beat => beat.textContent)).toEqual([
+      '夜探码头', '拿到账本', '被巡查撞见',
+    ])
+    expect(container.querySelector('[data-testid="chapter-context-scenes"]')).toBeNull()
+  })
+
   it('已绑定但指向的蓝图已被删除：说明目标不存在并给出重新绑定入口，不用其他资料顶替', async () => {
-    installIpc({ boundBlueprintChapter: 9, blueprintValue: null })
+    installIpc({ boundBlueprintChapter: 9, blueprintValue: null, blueprintV2Value: null })
     openDraftTab({ filePath: FILE_PATH, draftId: DRAFT_ID, chapterNumber: 4, blueprintChapterNumber: 9 })
 
     await renderEditor()
@@ -348,7 +411,9 @@ describe('DraftEditor 本章创作上下文', () => {
 
     expect(notice.textContent).toContain('绑定目标已不存在')
     expect(notice.textContent).toContain('第 9 章')
-    // 没有读取画布，也没有拿第 4 章的蓝图顶替。
+    // 两种权威存储都只按显式绑定章号读取；没有读取画布，也没有拿第 4 章顶替。
+    expect(invoke.mock.calls).toContainEqual(['db:blueprint-get', 9, PROJECT_PATH, PROJECT_SESSION])
+    expect(invoke.mock.calls).toContainEqual(['db:blueprint-v2-get', 9, PROJECT_PATH, PROJECT_SESSION])
     expect(invoke.mock.calls.some(([channel]) => channel === 'db:chapter-canvas-get')).toBe(false)
     expect(sidebarRoot()?.textContent).not.toContain('让主角在码头拿到账本')
 
@@ -367,7 +432,7 @@ describe('DraftEditor 本章创作上下文', () => {
     expect(notice.textContent).toContain('未绑定蓝图')
     // 关键红线：未绑定时一次蓝图/画布读取都不能发生。
     expect(invoke.mock.calls.some(([channel]) => channel === 'db:blueprint-get')).toBe(false)
-    expect(invoke.mock.calls.some(([channel]) => channel === 'db:chapter-canvas-get')).toBe(false)
+    expect(invoke.mock.calls.some(([channel]) => channel === 'db:blueprint-v2-get')).toBe(false)
     // 也不提供到别的资料的跳转。
     expect(container.querySelector('[data-testid="chapter-context-open-blueprint"]')).toBeNull()
     expect(container.querySelector('[data-testid="chapter-context-open-canvas"]')).toBeNull()
@@ -385,7 +450,7 @@ describe('DraftEditor 本章创作上下文', () => {
     await waitForVditorReady()
     await waitForSidebar('chapter-context-unbound')
 
-    // 从侧栏入口打开既有的绑定对话框（蓝图选项来自 db:blueprint-get-all）。
+    // 从侧栏入口打开既有的绑定对话框（蓝图选项来自有界摘要）。
     installIpc({ boundBlueprintChapter: 4 })
     await clickTestId('chapter-context-bind')
     await expect.element(page.getByRole('heading', { name: '绑定章节蓝图' })).toBeVisible()
@@ -423,15 +488,16 @@ describe('DraftEditor 本章创作上下文', () => {
           ? new Promise(resolve => { resolveMeta = resolve })
           : draftMeta(boundChapter)
       }
-      if (channel === 'db:blueprint-get-all') return [
-        blueprintRow({ chapterNumber: 4, title: '旧章' }),
-        blueprintRow({ chapterNumber: 12, title: '新章' }),
+      if (channel === 'db:blueprint-list-summary') return [
+        { chapterNumber: 4, title: '旧章', purpose: '', keyEvents: '' },
+        { chapterNumber: 12, title: '新章', purpose: '', keyEvents: '' },
       ]
+      if (channel === 'db:blueprint-v2-summary-list') return []
       if (channel === 'db:blueprint-get') return blueprintRow({
         chapterNumber: Number(args[0]),
         purpose: Number(args[0]) === 4 ? '旧章目标' : '新章目标',
       })
-      if (channel === 'db:chapter-canvas-get') return { canvas: null, nodes: [], edges: [] }
+      if (channel === 'db:blueprint-v2-get') return null
       if (channel === 'db:draft-set-blueprint') {
         boundChapter = Number(args[1])
         deferMeta = true
@@ -520,7 +586,7 @@ describe('DraftEditor 本章创作上下文', () => {
     await waitForVditorReady()
     await waitForSidebar('chapter-context-purpose')
 
-    installIpc({ boundBlueprintChapter: undefined, draftId: OTHER_DRAFT_ID, chapterNumber: 6, scenes: [] })
+    installIpc({ boundBlueprintChapter: undefined, draftId: OTHER_DRAFT_ID, chapterNumber: 6 })
     openDraftTab({ filePath: OTHER_FILE_PATH, draftId: OTHER_DRAFT_ID, chapterNumber: 6 })
     await renderEditor({ filePath: OTHER_FILE_PATH, tabId: OTHER_FILE_PATH })
     await waitForVditorReady()
@@ -540,7 +606,7 @@ describe('DraftEditor 本章创作上下文', () => {
         if (Number(args[0]) === 4) return new Promise(resolve => { resolveBlueprint = resolve })
         return null
       }
-      if (channel === 'db:chapter-canvas-get') return { canvas: null, nodes: SCENE_NODES, edges: [] }
+      if (channel === 'db:blueprint-v2-get') return null
       if (channel === 'db:draft-list') return [{ id: DRAFT_ID, version: 1 }]
       if (channel === 'db:review-list') return []
       if (channel === 'db:foreshadowing-list-by-draft') return []
@@ -551,7 +617,7 @@ describe('DraftEditor 本章创作上下文', () => {
     await waitForVditorReady()
 
     // 切到第 6 章（未绑定）并完成渲染。
-    installIpc({ boundBlueprintChapter: undefined, draftId: OTHER_DRAFT_ID, chapterNumber: 6, scenes: [] })
+    installIpc({ boundBlueprintChapter: undefined, draftId: OTHER_DRAFT_ID, chapterNumber: 6 })
     openDraftTab({ filePath: OTHER_FILE_PATH, draftId: OTHER_DRAFT_ID, chapterNumber: 6 })
     await renderEditor({ filePath: OTHER_FILE_PATH, tabId: OTHER_FILE_PATH })
     await waitForVditorReady()
@@ -577,7 +643,7 @@ describe('DraftEditor 本章创作上下文', () => {
         if (Number(args[0]) === 4) return new Promise(resolve => { resolveBlueprint = resolve })
         return null
       }
-      if (channel === 'db:chapter-canvas-get') return { canvas: null, nodes: SCENE_NODES, edges: [] }
+      if (channel === 'db:blueprint-v2-get') return null
       if (channel === 'db:draft-list') return [{ id: DRAFT_ID, version: 1 }]
       if (channel === 'db:review-list') return []
       if (channel === 'db:foreshadowing-list-by-draft') return []

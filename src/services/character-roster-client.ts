@@ -42,6 +42,7 @@ export function characterRosterEntryFromCard(card: CharacterData): CharacterRost
   const relationships = parseStructuredRelationships(card.relationships)
   return {
     name: card.name.trim(),
+    ...(card.cultivationLevelId !== undefined ? { cultivationLevelId: card.cultivationLevelId } : {}),
     role: card.role,
     gender: card.gender,
     age: card.age,
@@ -63,6 +64,7 @@ export function characterRosterEntryFromCard(card: CharacterData): CharacterRost
 export function characterCardFromRosterEntry(entry: CharacterRosterEntry): CharacterData {
   return {
     name: entry.name,
+    ...(entry.cultivationLevelId !== undefined ? { cultivationLevelId: entry.cultivationLevelId } : {}),
     role: normalizeCharacterRole(entry.role),
     gender: entry.gender,
     age: entry.age,

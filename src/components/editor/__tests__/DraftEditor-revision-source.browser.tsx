@@ -47,6 +47,7 @@ beforeEach(async () => {
       }
     }
     if (channel === 'db:blueprint-get-all' || channel === 'db:review-list') return []
+    if (channel === 'db:blueprint-list-summary' || channel === 'db:map-get-all') return []
     if (channel === 'db:draft-list') return [{ id: 7, version: 1 }]
     if (channel === 'db:revision-get-pending') {
       return [{
@@ -221,7 +222,7 @@ describe('DraftEditor revision source binding', () => {
         }
       }
       if (channel === 'db:draft-list') return [{ id: 7, version: 1 }, { id: 8, version: 1 }]
-      if (channel === 'db:blueprint-get-all' || channel === 'db:review-list' || channel === 'db:revision-get-pending') return []
+      if (channel === 'db:blueprint-get-all' || channel === 'db:blueprint-list-summary' || channel === 'db:review-list' || channel === 'db:revision-get-pending' || channel === 'db:map-get-all') return []
       if (channel === 'db:draft-update-content') return { success: true }
       throw new Error(`Unexpected IPC channel: ${channel}`)
     })

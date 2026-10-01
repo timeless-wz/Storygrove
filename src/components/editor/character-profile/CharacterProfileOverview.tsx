@@ -1,3 +1,4 @@
+import CharacterCultivationField from './CharacterCultivationField'
 import { ChevronDown } from 'lucide-react'
 import type { CharacterCard } from '../../../stores/character-store'
 import { useLocaleStore } from '../../../stores/locale-store'
@@ -99,6 +100,8 @@ export default function CharacterProfileOverview({
           ))}
         </dl>
       </header>
+
+      <CharacterCultivationField card={card} />
 
       <ProfileSection title={text('核心动机', 'Core motivation')}>
         {card.motivation.trim()

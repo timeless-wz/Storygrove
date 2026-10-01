@@ -20,13 +20,52 @@ export interface NarrativeThreadEventCandidate {
   reason: string
 }
 
-type BlueprintData = DatabaseChannels['db:blueprint-get-all']['return'][number]
+type BlueprintData = DatabaseChannels['db:blueprint-list-summary']['return'][number]
+type BlueprintV2Summary = DatabaseChannels['db:blueprint-v2-summary-list']['return'][number]
+
+export interface NarrativeThreadBlueprintSummary {
+  chapterNumber: number
+  title: string
+  purpose: string
+  keyEvents: string
+  sceneTitles: string[]
+}
+
+/** Merge bounded legacy and v2 projections without loading chapter Markdown. */
+export function mergeNarrativeThreadBlueprintSummaries(
+  legacy: BlueprintData[],
+  detailed: BlueprintV2Summary[],
+): NarrativeThreadBlueprintSummary[] {
+  const chapters = new Map<number, NarrativeThreadBlueprintSummary>(legacy.map(blueprint => [
+    blueprint.chapterNumber,
+    {
+      chapterNumber: blueprint.chapterNumber,
+      title: String(blueprint.title ?? '').slice(0, 160),
+      purpose: String(blueprint.purpose ?? '').slice(0, 300),
+      keyEvents: String(blueprint.keyEvents ?? '').slice(0, 800),
+      sceneTitles: [],
+    },
+  ]))
+
+  for (const summary of detailed) {
+    const previous = chapters.get(summary.chapterNumber)
+    chapters.set(summary.chapterNumber, {
+      chapterNumber: summary.chapterNumber,
+      title: previous?.title || `第${summary.chapterNumber}章细纲`,
+      purpose: previous?.purpose ?? '',
+      keyEvents: previous?.keyEvents ?? '',
+      sceneTitles: summary.sceneTitles.slice(0, 5).map(title => String(title ?? '').slice(0, 120)),
+    })
+  }
+
+  return [...chapters.values()].sort((left, right) => left.chapterNumber - right.chapterNumber)
+}
 
 export interface GenerateNarrativeThreadPlanCandidateInput {
   modelId: string
   writingLanguage: WritingLanguage
   totalChapters: number
-  blueprint: BlueprintData
+  blueprint: NarrativeThreadBlueprintSummary
   signal: AbortSignal
 }
 
@@ -64,6 +103,26 @@ function record(value: unknown): Record<string, unknown> | null {
 
 const MAX_PLAN_CANDIDATES = 8
 const MAX_EVENT_CANDIDATES = 5
+export const NARRATIVE_THREAD_FINALIZED_EXCERPT_MAX_CHARS = 10_000
+
+/** Keep candidate generation bounded while retaining evidence that can be checked against the finalized source. */
+export function boundedFinalizedExcerpt(content: string): string {
+  if (content.length <= NARRATIVE_THREAD_FINALIZED_EXCERPT_MAX_CHARS) return content
+  const marker = '\n…中间正文已省略…\n'
+  const headLength = Math.floor((NARRATIVE_THREAD_FINALIZED_EXCERPT_MAX_CHARS - marker.length) * 0.75)
+  const tailLength = NARRATIVE_THREAD_FINALIZED_EXCERPT_MAX_CHARS - marker.length - headLength
+  return `${content.slice(0, headLength)}${marker}${content.slice(-tailLength)}`
+}
+
+function boundedBlueprintSummary(blueprint: NarrativeThreadBlueprintSummary): NarrativeThreadBlueprintSummary {
+  return {
+    chapterNumber: blueprint.chapterNumber,
+    title: String(blueprint.title ?? '').slice(0, 160),
+    purpose: String(blueprint.purpose ?? '').slice(0, 300),
+    keyEvents: String(blueprint.keyEvents ?? '').slice(0, 800),
+    sceneTitles: blueprint.sceneTitles.slice(0, 5).map(title => String(title ?? '').slice(0, 120)),
+  }
+}
 
 function candidatesFromJson(content: string, limit: number): unknown[] {
   const parsed = record(JSON.parse(content.trim()))
@@ -149,7 +208,7 @@ export function createNarrativeThreadCandidateGenerator(
               role: 'user',
               content: JSON.stringify({
                 totalChapters: input.totalChapters,
-                blueprint: input.blueprint,
+                blueprint: boundedBlueprintSummary(input.blueprint),
               }),
             },
           ],
@@ -187,8 +246,8 @@ export function createNarrativeThreadCandidateGenerator(
               role: 'system',
               content: promptLanguageText(
                 input.writingLanguage,
-                '你是小说定稿事实审查员。只判断给定已定稿章节是否推进了给定叙事线索。证据必须是正文中逐字出现、最多 240 字的短摘录。只输出 JSON 对象：{"candidates":[{"type":"planted|progressing|resolved|abandoned","evidence":"","reason":""}]}。最多 5 项，不得输出计划 ID、草稿 ID 或章节号。',
-                'You review finalized fiction facts. Decide only whether the supplied finalized chapter advances the supplied narrative thread. Evidence must be a verbatim excerpt of at most 240 characters from the manuscript. Return only one JSON object: {"candidates":[{"type":"planted|progressing|resolved|abandoned","evidence":"","reason":""}]}. Maximum 5 items. Do not output plan IDs, draft IDs, or chapter numbers.',
+                '你是小说定稿事实审查员。只根据给定的定稿正文节选判断它是否推进了给定叙事线索；不要推断被省略部分。证据必须是节选中逐字出现、最多 240 字的短摘录。只输出 JSON 对象：{"candidates":[{"type":"planted|progressing|resolved|abandoned","evidence":"","reason":""}]}。最多 5 项，不得输出计划 ID、草稿 ID 或章节号。',
+                'You review finalized fiction facts. Decide only from the supplied finalized-text excerpt whether it advances the supplied narrative thread; do not infer from omitted text. Evidence must be a verbatim excerpt of at most 240 characters from the supplied excerpt. Return only one JSON object: {"candidates":[{"type":"planted|progressing|resolved|abandoned","evidence":"","reason":""}]}. Maximum 5 items. Do not output plan IDs, draft IDs, or chapter numbers.',
               ),
             },
             {
@@ -203,7 +262,7 @@ export function createNarrativeThreadCandidateGenerator(
                   authorIntent: input.plan.authorIntent,
                   currentStatus: input.plan.status,
                 },
-                finalizedContent: input.finalizedContent,
+                finalizedContent: boundedFinalizedExcerpt(input.finalizedContent),
               }),
             },
           ],
@@ -215,7 +274,10 @@ export function createNarrativeThreadCandidateGenerator(
             'Narrative-thread event candidate generation did not complete.',
           ))
         }
-        const candidates = parseNarrativeThreadEventCandidates(outcome.content, input.finalizedContent)
+        const candidates = parseNarrativeThreadEventCandidates(
+          outcome.content,
+          boundedFinalizedExcerpt(input.finalizedContent),
+        )
         if (candidates.length === 0) throw new Error(promptLanguageText(
           input.writingLanguage,
           '模型未返回带有效定稿证据的事件候选',

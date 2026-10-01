@@ -1,0 +1,37 @@
+{
+  "scenario": "E01-draft-persistence (partial)",
+  "runId": "vela-acc-e01-2026-10-01T02-30-57-500Z-370ed198",
+  "verdict": "FAIL",
+  "failedSteps": [
+    "build.current-source",
+    "execution.crashed"
+  ],
+  "steps": [
+    {
+      "name": "fixture.created",
+      "ok": true,
+      "data": {
+        "projectId": "e9dc64ab-c3ec-49de-abc0-4f9874d767bd",
+        "sources": 8
+      }
+    },
+    {
+      "name": "build.current-source",
+      "ok": false,
+      "data": {
+        "script": "build",
+        "exitCode": 2,
+        "ok": false
+      }
+    },
+    {
+      "name": "build.gate",
+      "ok": true,
+      "data": {
+        "ok": true,
+        "missing": []
+      }
+    }
+  ],
+  "error": "Error: Current product build failed"
+}

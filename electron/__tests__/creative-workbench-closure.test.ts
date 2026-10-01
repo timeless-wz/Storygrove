@@ -341,8 +341,9 @@ describe('Codex Fiction Creative Workbench Closure Integration Tests', () => {
     expect(neutralMain.startChapter).toBe(1)
     expect(neutralMain.endChapter).toBe(15)
 
-    // Event 1 summary uses userGuidance outline summary
-    expect(neutralMain.events[0].summary).toContain('主角在王都集市识破刺客阴谋')
+    // Plot projections consume blueprint facts, never author instruction text.
+    expect(neutralMain.events[0].summary).toBe('第 1 章 征途：章节 1 推进')
+    expect(neutralMain.events[0].summary).not.toContain('主角在王都集市识破刺客阴谋')
 
     // Subplot points to neutral track-main
     const neutralSub = neutralPlotTree.tracks[1]

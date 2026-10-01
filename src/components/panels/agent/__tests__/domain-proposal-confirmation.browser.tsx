@@ -8,6 +8,8 @@ import { useProjectStore } from '../../../../stores/project-store'
 import { useAgentStore } from '../../../../stores/agent-store'
 import ConfirmCard from '../ConfirmCard'
 import ArtifactCard from '../ArtifactCard'
+import { parseChapterBlueprintMarkdown } from '../../../../shared/blueprint-v2-markdown'
+import chapterOneMarkdown from '../../../../../test/fixtures/blueprint-v2/chapter-01.md?raw'
 
 const resolveToolConfirmation = vi.fn()
 const cancelGeneration = vi.fn()
@@ -40,7 +42,8 @@ beforeEach(() => {
   cancelGeneration.mockReset()
   invoke.mockReset()
   invoke.mockImplementation(async (channel: string) => {
-    if (channel === 'db:blueprint-get-all' || channel === 'db:draft-list-all' || channel === 'db:narrative-thread-list') return []
+    if (channel === 'db:blueprint-get-all' || channel === 'db:blueprint-list-summary'
+      || channel === 'db:draft-list-all' || channel === 'db:narrative-thread-list') return []
     return undefined
   })
   useAgentStore.setState({ resolveToolConfirmation, cancelGeneration })
@@ -118,7 +121,42 @@ describe('Agent domain proposal confirmation', () => {
     await expect.element(page.getByText('新标题')).toBeVisible()
     await page.getByRole('button', { name: '拒绝' }).click()
     expect(resolveToolConfirmation).toHaveBeenCalledWith('blueprint-1', false)
-    expect(invoke).toHaveBeenCalledTimes(1)
+    expect(invoke.mock.calls.map(([channel]) => channel)).toEqual([
+      'db:blueprint-v2-get', 'db:blueprint-get',
+    ])
+  })
+
+  it('shows v2 scene, rule, and custom-section diffs before the existing approval gate', async () => {
+    useLocaleStore.setState({ locale: 'zh-CN', initialized: true })
+    const currentContent = { ...parseChapterBlueprintMarkdown(chapterOneMarkdown).content, chapterNumber: 2 }
+    const detail = { ...currentContent, revision: 3, contentHash: 'current-hash' }
+    const proposedMarkdown = chapterOneMarkdown
+      .replace('许渡猛地从操作台板上弹坐而起', '许渡猛地从操作台板上站起')
+      .replace('古代登记库已不存在', '古代登记库仍然存在')
+      + '\n#### 【用户补充规则】\n未识别分区正文也必须保留。\n'
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'db:blueprint-get') return blueprint
+      if (channel === 'db:blueprint-v2-get') return detail
+      throw new Error(`unexpected channel ${channel}`)
+    })
+
+    await act(async () => root.render(<ConfirmCard toolCall={{
+      id: 'blueprint-v2-1', toolName: 'propose_chapter_blueprint',
+      arguments: { chapter_number: 2, v2_markdown: proposedMarkdown },
+      status: 'waiting_confirm', source: 'builtin', projectSession: session,
+    }} />))
+    await flushImpactReads()
+
+    await expect.element(page.getByText('分镜：场景一：02:14的冷汗与声学隔离席', { exact: true })).toBeVisible()
+    await expect.element(page.getByText(/弹坐而起/u)).toBeVisible()
+    await expect.element(page.getByText(/站起/u)).toBeVisible()
+    await expect.element(page.getByText(/古代登记库仍然存在/u)).toBeVisible()
+    await expect.element(page.getByText('【用户补充规则】', { exact: true })).toBeVisible()
+    await expect.element(page.getByText('未识别分区正文也必须保留。')).toBeVisible()
+    expect(container.textContent).not.toContain('"v2_markdown"')
+
+    await page.getByRole('button', { name: '批准执行' }).click()
+    expect(resolveToolConfirmation).toHaveBeenCalledWith('blueprint-v2-1', true)
   })
 
   it('disables approval after a project switch', async () => {
@@ -149,10 +187,10 @@ describe('Agent domain proposal confirmation', () => {
   it('previews English config impacts and sends only the selected unwritten blueprint diff to the existing gate', async () => {
     useLocaleStore.setState({ locale: 'en-US', initialized: true })
     invoke.mockImplementation(async (channel: string) => {
-      if (channel === 'db:blueprint-get-all') return [
-        { ...blueprint, chapterNumber: 2, title: 'The sealed door' },
-        { ...blueprint, chapterNumber: 3, title: 'The old verdict' },
-        { ...blueprint, chapterNumber: 4, title: 'Draft in progress' },
+      if (channel === 'db:blueprint-list-summary') return [
+        { chapterNumber: 2, title: 'The sealed door', purpose: '', keyEvents: '' },
+        { chapterNumber: 3, title: 'The old verdict', purpose: '', keyEvents: '' },
+        { chapterNumber: 4, title: 'Draft in progress', purpose: '', keyEvents: '' },
       ]
       if (channel === 'db:draft-list-all') return [
         { id: 1, chapterNumber: 1, chapterTitle: 'Opening', version: 1, status: 'finalized' },
@@ -207,14 +245,16 @@ describe('Agent domain proposal confirmation', () => {
       }],
     })
     expect(invoke.mock.calls.map(([channel]) => channel)).toEqual(expect.arrayContaining([
-      'db:blueprint-get-all', 'db:draft-list-all', 'db:narrative-thread-list',
+      'db:blueprint-list-summary', 'db:draft-list-all', 'db:narrative-thread-list',
     ]))
   })
 
   it('shows the Chinese impact preview but cancels it without any domain write', async () => {
     useLocaleStore.setState({ locale: 'zh-CN', initialized: true })
     invoke.mockImplementation(async (channel: string) => {
-      if (channel === 'db:blueprint-get-all') return [{ ...blueprint, chapterNumber: 2, title: '封闭的门' }]
+      if (channel === 'db:blueprint-list-summary') return [{
+        chapterNumber: 2, title: '封闭的门', purpose: '', keyEvents: '',
+      }]
       if (channel === 'db:draft-list-all') return []
       if (channel === 'db:narrative-thread-list') return []
       throw new Error(`unexpected channel ${channel}`)

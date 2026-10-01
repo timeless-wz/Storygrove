@@ -151,12 +151,22 @@ function stubLlm(command: object, response: string): void {
   }
 }
 
-function stubVelaIpc(invoke: (channel: string, ...args: unknown[]) => Promise<unknown>): void {
+function stubVelaIpc(
+  invoke: (channel: string, ...args: unknown[]) => Promise<unknown>,
+  storedReviewDraft?: { content: string; blueprintChapterNumber?: number; blueprintReadFailure?: boolean },
+): void {
   vi.stubGlobal('window', {
     velaAPI: {
       invoke: (channel: string, ...args: unknown[]) => (
+        storedReviewDraft && (channel === 'db:draft-get-full' || channel === 'db:draft-get-meta')
+          ? Promise.resolve({ id: 1, chapterNumber: 1, version: 1, status: 'draft', source: 'write', blueprintChapterNumber: 1, ...storedReviewDraft })
+          :
         channel === 'prompt:load-global'
           ? Promise.resolve({ templates: [], diagnostics: [] })
+          : channel === 'db:blueprint-v2-get'
+            ? storedReviewDraft?.blueprintReadFailure
+              ? Promise.reject(new Error('injected outline read failure'))
+              : Promise.resolve(null)
           : channel === 'fs:check-exists' && String(args[0]).endsWith('/.vela/prompts')
             ? Promise.resolve(false)
             : invoke(channel, ...args)
@@ -1139,7 +1149,7 @@ describe('workflow mutation failure boundaries', () => {
       if (channel === 'db:continuity-list-before' || channel === 'db:character-get-all') return []
       if (channel === 'db:project-core-get') return {}
       if (channel === 'db:blueprint-get-all') return [blueprint, { ...blueprint, chapterNumber: 2, keyEvents: '搬运设备' }]
-      if (channel === 'db:blueprint-get') return null
+      if (channel === 'db:blueprint-get') return blueprint
       if (channel === 'db:draft-get-meta') return { id: 1, chapterNumber: 1, version: 1, status: 'draft', source: 'write' }
       if (channel === 'db:review-create') {
         saved = JSON.parse((args[0] as { content: string }).content)
@@ -1147,7 +1157,7 @@ describe('workflow mutation failure boundaries', () => {
       }
       throw new Error(`unexpected IPC: ${channel}`)
     })
-    stubVelaIpc(invoke)
+    stubVelaIpc(invoke, { content: draft, blueprintChapterNumber: 1 })
     let prompt = ''
     const generateStream = vi.fn(async (messages, streamCallbacks) => {
       prompt = messages.map((message: { content: string }) => message.content).join('\n')
@@ -1192,7 +1202,7 @@ describe('workflow mutation failure boundaries', () => {
       if (channel === 'db:blueprint-get') return null
       throw new Error(`unexpected IPC: ${channel}`)
     })
-    stubVelaIpc(invoke)
+    stubVelaIpc(invoke, { content: '待审正文' })
     const command = new ReviewChapterCommand({
       draftPath: 'vela://draft/1',
       draftContent: '待审正文',
@@ -1254,7 +1264,7 @@ describe('workflow mutation failure boundaries', () => {
       if (channel === 'db:blueprint-get') return null
       throw new Error(`unexpected IPC: ${channel}`)
     })
-    stubVelaIpc(invoke)
+    stubVelaIpc(invoke, { content: '待审正文', blueprintReadFailure: true })
     let observedReviewPrompt = ''
     useLLMStore.setState({
       defaultModelId: 'model',
@@ -1280,10 +1290,11 @@ describe('workflow mutation failure boundaries', () => {
       summary: string
       items: Array<{ description: string; quote?: string }>
     }
-    expect(persisted.summary).toContain('待核实')
+    expect(persisted.summary).toBe('总'.repeat(120))
+    expect(persisted).toMatchObject({ blueprintReviewUnavailable: 'unavailable' })
     expect(persisted.items.slice(0, 5).map(item => Array.from(item.description).length)).toEqual([200, 200, 157, 200, 200])
     expect(persisted.items.slice(0, 5).map(item => item.quote === undefined ? 0 : Array.from(item.quote).length)).toEqual([154, 147, 0, 0, 69])
-    expect(persisted.items[5]).toMatchObject({ severity: 'unknown' })
+    expect(persisted.items).toHaveLength(5)
     expect(useEditorStore.getState().tabs).toHaveLength(1)
     expect(observedReviewPrompt).toContain('全部 items 必须为 1–10 条')
     expect(observedReviewPrompt).toContain('quote 不超过 160 字')
@@ -1318,7 +1329,7 @@ describe('workflow mutation failure boundaries', () => {
       if (channel === 'db:blueprint-get') return null
       throw new Error(`unexpected IPC: ${channel}`)
     })
-    stubVelaIpc(invoke)
+    stubVelaIpc(invoke, { content: '待审正文', blueprintReadFailure: true })
     const command = new ReviewChapterCommand({
       draftPath: 'vela://draft/1',
       draftContent: '待审正文',
@@ -1333,8 +1344,8 @@ describe('workflow mutation failure boundaries', () => {
     })).resolves.toBe(response)
 
     const persisted = JSON.parse(persistedContent) as typeof review
-    expect(persisted.items).toHaveLength(5)
-    expect(persisted.items[4]).toMatchObject({ severity: 'unknown' })
+    expect(persisted.items).toHaveLength(4)
+    expect(persisted).toMatchObject({ blueprintReviewUnavailable: 'unavailable' })
     expect(Array.from(persisted.items[1]!.quote!)).toHaveLength(160)
     expect(persisted.items[1]!.quote).toBe('潮'.repeat(160))
   })
@@ -1421,7 +1432,7 @@ describe('workflow mutation failure boundaries', () => {
       if (channel === 'db:blueprint-get') return null
       throw new Error(`unexpected IPC: ${channel}`)
     })
-    stubVelaIpc(invoke)
+    stubVelaIpc(invoke, { content: 'Draft awaiting review.' })
     const command = new ReviewChapterCommand({
       draftPath: 'vela://draft/1',
       draftContent: 'Draft awaiting review.',
@@ -1472,7 +1483,7 @@ describe('workflow mutation failure boundaries', () => {
       if (channel === 'db:project-core-get') return {}
       throw new Error(`unexpected IPC: ${channel}`)
     })
-    stubVelaIpc(invoke)
+    stubVelaIpc(invoke, { content: writingLanguage === 'en-US' ? 'Draft awaiting review.' : '待审正文' })
     const command = new ReviewChapterCommand({
       draftPath: 'vela://draft/1',
       draftContent: writingLanguage === 'en-US' ? 'Draft awaiting review.' : '待审正文',
@@ -1511,7 +1522,7 @@ describe('workflow mutation failure boundaries', () => {
       if (channel === 'db:blueprint-get') return null
       throw new Error(`unexpected IPC: ${channel}`)
     })
-    stubVelaIpc(invoke)
+    stubVelaIpc(invoke, { content: '待审正文' })
     const generateStream = vi.fn(async (
       _messages: Parameters<ReturnType<typeof useLLMStore.getState>['generateStream']>[0],
       streamCallbacks: Parameters<ReturnType<typeof useLLMStore.getState>['generateStream']>[1],
@@ -1566,10 +1577,10 @@ describe('workflow mutation failure boundaries', () => {
         saved = JSON.parse((args[0] as { content: string }).content)
         return { success: true, id: 10 }
       }
-      if (channel === 'db:blueprint-get') return null
+      if (channel === 'db:blueprint-get') return blueprint
       throw new Error(`unexpected IPC: ${channel}`)
     })
-    stubVelaIpc(invoke)
+    stubVelaIpc(invoke, { content: originalDraft, blueprintChapterNumber: 1 })
     const rebuildPrompts: string[] = []
     const generateStream = vi.fn(async (
       messages: Parameters<ReturnType<typeof useLLMStore.getState>['generateStream']>[0],
@@ -1620,7 +1631,7 @@ describe('workflow mutation failure boundaries', () => {
       if (channel === 'db:project-core-get') return {}
       throw new Error(`unexpected IPC: ${channel}`)
     })
-    stubVelaIpc(invoke)
+    stubVelaIpc(invoke, { content: '待审正文' })
     const generateStream = vi.fn(async (
       _messages: Parameters<ReturnType<typeof useLLMStore.getState>['generateStream']>[0],
       streamCallbacks: Parameters<ReturnType<typeof useLLMStore.getState>['generateStream']>[1],

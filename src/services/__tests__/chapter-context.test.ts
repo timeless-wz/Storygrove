@@ -14,7 +14,6 @@ vi.mock('../ipc-client', () => ({
 const {
   boundBlueprintChapterNumber,
   loadChapterContext,
-  orderScenesForSidebar,
   splitChapterBeats,
 } = await import('../chapter-context')
 
@@ -48,8 +47,29 @@ function blueprintRow(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function canvasGraph(nodes: unknown[]) {
-  return { canvas: null, nodes, edges: [] }
+function blueprintDetail(chapterNumber = 4, readStatus?: 'corrupt' | 'needs-newer-app') {
+  return {
+    schemaVersion: 2 as const,
+    chapterNumber,
+    chapterTitle: `第${chapterNumber}章｜细纲标题`,
+    docPreamble: '',
+    sections: [{
+      kind: 'canonical' as const,
+      id: 'storyboard' as const,
+      title: '【逐场分镜拆解】',
+      level: 4,
+      preamble: '',
+      items: [
+        { kind: 'scene' as const, id: 'bps-scene-1', level: 5, title: '场景一：夜路', markdown: '环境与动作正文', presence: 'on-canvas' as const },
+        { kind: 'scene' as const, id: 'bps-scene-2', level: 5, title: '场景二：码头', markdown: '账本正文', presence: 'off-canvas' as const },
+      ],
+      postamble: '',
+    }],
+    origin: 'manual' as const,
+    revision: 1,
+    contentHash: 'hash',
+    ...(readStatus ? { readStatus, rawMarkdown: '### 尚未解析的细纲' } : {}),
+  }
 }
 
 beforeEach(() => {
@@ -84,53 +104,16 @@ describe('splitChapterBeats', () => {
   })
 })
 
-describe('orderScenesForSidebar', () => {
-  const sceneNode = (id: string, order: number | null, title: string) => ({
-    id,
-    canvasId: 'cha-4',
-    type: 'scene' as const,
-    title,
-    summary: '',
-    colorKey: 'default' as const,
-    role: '',
-    order,
-    refs: {},
-    x: 0,
-    y: 0,
-  })
-
-  it('只取场景卡，按主线顺序排列，未排序的排在最后', () => {
-    const nodes = [
-      sceneNode('c', null, '未排序'),
-      { ...sceneNode('x', 1, '角色节点'), type: 'character' as const },
-      sceneNode('b', 2, '第二场'),
-      sceneNode('a', 1, '第一场'),
-    ]
-    expect(orderScenesForSidebar(nodes).map(scene => scene.title)).toEqual(['第一场', '第二场', '未排序'])
-  })
-
-  it('非数组输入返回空列表，不抛错', () => {
-    expect(orderScenesForSidebar(null)).toEqual([])
-    expect(orderScenesForSidebar(undefined)).toEqual([])
-  })
-})
-
 describe('loadChapterContext', () => {
   it('未绑定蓝图时直接返回 unbound，且不发起任何读取', async () => {
     await expect(loadChapterContext(SESSION_A, draftBoundTo())).resolves.toEqual({ status: 'unbound' })
     expect(mocks.invokeWithProjectSession).not.toHaveBeenCalled()
   })
 
-  it('已绑定：按绑定章号读取蓝图与场景画布，字段一一对应', async () => {
+  it('已绑定：按绑定章号读取 v1 要点与正式 v2 分镜，不读取旧画布场景', async () => {
     mocks.invokeWithProjectSession.mockImplementation(async (_session: unknown, channel: string) => {
       if (channel === 'db:blueprint-get') return blueprintRow()
-      if (channel === 'db:chapter-canvas-get') {
-        return canvasGraph([
-          { id: 's2', type: 'scene', title: '码头', summary: '拿到账本', role: '发展', order: 2 },
-          { id: 's1', type: 'scene', title: '夜路', summary: '', role: '铺垫', order: 1 },
-          { id: 'c1', type: 'character', title: '林晚', summary: '', role: '', order: null },
-        ])
-      }
+      if (channel === 'db:blueprint-v2-get') return blueprintDetail()
       throw new Error(`Unexpected channel: ${channel}`)
     })
 
@@ -141,7 +124,7 @@ describe('loadChapterContext', () => {
     // 用绑定章号 4 去读，而不是草稿自身的章号。
     expect(mocks.invokeWithProjectSession.mock.calls).toEqual([
       [SESSION_A, 'db:blueprint-get', 4, PROJECT_A],
-      [SESSION_A, 'db:chapter-canvas-get', 4, PROJECT_A],
+      [SESSION_A, 'db:blueprint-v2-get', 4, PROJECT_A],
     ])
     expect(state.blueprintChapterNumber).toBe(4)
     expect(state.blueprint).toEqual({
@@ -153,13 +136,31 @@ describe('loadChapterContext', () => {
       characters: ['林晚', '赵九'],
       suspenseHook: '账本缺了最后一页',
     })
-    expect(state.scenes.map(scene => scene.title)).toEqual(['夜路', '码头'])
+    expect(state.scenes.map(scene => scene.title)).toEqual(['场景一：夜路', '场景二：码头'])
+    expect(state.scenes.map(scene => scene.markdown)).toEqual(['环境与动作正文', '账本正文'])
+    expect(state.scenes[1].presence).toBe('off-canvas')
     expect(state.scenesLoadFailed).toBe(false)
+    expect(state.hasV2Detail).toBe(true)
+  })
+
+  it('仅有 v2 细纲时仍以 v2 内容读取，不将目标误报为缺失', async () => {
+    mocks.invokeWithProjectSession.mockImplementation(async (_session: unknown, channel: string) => {
+      if (channel === 'db:blueprint-get') return null
+      if (channel === 'db:blueprint-v2-get') return blueprintDetail()
+      throw new Error(`Unexpected channel: ${channel}`)
+    })
+    const state = await loadChapterContext(SESSION_A, draftBoundTo(4))
+    expect(state.status).toBe('ready')
+    if (state.status !== 'ready') return
+    expect(state.blueprint.title).toBe('细纲标题')
+    expect(state.blueprint.beats).toEqual(['场景一：夜路', '场景二：码头'])
+    expect(state.scenes).toHaveLength(2)
   })
 
   it('绑定目标已被删除：返回 target-missing，不拿草稿章号的同名蓝图顶替', async () => {
     mocks.invokeWithProjectSession.mockImplementation(async (_session: unknown, channel: string) => {
       if (channel === 'db:blueprint-get') return null
+      if (channel === 'db:blueprint-v2-get') return null
       // 若实现按草稿章号兜底，这里会返回一份蓝图；必须断言它没有被读取。
       throw new Error(`Unexpected channel: ${channel}`)
     })
@@ -170,6 +171,7 @@ describe('loadChapterContext', () => {
     })
     expect(mocks.invokeWithProjectSession.mock.calls).toEqual([
       [SESSION_A, 'db:blueprint-get', 9, PROJECT_A],
+      [SESSION_A, 'db:blueprint-v2-get', 9, PROJECT_A],
     ])
   })
 
@@ -181,10 +183,10 @@ describe('loadChapterContext', () => {
     ])
   })
 
-  it('画布读取失败不拖垮蓝图要点：仍返回 ready 并标记 scenesLoadFailed', async () => {
+  it('v2 读取失败不拖垮旧简纲：仍返回 ready 并标记分镜读取失败', async () => {
     mocks.invokeWithProjectSession.mockImplementation(async (_session: unknown, channel: string) => {
       if (channel === 'db:blueprint-get') return blueprintRow()
-      throw new Error('canvas read failed')
+      throw new Error('v2 read failed')
     })
 
     const state = await loadChapterContext(SESSION_A, draftBoundTo(4))
@@ -215,7 +217,7 @@ describe('loadChapterContext', () => {
   it('绑定到另一个项目的章号时按传入会话读取，不跨项目兜底', async () => {
     mocks.invokeWithProjectSession.mockImplementation(async (_session: unknown, channel: string) => {
       if (channel === 'db:blueprint-get') return blueprintRow({ chapterNumber: 12, title: '番外' })
-      if (channel === 'db:chapter-canvas-get') return canvasGraph([])
+      if (channel === 'db:blueprint-v2-get') return blueprintDetail(12)
       throw new Error(`Unexpected channel: ${channel}`)
     })
 
@@ -232,7 +234,21 @@ describe('loadChapterContext', () => {
     expect(state.blueprint.title).toBe('番外')
     expect(mocks.invokeWithProjectSession.mock.calls).toEqual([
       [sessionB, 'db:blueprint-get', 12, PROJECT_B],
-      [sessionB, 'db:chapter-canvas-get', 12, PROJECT_B],
+      [sessionB, 'db:blueprint-v2-get', 12, PROJECT_B],
     ])
+  })
+
+  it('损坏的 v2 仍标记为正式细纲，避免回退展示一套冲突的旧节拍', async () => {
+    mocks.invokeWithProjectSession.mockImplementation(async (_session: unknown, channel: string) => {
+      if (channel === 'db:blueprint-get') return blueprintRow()
+      if (channel === 'db:blueprint-v2-get') return blueprintDetail(4, 'corrupt')
+      throw new Error(`Unexpected channel: ${channel}`)
+    })
+    const state = await loadChapterContext(SESSION_A, draftBoundTo(4))
+    expect(state.status).toBe('ready')
+    if (state.status !== 'ready') return
+    expect(state.hasV2Detail).toBe(true)
+    expect(state.scenesLoadFailed).toBe(true)
+    expect(state.scenes).toEqual([])
   })
 })

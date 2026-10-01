@@ -1,6 +1,7 @@
 import type { EditorTab } from './editor-store'
 
 const LEDGER_TYPE_BY_KEY: Record<string, EditorTab['type']> = {
+  'cultivation-settings': 'cultivation',
   'character-editor-drafts': 'character',
   config: 'config',
   'chapter-card-editor': 'chapter-card',

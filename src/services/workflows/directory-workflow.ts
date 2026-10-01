@@ -19,6 +19,7 @@ import { ipc } from '../ipc-client'
 import { PromptBudgetExceededError } from '../generation/generation-harness'
 import type {
   BlueprintData,
+  BlueprintListSummary,
   BlueprintRangeCommitMode,
   BlueprintRangeCommitReceipt,
 } from '../../../electron/repositories/blueprint-repository'
@@ -30,6 +31,8 @@ import { requireWorkflowProjectSession } from './workflow-project-session'
 // ==========================================
 
 export type ChapterBlueprint = BlueprintData
+export type DirectoryBlueprintSummary = Pick<BlueprintListSummary,
+  'chapterNumber' | 'volumeId' | 'title' | 'purpose' | 'keyEvents'>
 
 export interface DirectoryWorkflowParams {
   mode: 'full' | 'append'
@@ -138,12 +141,45 @@ export function assertBlueprintCoverage(
   }
 }
 
+export async function loadDirectoryBlueprintSummaries(
+  expectedProjectPath: string,
+  projectSession: ProjectSessionContext,
+): Promise<DirectoryBlueprintSummary[]> {
+  const [blueprints, v2Summaries] = await Promise.all([
+    ipc.invokeWithProjectSession(projectSession, 'db:blueprint-list-summary', expectedProjectPath),
+    ipc.invokeWithProjectSession(projectSession, 'db:blueprint-v2-summary-list', expectedProjectPath),
+  ])
+  const byChapter = new Map<number, DirectoryBlueprintSummary>(blueprints.map((summary: BlueprintListSummary) => ([
+    summary.chapterNumber,
+    {
+      chapterNumber: summary.chapterNumber,
+      ...(summary.volumeId ? { volumeId: summary.volumeId } : {}),
+      title: String(summary.title ?? '').slice(0, 160),
+      purpose: String(summary.purpose ?? '').slice(0, 300),
+      keyEvents: String(summary.keyEvents ?? '').slice(0, 800),
+    },
+  ])))
+  for (const summary of v2Summaries) {
+    if (byChapter.has(summary.chapterNumber)) continue
+    byChapter.set(summary.chapterNumber, {
+      chapterNumber: summary.chapterNumber,
+      title: summary.sceneTitles[0]?.slice(0, 160) || `第${summary.chapterNumber}章`,
+      purpose: '',
+      keyEvents: summary.sceneTitles.slice(0, 5).join('\n').slice(0, 800),
+    })
+  }
+  return [...byChapter.values()]
+    .sort((left, right) => left.chapterNumber - right.chapterNumber)
+    .slice(0, 300)
+}
+
+/** B 主编辑器逐章编辑旧简纲时仍需保留完整 v1 行；列表与模型上下文请用摘要函数。 */
 export async function loadDirectoryBlueprints(
   expectedProjectPath: string,
   projectSession: ProjectSessionContext,
 ): Promise<ChapterBlueprint[]> {
   const blueprints = await ipc.invokeWithProjectSession(projectSession, 'db:blueprint-get-all', expectedProjectPath)
-  return blueprints.sort((a, b) => a.chapterNumber - b.chapterNumber)
+  return blueprints.sort((left, right) => left.chapterNumber - right.chapterNumber)
 }
 
 function assertIpcSuccess(result: { success: boolean; error?: string }, action: string): void {
@@ -200,6 +236,75 @@ export async function commitDirectoryBlueprintRange(
   return result.receipt
 }
 
+/** 守卫提交结果：被跳过的章与实际提交的收据（可能按连续子范围拆分）。 */
+export interface GuardedDirectoryCommitResult {
+  receipts: BlueprintRangeCommitReceipt[]
+  committedChapters: number[]
+  /** 已有 v2 细纲而被本次简纲生成跳过的章（流程结果中必须明示，契约 §7.4）。 */
+  skippedChapters: Array<{ chapterNumber: number; title: string }>
+}
+
+function contiguousRanges(chapterNumbers: readonly number[]): Array<{ startChapter: number; endChapter: number }> {
+  const sorted = [...chapterNumbers].sort((a, b) => a - b)
+  const ranges: Array<{ startChapter: number; endChapter: number }> = []
+  for (const chapterNumber of sorted) {
+    const last = ranges[ranges.length - 1]
+    if (last && chapterNumber === last.endChapter + 1) {
+      last.endChapter = chapterNumber
+    } else {
+      ranges.push({ startChapter: chapterNumber, endChapter: chapterNumber })
+    }
+  }
+  return ranges
+}
+
+/**
+ * 批量简纲提交的 v2 覆盖守卫（契约 §7.4）：
+ * - 先读 `db:blueprint-v2-summary-list`，目标范围内已有 v2 细纲的章一律跳过，
+ *   绝不让批量生成的简纲覆盖人工/导入的完整细纲（含投影字段）。
+ * - 跳过后按连续子范围以 `replace-range` 提交；`db:blueprint-commit-range`
+ *   通道签名冻结（契约缺口 §15.1），防护只能落在调用方。
+ * - 范围内没有任何 v2 细纲时保持原有单次提交语义（full 模式不变）。
+ */
+export async function commitDirectoryBlueprintsWithV2Guard(
+  blueprints: ChapterBlueprint[],
+  expectedProjectPath: string,
+  range: { mode: BlueprintRangeCommitMode; startChapter: number; endChapter: number },
+  operationId: string,
+  projectSession: ProjectSessionContext,
+): Promise<GuardedDirectoryCommitResult> {
+  const summaryList = await ipc.invokeWithProjectSession(
+    projectSession, 'db:blueprint-v2-summary-list', expectedProjectPath,
+  )
+  const v2ChapterNumbers = new Set(summaryList.map(summary => summary.chapterNumber))
+  const requested = new Set(blueprints.map(blueprint => blueprint.chapterNumber))
+  const protectedInRange = [...requested].filter(chapterNumber => v2ChapterNumbers.has(chapterNumber))
+  if (protectedInRange.length === 0) {
+    const receipt = await commitDirectoryBlueprintRange(blueprints, expectedProjectPath, range, operationId, projectSession)
+    return { receipts: [receipt], committedChapters: blueprints.map(b => b.chapterNumber), skippedChapters: [] }
+  }
+
+  const writable = blueprints.filter(blueprint => !v2ChapterNumbers.has(blueprint.chapterNumber))
+  const skippedChapters = blueprints
+    .filter(blueprint => v2ChapterNumbers.has(blueprint.chapterNumber))
+    .map(blueprint => ({ chapterNumber: blueprint.chapterNumber, title: blueprint.title }))
+  const receipts: BlueprintRangeCommitReceipt[] = []
+  const committedChapters: number[] = []
+  // 子范围提交只允许 replace-range：full 模式要求覆盖完整连续范围（含被跳过章）。
+  for (const subRange of contiguousRanges(writable.map(b => b.chapterNumber))) {
+    const subBlueprints = writable.filter(b => b.chapterNumber >= subRange.startChapter && b.chapterNumber <= subRange.endChapter)
+    receipts.push(await commitDirectoryBlueprintRange(
+      subBlueprints,
+      expectedProjectPath,
+      { mode: 'replace-range', ...subRange },
+      `${operationId}-s${subRange.startChapter}`,
+      projectSession,
+    ))
+    committedChapters.push(...subBlueprints.map(b => b.chapterNumber))
+  }
+  return { receipts, committedChapters, skippedChapters }
+}
+
 export async function verifyBlueprintsPersisted(
   blueprints: ChapterBlueprint[],
   expectedProjectPath: string,
@@ -233,8 +338,14 @@ export async function getBlueprintCount(
   projectSession: ProjectSessionContext,
 ): Promise<number> {
   try {
-    const blueprints = await ipc.invokeWithProjectSession(projectSession, 'db:blueprint-get-all', expectedProjectPath)
-    return blueprints.length
+    const [blueprints, v2Summaries] = await Promise.all([
+      ipc.invokeWithProjectSession(projectSession, 'db:blueprint-list-summary', expectedProjectPath),
+      ipc.invokeWithProjectSession(projectSession, 'db:blueprint-v2-summary-list', expectedProjectPath),
+    ])
+    return new Set([
+      ...blueprints.map(blueprint => blueprint.chapterNumber),
+      ...v2Summaries.map(summary => summary.chapterNumber),
+    ]).size
   } catch {
     return 0
   }
@@ -280,10 +391,10 @@ export function createDirectoryWorkflow(
     uiLocale: frozenUiLocale,
     title: params.mode === 'append'
       ? text(
-        `续写章节蓝图${params.startChapter ? `（从第 ${params.startChapter} 章）` : ''}`,
-        `Continue chapter blueprints${params.startChapter ? ` (from chapter ${params.startChapter})` : ''}`,
+        `续写章节蓝图（简纲）${params.startChapter ? `（从第 ${params.startChapter} 章）` : ''}`,
+        `Continue chapter blueprints (simple outlines)${params.startChapter ? ` (from chapter ${params.startChapter})` : ''}`,
       )
-      : text('生成章节蓝图（全量）', 'Generate chapter blueprints (all)'),
+      : text('生成章节蓝图（全量简纲）', 'Generate chapter blueprints (all, simple outlines)'),
     projectPath: expectedProjectPath,
     projectSession,
     resourceKeys: [
@@ -326,7 +437,7 @@ export function createDirectoryWorkflow(
           // 注入节奏指导到 context，供 Command 读取
           if (params.pacingGuidance) context.data.pacingGuidance = params.pacingGuidance
           if (params.mode === 'append') {
-            const existing = await loadDirectoryBlueprints(expectedProjectPath, projectSession)
+            const existing = await loadDirectoryBlueprintSummaries(expectedProjectPath, projectSession)
             context.data.existingBlueprints = existing
             callbacks.log(text(
               `已加载 ${existing.length} 章已有蓝图`,
@@ -342,8 +453,8 @@ export function createDirectoryWorkflow(
       {
         name: text('生成蓝图', 'Generate blueprints'),
         description: text(
-          '基于架构文件生成、完整验证并原子提交章节蓝图',
-          'Generate, fully validate, and atomically commit chapter blueprints from the architecture',
+          '基于架构生成章节【简纲】（章节级字段，非逐场分镜细纲）并原子提交；已有 v2 完整细纲的章会被跳过且不被覆盖',
+          'Generate chapter SIMPLE outlines (chapter-level fields, not scene storyboards) from the architecture and commit atomically; chapters that already have v2 detailed outlines are skipped and never overwritten',
         ),
         executor: async (_step, context, callbacks) => {
           const directoryCommand = await import('./commands/directory.command')
@@ -381,8 +492,8 @@ export function createDirectoryWorkflow(
           }
           // 返回可读摘要字符串（step.result 必须是 string，否则 AIOutputPanel 渲染会崩溃）
           return text(
-            `已生成 ${blueprints.length} 章蓝图`,
-            `Generated ${blueprints.length} chapter blueprint${blueprints.length === 1 ? '' : 's'}`,
+            `已生成 ${blueprints.length} 章简纲（详细细纲请逐章导入或编辑）`,
+            `Generated ${blueprints.length} simple outline(s); import or edit detailed outlines per chapter`,
           )
         },
       },

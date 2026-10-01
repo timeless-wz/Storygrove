@@ -34,6 +34,8 @@ const mocks = vi.hoisted(() => ({
     factHash: 'empty-fact',
   })),
   characterRosterCommit: vi.fn(),
+  cultivationRead: vi.fn(() => ({ revision: 0, realms: [] })),
+  cultivationSave: vi.fn(),
   characterRelationshipGetAll: vi.fn((): Array<Record<string, unknown>> => []),
   characterRelationshipUpsert: vi.fn((data: unknown) => data),
   characterRelationshipDelete: vi.fn(),
@@ -77,6 +79,7 @@ vi.mock('electron', () => ({
     }),
   },
 }))
+vi.mock('../../repositories/cultivation-repository', () => ({ CultivationRepository: { read: mocks.cultivationRead, save: mocks.cultivationSave } }))
 
 vi.mock('../../database', () => ({
   closeProjectDatabase: mocks.closeProjectDatabase,
@@ -304,6 +307,19 @@ beforeEach(() => {
 })
 
 describe('database controller project context guard', () => {
+  it('routes cultivation through path and session checks, including same-path expired leases', async () => {
+    await expect(handler('db:cultivation-read')({}, 'C:/projects/A')).resolves.toEqual({ revision: 0, realms: [] })
+    await expect(handler('db:cultivation-read')({}, 'C:/projects/B')).rejects.toThrow()
+    const request = { expectedRevision: 0, expectedRosterRevision: 0, realms: [], resolutions: {} }
+    await expect(rawHandler('db:cultivation-save')({}, request, 'C:/projects/A')).resolves.toMatchObject({ success: false })
+    expect(mocks.cultivationSave).not.toHaveBeenCalled()
+    mocks.assertCurrentProjectContext.mockImplementationOnce(() => { throw new Error('expired lease') })
+    await expect(rawHandler('db:cultivation-save')({}, request, 'C:/projects/A', { ...currentSession(), leaseId: 'old' })).resolves.toMatchObject({ success: false, error: expect.stringContaining('expired lease') })
+    expect(mocks.cultivationSave).not.toHaveBeenCalled()
+    mocks.cultivationSave.mockReturnValueOnce({ system: { revision: 1, realms: [] }, roster: {} })
+    await expect(handler('db:cultivation-save')({}, request, 'C:/projects/A')).resolves.toMatchObject({ success: true })
+    expect(mocks.cultivationSave).toHaveBeenCalledWith(request)
+  })
   it('rejects selecting two draft versions for the same chapter at the database boundary', async () => {
     const draft = (id: number, version: number) => ({
       id,

@@ -1,0 +1,1538 @@
+{
+  "scanMode": "static-candidates",
+  "limitations": [
+    "Interpolated table names need manual resolution; SQL fragments and dynamic IPC are not proof of complete runtime coverage."
+  ],
+  "generatedAt": "2026-10-01T01:42:42.450Z",
+  "repoRoot": "D:\\ai\\AI-Novel-Writer-master",
+  "declaredTables": {
+    "count": 111,
+    "tables": [
+      {
+        "name": "agent_proposals",
+        "declaredIn": [
+          "electron/services/phase2-8-schema.ts",
+          "scripts/story-mcp-server.mjs"
+        ]
+      },
+      {
+        "name": "agent_sessions",
+        "declaredIn": [
+          "electron/services/phase2-8-schema.ts",
+          "scripts/story-mcp-server.mjs"
+        ]
+      },
+      {
+        "name": "audit_findings",
+        "declaredIn": [
+          "electron/services/phase2-8-schema.ts"
+        ]
+      },
+      {
+        "name": "audit_runs",
+        "declaredIn": [
+          "electron/services/phase2-8-schema.ts"
+        ]
+      },
+      {
+        "name": "audit_waivers",
+        "declaredIn": [
+          "electron/services/phase2-8-schema.ts"
+        ]
+      },
+      {
+        "name": "blueprint_character_sync_operations",
+        "declaredIn": [
+          "electron/repositories/blueprint-repository.ts"
+        ]
+      },
+      {
+        "name": "blueprint_commit_operations",
+        "declaredIn": [
+          "electron/repositories/blueprint-repository.ts"
+        ]
+      },
+      {
+        "name": "blueprint_detail_review_notices",
+        "declaredIn": [
+          "electron/database.ts",
+          "electron/repositories/blueprint-detail-repository.ts"
+        ]
+      },
+      {
+        "name": "blueprint_details",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "blueprint_volumes",
+        "declaredIn": [
+          "electron/database.ts",
+          "electron/repositories/blueprint-repository.ts"
+        ]
+      },
+      {
+        "name": "blueprints",
+        "declaredIn": [
+          "electron/database.ts",
+          "scripts/upgrade-data-fixture.mjs"
+        ]
+      },
+      {
+        "name": "chapter_canvas_edges",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "chapter_canvas_nodes",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "chapter_canvases",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "chapter_context_snapshots",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "chapter_deletion_operations",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "character_graph_positions",
+        "declaredIn": [
+          "electron/repositories/character-relationship-repository.ts"
+        ]
+      },
+      {
+        "name": "character_identities",
+        "declaredIn": [
+          "electron/repositories/character-relationship-repository.ts"
+        ]
+      },
+      {
+        "name": "character_knowledge",
+        "declaredIn": [
+          "electron/services/phase2-8-schema.ts"
+        ]
+      },
+      {
+        "name": "character_roster_meta",
+        "declaredIn": [
+          "electron/repositories/character-roster-schema.ts"
+        ]
+      },
+      {
+        "name": "character_roster_operations",
+        "declaredIn": [
+          "electron/repositories/character-roster-schema.ts"
+        ]
+      },
+      {
+        "name": "character_shared_relationships",
+        "declaredIn": [
+          "electron/repositories/character-relationship-repository.ts"
+        ]
+      },
+      {
+        "name": "character_shared_relationships_name_legacy",
+        "declaredIn": [
+          "electron/repositories/character-relationship-repository.ts"
+        ]
+      },
+      {
+        "name": "characters",
+        "declaredIn": [
+          "electron/database.ts",
+          "scripts/upgrade-data-fixture.mjs"
+        ]
+      },
+      {
+        "name": "consistency_exemptions",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "contents",
+        "declaredIn": [
+          "electron/database.ts",
+          "scripts/upgrade-data-fixture.mjs"
+        ]
+      },
+      {
+        "name": "continuity_projection_meta",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "cultivation_levels",
+        "declaredIn": [
+          "electron/repositories/cultivation-schema.ts"
+        ]
+      },
+      {
+        "name": "cultivation_meta",
+        "declaredIn": [
+          "electron/repositories/cultivation-schema.ts"
+        ]
+      },
+      {
+        "name": "cultivation_realms",
+        "declaredIn": [
+          "electron/repositories/cultivation-schema.ts"
+        ]
+      },
+      {
+        "name": "drafts",
+        "declaredIn": [
+          "electron/database.ts",
+          "scripts/upgrade-data-fixture.mjs"
+        ]
+      },
+      {
+        "name": "embedding_records",
+        "declaredIn": [
+          "electron/services/phase2-8-schema.ts"
+        ]
+      },
+      {
+        "name": "entity_state_snapshots",
+        "declaredIn": [
+          "electron/services/phase2-8-schema.ts"
+        ]
+      },
+      {
+        "name": "finalization_outbox",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "finalized_draft_import_operations",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "foreshadowings",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "import_global_fact_operations",
+        "declaredIn": [
+          "electron/database.ts",
+          "electron/repositories/import-global-facts-repository.ts"
+        ]
+      },
+      {
+        "name": "import_legacy_identity_bridge",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "import_reference_documents",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "import_run_chapters",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "import_run_knowledge_receipts",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "import_run_receipts",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "import_run_source_chapters",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "import_run_sources",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "import_runs",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "import_runs_stage_v3",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "import_source_aliases",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "import_source_chapter_map",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "knowledge_chunks",
+        "declaredIn": [
+          "electron/services/phase2-8-schema.ts"
+        ]
+      },
+      {
+        "name": "knowledge_index_queue",
+        "declaredIn": [
+          "electron/services/phase2-8-schema.ts",
+          "scripts/story-mcp-server.mjs"
+        ]
+      },
+      {
+        "name": "llm_calls",
+        "declaredIn": [
+          "electron/database.ts",
+          "scripts/upgrade-data-fixture.mjs"
+        ]
+      },
+      {
+        "name": "mcp_audit_log",
+        "declaredIn": [
+          "electron/services/phase2-8-schema.ts",
+          "scripts/story-mcp-server.mjs"
+        ]
+      },
+      {
+        "name": "narrative_thread_confirmations",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "narrative_thread_plans",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "plot_canvas_edges",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "plot_canvas_nodes",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "plot_canvases",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "post_process_runs",
+        "declaredIn": [
+          "electron/database.ts",
+          "scripts/upgrade-data-fixture.mjs"
+        ]
+      },
+      {
+        "name": "post_process_steps",
+        "declaredIn": [
+          "electron/database.ts",
+          "scripts/upgrade-data-fixture.mjs"
+        ]
+      },
+      {
+        "name": "project_core",
+        "declaredIn": [
+          "electron/database.ts",
+          "scripts/upgrade-data-fixture.mjs"
+        ]
+      },
+      {
+        "name": "recovery_candidates",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "reviews",
+        "declaredIn": [
+          "electron/database.ts",
+          "scripts/upgrade-data-fixture.mjs"
+        ]
+      },
+      {
+        "name": "revisions",
+        "declaredIn": [
+          "electron/database.ts",
+          "scripts/upgrade-data-fixture.mjs"
+        ]
+      },
+      {
+        "name": "setting_rules",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "setting_rules_stage_v2",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "story_events",
+        "declaredIn": [
+          "electron/services/phase2-8-schema.ts"
+        ]
+      },
+      {
+        "name": "story_fact_candidates",
+        "declaredIn": [
+          "electron/services/story-domain-schema.ts"
+        ]
+      },
+      {
+        "name": "story_fact_impacts",
+        "declaredIn": [
+          "electron/services/story-domain-schema.ts"
+        ]
+      },
+      {
+        "name": "story_fact_relations",
+        "declaredIn": [
+          "electron/services/story-domain-schema.ts"
+        ]
+      },
+      {
+        "name": "story_fact_versions",
+        "declaredIn": [
+          "electron/services/story-domain-schema.ts"
+        ]
+      },
+      {
+        "name": "story_facts",
+        "declaredIn": [
+          "electron/services/story-domain-schema.ts"
+        ]
+      },
+      {
+        "name": "story_timeline_branches",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "story_timeline_events",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "story_timeline_settings",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "summary_snapshots",
+        "declaredIn": [
+          "electron/database.ts",
+          "scripts/upgrade-data-fixture.mjs"
+        ]
+      },
+      {
+        "name": "text_metric_versions",
+        "declaredIn": [
+          "electron/services/draft-unit-migration.ts"
+        ]
+      },
+      {
+        "name": "workspace_approval_receipts",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "workspace_approval_receipts_stage_v2",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "workspace_binding_states",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "workspace_hub_migration_audit",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "workspace_import_candidates",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "workspace_import_candidates_stage_v2",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "workspace_source_fragments",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "workspace_source_snapshot_fragments",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "workspace_source_snapshot_rules",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "workspace_source_snapshots",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "workspace_sources",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "world_character_links",
+        "declaredIn": [
+          "electron/services/world-workbench-schema.ts"
+        ]
+      },
+      {
+        "name": "world_character_locations",
+        "declaredIn": [
+          "electron/services/world-workbench-schema.ts"
+        ]
+      },
+      {
+        "name": "world_event_links",
+        "declaredIn": [
+          "electron/services/world-workbench-schema.ts"
+        ]
+      },
+      {
+        "name": "world_event_worlds",
+        "declaredIn": [
+          "electron/services/world-workbench-schema.ts"
+        ]
+      },
+      {
+        "name": "world_faction_characters",
+        "declaredIn": [
+          "electron/services/world-workbench-schema.ts"
+        ]
+      },
+      {
+        "name": "world_faction_places",
+        "declaredIn": [
+          "electron/services/world-workbench-schema.ts"
+        ]
+      },
+      {
+        "name": "world_faction_relations",
+        "declaredIn": [
+          "electron/services/world-workbench-schema.ts"
+        ]
+      },
+      {
+        "name": "world_factions",
+        "declaredIn": [
+          "electron/services/world-workbench-schema.ts"
+        ]
+      },
+      {
+        "name": "world_map_atlas_migration",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "world_map_edges",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "world_map_nodes",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "world_maps",
+        "declaredIn": [
+          "electron/database.ts"
+        ]
+      },
+      {
+        "name": "world_portal_characters",
+        "declaredIn": [
+          "electron/services/world-workbench-schema.ts"
+        ]
+      },
+      {
+        "name": "world_portal_factions",
+        "declaredIn": [
+          "electron/services/world-workbench-schema.ts"
+        ]
+      },
+      {
+        "name": "world_portals",
+        "declaredIn": [
+          "electron/services/world-workbench-schema.ts"
+        ]
+      },
+      {
+        "name": "world_relic_characters",
+        "declaredIn": [
+          "electron/services/world-workbench-schema.ts"
+        ]
+      },
+      {
+        "name": "world_relic_factions",
+        "declaredIn": [
+          "electron/services/world-workbench-schema.ts"
+        ]
+      },
+      {
+        "name": "world_relics",
+        "declaredIn": [
+          "electron/services/world-workbench-schema.ts"
+        ]
+      },
+      {
+        "name": "world_rule_targets",
+        "declaredIn": [
+          "electron/services/world-workbench-schema.ts"
+        ]
+      },
+      {
+        "name": "world_rules",
+        "declaredIn": [
+          "electron/services/world-workbench-schema.ts"
+        ]
+      },
+      {
+        "name": "world_trail_current_bindings",
+        "declaredIn": [
+          "electron/services/world-workbench-schema.ts"
+        ]
+      },
+      {
+        "name": "world_trails",
+        "declaredIn": [
+          "electron/services/world-workbench-schema.ts"
+        ]
+      },
+      {
+        "name": "world_workbench_migrations",
+        "declaredIn": [
+          "electron/services/world-workbench-schema.ts"
+        ]
+      },
+      {
+        "name": "worlds",
+        "declaredIn": [
+          "electron/services/world-workbench-schema.ts"
+        ]
+      }
+    ]
+  },
+  "tableOwners": [
+    {
+      "name": "agent_proposals",
+      "files": [
+        "electron/services/agent-proposal-service.ts",
+        "scripts/story-mcp-server.mjs"
+      ]
+    },
+    {
+      "name": "agent_sessions",
+      "files": [
+        "electron/services/agent-proposal-service.ts",
+        "scripts/story-mcp-server.mjs"
+      ]
+    },
+    {
+      "name": "audit_findings",
+      "files": [
+        "electron/services/continuity-audit-service.ts",
+        "scripts/story-mcp-server.mjs"
+      ]
+    },
+    {
+      "name": "audit_runs",
+      "files": [
+        "electron/services/continuity-audit-service.ts"
+      ]
+    },
+    {
+      "name": "audit_waivers",
+      "files": [
+        "electron/services/continuity-audit-service.ts"
+      ]
+    },
+    {
+      "name": "blueprint_character_sync_operations",
+      "files": [
+        "electron/repositories/blueprint-repository.ts"
+      ]
+    },
+    {
+      "name": "blueprint_commit_operations",
+      "files": [
+        "electron/repositories/blueprint-repository.ts"
+      ]
+    },
+    {
+      "name": "blueprint_detail_review_notices",
+      "files": [
+        "electron/repositories/blueprint-detail-repository.ts"
+      ]
+    },
+    {
+      "name": "blueprint_details",
+      "files": [
+        "electron/repositories/blueprint-detail-repository.ts"
+      ]
+    },
+    {
+      "name": "blueprint_volumes",
+      "files": [
+        "electron/database.ts",
+        "electron/repositories/blueprint-repository.ts",
+        "electron/repositories/plot-tree-repository.ts",
+        "scripts/story-mcp-chapter-actions.mjs"
+      ]
+    },
+    {
+      "name": "blueprints",
+      "files": [
+        "electron/database.ts",
+        "electron/repositories/blueprint-detail-repository.ts",
+        "electron/repositories/blueprint-repository.ts",
+        "electron/repositories/character-repository.ts",
+        "electron/repositories/character-roster-repository.ts",
+        "electron/repositories/draft-repository.ts",
+        "electron/repositories/plot-tree-repository.ts",
+        "electron/repositories/summary-repository.ts",
+        "scripts/story-mcp-chapter-actions.mjs",
+        "scripts/upgrade-data-fixture.mjs"
+      ]
+    },
+    {
+      "name": "chapter_canvas_edges",
+      "files": [
+        "electron/repositories/chapter-canvas-repository.ts"
+      ]
+    },
+    {
+      "name": "chapter_canvas_nodes",
+      "files": [
+        "electron/repositories/chapter-canvas-repository.ts"
+      ]
+    },
+    {
+      "name": "chapter_canvases",
+      "files": [
+        "electron/repositories/chapter-canvas-repository.ts"
+      ]
+    },
+    {
+      "name": "chapter_context_snapshots",
+      "files": [
+        "electron/repositories/workspace-hub-repository.ts",
+        "scripts/story-mcp-server.mjs"
+      ]
+    },
+    {
+      "name": "chapter_deletion_operations",
+      "files": [
+        "electron/repositories/chapter-deletion-repository.ts"
+      ]
+    },
+    {
+      "name": "character_graph_positions",
+      "files": [
+        "electron/repositories/character-relationship-repository.ts"
+      ]
+    },
+    {
+      "name": "character_identities",
+      "files": [
+        "electron/repositories/character-relationship-repository.ts",
+        "electron/repositories/world-workbench-repository.ts"
+      ]
+    },
+    {
+      "name": "character_knowledge",
+      "files": [
+        "electron/services/continuity-audit-service.ts"
+      ]
+    },
+    {
+      "name": "character_roster_meta",
+      "files": [
+        "electron/repositories/character-roster-repository.ts",
+        "electron/repositories/character-roster-schema.ts",
+        "electron/repositories/project-clear-repository.ts"
+      ]
+    },
+    {
+      "name": "character_roster_operations",
+      "files": [
+        "electron/repositories/blueprint-repository.ts",
+        "electron/repositories/character-roster-repository.ts",
+        "electron/repositories/project-clear-repository.ts",
+        "electron/repositories/workspace-hub-repository.ts"
+      ]
+    },
+    {
+      "name": "character_shared_relationships",
+      "files": [
+        "electron/repositories/character-relationship-repository.ts"
+      ]
+    },
+    {
+      "name": "characters",
+      "files": [
+        "electron/database.ts",
+        "electron/repositories/character-relationship-repository.ts",
+        "electron/repositories/character-repository.ts",
+        "electron/repositories/character-roster-repository.ts",
+        "electron/repositories/character-roster-schema.ts",
+        "electron/repositories/project-clear-repository.ts",
+        "electron/repositories/summary-repository.ts",
+        "electron/repositories/world-workbench-repository.ts",
+        "scripts/upgrade-data-fixture.mjs"
+      ]
+    },
+    {
+      "name": "consistency_exemptions",
+      "files": [
+        "electron/repositories/consistency-exemption-repository.ts"
+      ]
+    },
+    {
+      "name": "contents",
+      "files": [
+        "electron/database.ts",
+        "electron/repositories/chapter-deletion-repository.ts",
+        "electron/repositories/content-repository.ts",
+        "electron/repositories/draft-repository.ts",
+        "electron/repositories/draft-source-guard.ts",
+        "electron/repositories/finalization-repository.ts",
+        "electron/repositories/finalized-draft-import-repository.ts",
+        "electron/repositories/project-clear-repository.ts",
+        "electron/repositories/revision-repository.ts",
+        "electron/repositories/story-domain-repository.ts",
+        "electron/repositories/summary-repository.ts",
+        "electron/services/draft-unit-migration.ts",
+        "electron/services/finalized-fact-extraction-service.ts",
+        "scripts/story-mcp-chapter-actions.mjs"
+      ]
+    },
+    {
+      "name": "continuity_projection_meta",
+      "files": [
+        "electron/database.ts",
+        "electron/repositories/summary-repository.ts",
+        "scripts/upgrade-data-fixture.mjs"
+      ]
+    },
+    {
+      "name": "cultivation_levels",
+      "files": [
+        "electron/repositories/character-repository.ts",
+        "electron/repositories/character-roster-repository.ts",
+        "electron/repositories/cultivation-repository.ts"
+      ]
+    },
+    {
+      "name": "cultivation_meta",
+      "files": [
+        "electron/repositories/cultivation-repository.ts",
+        "electron/repositories/cultivation-schema.ts"
+      ]
+    },
+    {
+      "name": "cultivation_realms",
+      "files": [
+        "electron/repositories/cultivation-repository.ts"
+      ]
+    },
+    {
+      "name": "drafts",
+      "files": [
+        "electron/database.ts",
+        "electron/repositories/chapter-deletion-repository.ts",
+        "electron/repositories/character-roster-repository.ts",
+        "electron/repositories/draft-repository.ts",
+        "electron/repositories/draft-source-guard.ts",
+        "electron/repositories/finalization-repository.ts",
+        "electron/repositories/finalized-draft-import-repository.ts",
+        "electron/repositories/foreshadowing-repository.ts",
+        "electron/repositories/narrative-thread-repository.ts",
+        "electron/repositories/plot-tree-repository.ts",
+        "electron/repositories/project-clear-repository.ts",
+        "electron/repositories/revision-repository.ts",
+        "electron/repositories/story-domain-repository.ts",
+        "electron/repositories/summary-repository.ts",
+        "electron/services/finalized-fact-extraction-service.ts",
+        "scripts/story-mcp-chapter-actions.mjs",
+        "scripts/upgrade-data-fixture.mjs"
+      ]
+    },
+    {
+      "name": "embedding_records",
+      "files": [
+        "electron/services/continuity-audit-service.ts",
+        "electron/services/rag-context-service.ts"
+      ]
+    },
+    {
+      "name": "entity_state_snapshots",
+      "files": [
+        "electron/services/continuity-audit-service.ts",
+        "electron/services/story-ledger-service.ts"
+      ]
+    },
+    {
+      "name": "finalization_outbox",
+      "files": [
+        "electron/database.ts",
+        "electron/repositories/chapter-deletion-repository.ts",
+        "electron/repositories/character-roster-repository.ts",
+        "electron/repositories/draft-repository.ts",
+        "electron/repositories/finalization-repository.ts",
+        "electron/repositories/finalized-draft-import-repository.ts",
+        "electron/repositories/narrative-thread-repository.ts",
+        "electron/repositories/plot-tree-repository.ts",
+        "electron/repositories/summary-repository.ts"
+      ]
+    },
+    {
+      "name": "finalized_draft_import_operations",
+      "files": [
+        "electron/repositories/draft-repository.ts",
+        "electron/repositories/finalized-draft-import-repository.ts",
+        "electron/repositories/project-clear-repository.ts"
+      ]
+    },
+    {
+      "name": "foreshadowings",
+      "files": [
+        "electron/repositories/draft-repository.ts",
+        "electron/repositories/foreshadowing-repository.ts",
+        "electron/repositories/project-clear-repository.ts"
+      ]
+    },
+    {
+      "name": "import_global_fact_operations",
+      "files": [
+        "electron/repositories/import-global-facts-repository.ts"
+      ]
+    },
+    {
+      "name": "import_legacy_identity_bridge",
+      "files": [
+        "electron/database.ts",
+        "electron/repositories/import-source-identity-repository.ts"
+      ]
+    },
+    {
+      "name": "import_reference_documents",
+      "files": [
+        "electron/repositories/import-run-repository.ts"
+      ]
+    },
+    {
+      "name": "import_run_chapters",
+      "files": [
+        "electron/database.ts",
+        "electron/repositories/import-run-repository.ts",
+        "electron/services/draft-unit-migration.ts"
+      ]
+    },
+    {
+      "name": "import_run_knowledge_receipts",
+      "files": [
+        "electron/repositories/import-run-repository.ts"
+      ]
+    },
+    {
+      "name": "import_run_receipts",
+      "files": [
+        "electron/repositories/import-run-repository.ts"
+      ]
+    },
+    {
+      "name": "import_run_source_chapters",
+      "files": [
+        "electron/repositories/import-run-repository.ts",
+        "electron/services/draft-unit-migration.ts"
+      ]
+    },
+    {
+      "name": "import_run_sources",
+      "files": [
+        "electron/repositories/import-run-repository.ts",
+        "electron/services/draft-unit-migration.ts"
+      ]
+    },
+    {
+      "name": "import_runs",
+      "files": [
+        "electron/database.ts",
+        "electron/repositories/import-run-repository.ts",
+        "electron/services/draft-unit-migration.ts"
+      ]
+    },
+    {
+      "name": "import_runs_stage_v3",
+      "files": [
+        "electron/database.ts"
+      ]
+    },
+    {
+      "name": "import_source_aliases",
+      "files": [
+        "electron/repositories/import-source-identity-repository.ts"
+      ]
+    },
+    {
+      "name": "import_source_chapter_map",
+      "files": [
+        "electron/database.ts",
+        "electron/repositories/import-run-repository.ts"
+      ]
+    },
+    {
+      "name": "import_source_identity",
+      "files": [
+        "electron/database.ts"
+      ]
+    },
+    {
+      "name": "knowledge_chunks",
+      "files": [
+        "electron/services/rag-context-service.ts",
+        "scripts/story-mcp-server.mjs"
+      ]
+    },
+    {
+      "name": "knowledge_index_queue",
+      "files": [
+        "electron/services/rag-context-service.ts",
+        "scripts/story-mcp-server.mjs"
+      ]
+    },
+    {
+      "name": "llm_calls",
+      "files": [
+        "electron/repositories/llm-repository.ts"
+      ]
+    },
+    {
+      "name": "mcp_audit_log",
+      "files": [
+        "scripts/story-mcp-server.mjs"
+      ]
+    },
+    {
+      "name": "narrative_thread_confirmations",
+      "files": [
+        "electron/repositories/narrative-thread-repository.ts"
+      ]
+    },
+    {
+      "name": "narrative_thread_plans",
+      "files": [
+        "electron/repositories/narrative-thread-repository.ts"
+      ]
+    },
+    {
+      "name": "plot_canvas_edges",
+      "files": [
+        "electron/repositories/plot-canvas-repository.ts"
+      ]
+    },
+    {
+      "name": "plot_canvas_nodes",
+      "files": [
+        "electron/repositories/plot-canvas-repository.ts"
+      ]
+    },
+    {
+      "name": "plot_canvases",
+      "files": [
+        "electron/repositories/plot-canvas-repository.ts"
+      ]
+    },
+    {
+      "name": "post_process_runs",
+      "files": [
+        "electron/repositories/chapter-deletion-repository.ts",
+        "electron/repositories/draft-repository.ts",
+        "electron/repositories/post-process-repository.ts",
+        "electron/repositories/project-clear-repository.ts"
+      ]
+    },
+    {
+      "name": "post_process_steps",
+      "files": [
+        "electron/repositories/draft-repository.ts",
+        "electron/repositories/post-process-repository.ts",
+        "electron/repositories/project-clear-repository.ts"
+      ]
+    },
+    {
+      "name": "project_core",
+      "files": [
+        "electron/database.ts",
+        "electron/repositories/character-roster-repository.ts",
+        "electron/repositories/character-roster-schema.ts",
+        "electron/repositories/plot-tree-repository.ts",
+        "electron/repositories/project-clear-repository.ts",
+        "electron/repositories/project-core-repository.ts",
+        "electron/repositories/workspace-hub-repository.ts",
+        "electron/repositories/world-map-repository.ts",
+        "electron/services/world-map-atlas-migration.ts",
+        "scripts/story-mcp-server.mjs",
+        "scripts/upgrade-data-fixture.mjs"
+      ]
+    },
+    {
+      "name": "recovery_candidates",
+      "files": [
+        "electron/repositories/recovery-candidate-repository.ts"
+      ]
+    },
+    {
+      "name": "reviews",
+      "files": [
+        "electron/repositories/chapter-deletion-repository.ts",
+        "electron/repositories/draft-repository.ts",
+        "electron/repositories/project-clear-repository.ts",
+        "electron/repositories/review-repository.ts"
+      ]
+    },
+    {
+      "name": "revisions",
+      "files": [
+        "electron/repositories/chapter-deletion-repository.ts",
+        "electron/repositories/draft-repository.ts",
+        "electron/repositories/project-clear-repository.ts",
+        "electron/repositories/revision-repository.ts"
+      ]
+    },
+    {
+      "name": "setting_rules",
+      "files": [
+        "electron/database.ts",
+        "electron/repositories/workspace-hub-repository.ts"
+      ]
+    },
+    {
+      "name": "setting_rules_stage_v2",
+      "files": [
+        "electron/database.ts"
+      ]
+    },
+    {
+      "name": "story_events",
+      "files": [
+        "electron/services/continuity-audit-service.ts",
+        "electron/services/story-ledger-service.ts",
+        "scripts/story-mcp-server.mjs"
+      ]
+    },
+    {
+      "name": "story_fact_candidates",
+      "files": [
+        "electron/repositories/story-domain-repository.ts"
+      ]
+    },
+    {
+      "name": "story_fact_impacts",
+      "files": [
+        "electron/repositories/story-domain-repository.ts",
+        "electron/services/story-data-approval-service.ts"
+      ]
+    },
+    {
+      "name": "story_fact_relations",
+      "files": [
+        "electron/repositories/story-domain-repository.ts"
+      ]
+    },
+    {
+      "name": "story_fact_versions",
+      "files": [
+        "electron/repositories/story-domain-repository.ts"
+      ]
+    },
+    {
+      "name": "story_facts",
+      "files": [
+        "electron/repositories/story-domain-repository.ts",
+        "electron/services/continuity-audit-service.ts",
+        "scripts/story-mcp-server.mjs"
+      ]
+    },
+    {
+      "name": "story_timeline_branches",
+      "files": [
+        "electron/database.ts",
+        "electron/repositories/story-timeline-repository.ts"
+      ]
+    },
+    {
+      "name": "story_timeline_events",
+      "files": [
+        "electron/repositories/story-timeline-repository.ts",
+        "electron/repositories/world-workbench-repository.ts"
+      ]
+    },
+    {
+      "name": "story_timeline_settings",
+      "files": [
+        "electron/repositories/story-timeline-repository.ts"
+      ]
+    },
+    {
+      "name": "summary_snapshots",
+      "files": [
+        "electron/repositories/draft-repository.ts",
+        "electron/repositories/plot-tree-repository.ts",
+        "electron/repositories/project-clear-repository.ts",
+        "electron/repositories/summary-repository.ts"
+      ]
+    },
+    {
+      "name": "text_metric_versions",
+      "files": [
+        "electron/services/draft-unit-migration.ts"
+      ]
+    },
+    {
+      "name": "workspace_approval_receipts",
+      "files": [
+        "electron/database.ts",
+        "electron/repositories/workspace-hub-repository.ts"
+      ]
+    },
+    {
+      "name": "workspace_approval_receipts_stage_v2",
+      "files": [
+        "electron/database.ts"
+      ]
+    },
+    {
+      "name": "workspace_binding_states",
+      "files": [
+        "electron/database.ts",
+        "electron/repositories/workspace-hub-repository.ts"
+      ]
+    },
+    {
+      "name": "workspace_hub_migration_audit",
+      "files": [
+        "electron/database.ts"
+      ]
+    },
+    {
+      "name": "workspace_import_candidates",
+      "files": [
+        "electron/database.ts",
+        "electron/repositories/workspace-hub-repository.ts"
+      ]
+    },
+    {
+      "name": "workspace_import_candidates_stage_v2",
+      "files": [
+        "electron/database.ts"
+      ]
+    },
+    {
+      "name": "workspace_source_fragments",
+      "files": [
+        "electron/database.ts"
+      ]
+    },
+    {
+      "name": "workspace_source_snapshot_fragments",
+      "files": [
+        "electron/database.ts",
+        "electron/repositories/story-domain-repository.ts",
+        "electron/repositories/workspace-hub-repository.ts",
+        "electron/repositories/world-map-repository.ts",
+        "electron/services/chapter-context-assembler.ts",
+        "electron/services/story-data-approval-service.ts"
+      ]
+    },
+    {
+      "name": "workspace_source_snapshot_rules",
+      "files": [
+        "electron/database.ts",
+        "electron/repositories/workspace-hub-repository.ts",
+        "electron/repositories/world-map-repository.ts"
+      ]
+    },
+    {
+      "name": "workspace_source_snapshots",
+      "files": [
+        "electron/database.ts",
+        "electron/repositories/story-domain-repository.ts",
+        "electron/repositories/workspace-hub-repository.ts"
+      ]
+    },
+    {
+      "name": "workspace_sources",
+      "files": [
+        "electron/database.ts",
+        "electron/repositories/story-domain-repository.ts",
+        "electron/repositories/workspace-hub-repository.ts",
+        "electron/repositories/world-map-repository.ts"
+      ]
+    },
+    {
+      "name": "world_character_links",
+      "files": [
+        "electron/repositories/world-workbench-repository.ts",
+        "electron/services/world-workbench-schema.ts"
+      ]
+    },
+    {
+      "name": "world_character_locations",
+      "files": [
+        "electron/repositories/world-workbench-repository.ts",
+        "electron/services/world-workbench-schema.ts"
+      ]
+    },
+    {
+      "name": "world_event_links",
+      "files": [
+        "electron/repositories/world-workbench-repository.ts",
+        "electron/services/world-workbench-schema.ts"
+      ]
+    },
+    {
+      "name": "world_event_worlds",
+      "files": [
+        "electron/repositories/world-workbench-repository.ts"
+      ]
+    },
+    {
+      "name": "world_faction_characters",
+      "files": [
+        "electron/repositories/world-workbench-repository.ts",
+        "electron/services/world-workbench-schema.ts"
+      ]
+    },
+    {
+      "name": "world_faction_places",
+      "files": [
+        "electron/repositories/world-workbench-repository.ts"
+      ]
+    },
+    {
+      "name": "world_faction_relations",
+      "files": [
+        "electron/repositories/world-workbench-repository.ts"
+      ]
+    },
+    {
+      "name": "world_factions",
+      "files": [
+        "electron/repositories/world-workbench-repository.ts"
+      ]
+    },
+    {
+      "name": "world_map_atlas_migration",
+      "files": [
+        "electron/repositories/world-map-repository.ts",
+        "electron/services/world-map-atlas-migration.ts"
+      ]
+    },
+    {
+      "name": "world_map_edges",
+      "files": [
+        "electron/repositories/world-map-repository.ts",
+        "electron/services/world-map-atlas-migration.ts"
+      ]
+    },
+    {
+      "name": "world_map_image",
+      "files": [
+        "electron/services/world-map-atlas-migration.ts"
+      ]
+    },
+    {
+      "name": "world_map_layers",
+      "files": [
+        "electron/services/world-map-atlas-migration.ts"
+      ]
+    },
+    {
+      "name": "world_map_nodes",
+      "files": [
+        "electron/repositories/world-map-repository.ts",
+        "electron/repositories/world-workbench-repository.ts",
+        "electron/services/world-map-atlas-migration.ts"
+      ]
+    },
+    {
+      "name": "world_maps",
+      "files": [
+        "electron/repositories/world-map-repository.ts",
+        "electron/repositories/world-workbench-repository.ts",
+        "electron/services/world-map-atlas-migration.ts"
+      ]
+    },
+    {
+      "name": "world_portal_characters",
+      "files": [
+        "electron/repositories/world-workbench-repository.ts",
+        "electron/services/world-workbench-schema.ts"
+      ]
+    },
+    {
+      "name": "world_portal_factions",
+      "files": [
+        "electron/repositories/world-workbench-repository.ts"
+      ]
+    },
+    {
+      "name": "world_portals",
+      "files": [
+        "electron/repositories/world-workbench-repository.ts"
+      ]
+    },
+    {
+      "name": "world_relic_characters",
+      "files": [
+        "electron/repositories/world-workbench-repository.ts",
+        "electron/services/world-workbench-schema.ts"
+      ]
+    },
+    {
+      "name": "world_relic_factions",
+      "files": [
+        "electron/repositories/world-workbench-repository.ts"
+      ]
+    },
+    {
+      "name": "world_relics",
+      "files": [
+        "electron/repositories/world-workbench-repository.ts"
+      ]
+    },
+    {
+      "name": "world_rule_targets",
+      "files": [
+        "electron/repositories/world-workbench-repository.ts"
+      ]
+    },
+    {
+      "name": "world_rules",
+      "files": [
+        "electron/repositories/world-workbench-repository.ts"
+      ]
+    },
+    {
+      "name": "world_trail_current_bindings",
+      "files": [
+        "electron/repositories/world-workbench-repository.ts",
+        "electron/services/world-workbench-schema.ts"
+      ]
+    },
+    {
+      "name": "world_trails",
+      "files": [
+        "electron/repositories/story-timeline-repository.ts",
+        "electron/repositories/world-workbench-repository.ts",
+        "electron/services/world-workbench-schema.ts"
+      ]
+    },
+    {
+      "name": "world_workbench_migrations",
+      "files": [
+        "electron/repositories/world-workbench-repository.ts",
+        "electron/services/world-workbench-schema.ts"
+      ]
+    },
+    {
+      "name": "worlds",
+      "files": [
+        "electron/repositories/world-workbench-repository.ts"
+      ]
+    }
+  ],
+  "checks": {
+    "orphanTables": [
+      "character_shared_relationships_name_legacy"
+    ],
+    "unknownRefs": [
+      "import_source_identity",
+      "world_map_image",
+      "world_map_layers"
+    ]
+  }
+}
