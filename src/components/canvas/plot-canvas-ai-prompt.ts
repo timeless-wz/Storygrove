@@ -1,8 +1,50 @@
 import type { DatabaseChannels, ProjectData } from '../../shared/ipc-channels'
+import type { ChapterBlueprintV2Summary } from '../../shared/blueprint-v2'
 import type { PlotCanvasGraph } from '../../shared/plot-canvas'
 import type { PlotCanvasAIMode } from './plot-canvas-ai-proposal'
 
 type Blueprint = DatabaseChannels['db:blueprint-get-all']['return'][number]
+
+export interface PlotCanvasBlueprintSummary {
+  chapterNumber: number
+  title: string
+  purpose: string
+  keyEvents: string
+  suspenseHook: string
+}
+
+/** Project bounded cross-chapter summaries for the plot canvas AI; never retain Markdown bodies. */
+export function projectPlotCanvasBlueprintSummaries(
+  legacyRows: readonly Blueprint[],
+  v2Summaries: readonly ChapterBlueprintV2Summary[],
+): PlotCanvasBlueprintSummary[] {
+  const summariesByChapter = new Map(v2Summaries.map(summary => [summary.chapterNumber, summary]))
+  const seen = new Set<number>()
+  const projected = legacyRows.map(row => {
+    seen.add(row.chapterNumber)
+    const v2 = summariesByChapter.get(row.chapterNumber)
+    return {
+      chapterNumber: row.chapterNumber,
+      title: String(row.title ?? '').slice(0, 160),
+      purpose: String(row.purpose ?? '').slice(0, 300),
+      keyEvents: String(row.keyEvents || (v2?.sceneTitles ?? []).join('\n')).slice(0, 700),
+      suspenseHook: String(row.suspenseHook ?? '').slice(0, 320),
+    }
+  })
+  for (const summary of v2Summaries) {
+    if (seen.has(summary.chapterNumber)) continue
+    projected.push({
+      chapterNumber: summary.chapterNumber,
+      title: `第${summary.chapterNumber}章`,
+      purpose: '',
+      keyEvents: summary.sceneTitles.slice(0, 8).join('\n').slice(0, 700),
+      suspenseHook: '',
+    })
+  }
+  return projected
+    .sort((left, right) => left.chapterNumber - right.chapterNumber)
+    .slice(0, 40)
+}
 
 /** 只发送作者确认的规划摘要与当前画布，不读取正文或改变权威资料。 */
 export function createPlotCanvasAIMessages(input: {
@@ -10,7 +52,7 @@ export function createPlotCanvasAIMessages(input: {
   instruction: string
   graph: PlotCanvasGraph
   project: ProjectData
-  blueprints: Blueprint[]
+  blueprints: PlotCanvasBlueprintSummary[]
   history: Array<{ instruction: string; explanation: string }>
 }): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
   const { mode, instruction, graph, project, blueprints, history } = input
@@ -23,7 +65,7 @@ export function createPlotCanvasAIMessages(input: {
     globalGuidance: String(novel.globalGuidance ?? '').slice(0, 2000),
     blueprints: blueprints.slice(0, 40).map(item => ({
       chapterNumber: item.chapterNumber,
-      title: item.title,
+      title: String(item.title ?? '').slice(0, 160),
       purpose: String(item.purpose ?? '').slice(0, 300),
       keyEvents: String(item.keyEvents ?? '').slice(0, 700),
     })),

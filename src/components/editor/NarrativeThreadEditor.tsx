@@ -19,9 +19,11 @@ import { ipc } from '../../services/ipc-client'
 import { rebuildPlotTreeDeterministic } from '../../services/plot-tree-deterministic'
 import {
   narrativeThreadCandidateGenerator,
+  projectNarrativeThreadBlueprintSummary,
   type NarrativeThreadCandidateGenerator,
   type NarrativeThreadEventCandidate,
   type NarrativeThreadPlanCandidate,
+  type NarrativeThreadBlueprintSummary,
 } from '../../services/narrative-thread-candidate-generator'
 import {
   generatePlotTree,
@@ -207,7 +209,7 @@ export default function NarrativeThreadEditor({
   const loadModels = useLLMStore(s => s.loadModels)
   const [threads, setThreads] = useState<NarrativeThreadView[]>([])
   const [finalizedDrafts, setFinalizedDrafts] = useState<DatabaseChannels['db:draft-list-all']['return']>([])
-  const [blueprints, setBlueprints] = useState<DatabaseChannels['db:blueprint-get-all']['return']>([])
+  const [blueprints, setBlueprints] = useState<NarrativeThreadBlueprintSummary[]>([])
   const [plan, setPlan] = useState<NarrativeThreadPlanInput>(EMPTY_PLAN)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [eventPlanId, setEventPlanId] = useState<number | null>(null)
@@ -260,16 +262,21 @@ export default function NarrativeThreadEditor({
     const session = captureProjectSession(useProjectStore.getState().currentProject)
     if (!session || !isProjectSessionPath(session, projectKey)) return
     try {
-      const [nextThreads, drafts, nextBlueprints] = await Promise.all([
+      const [nextThreads, drafts, nextBlueprints, v2Summaries] = await Promise.all([
         ipc.invokeWithProjectSession(session, 'db:narrative-thread-list', projectKey),
         ipc.invokeWithProjectSession(session, 'db:draft-list-all', projectKey),
         ipc.invokeWithProjectSession(session, 'db:blueprint-get-all', projectKey),
+        ipc.invokeWithProjectSession(session, 'db:blueprint-v2-summary-list', projectKey),
       ])
       if (!isProjectSessionCurrent(session)) return
       const finalized = drafts.filter(draft => draft.status === 'finalized')
       setFinalizedDrafts(finalized)
       setThreads(nextThreads)
-      setBlueprints(nextBlueprints)
+      const v2ByChapter = new Map(v2Summaries.map(summary => [summary.chapterNumber, summary]))
+      setBlueprints(nextBlueprints.map(blueprint => projectNarrativeThreadBlueprintSummary(
+        blueprint,
+        v2ByChapter.get(blueprint.chapterNumber),
+      )))
       setEventDraftId(previous => previous || finalized[0]?.id || 0)
       setAiBlueprintChapter(previous => previous || nextBlueprints[0]?.chapterNumber || 0)
     } catch {

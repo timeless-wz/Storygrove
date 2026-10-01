@@ -1,4 +1,5 @@
 import type { DatabaseChannels } from '../shared/ipc-channels'
+import type { ChapterBlueprintV2Summary } from '../shared/blueprint-v2'
 import type {
   NarrativeThreadEventType,
   NarrativeThreadPlanInput,
@@ -22,11 +23,47 @@ export interface NarrativeThreadEventCandidate {
 
 type BlueprintData = DatabaseChannels['db:blueprint-get-all']['return'][number]
 
+export interface NarrativeThreadBlueprintSummary {
+  chapterNumber: number
+  title: string
+  role: string
+  purpose: string
+  keyEvents: string
+  suspenseHook: string
+  characters: string[]
+  v2?: Pick<ChapterBlueprintV2Summary, 'sceneCount' | 'sceneTitles' | 'wordBudget'>
+}
+
+export function projectNarrativeThreadBlueprintSummary(
+  blueprint: BlueprintData | NarrativeThreadBlueprintSummary,
+  v2?: Pick<ChapterBlueprintV2Summary, 'sceneCount' | 'sceneTitles' | 'wordBudget'>,
+): NarrativeThreadBlueprintSummary {
+  const bounded = (value: unknown, limit: number) => typeof value === 'string' ? value.trim().slice(0, limit) : ''
+  const existingV2 = 'v2' in blueprint ? blueprint.v2 : undefined
+  const v2View = v2 ?? existingV2
+  return {
+    chapterNumber: blueprint.chapterNumber,
+    title: bounded(blueprint.title, 160),
+    role: bounded(blueprint.role, 80),
+    purpose: bounded(blueprint.purpose, 600),
+    keyEvents: bounded(blueprint.keyEvents, 1200),
+    suspenseHook: bounded(blueprint.suspenseHook, 320),
+    characters: (Array.isArray(blueprint.characters) ? blueprint.characters : [])
+      .slice(0, 12).map(name => bounded(name, 80)).filter(Boolean),
+    ...(v2View ? { v2: {
+      sceneCount: v2View.sceneCount,
+      sceneTitles: v2View.sceneTitles.slice(0, 8).map(title => bounded(title, 160)),
+      wordBudget: v2View.wordBudget,
+    } } : {}),
+  }
+}
+
 export interface GenerateNarrativeThreadPlanCandidateInput {
   modelId: string
   writingLanguage: WritingLanguage
   totalChapters: number
-  blueprint: BlueprintData
+  blueprint: BlueprintData | NarrativeThreadBlueprintSummary
+  v2Summary?: ChapterBlueprintV2Summary
   signal: AbortSignal
 }
 
@@ -149,7 +186,7 @@ export function createNarrativeThreadCandidateGenerator(
               role: 'user',
               content: JSON.stringify({
                 totalChapters: input.totalChapters,
-                blueprint: input.blueprint,
+                blueprint: projectNarrativeThreadBlueprintSummary(input.blueprint, input.v2Summary),
               }),
             },
           ],

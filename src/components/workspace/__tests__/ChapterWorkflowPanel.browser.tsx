@@ -6,14 +6,21 @@ import { useLocaleStore } from '../../../stores/locale-store'
 import { useProjectStore } from '../../../stores/project-store'
 import { useWorkspaceHubStore } from '../../../stores/workspace-hub-store'
 import { setActiveProjectSessionContext } from '../../../shared/project-session-context'
+import { parseChapterBlueprintMarkdown } from '../../../shared/blueprint-v2-markdown'
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 const originalLocale = useLocaleStore.getState(); const originalProject = useProjectStore.getState(); const originalHub = useWorkspaceHubStore.getState()
 let root: Root; let container: HTMLDivElement; let invoke: ReturnType<typeof vi.fn>
 
 beforeEach(async () => {
+  const detail = {
+    ...parseChapterBlueprintMarkdown('# 第31章｜归来\n## 【逐场分镜拆解】\n##### 场景一：抵达遗迹\n发现线索。\n').content,
+    revision: 1,
+    contentHash: 'a'.repeat(64),
+  }
   invoke = vi.fn(async (channel: string) => {
-    if (channel === 'db:blueprint-get-all') return [{ chapterNumber: 31, title: '第31章 归来', purpose: '推进主线', keyEvents: '抵达遗迹；发现线索' }]
+    if (channel === 'db:blueprint-get') return { chapterNumber: 31, title: '第31章 归来', purpose: '推进主线', keyEvents: '抵达遗迹；发现线索' }
+    if (channel === 'db:blueprint-v2-get') return detail
     if (channel === 'db:draft-list') return [{ id: 7, chapterNumber: 31, version: 1, status: 'finalized', source: 'write', contentId: 2, wordCount: 100, createdAt: '', updatedAt: '' }]
     if (channel === 'story-data:extract-finalized-draft') return [{ candidateId: 'c1' }]
     return []
@@ -37,6 +44,7 @@ describe('ChapterWorkflowPanel browser acceptance', () => {
     expect(container.textContent).toContain('章节创作工作台')
     expect(container.textContent).toContain('上下文装配')
     expect(container.textContent).toContain('正文、审核、修订与定稿')
+    expect(container.textContent).toContain('场景一：抵达遗迹')
     const button = [...container.querySelectorAll('button')].find(item => item.textContent?.includes('提取候选资料'))
     expect(button).toBeTruthy()
     await act(async () => button?.dispatchEvent(new MouseEvent('click', { bubbles: true })))

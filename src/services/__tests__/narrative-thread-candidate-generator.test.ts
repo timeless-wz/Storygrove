@@ -7,6 +7,7 @@ import {
   NARRATIVE_THREAD_CANDIDATE_BUDGET,
   parseNarrativeThreadEventCandidates,
   parseNarrativeThreadPlanCandidates,
+  projectNarrativeThreadBlueprintSummary,
 } from '../narrative-thread-candidate-generator'
 
 describe('narrative thread AI candidate boundary', () => {
@@ -163,8 +164,8 @@ describe('narrative thread AI candidate boundary', () => {
       totalChapters: 12,
       blueprint: {
         chapterNumber: 2, title: '日志失踪', role: '发展', purpose: '引出伪造者',
-        keyEvents: '航海日志从保险柜消失。', characters: ['林岚'], suspenseHook: '',
-        userGuidance: '', notes: '', notesUpdatedAt: '',
+        keyEvents: '航海日志从保险柜消失。'.repeat(300), characters: Array.from({ length: 20 }, (_, i) => `角色${i}`), suspenseHook: '悬念'.repeat(200),
+        userGuidance: 'private guidance'.repeat(200), notes: 'finalized notes'.repeat(200), notesUpdatedAt: '',
       },
       signal: new AbortController().signal,
     })).resolves.toHaveLength(1)
@@ -181,6 +182,41 @@ describe('narrative thread AI candidate boundary', () => {
     expect(observedTask?.messages.find(message => message.role === 'system')?.content).toContain('1..12')
     expect(JSON.parse(observedTask?.messages.find(message => message.role === 'user')?.content ?? '{}'))
       .toMatchObject({ totalChapters: 12 })
+    const sentBlueprint = JSON.parse(observedTask?.messages.find(message => message.role === 'user')?.content ?? '{}').blueprint
+    expect(sentBlueprint).toMatchObject({ chapterNumber: 2, title: '日志失踪' })
+    expect(sentBlueprint.keyEvents).toHaveLength(1200)
+    expect(sentBlueprint.characters).toHaveLength(12)
+    expect(sentBlueprint.suspenseHook).toHaveLength(320)
+    expect(sentBlueprint).not.toHaveProperty('notes')
+    expect(sentBlueprint).not.toHaveProperty('userGuidance')
+  })
+
+  it('projects bounded v2 scene titles while excluding the full chapter and finalized notes', () => {
+    const projected = projectNarrativeThreadBlueprintSummary({
+      chapterNumber: 1,
+      title: 'T'.repeat(400),
+      role: 'R'.repeat(200),
+      purpose: 'P'.repeat(2000),
+      keyEvents: 'K'.repeat(3000),
+      suspenseHook: 'H'.repeat(800),
+      characters: Array.from({ length: 20 }, () => 'C'.repeat(120)),
+      userGuidance: 'G'.repeat(10000),
+      notes: 'N'.repeat(10000),
+      notesUpdatedAt: '',
+    }, {
+      sceneCount: 4,
+      sceneTitles: Array.from({ length: 20 }, () => 'S'.repeat(200)),
+      wordBudget: 4200,
+    })
+
+    expect(projected.title).toHaveLength(160)
+    expect(projected.keyEvents).toHaveLength(1200)
+    expect(projected.characters).toHaveLength(12)
+    expect(projected.characters[0]).toHaveLength(80)
+    expect(projected.v2?.sceneTitles).toHaveLength(8)
+    expect(projected.v2?.sceneTitles[0]).toHaveLength(160)
+    expect(JSON.stringify(projected)).not.toContain('N'.repeat(100))
+    expect(JSON.stringify(projected)).not.toContain('G'.repeat(100))
   })
 
   it('binds an event candidate to the supplied finalized source instead of trusting model identity fields', async () => {

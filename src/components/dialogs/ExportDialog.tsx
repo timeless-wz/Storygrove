@@ -24,7 +24,8 @@ import {
 } from '../project-session-gate'
 import type { ProjectSessionContext } from '../../shared/ipc-channels'
 import type { DraftMeta } from '../../../electron/repositories/draft-repository'
-import type { BlueprintData, BlueprintVolumeData } from '../../../electron/repositories/blueprint-repository'
+import type { BlueprintVolumeData } from '../../../electron/repositories/blueprint-repository'
+import { projectBlueprintList, type BlueprintListProjection } from '../../shared/blueprint-list-projection'
 import type {
   FinalizedDraftExportSnapshot,
 } from '../../../electron/repositories/finalization-repository'
@@ -37,7 +38,7 @@ import { resolveWritingLanguage } from '../../shared/writing-language'
 type ExportScope = 'full-book' | 'chapter' | 'volume' | 'settings'
 type SelectionCatalog = {
   drafts: DraftMeta[]
-  blueprints: BlueprintData[]
+  blueprints: BlueprintListProjection[]
   volumes: BlueprintVolumeData[]
   finalized: FinalizedDraftExportSnapshot[]
 }
@@ -98,13 +99,15 @@ export default function ExportDialog({ isOpen, onClose }: { isOpen: boolean; onC
     setCatalogError('')
     setPreview(null)
     try {
-      const [drafts, blueprints, volumes, finalized] = await Promise.all([
+      const [drafts, legacyBlueprints, v2Summaries, volumes, finalized] = await Promise.all([
         ipc.invokeWithProjectSession(session, 'db:draft-list-all', session.projectPath),
         ipc.invokeWithProjectSession(session, 'db:blueprint-get-all', session.projectPath),
+        ipc.invokeWithProjectSession(session, 'db:blueprint-v2-summary-list', session.projectPath),
         ipc.invokeWithProjectSession(session, 'db:blueprint-volume-list', session.projectPath),
         ipc.invokeWithProjectSession(session, 'db:draft-export-snapshot', session.projectPath),
       ])
       if (!isProjectSessionCurrent(session)) return
+      const blueprints = projectBlueprintList(legacyBlueprints, v2Summaries)
       const value = { drafts, blueprints, volumes, finalized }
       setCatalog({ session, value })
       const firstChapter = [...new Set([

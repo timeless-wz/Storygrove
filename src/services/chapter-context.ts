@@ -10,7 +10,8 @@
  */
 
 import type { DatabaseChannels, ProjectSessionContext } from '../shared/ipc-channels'
-import type { ChapterCanvasNodeData } from '../shared/chapter-canvas'
+import { assertNoLossOnSerialize } from '../shared/blueprint-v2-markdown'
+import { getBlueprintV2Scenes, type ChapterBlueprintV2Content } from '../shared/blueprint-v2'
 import { isProjectSessionCurrent } from '../components/project-session-gate'
 import { ipc } from './ipc-client'
 
@@ -33,11 +34,9 @@ export interface ChapterContextBlueprint {
 export interface ChapterContextScene {
   id: string
   title: string
-  summary: string
-  /** 场景角色定位，沿用蓝图词表；未设置时为空串。 */
-  role: string
-  /** 主线顺序（1 起）；未排序时为 null，排在已排序场景之后。 */
-  order: number | null
+  markdown: string
+  presence: 'on-canvas' | 'off-canvas'
+  order: number
 }
 
 export type ChapterContextState =
@@ -59,8 +58,9 @@ export type ChapterContextState =
       blueprintChapterNumber: number
       blueprint: ChapterContextBlueprint
       scenes: ChapterContextScene[]
-      /** 画布读取失败：与「本章还没有场景」区分显示。 */
-      scenesLoadFailed: boolean
+      /** 正常读取时为无损重建的完整 Markdown；损坏详情时退回存储的原文。 */
+      detailMarkdown: string | null
+      detailReadStatus: 'corrupt' | 'needs-newer-app' | 'load-error' | null
     }
 
 /**
@@ -88,27 +88,6 @@ export function splitChapterBeats(keyEvents: string | null | undefined): string[
     .split(/\r?\n|[；;]/u)
     .map(beat => beat.trim())
     .filter(beat => beat.length > 0)
-}
-
-/** 场景卡按主线顺序排列；未排序的场景排在最后，并以横坐标兜底。 */
-export function orderScenesForSidebar(
-  nodes: readonly ChapterCanvasNodeData[] | null | undefined,
-): ChapterContextScene[] {
-  if (!Array.isArray(nodes)) return []
-  return nodes
-    .filter(node => node?.type === 'scene')
-    .map(node => ({
-      id: node.id,
-      title: typeof node.title === 'string' ? node.title : '',
-      summary: typeof node.summary === 'string' ? node.summary : '',
-      role: typeof node.role === 'string' ? node.role : '',
-      order: typeof node.order === 'number' ? node.order : null,
-    }))
-    .sort((a, b) => {
-      const left = a.order ?? Number.MAX_SAFE_INTEGER
-      const right = b.order ?? Number.MAX_SAFE_INTEGER
-      return left - right
-    })
 }
 
 function toBlueprintView(blueprint: {
@@ -158,21 +137,42 @@ export async function loadChapterContext(
   if (!isProjectSessionCurrent(projectSession)) return { status: 'session-lost' }
   if (!blueprint) return { status: 'target-missing', blueprintChapterNumber }
 
-  let scenes: ChapterContextScene[] = []
-  let scenesLoadFailed = false
+  let detail: DatabaseChannels['db:blueprint-v2-get']['return'] = null
+  let detailReadStatus: 'corrupt' | 'needs-newer-app' | 'load-error' | null = null
   try {
-    const graph = await ipc.invokeWithProjectSession(
+    detail = await ipc.invokeWithProjectSession(
       projectSession,
-      'db:chapter-canvas-get',
+      'db:blueprint-v2-get',
       blueprintChapterNumber,
       projectSession.projectPath,
     )
     if (!isProjectSessionCurrent(projectSession)) return { status: 'session-lost' }
-    scenes = orderScenesForSidebar(graph?.nodes)
+    if (detail?.readStatus) detailReadStatus = detail.readStatus
   } catch {
-    // 画布读取失败不拖垮蓝图要点：侧栏仍需显示真实的目标与悬念。
     if (!isProjectSessionCurrent(projectSession)) return { status: 'session-lost' }
-    scenesLoadFailed = true
+    detailReadStatus = 'load-error'
+  }
+
+  let scenes: ChapterContextScene[] = []
+  let detailMarkdown: string | null = null
+  if (detail && !detail.readStatus) {
+    const content = detail as ChapterBlueprintV2Content
+    try {
+      scenes = getBlueprintV2Scenes(content).map(scene => ({
+        id: scene.sceneId,
+        title: scene.title,
+        markdown: scene.markdown,
+        presence: scene.presence,
+        order: scene.order,
+      }))
+      detailMarkdown = assertNoLossOnSerialize(content)
+    } catch {
+      scenes = []
+      detailReadStatus = 'corrupt'
+      detailMarkdown = detail.rawMarkdown ?? null
+    }
+  } else if (detail?.rawMarkdown) {
+    detailMarkdown = detail.rawMarkdown
   }
 
   return {
@@ -180,6 +180,7 @@ export async function loadChapterContext(
     blueprintChapterNumber,
     blueprint: toBlueprintView(blueprint),
     scenes,
-    scenesLoadFailed,
+    detailMarkdown,
+    detailReadStatus,
   }
 }

@@ -1,15 +1,18 @@
-import type { BlueprintData, BlueprintVolumeData } from '../../../electron/repositories/blueprint-repository'
+import type { BlueprintVolumeData } from '../../../electron/repositories/blueprint-repository'
 import type { DraftMeta } from '../../../electron/repositories/draft-repository'
+import type { BlueprintListProjection } from '../../shared/blueprint-list-projection'
 
 export interface OutlineData {
   volumes: BlueprintVolumeData[]
-  blueprints: BlueprintData[]
+  blueprints: BlueprintListProjection[]
   drafts: DraftMeta[]
 }
 
 export interface ChapterEntry {
   number: number
   title: string
+  sceneCount: number
+  sceneTitles: string[]
   draft?: DraftMeta
   manuscript?: DraftMeta
 }
@@ -34,7 +37,10 @@ export function groupOutline(data: OutlineData, fallbackVolumeName: string) {
   }
   for (const blueprint of data.blueprints) {
     chapters.set(`${volumeForBlueprint(blueprint.chapterNumber)}:${blueprint.chapterNumber}`, {
-      number: blueprint.chapterNumber, title: blueprint.title,
+      number: blueprint.chapterNumber,
+      title: blueprint.title,
+      sceneCount: blueprint.sceneCount ?? 0,
+      sceneTitles: blueprint.sceneTitles ?? [],
     })
   }
   for (const draft of data.drafts) {
@@ -47,6 +53,8 @@ export function groupOutline(data: OutlineData, fallbackVolumeName: string) {
     const entry = chapters.get(key) ?? {
       number: draft.chapterNumber,
       title: draft.chapterTitle || blueprints.get(draft.blueprintChapterNumber ?? -1)?.title || '',
+      sceneCount: blueprints.get(draft.blueprintChapterNumber ?? -1)?.sceneCount ?? 0,
+      sceneTitles: blueprints.get(draft.blueprintChapterNumber ?? -1)?.sceneTitles ?? [],
     }
     if (draft.status === 'finalized') {
       entry.manuscript = latest([draft, ...(entry.manuscript ? [entry.manuscript] : [])])

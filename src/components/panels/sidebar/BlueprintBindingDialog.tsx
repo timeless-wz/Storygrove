@@ -8,6 +8,7 @@ import { toast } from '../../ui/Toast'
 import { Button } from '../../ui/Button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../ui/Dialog'
 import { captureProjectSession, isProjectSessionCurrent, isProjectSessionPath } from '../../project-session-gate'
+import { projectBlueprintList, type BlueprintListProjection } from '../../../shared/blueprint-list-projection'
 
 export interface BlueprintBindingTarget {
   draftId: number
@@ -27,7 +28,7 @@ export function BlueprintBindingDialog({
 }) {
   const text = useLocaleStore(s => s.text)
   const currentProject = useProjectStore(s => s.currentProject)
-  const [blueprints, setBlueprints] = useState<Array<{ chapterNumber: number; title: string }>>([])
+  const [blueprints, setBlueprints] = useState<BlueprintListProjection[]>([])
   const [selected, setSelected] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -37,10 +38,13 @@ export function BlueprintBindingDialog({
     let cancelled = false
     const projectSession = captureProjectSession(currentProject)
     if (!projectSession) return
-    void ipc.invokeWithProjectSession(projectSession, 'db:blueprint-get-all', projectSession.projectPath)
-      .then(items => {
+    void Promise.all([
+      ipc.invokeWithProjectSession(projectSession, 'db:blueprint-get-all', projectSession.projectPath),
+      ipc.invokeWithProjectSession(projectSession, 'db:blueprint-v2-summary-list', projectSession.projectPath),
+    ])
+      .then(([items, summaries]) => {
         if (!cancelled && isProjectSessionCurrent(projectSession)) {
-          setBlueprints(items.map(item => ({ chapterNumber: item.chapterNumber, title: item.title })))
+          setBlueprints(projectBlueprintList(items, summaries))
         }
       })
       .catch(() => {
@@ -107,7 +111,10 @@ export function BlueprintBindingDialog({
             <option value="">{text('不绑定蓝图', 'No blueprint')}</option>
             {blueprints.map(blueprint => (
               <option key={blueprint.chapterNumber} value={blueprint.chapterNumber}>
-                {text(`第${blueprint.chapterNumber}章 ${blueprint.title || '未命名蓝图'}`, `Chapter ${blueprint.chapterNumber} ${blueprint.title || 'Untitled blueprint'}`)}
+                {text(
+                  `第${blueprint.chapterNumber}章 ${blueprint.title || '未命名蓝图'}${blueprint.sceneCount ? ` · ${blueprint.sceneCount}场分镜` : ''}`,
+                  `Chapter ${blueprint.chapterNumber} ${blueprint.title || 'Untitled blueprint'}${blueprint.sceneCount ? ` · ${blueprint.sceneCount} scenes` : ''}`,
+                )}
               </option>
             ))}
           </select>

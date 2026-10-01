@@ -14,6 +14,7 @@ import {
   isProjectSessionCurrent,
   isProjectSessionPath,
 } from '../project-session-gate'
+import { projectBlueprintList } from '../../shared/blueprint-list-projection'
 
 /** 章节元数据 */
 interface ChapterMeta {
@@ -21,6 +22,7 @@ interface ChapterMeta {
   chapter_number: number
   title: string
   status: string
+  sceneCount: number
 }
 
 /** 版本历史面板 — 查看章节版本并与当前内容对比 */
@@ -38,17 +40,17 @@ export default function VersionHistory({ projectKey }: { projectKey: string }) {
     if (!projectSession || !isProjectSessionPath(projectSession, projectKey)) return
     setLoading(true)
     try {
-      const blueprints = await ipc.invokeWithProjectSession(
-        projectSession,
-        'db:blueprint-get-all',
-        projectSession.projectPath,
-      )
+      const [legacyRows, v2Summaries] = await Promise.all([
+        ipc.invokeWithProjectSession(projectSession, 'db:blueprint-get-all', projectSession.projectPath),
+        ipc.invokeWithProjectSession(projectSession, 'db:blueprint-v2-summary-list', projectSession.projectPath),
+      ])
       if (!isProjectSessionCurrent(projectSession)) return
-      setChapters(blueprints.map(c => ({
+      setChapters(projectBlueprintList(legacyRows, v2Summaries).map(c => ({
         id: String(c.chapterNumber),
         chapter_number: c.chapterNumber,
         title: c.title || text(`第 ${c.chapterNumber} 章`, `Chapter ${c.chapterNumber}`),
         status: 'draft',
+        sceneCount: c.sceneCount ?? 0,
       })))
     } catch {
       if (isProjectSessionCurrent(projectSession)) setChapters([])
@@ -240,6 +242,7 @@ export default function VersionHistory({ projectKey }: { projectKey: string }) {
                   {ch.chapter_number}
                 </span>
                 {ch.title || text('未命名', 'Untitled')}
+                {ch.sceneCount > 0 && <small className="ml-1 opacity-60">{text(`${ch.sceneCount} 场分镜`, `${ch.sceneCount} scenes`)}</small>}
               </div>
             ))
           )}

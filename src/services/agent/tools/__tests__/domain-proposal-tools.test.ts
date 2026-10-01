@@ -5,8 +5,11 @@ import { createAgentExecutionContext } from '../project-context'
 import { proposeNovelConfigTool } from '../propose-novel-config.tool'
 import {
   buildChapterBlueprintProposal,
+  buildChapterBlueprintV2Proposal,
   proposeChapterBlueprintTool,
 } from '../propose-chapter-blueprint.tool'
+import { parseChapterBlueprintMarkdown } from '../../../../shared/blueprint-v2-markdown'
+import { getBlueprintV2Scenes } from '../../../../shared/blueprint-v2'
 import { builtinTools } from '..'
 import { runAgentLoop } from '../../agent-engine'
 import { toolRegistry } from '../../tool-registry'
@@ -73,6 +76,7 @@ describe('explicit Agent domain proposals', () => {
     invoke.mockImplementation(async (_session, channel: string) => {
       if (channel === 'project:update-config') return { success: true }
       if (channel === 'db:blueprint-get') return blueprint
+      if (channel === 'db:blueprint-v2-get') return null
       if (channel === 'db:blueprint-upsert') return { success: true }
       throw new Error(`unexpected channel ${channel}`)
     })
@@ -105,7 +109,7 @@ describe('explicit Agent domain proposals', () => {
       arguments: { chapter_number: 2, changes: { purpose: '埋下蓝钥匙线索' } },
     })
     expect(invoke.mock.calls.map(([, channel]) => channel)).toEqual([
-      'project:update-config', 'db:blueprint-get', 'db:blueprint-upsert',
+      'project:update-config', 'db:blueprint-get', 'db:blueprint-v2-get', 'db:blueprint-upsert',
     ])
     expect(callbacks.onDone).toHaveBeenCalledWith(
       '配置与所选蓝图均已提交。',
@@ -123,6 +127,7 @@ describe('explicit Agent domain proposals', () => {
     invoke.mockImplementation(async (_session, channel: string) => {
       if (channel === 'project:update-config') return { success: true }
       if (channel === 'db:blueprint-get') return blueprint
+      if (channel === 'db:blueprint-v2-get') return null
       if (channel === 'db:blueprint-upsert') return { success: false, error: 'blueprint storage unavailable' }
       throw new Error(`unexpected channel ${channel}`)
     })
@@ -238,6 +243,7 @@ describe('explicit Agent domain proposals', () => {
   it('merges an approved chapter-blueprint proposal into the existing target only', async () => {
     invoke
       .mockResolvedValueOnce(blueprint)
+      .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ success: true })
 
     const result = await proposeChapterBlueprintTool.execute({
@@ -246,12 +252,83 @@ describe('explicit Agent domain proposals', () => {
     }, createAgentExecutionContext())
 
     expect(result).toMatchObject({ success: true })
-    expect(invoke).toHaveBeenNthCalledWith(2,
+    expect(invoke).toHaveBeenNthCalledWith(3,
       expect.objectContaining({ projectId: 'project-A', leaseId: 'lease-A' }),
       'db:blueprint-upsert',
       { ...blueprint, title: '新标题', characters: ['林舟', '顾遥'] },
       project.path,
     )
+  })
+
+  it('diffs and saves a complete v2 Markdown proposal through the revision-checked detail channel', async () => {
+    const currentMarkdown = `# 第2章｜旧标题
+## 【逐场分镜拆解】
+##### 场景一：同一场景
+旧对白。
+## 【超凡物理与规则交互细节】
+- **规则**：保留边界。
+## 【写作禁忌与防坑自检】
+- **禁写**：不解释石书真身。
+## 【自定义标题】
+旧的未知内容。
+`
+    const proposedMarkdown = `# 第2章｜新标题
+## 【逐场分镜拆解】
+##### 场景一：同一场景
+新对白。
+##### 场景二：新增场景
+新的正文。
+## 【超凡物理与规则交互细节】
+- **规则**：规则仍完整。
+## 【写作禁忌与防坑自检】
+- **禁写**：不解释石书真身。
+## 【自定义标题】
+未知标题和内容不能丢。
+`
+    const base = parseChapterBlueprintMarkdown(currentMarkdown).content
+    const currentDetail = { ...base, revision: 6, contentHash: 'c'.repeat(64) }
+    const proposal = buildChapterBlueprintV2Proposal({ markdown: proposedMarkdown }, 2, currentDetail)
+
+    expect(proposal).toMatchObject({ valid: true, kind: 'v2', baseRevision: 6 })
+    if (!proposal.valid || proposal.kind !== 'v2') return
+    expect(proposal.diffs.map(diff => diff.field)).toEqual(expect.arrayContaining([
+      '章题',
+      '【逐场分镜拆解】 / 场景一：同一场景',
+      '【逐场分镜拆解】 / 场景二：新增场景',
+      '【超凡物理与规则交互细节】',
+      '【自定义标题】',
+    ]))
+    expect(JSON.stringify(proposal.content)).toContain('未知标题和内容不能丢。')
+    expect(getBlueprintV2Scenes(proposal.content)[0]?.sceneId).toBe(getBlueprintV2Scenes(base)[0]?.sceneId)
+
+    invoke.mockImplementation(async (_session, channel: string, value?: unknown) => {
+      if (channel === 'db:blueprint-get') return blueprint
+      if (channel === 'db:blueprint-v2-get') return currentDetail
+      if (channel === 'db:blueprint-v2-save') {
+        expect(value).toMatchObject({ chapterNumber: 2, baseRevision: 6 })
+        return { success: true, revision: 7 }
+      }
+      throw new Error(`unexpected channel ${channel}`)
+    })
+    const result = await proposeChapterBlueprintTool.execute({ chapter_number: 2, markdown: proposedMarkdown }, createAgentExecutionContext())
+    expect(result).toMatchObject({ success: true })
+    expect(invoke.mock.calls.map(([, channel]) => channel)).toEqual([
+      'db:blueprint-get', 'db:blueprint-v2-get', 'db:blueprint-v2-save',
+    ])
+  })
+
+  it('rejects legacy AI writes against v2 detail and never changes finalized notes', async () => {
+    invoke.mockImplementation(async (_session, channel: string) => {
+      if (channel === 'db:blueprint-get') return blueprint
+      if (channel === 'db:blueprint-v2-get') return { ...parseChapterBlueprintMarkdown('# 第2章\n## 【写作禁忌与防坑自检】\n- **禁写**：不要泄露。\n').content, revision: 1, contentHash: 'd'.repeat(64) }
+      throw new Error(`unexpected channel ${channel}`)
+    })
+    await expect(proposeChapterBlueprintTool.execute({
+      chapter_number: 2,
+      changes: { purpose: '覆盖细纲', notes: '不允许' },
+    }, createAgentExecutionContext())).resolves.toMatchObject({ success: false })
+    expect(invoke.mock.calls).toEqual([])
+    expect(invoke.mock.calls.some(([, channel]) => channel === 'db:blueprint-upsert' || channel === 'db:blueprint-v2-save')).toBe(false)
   })
 
   it.each(['作者微操指导', '用户指引'])(
@@ -271,6 +348,7 @@ describe('explicit Agent domain proposals', () => {
 
       invoke
         .mockResolvedValueOnce(blueprint)
+        .mockResolvedValueOnce(null)
         .mockResolvedValueOnce({ success: true })
       const result = await proposeChapterBlueprintTool.execute({
         chapter_number: 2,
@@ -279,7 +357,7 @@ describe('explicit Agent domain proposals', () => {
 
       expect(proposeChapterBlueprintTool.requiresConfirmation).toBe(true)
       expect(result).toMatchObject({ success: true })
-      expect(invoke).toHaveBeenNthCalledWith(2,
+      expect(invoke).toHaveBeenNthCalledWith(3,
         expect.objectContaining({ projectId: 'project-A', leaseId: 'lease-A' }),
         'db:blueprint-upsert',
         { ...blueprint, userGuidance: guidance },

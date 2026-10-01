@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { BlueprintData } from '../../../../electron/repositories/blueprint-repository'
 import type { DraftMeta } from '../../../../electron/repositories/draft-repository'
 import type { NarrativeThreadView } from '../../../shared/narrative-thread'
+import type { ChapterBlueprintV2Summary } from '../../../shared/blueprint-v2'
 import { sameProjectSessionContext, projectSessionContextFromProject } from '../../../shared/project-session-context'
 import type {
   ConfigImpactBlueprintProposal,
@@ -52,6 +53,7 @@ export type ConfigImpactPreviewState =
       kind: 'valid'
       changedFields: string[]
       unwrittenBlueprints: ImpactBlueprint[]
+      v2OutlineChapters: ImpactBlueprint[]
       activeThreads: NarrativeThreadView[]
       finalizedChapters: FinalizedChapter[]
       blueprintProposals: SelectableBlueprintProposal[]
@@ -103,6 +105,7 @@ export function buildConfigImpactPreview(
   blueprints: BlueprintData[],
   drafts: DraftMeta[],
   threads: NarrativeThreadView[],
+  v2Summaries: readonly ChapterBlueprintV2Summary[] = [],
 ): Extract<ConfigImpactPreviewState, { kind: 'valid' }> {
   const finalizedByChapter = new Map<number, FinalizedChapter>()
   const writtenChapters = new Set<number>()
@@ -117,6 +120,8 @@ export function buildConfigImpactPreview(
   const unwritten = blueprints
     .filter(blueprint => !writtenChapters.has(blueprint.chapterNumber))
     .sort((left, right) => left.chapterNumber - right.chapterNumber)
+  const v2ChapterNumbers = new Set(v2Summaries.map(summary => summary.chapterNumber))
+  const v2OutlineChapters = unwritten.filter(blueprint => v2ChapterNumbers.has(blueprint.chapterNumber))
   return {
     kind: 'valid',
     changedFields,
@@ -124,9 +129,18 @@ export function buildConfigImpactPreview(
       chapterNumber: blueprint.chapterNumber,
       title: blueprint.title,
     })),
+    v2OutlineChapters: v2OutlineChapters.map(blueprint => ({
+      chapterNumber: blueprint.chapterNumber,
+      title: blueprint.title,
+    })),
     activeThreads: threads.filter(thread => thread.status !== 'resolved' && thread.status !== 'abandoned'),
     finalizedChapters: [...finalizedByChapter.values()].sort((left, right) => left.chapterNumber - right.chapterNumber),
-    blueprintProposals: buildSelectableProposals(args, unwritten),
+    // `blueprint_changes` is a v1 field proposal format. V2 details need a
+    // complete Markdown proposal and must never be reduced to this whitelist.
+    blueprintProposals: buildSelectableProposals(
+      args,
+      unwritten.filter(blueprint => !v2ChapterNumbers.has(blueprint.chapterNumber)),
+    ),
   }
 }
 
@@ -163,7 +177,8 @@ export function useConfigImpactPreview(
       ipc.invokeWithProjectSession(toolCall.projectSession, 'db:blueprint-get-all', currentProject.path),
       ipc.invokeWithProjectSession(toolCall.projectSession, 'db:draft-list-all', currentProject.path),
       ipc.invokeWithProjectSession(toolCall.projectSession, 'db:narrative-thread-list', currentProject.path),
-    ]).then(([blueprints, drafts, threads]) => {
+      ipc.invokeWithProjectSession(toolCall.projectSession, 'db:blueprint-v2-summary-list', currentProject.path),
+    ]).then(([blueprints, drafts, threads, v2Summaries]) => {
       if (disposed) return
       const now = useProjectStore.getState().currentProject
       if (!sameProjectSessionContext(toolCall.projectSession, projectSessionContextFromProject(now))) {
@@ -172,7 +187,7 @@ export function useConfigImpactPreview(
       }
       setLoaded({
         key: requestKey,
-        preview: buildConfigImpactPreview(toolCall.arguments, changedFields, blueprints, drafts, threads),
+        preview: buildConfigImpactPreview(toolCall.arguments, changedFields, blueprints, drafts, threads, v2Summaries),
       })
     }).catch(() => {
       if (!disposed) setLoaded({
@@ -229,6 +244,22 @@ export default function ConfigImpactPreview({ preview, selectedKeys, onSelection
           reason: text('可能需要与更新后的故事事实重新对齐', 'May need alignment with the updated story facts'),
         }))}
       />
+      {preview.v2OutlineChapters.length > 0 && (
+        <div className="rounded border border-[var(--color-border)] p-2 text-[0.68rem]">
+          <div className="font-medium">{text('已有完整细纲', 'Complete outlines already exist')}</div>
+          <p className="mt-1 opacity-75">
+            {text(
+              '这些章节不会套用旧版字段提案。需要调整时，请通过章节蓝图提交完整 Markdown 提案。',
+              'Legacy field proposals are not applied to these chapters. Submit a complete Markdown proposal from the chapter blueprint when changes are needed.',
+            )}
+          </p>
+          <ul className="mt-1 list-disc pl-4">
+            {preview.v2OutlineChapters.map(item => (
+              <li key={item.chapterNumber}>{text(`第 ${item.chapterNumber} 章 · ${item.title}`, `Chapter ${item.chapterNumber} · ${item.title}`)}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       <ImpactList
         title={text('活跃叙事线索', 'Active narrative threads')}
         empty={text('没有活跃线索', 'No active narrative threads')}

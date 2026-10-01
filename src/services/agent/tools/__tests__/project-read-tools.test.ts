@@ -6,6 +6,8 @@ import { readArchitectureTool } from '../read-architecture.tool'
 import { readFileTool } from '../read-file.tool'
 import { searchKnowledgeTool } from '../search-knowledge.tool'
 import { listChaptersTool } from '../list-chapters.tool'
+import { readBlueprintTool } from '../read-blueprint.tool'
+import { parseChapterBlueprintMarkdown } from '../../../../shared/blueprint-v2-markdown'
 import { createAgentExecutionContext } from '../project-context'
 import { builtinTools } from '..'
 
@@ -37,6 +39,54 @@ afterEach(() => {
 })
 
 describe('agent project read tools', () => {
+  it('returns a single v2 outline as complete loss-checked Markdown and excludes finalized notes', async () => {
+    const markdown = '# 第1章｜接错的人\n## 【逐场分镜拆解】\n##### 场景一：开场\n对话与细节。\n## 【未知补充】\n完整保留这段。\n'
+    const detail = { ...parseChapterBlueprintMarkdown(markdown).content, revision: 1, contentHash: 'a'.repeat(64) }
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'db:blueprint-get') return {
+        chapterNumber: 1, title: '接错的人', role: '开篇', purpose: '', keyEvents: '', characters: [],
+        suspenseHook: '', notes: '定稿记录不能当蓝图导出', userGuidance: '保留的独立作者指导',
+      }
+      if (channel === 'db:blueprint-v2-get') return detail
+      throw new Error(`Unexpected IPC channel: ${channel}`)
+    })
+    vi.stubGlobal('window', { velaAPI: { invoke } })
+
+    const result = await readBlueprintTool.execute({ chapter_number: 1 }, createAgentExecutionContext())
+
+    expect(result.success).toBe(true)
+    expect(result.content).toContain('##### 场景一：开场')
+    expect(result.content).toContain('## 【未知补充】')
+    expect(result.content).toContain('独立作者指导')
+    expect(result.content).not.toContain('定稿记录不能当蓝图导出')
+    expect(invoke.mock.calls.map(([channel]) => channel)).toEqual(['db:blueprint-get', 'db:blueprint-v2-get'])
+  })
+
+  it('keeps list output bounded and adds only v2 scene-title summaries', async () => {
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'db:blueprint-get-all') return [{
+        chapterNumber: 1, title: '接错的人', purpose: 'P'.repeat(4000), keyEvents: 'K'.repeat(5000),
+        characters: [], suspenseHook: '', role: '', notes: 'must not leak', userGuidance: '', notesUpdatedAt: '',
+      }]
+      if (channel === 'db:blueprint-v2-summary-list') return [{
+        chapterNumber: 1, revision: 2, contentHash: 'b'.repeat(64), origin: 'import', updatedAt: '',
+        sceneCount: 6, sceneTitles: ['场景一', '场景二', '场景三', '场景四', '不可展示的第五场'], wordBudget: 4200,
+      }]
+      throw new Error(`Unexpected IPC channel: ${channel}`)
+    })
+    vi.stubGlobal('window', { velaAPI: { invoke } })
+
+    const result = await readBlueprintTool.execute({}, createAgentExecutionContext())
+
+    expect(result.success).toBe(true)
+    expect(result.content).toContain('正式分镜 6 场')
+    expect(result.content).toContain('场景四')
+    expect(result.content).not.toContain('不可展示的第五场')
+    expect(result.content).not.toContain('must not leak')
+    expect(result.content).not.toContain('K'.repeat(100))
+    expect(result.content.length).toBeLessThan(2_000)
+  })
+
   it('keeps app-generated English results free of Chinese across every built-in tool', async () => {
     useProjectStore.setState({
       currentProject: {

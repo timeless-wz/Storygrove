@@ -12,11 +12,12 @@
  */
 
 import { useEffect, useRef, type ReactNode } from 'react'
-import { Anchor, BookOpen, Compass, Layers, Link2, ListOrdered, Target, Unlink, X } from 'lucide-react'
+import { Anchor, BookOpen, Clipboard, Compass, Download, Layers, Link2, ListOrdered, Target, Unlink, X } from 'lucide-react'
 
 import type { ChapterContextState } from '../../services/chapter-context'
 import { useLocaleStore } from '../../stores/locale-store'
 import { Button } from '../ui/Button'
+import { toast } from '../ui/Toast'
 
 export interface ChapterContextSidebarProps {
   /** 侧栏是否展开。收起时调用方不渲染本组件。 */
@@ -136,7 +137,7 @@ function ChapterContextBody({
     )
   }
 
-  const { blueprint, scenes, scenesLoadFailed } = state
+  const { blueprint, scenes, detailMarkdown, detailReadStatus } = state
   return (
     <>
       <div className="chapter-context-blueprint-head" data-testid="chapter-context-blueprint-head">
@@ -161,26 +162,34 @@ function ChapterContextBody({
           : <EmptyHint>{text('蓝图未填写本章目标。', 'This blueprint has no chapter goal.')}</EmptyHint>}
       </section>
 
-      <section className="chapter-context-section">
-        <SectionHeading icon={<ListOrdered size={12} />} label={text('关键事件 / 节拍', 'Key events / beats')} />
-        {blueprint.beats.length > 0 ? (
-          <ol className="chapter-context-beats" data-testid="chapter-context-beats">
-            {blueprint.beats.map((beat, index) => (
-              <li key={`${index}-${beat}`} className="chapter-context-beat">{beat}</li>
-            ))}
-          </ol>
-        ) : (
-          <EmptyHint>{text('蓝图未填写关键事件。', 'This blueprint has no key events.')}</EmptyHint>
-        )}
-      </section>
+      {detailReadStatus && (
+        <p className="chapter-context-notice" role="status" data-testid="chapter-context-detail-warning">
+          {detailReadStatus === 'needs-newer-app'
+            ? text('这份细纲由较新版本保存；当前版本仅展示可读的原始 Markdown。', 'This outline was saved by a newer app version. This version can only show its stored Markdown.')
+            : detailReadStatus === 'corrupt'
+              ? text('细纲结构读取异常；保留展示存储的原始 Markdown，请勿用旧版内容覆盖。', 'The outline structure could not be read. Its stored Markdown is shown; do not overwrite it with an older projection.')
+              : text('完整细纲读取失败；下方仅显示旧版简纲投影。', 'Could not read the full outline. Only the legacy outline projection is shown below.')}
+        </p>
+      )}
+
+      {!detailMarkdown && (
+        <section className="chapter-context-section">
+          <SectionHeading icon={<ListOrdered size={12} />} label={text('关键事件 / 节拍', 'Key events / beats')} />
+          {blueprint.beats.length > 0 ? (
+            <ol className="chapter-context-beats" data-testid="chapter-context-beats">
+              {blueprint.beats.map((beat, index) => (
+                <li key={`${index}-${beat}`} className="chapter-context-beat">{beat}</li>
+              ))}
+            </ol>
+          ) : (
+            <EmptyHint>{text('蓝图未填写关键事件。', 'This blueprint has no key events.')}</EmptyHint>
+          )}
+        </section>
+      )}
 
       <section className="chapter-context-section">
         <SectionHeading icon={<Compass size={12} />} label={text('场景顺序', 'Scene order')} />
-        {scenesLoadFailed ? (
-          <EmptyHint>
-            {text('场景画布读取失败，请打开场景画布确认。', 'Could not read the scene canvas. Open it to check.')}
-          </EmptyHint>
-        ) : scenes.length > 0 ? (
+        {scenes.length > 0 ? (
           <ol className="chapter-context-scenes" data-testid="chapter-context-scenes">
             {scenes.map((scene, index) => (
               <li key={scene.id} className="chapter-context-scene">
@@ -188,10 +197,12 @@ function ChapterContextBody({
                 <span className="chapter-context-scene-main">
                   <span className="chapter-context-scene-title">
                     {scene.title || text('未命名场景', 'Untitled scene')}
-                    {scene.role && <span className="chapter-context-scene-role">{scene.role}</span>}
+                    {scene.presence === 'off-canvas' && (
+                      <span className="chapter-context-scene-role">{text('未编排到画布', 'Off canvas')}</span>
+                    )}
                   </span>
-                  {scene.summary && (
-                    <span className="chapter-context-scene-summary">{scene.summary}</span>
+                  {scene.markdown && (
+                    <span className="chapter-context-scene-summary whitespace-pre-wrap">{scene.markdown}</span>
                   )}
                 </span>
               </li>
@@ -199,10 +210,23 @@ function ChapterContextBody({
           </ol>
         ) : (
           <EmptyHint>
-            {text('本章还没有场景卡。', 'No scene cards for this chapter yet.')}
+            {detailMarkdown
+              ? text('这份细纲尚未建立正式分镜。', 'This outline has no formal storyboard scenes yet.')
+              : text('旧版简纲没有正式分镜数据。', 'Legacy outline data has no formal storyboard scenes.')}
           </EmptyHint>
         )}
       </section>
+
+      {detailMarkdown && (
+        <details className="chapter-context-section" data-testid="chapter-context-full-markdown">
+          <summary className="cursor-pointer text-xs font-semibold">
+            {text('查看完整细纲 Markdown（含全部分区）', 'View complete outline Markdown (all sections)')}
+          </summary>
+          <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words text-xs" data-testid="chapter-context-full-markdown-text">
+            {detailMarkdown}
+          </pre>
+        </details>
+      )}
 
       <section className="chapter-context-section">
         <SectionHeading icon={<Anchor size={12} />} label={text('章尾悬念', 'Ending hook')} />
@@ -303,6 +327,43 @@ export function ChapterContextSidebar({
             <BookOpen size={11} aria-hidden="true" />
             {text('打开蓝图', 'Open blueprint')}
           </Button>
+          {state.detailMarkdown && (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="chapter-context-jump"
+                data-testid="chapter-context-copy-markdown"
+                onClick={() => {
+                  void navigator.clipboard.writeText(state.detailMarkdown!).then(
+                    () => toast.success(text('完整细纲 Markdown 已复制', 'Complete outline Markdown copied')),
+                    () => toast.error(text('复制细纲失败', 'Could not copy the outline')),
+                  )
+                }}
+              >
+                <Clipboard size={11} aria-hidden="true" />
+                {text('复制完整 Markdown', 'Copy full Markdown')}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="chapter-context-jump"
+                data-testid="chapter-context-download-markdown"
+                onClick={() => {
+                  const blob = new Blob([state.detailMarkdown!], { type: 'text/markdown;charset=utf-8' })
+                  const url = URL.createObjectURL(blob)
+                  const anchor = document.createElement('a')
+                  anchor.href = url
+                  anchor.download = `第${state.blueprintChapterNumber}章-章节蓝图.md`
+                  anchor.click()
+                  URL.revokeObjectURL(url)
+                }}
+              >
+                <Download size={11} aria-hidden="true" />
+                {text('导出 Markdown', 'Export Markdown')}
+              </Button>
+            </>
+          )}
           <Button
             variant="ghost"
             size="sm"

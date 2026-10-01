@@ -172,6 +172,8 @@ function installIpc() {
           chapterNumber: 2, title: '刻痕之谜', role: '发展', purpose: '', keyEvents: '',
           characters: [], suspenseHook: '', userGuidance: '', notes: '', notesUpdatedAt: '',
         }]
+      case 'db:blueprint-v2-summary-list':
+        return []
       case 'db:draft-list-all':
         return [{ id: 7, chapterNumber: 2, version: 1, status: 'finalized', source: 'write', contentId: 1, wordCount: 8, createdAt: '', updatedAt: '' }]
       case 'db:narrative-thread-list':

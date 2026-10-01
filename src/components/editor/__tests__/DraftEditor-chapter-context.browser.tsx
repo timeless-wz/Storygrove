@@ -9,6 +9,7 @@ import { useLayoutStore } from '../../../stores/layout-store'
 import { useProjectStore } from '../../../stores/project-store'
 import { useWorkflowStore } from '../../../stores/workflow-store'
 import { useLocaleStore } from '../../../stores/locale-store'
+import { parseChapterBlueprintMarkdown } from '../../../shared/blueprint-v2-markdown'
 import {
   draftEditorPositionKey,
   readDraftEditorPosition,
@@ -38,6 +39,17 @@ const OTHER_FILE_PATH = `vela://draft/${OTHER_DRAFT_ID}`
 const INITIAL_CONTENT = '# 第四章 风暴降临\n\n海风呼啸着卷过港口。'
 const READY_TIMEOUT = 20000
 const CHAPTER_CARD_TAB_ID = `chapter-card-editor:${encodeURIComponent(PROJECT_PATH)}`
+const V2_MARKDOWN = `# 第4章｜风暴降临
+## 【本章定位与四维指标】
+- **核心使命**：让主角找到账本。
+## 【逐场分镜拆解】
+##### 场景一：正式分镜标题
+###### 声学捕捉
+周晓：这里有人。
+## 【自定义补充】
+这段未知分区也必须完整保留。
+`
+const V2_DETAIL = { ...parseChapterBlueprintMarkdown(V2_MARKDOWN).content, revision: 2, contentHash: 'a'.repeat(64) }
 
 let root: Root
 let container: HTMLDivElement
@@ -119,6 +131,7 @@ function installIpc(options: {
   chapterNumber?: number
   blueprintValue?: Record<string, unknown> | null
   scenes?: unknown[]
+  v2Detail?: unknown | null
   delayBlueprintGet?: boolean
 } = {}) {
   const {
@@ -127,6 +140,7 @@ function installIpc(options: {
     chapterNumber = 4,
     blueprintValue,
     scenes = SCENE_NODES,
+    v2Detail,
     delayBlueprintGet = false,
   } = options
 
@@ -137,11 +151,13 @@ function installIpc(options: {
     if (channel === 'db:blueprint-get-all') {
       return boundBlueprintChapter === undefined ? [] : [{ chapterNumber: boundBlueprintChapter, title: '风暴降临' }]
     }
+    if (channel === 'db:blueprint-v2-summary-list') return []
     if (channel === 'db:blueprint-get') {
       if (blueprintValue === null) return null
       if (blueprintValue !== undefined) return blueprintValue
       return delayBlueprintGet ? new Promise(() => {}) : blueprintRow()
     }
+    if (channel === 'db:blueprint-v2-get') return v2Detail === undefined ? V2_DETAIL : v2Detail
     if (channel === 'db:chapter-canvas-get') return { canvas: null, nodes: scenes, edges: [] }
     if (channel === 'db:draft-list') return [{ id: draftId, version: 1 }]
     if (channel === 'db:review-list') return []
@@ -289,7 +305,7 @@ afterEach(async () => {
 })
 
 describe('DraftEditor 本章创作上下文', () => {
-  it('已绑定：展示真实的目标、节拍、场景顺序与章尾悬念，且全程只读', async () => {
+  it('已绑定：展示正式分镜和完整 Markdown，不把独立画布卡片当作第二套场景', async () => {
     await renderEditor()
     await waitForVditorReady()
     await waitForSidebar('chapter-context-purpose')
@@ -297,21 +313,20 @@ describe('DraftEditor 本章创作上下文', () => {
     expect(sidebarRoot()?.textContent).toContain('让主角在码头拿到账本')
     expect(sidebarRoot()?.textContent).toContain('账本缺了最后一页')
 
-    // 节拍按换行与分号拆开，不做改写。
-    const beats = container.querySelectorAll('[data-testid="chapter-context-beats"] li')
-    expect(Array.from(beats).map(beat => beat.textContent)).toEqual([
-      '夜探码头', '拿到账本', '被巡查撞见',
-    ])
-
-    // 场景顺序按 order 升序，而不是按画布返回顺序。
     const scenes = container.querySelectorAll('[data-testid="chapter-context-scenes"] li')
-    expect(scenes.length).toBe(2)
-    expect(scenes[0].textContent).toContain('夜探码头')
-    expect(scenes[1].textContent).toContain('被巡查撞见')
+    expect(scenes.length).toBe(1)
+    expect(scenes[0].textContent).toContain('场景一：正式分镜标题')
+    expect(scenes[0].textContent).toContain('周晓：这里有人。')
+    expect(sidebarRoot()?.textContent).not.toContain('被巡查撞见')
+    expect(container.querySelector('[data-testid="chapter-context-beats"]')).toBeNull()
+    expect(container.querySelector('[data-testid="chapter-context-full-markdown-text"]')?.textContent).toContain('这段未知分区也必须完整保留。')
+    expect(container.querySelector('[data-testid="chapter-context-copy-markdown"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="chapter-context-download-markdown"]')).not.toBeNull()
 
     // 读取用的是草稿绑定的章号。
     expect(invoke.mock.calls).toContainEqual(['db:blueprint-get', 4, PROJECT_PATH, PROJECT_SESSION])
-    expect(invoke.mock.calls).toContainEqual(['db:chapter-canvas-get', 4, PROJECT_PATH, PROJECT_SESSION])
+    expect(invoke.mock.calls).toContainEqual(['db:blueprint-v2-get', 4, PROJECT_PATH, PROJECT_SESSION])
+    expect(invoke.mock.calls.some(([channel]) => channel === 'db:chapter-canvas-get')).toBe(false)
 
     // 侧栏是只读的：期间没有写入草稿、蓝图或画布。
     const writeChannels = invoke.mock.calls
@@ -325,6 +340,7 @@ describe('DraftEditor 本章创作上下文', () => {
       boundBlueprintChapter: 4,
       blueprintValue: blueprintRow({ purpose: '', keyEvents: '', suspenseHook: '', role: '', characters: [] }),
       scenes: [],
+      v2Detail: null,
     })
 
     await renderEditor()
@@ -334,7 +350,7 @@ describe('DraftEditor 本章创作上下文', () => {
     const body = sidebarRoot()?.textContent ?? ''
     expect(body).toContain('蓝图未填写本章目标')
     expect(body).toContain('蓝图未填写关键事件')
-    expect(body).toContain('本章还没有场景卡')
+    expect(body).toContain('旧版简纲没有正式分镜数据')
     expect(body).toContain('蓝图未填写章尾悬念')
   })
 

@@ -3,7 +3,10 @@ import { useEffect, useMemo, useState } from 'react'
 
 import type { ToolCallInfo } from '../../../services/agent/agent-engine'
 import { ipc } from '../../../services/ipc-client'
-import { buildChapterBlueprintProposal } from '../../../services/agent/tools/propose-chapter-blueprint.tool'
+import {
+  buildChapterBlueprintProposal,
+  buildChapterBlueprintV2Proposal,
+} from '../../../services/agent/tools/propose-chapter-blueprint.tool'
 import { buildNovelConfigProposal, type ProposalFieldDiff } from '../../../services/agent/tools/propose-novel-config.tool'
 import { useLocaleStore } from '../../../stores/locale-store'
 import { useProjectStore } from '../../../stores/project-store'
@@ -28,6 +31,7 @@ export interface DomainProposalPreview {
   kind: 'none' | 'loading' | 'valid' | 'invalid' | 'stale'
   diffs: ProposalFieldDiff[]
   error?: string
+  warnings?: string[]
 }
 
 function displayValue(value: unknown, locale: string): string {
@@ -69,9 +73,10 @@ export function useDomainProposalPreview(toolCall: ToolCallInfo): DomainProposal
     if (blueprintImmediate || !currentProject || !toolCall.projectSession) return
     const chapterNumber = toolCall.arguments.chapter_number
     let disposed = false
-    void ipc.invokeWithProjectSession(
-      toolCall.projectSession, 'db:blueprint-get', chapterNumber as number, currentProject.path,
-    ).then((blueprint) => {
+    void Promise.all([
+      ipc.invokeWithProjectSession(toolCall.projectSession, 'db:blueprint-get', chapterNumber as number, currentProject.path),
+      ipc.invokeWithProjectSession(toolCall.projectSession, 'db:blueprint-v2-get', chapterNumber as number, currentProject.path),
+    ]).then(([blueprint, detail]) => {
       if (disposed) return
       const now = useProjectStore.getState().currentProject
       if (!sameProjectSessionContext(toolCall.projectSession, projectSessionContextFromProject(now))) {
@@ -82,9 +87,13 @@ export function useDomainProposalPreview(toolCall: ToolCallInfo): DomainProposal
         setBlueprintPreview({ kind: 'invalid', diffs: [], error: `第 ${chapterNumber} 章蓝图不存在` })
         return
       }
-      const proposal = buildChapterBlueprintProposal(toolCall.arguments, blueprint)
+      const proposal = typeof toolCall.arguments.markdown === 'string'
+        ? buildChapterBlueprintV2Proposal(toolCall.arguments, chapterNumber as number, detail)
+        : detail
+          ? { valid: false as const, error: '该章已有 v2 细纲；请基于当前完整 Markdown 提交细纲提案。' }
+          : buildChapterBlueprintProposal(toolCall.arguments, blueprint)
       setBlueprintPreview(proposal.valid
-        ? { kind: 'valid', diffs: proposal.diffs }
+        ? { kind: 'valid', diffs: proposal.diffs, warnings: proposal.kind === 'v2' ? proposal.warnings : [] }
         : { kind: 'invalid', diffs: [], error: proposal.error })
     }).catch(() => {
       if (!disposed) setBlueprintPreview({ kind: 'invalid', diffs: [], error: '无法读取章节蓝图' })
@@ -105,12 +114,31 @@ export default function DomainProposalDiff({ toolCall, preview }: { toolCall: To
   const labels = toolCall.toolName === 'propose_novel_config' ? CONFIG_LABELS : BLUEPRINT_LABELS
   return (
     <div className="space-y-2" aria-label={text('字段变更', 'Field changes')}>
+      {preview.warnings?.map(warning => (
+        <p key={warning} role="status" className="rounded border border-[var(--color-warning-border,var(--color-border))] p-2 text-xs text-[var(--color-warning-text)]">{warning}</p>
+      ))}
       {preview.diffs.map(diff => (
         <div key={diff.field} className="rounded border border-[var(--color-border)] p-2">
           <div className="mb-1 text-xs font-medium">{text(labels[diff.field]?.[0] ?? diff.field, labels[diff.field]?.[1] ?? diff.field)}</div>
           <div className="grid grid-cols-2 items-start gap-2 text-[0.7rem]">
-            <div><span className="opacity-60">{text('当前', 'Current')}</span><div className="whitespace-pre-wrap break-words">{displayValue(diff.current, locale)}</div></div>
-            <div><span className="opacity-60">{text('建议', 'Proposed')}</span><div className="whitespace-pre-wrap break-words">{displayValue(diff.proposed, locale)}</div></div>
+            {([
+              { side: 'current', value: diff.current },
+              { side: 'proposed', value: diff.proposed },
+            ] as const).map(({ side, value }) => {
+              const label = side === 'current' ? text('当前', 'Current') : text('建议', 'Proposed')
+              const rendered = displayValue(value, locale)
+              return (
+                <div key={side}>
+                  <span className="opacity-60">{label}</span>
+                  {rendered.length > 1200 ? (
+                    <details className="mt-1">
+                      <summary className="cursor-pointer">{text(`查看完整内容（${rendered.length} 字符）`, `View full content (${rendered.length} characters)`)}</summary>
+                      <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-words">{rendered}</pre>
+                    </details>
+                  ) : <div className="whitespace-pre-wrap break-words">{rendered}</div>}
+                </div>
+              )
+            })}
           </div>
         </div>
       ))}

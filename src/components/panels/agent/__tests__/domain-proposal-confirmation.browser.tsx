@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { useLocaleStore } from '../../../../stores/locale-store'
 import { useProjectStore } from '../../../../stores/project-store'
 import { useAgentStore } from '../../../../stores/agent-store'
+import { parseChapterBlueprintMarkdown } from '../../../../shared/blueprint-v2-markdown'
 import ConfirmCard from '../ConfirmCard'
 import ArtifactCard from '../ArtifactCard'
 
@@ -41,6 +42,7 @@ beforeEach(() => {
   invoke.mockReset()
   invoke.mockImplementation(async (channel: string) => {
     if (channel === 'db:blueprint-get-all' || channel === 'db:draft-list-all' || channel === 'db:narrative-thread-list') return []
+    if (channel === 'db:blueprint-v2-summary-list') return []
     return undefined
   })
   useAgentStore.setState({ resolveToolConfirmation, cancelGeneration })
@@ -100,25 +102,51 @@ describe('Agent domain proposal confirmation', () => {
     expect(resolveToolConfirmation).toHaveBeenCalledWith('config-1', true)
   })
 
-  it('loads a Chinese blueprint diff and rejects without invoking a write', async () => {
+  it('loads a complete v2 scene diff and rejects without invoking a write', async () => {
     useLocaleStore.setState({ locale: 'zh-CN', initialized: true })
-    invoke.mockResolvedValue({
-      chapterNumber: 2, title: '旧标题', role: '发展', purpose: '推进调查', keyEvents: '找到线索',
-      characters: ['林舟'], suspenseHook: '谁在说谎', userGuidance: '', notes: '', notesUpdatedAt: '',
+    const currentDetail = {
+      ...parseChapterBlueprintMarkdown(`# 第2章｜旧标题
+## 【逐场分镜拆解】
+##### 场景一：蓝色门
+- **线索**：旧版本线索。
+## 【超凡物理与规则交互细节】
+- **规则**：保留既有规则。
+## 【写作禁忌与防坑自检】
+- **禁写**：不可解释蓝色门来源。
+`).content,
+      revision: 4,
+      contentHash: 'f'.repeat(64),
+    }
+    const proposedMarkdown = `# 第2章｜新标题
+## 【逐场分镜拆解】
+##### 场景一：蓝色门
+- **线索**：新版本线索，完整内容应显示。
+## 【超凡物理与规则交互细节】
+- **规则**：保留既有规则。
+## 【写作禁忌与防坑自检】
+- **禁写**：不可解释蓝色门来源。
+`
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'db:blueprint-get') return blueprint
+      if (channel === 'db:blueprint-v2-get') return currentDetail
+      throw new Error(`unexpected channel ${channel}`)
     })
     await act(async () => root.render(<ConfirmCard toolCall={{
       id: 'blueprint-1', toolName: 'propose_chapter_blueprint',
-      arguments: { chapter_number: 2, changes: { title: '新标题' } },
+      arguments: { chapter_number: 2, markdown: proposedMarkdown },
       status: 'waiting_confirm', source: 'builtin', projectSession: session,
     }} />))
     await flushImpactReads()
 
-    await expect.element(page.getByText('章节标题')).toBeVisible()
-    await expect.element(page.getByText('旧标题')).toBeVisible()
-    await expect.element(page.getByText('新标题')).toBeVisible()
+    await expect.element(page.getByText('章题')).toBeVisible()
+    await expect.element(page.getByText('第2章｜旧标题')).toBeVisible()
+    await expect.element(page.getByText('第2章｜新标题')).toBeVisible()
+    await expect.element(page.getByText('【逐场分镜拆解】 / 场景一：蓝色门')).toBeVisible()
+    await expect.element(page.getByText('旧版本线索。')).toBeVisible()
+    await expect.element(page.getByText('新版本线索，完整内容应显示。')).toBeVisible()
     await page.getByRole('button', { name: '拒绝' }).click()
     expect(resolveToolConfirmation).toHaveBeenCalledWith('blueprint-1', false)
-    expect(invoke).toHaveBeenCalledTimes(1)
+    expect(invoke.mock.calls.map(([channel]) => channel)).toEqual(['db:blueprint-get', 'db:blueprint-v2-get'])
   })
 
   it('disables approval after a project switch', async () => {
@@ -171,6 +199,7 @@ describe('Agent domain proposal confirmation', () => {
           dormantChapters: 0, overdue: false, events: [], createdAt: '', updatedAt: '',
         },
       ]
+      if (channel === 'db:blueprint-v2-summary-list') return []
       throw new Error(`unexpected channel ${channel}`)
     })
 
@@ -211,12 +240,50 @@ describe('Agent domain proposal confirmation', () => {
     ]))
   })
 
+  it('does not reduce an existing v2 outline to optional v1 config-impact fields', async () => {
+    useLocaleStore.setState({ locale: 'en-US', initialized: true })
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'db:blueprint-get-all') return [{ ...blueprint, chapterNumber: 2, title: 'The complete outline' }]
+      if (channel === 'db:draft-list-all' || channel === 'db:narrative-thread-list') return []
+      if (channel === 'db:blueprint-v2-summary-list') return [{
+        chapterNumber: 2,
+        revision: 5,
+        contentHash: 'a'.repeat(64),
+        origin: 'import',
+        updatedAt: '2026-09-30T00:00:00.000Z',
+        sceneCount: 4,
+        sceneTitles: ['Scene One', 'Scene Two', 'Scene Three', 'Scene Four'],
+        wordBudget: 4200,
+      }]
+      throw new Error(`unexpected channel ${channel}`)
+    })
+
+    await act(async () => root.render(<ConfirmCard toolCall={{
+      id: 'impact-v2', toolName: 'propose_novel_config',
+      arguments: {
+        changes: { coreOutline: 'A new project fact.' },
+        blueprint_changes: [{ chapter_number: 2, changes: { purpose: 'Legacy field update' } }],
+      },
+      status: 'waiting_confirm', source: 'builtin', projectSession: session,
+    }} />))
+    await flushImpactReads()
+
+    await expect.element(page.getByText('Complete outlines already exist')).toBeVisible()
+    expect(container.textContent).toContain('Chapter 2 · The complete outline')
+    await expect.element(page.getByText('Legacy field update')).not.toBeInTheDocument()
+    expect(container.textContent).not.toContain('Legacy field update')
+
+    await page.getByRole('button', { name: 'Approve' }).click()
+    expect(resolveToolConfirmation).toHaveBeenCalledWith('impact-v2', true)
+  })
+
   it('shows the Chinese impact preview but cancels it without any domain write', async () => {
     useLocaleStore.setState({ locale: 'zh-CN', initialized: true })
     invoke.mockImplementation(async (channel: string) => {
       if (channel === 'db:blueprint-get-all') return [{ ...blueprint, chapterNumber: 2, title: '封闭的门' }]
       if (channel === 'db:draft-list-all') return []
       if (channel === 'db:narrative-thread-list') return []
+      if (channel === 'db:blueprint-v2-summary-list') return []
       throw new Error(`unexpected channel ${channel}`)
     })
 

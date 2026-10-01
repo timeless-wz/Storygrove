@@ -91,6 +91,8 @@ function seedIpc() {
           chapterNumber, title: `第${chapterNumber}章蓝图`, role: '发展', purpose: '', keyEvents: '',
           characters: [], suspenseHook: '', userGuidance: '', notes: '', notesUpdatedAt: '',
         }))
+      case 'db:blueprint-v2-summary-list':
+        return []
       case 'db:draft-list-all':
         return [{ id: 11, chapterNumber: 1, version: 1, status: 'finalized', source: 'write', contentId: 1, wordCount: 800, createdAt: '', updatedAt: '' }]
       case 'db:narrative-thread-list':

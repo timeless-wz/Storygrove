@@ -69,6 +69,7 @@ describe('VersionHistory locale', () => {
     })
     invoke.mockImplementation(async (channel: string, ...args: unknown[]) => {
       if (channel === 'db:blueprint-get-all') return blueprints
+      if (channel === 'db:blueprint-v2-summary-list') return []
       if (channel === 'db:draft-list') {
         return args[0] === 2
           ? [
@@ -114,6 +115,7 @@ describe('VersionHistory locale', () => {
   it('renders the chapter-list empty state in English', async () => {
     invoke.mockImplementation(async (channel: string) => {
       if (channel === 'db:blueprint-get-all') return []
+      if (channel === 'db:blueprint-v2-summary-list') return []
       throw new Error(`unexpected IPC: ${channel}`)
     })
 

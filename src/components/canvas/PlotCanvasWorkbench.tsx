@@ -76,6 +76,7 @@ import { toast } from '../ui/Toast'
 import { confirm } from '../ui/Confirm'
 import { useCanvasPersistence } from './canvas-persistence'
 import { PlotCanvasAIDialog } from './PlotCanvasAIDialog'
+import { projectPlotCanvasBlueprintSummaries, type PlotCanvasBlueprintSummary } from './plot-canvas-ai-prompt'
 import type { PlotCanvasAIMode } from './plot-canvas-ai-proposal'
 import {
   CanvasLabeledEdge,
@@ -108,7 +109,6 @@ import {
 } from './plot-graph'
 import './canvas-workbench.css'
 
-type BlueprintRow = DatabaseChannels['db:blueprint-get-all']['return'][number]
 type DraftRow = DatabaseChannels['db:draft-list-all']['return'][number]
 type ThreadRow = DatabaseChannels['db:narrative-thread-list']['return'][number]
 type ForeshadowingRow = DatabaseChannels['db:foreshadowing-list']['return'][number]
@@ -179,7 +179,8 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
   const [canvases, setCanvases] = useState<PlotCanvasSummary[]>([])
   const [activeCanvasId, setActiveCanvasId] = useState<string | null>(null)
   const [graph, setGraph] = useState<PlotCanvasGraph | null>(null)
-  const [blueprints, setBlueprints] = useState<BlueprintRow[]>([])
+  const [blueprintChapterNumbers, setBlueprintChapterNumbers] = useState<number[]>([])
+  const [blueprints, setBlueprints] = useState<PlotCanvasBlueprintSummary[]>([])
   const [drafts, setDrafts] = useState<DraftRow[]>([])
   const [threads, setThreads] = useState<ThreadRow[]>([])
   const [foreshadowings, setForeshadowings] = useState<ForeshadowingRow[]>([])
@@ -271,14 +272,20 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
   const loadReferences = useCallback(async () => {
     const session = captureProjectSession(useProjectStore.getState().currentProject)
     if (!session) return
-    const [nextBlueprints, nextDrafts, nextThreads, nextForeshadowings] = await Promise.all([
+    const [legacyBlueprints, v2Summaries, nextDrafts, nextThreads, nextForeshadowings] = await Promise.all([
       ipc.invokeWithProjectSession(session, 'db:blueprint-get-all', projectKey),
+      ipc.invokeWithProjectSession(session, 'db:blueprint-v2-summary-list', projectKey),
       ipc.invokeWithProjectSession(session, 'db:draft-list-all', projectKey),
       ipc.invokeWithProjectSession(session, 'db:narrative-thread-list', projectKey),
       ipc.invokeWithProjectSession(session, 'db:foreshadowing-list', 'all', projectKey),
     ])
     if (!isProjectSessionCurrent(session)) return
-    setBlueprints(nextBlueprints)
+    const chapterNumbers = new Set<number>([
+      ...legacyBlueprints.map(blueprint => blueprint.chapterNumber),
+      ...v2Summaries.map(summary => summary.chapterNumber),
+    ])
+    setBlueprintChapterNumbers([...chapterNumbers].sort((left, right) => left - right))
+    setBlueprints(projectPlotCanvasBlueprintSummaries(legacyBlueprints, v2Summaries))
     setDrafts(nextDrafts)
     setThreads(nextThreads)
     setForeshadowings(nextForeshadowings)
@@ -1155,13 +1162,13 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
       const chapterDrafts = drafts.filter(draft => draft.chapterNumber === chapter && draft.status !== 'archived')
       const best = chapterDrafts.find(draft => draft.status === 'finalized') ?? chapterDrafts[0]
       info.set(chapter, {
-        hasBlueprint: blueprints.some(bp => bp.chapterNumber === chapter),
+        hasBlueprint: blueprintChapterNumbers.includes(chapter),
         draftId: best?.id ?? null,
         finalized: best?.status === 'finalized',
       })
     }
     return info
-  }, [blueprints, drafts, detailNode])
+  }, [blueprintChapterNumbers, drafts, detailNode])
 
   if (loading) {
     return (
@@ -1300,7 +1307,7 @@ export default function PlotCanvasWorkbench({ projectKey, onOpenPlan }: PlotCanv
               <div className="flex flex-wrap gap-1.5">
                 {(() => {
                   const chapterNumbers = new Set<number>(detailNode.chapterRefs)
-                  for (const bp of blueprints) chapterNumbers.add(bp.chapterNumber)
+                  for (const chapterNumber of blueprintChapterNumbers) chapterNumbers.add(chapterNumber)
                   for (const draft of drafts) chapterNumbers.add(draft.chapterNumber)
                   return [...chapterNumbers].sort((a, b) => a - b).slice(0, 60).map(chapter => (
                     <button

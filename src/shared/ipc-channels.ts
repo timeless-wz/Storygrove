@@ -58,6 +58,11 @@ import type {
   ChapterCanvasNodeUpsertPayload,
   ChapterCanvasEdgeUpsertPayload,
 } from './chapter-canvas'
+import type {
+  ChapterBlueprintV2DetailRead,
+  ChapterBlueprintV2SaveInput,
+  ChapterBlueprintV2Summary,
+} from './blueprint-v2'
 import type { WorldMapNode, WorldMapEdge, WorldMapCandidate, WorldMapImage, WorldMap, WorldMapAtlas } from './world-map'
 import type {
   StoryTimelineBranch,
@@ -987,6 +992,11 @@ export interface DatabaseChannels {
   'db:blueprint-volume-list': { args: [expectedProjectPath: string]; return: BlueprintVolumeData[] }
   'db:blueprint-volume-upsert': { args: [volume: BlueprintVolumeData, expectedProjectPath: string]; return: { success: boolean; error?: string } }
   'db:blueprint-get': { args: [chapterNumber: number, expectedProjectPath: string]; return: BlueprintData | null }
+  'db:blueprint-v2-get': { args: [chapterNumber: number, expectedProjectPath: string]; return: ChapterBlueprintV2DetailRead | null }
+  'db:blueprint-v2-summary-list': { args: [expectedProjectPath: string]; return: ChapterBlueprintV2Summary[] }
+  'db:blueprint-v2-save': { args: [input: ChapterBlueprintV2SaveInput, expectedProjectPath: string]; return: { success: boolean; revision?: number; contentHash?: string; conflict?: boolean; currentRevision?: number; error?: string } }
+  'db:blueprint-v2-scene-order-save': { args: [input: { chapterNumber: number; baseRevision: number; orderedSceneIds: string[] }, expectedProjectPath: string]; return: { success: boolean; revision?: number; contentHash?: string; conflict?: boolean; currentRevision?: number; error?: string } }
+  'db:blueprint-v2-delete': { args: [chapterNumber: number, expectedProjectPath: string]; return: { success: boolean; error?: string } }
   'db:blueprint-upsert': { args: [data: BlueprintData, expectedProjectPath: string]; return: { success: boolean; error?: string } }
   'db:blueprint-upsert-many': { args: [items: BlueprintData[], expectedProjectPath: string]; return: { success: boolean; error?: string } }
   'db:blueprint-commit-range': {

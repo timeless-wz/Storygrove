@@ -11,6 +11,7 @@ import { toast } from '../ui/Toast'
 import { captureProjectSession, isProjectSessionCurrent, isProjectSessionPath } from '../project-session-gate'
 import { openBuiltinEditor, openChapterFile } from '../panels/sidebar/sidebar-file-openers'
 import { groupOutline, type OutlineData } from './chapter-outline-model'
+import { projectBlueprintList } from '../../shared/blueprint-list-projection'
 import './chapter-outline-sidebar.css'
 
 export default function ChapterOutlineSidebar({ tab }: { tab: EditorTab }) {
@@ -34,14 +35,15 @@ export default function ChapterOutlineSidebar({ tab }: { tab: EditorTab }) {
     const session = captureProjectSession(project)
     if (!session || !isProjectSessionPath(session, tab.projectKey)) return
     try {
-      const [volumes, blueprints, drafts] = await Promise.all([
+      const [volumes, legacyRows, drafts, v2Summaries] = await Promise.all([
         ipc.invokeWithProjectSession(session, 'db:blueprint-volume-list', session.projectPath),
         ipc.invokeWithProjectSession(session, 'db:blueprint-get-all', session.projectPath),
         ipc.invokeWithProjectSession(session, 'db:draft-list-all', session.projectPath),
+        ipc.invokeWithProjectSession(session, 'db:blueprint-v2-summary-list', session.projectPath),
       ])
       if (!isProjectSessionCurrent(session)) return
       const loadedIdentity = `${session.projectId}:${session.leaseId}`
-      setLoaded({ identity: loadedIdentity, data: { volumes, blueprints, drafts } })
+      setLoaded({ identity: loadedIdentity, data: { volumes, blueprints: projectBlueprintList(legacyRows, v2Summaries), drafts } })
       setFailure(null)
     } catch (cause) {
       if (isProjectSessionCurrent(session)) setFailure({ identity: `${session.projectId}:${session.leaseId}`, message: String(cause) })
@@ -144,13 +146,14 @@ export default function ChapterOutlineSidebar({ tab }: { tab: EditorTab }) {
                 <small>{group.chapters.length}</small>
               </button>
               {!closed && group.chapters.map(chapter => <div className="chapter-outline-chapter" key={chapter.number}>
-                <button type="button" className="chapter-outline-chapter-button" disabled={busy} onClick={() => void openTarget({
+                <button type="button" className="chapter-outline-chapter-button" disabled={busy} title={chapter.sceneCount > 0 ? chapter.sceneTitles.join('、') : undefined} onClick={() => void openTarget({
                   path: chapter.draft ? `vela://draft/${chapter.draft.id}` : chapter.manuscript ? `vela://manuscript/${chapter.manuscript.id}` : undefined,
                   name: `${text(`第 ${chapter.number} 章`, `Chapter ${chapter.number}`)} ${chapter.title}`,
                   chapterNumber: chapter.number,
                 })}>
                   <span>{text(`第 ${chapter.number} 章`, `Ch. ${chapter.number}`)}</span>
                   <span className="chapter-outline-chapter-title">{chapter.title || text('未命名', 'Untitled')}</span>
+                  {chapter.sceneCount > 0 && <small className="chapter-outline-scene-count">{text(`${chapter.sceneCount} 场`, `${chapter.sceneCount} scenes`)}</small>}
                 </button>
                 <div className="chapter-outline-targets">
                   {chapter.draft && renderTarget(chapter.draft, 'draft', chapter.number)}

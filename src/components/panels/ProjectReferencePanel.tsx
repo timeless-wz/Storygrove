@@ -4,6 +4,7 @@ import {
   BookOpen,
   BookMarked,
   Bookmark,
+  Clipboard,
   ChevronDown,
   ChevronRight,
   ClipboardCheck,
@@ -31,6 +32,8 @@ import { openBuiltinEditor } from './sidebar/sidebar-file-openers'
 import { IconTooltip } from '../ui/Tooltip'
 import { captureProjectSession } from '../project-session-gate'
 import { ipc } from '../../services/ipc-client'
+import { assertNoLossOnSerialize } from '../../shared/blueprint-v2-markdown'
+import { toast } from '../ui/Toast'
 import { getWorldMapName } from '../../shared/world-map'
 import type { ChapterBlueprint } from '../../services/workflows/directory-workflow'
 import type { ReviewFull } from '../../../electron/repositories/review-repository'
@@ -101,6 +104,7 @@ export default function ProjectReferencePanel() {
 
   // 正在写草稿时上下文感知的当前蓝图与审核状态
   const [currentBlueprint, setCurrentBlueprint] = useState<ChapterBlueprint | null>(null)
+  const [currentBlueprintMarkdown, setCurrentBlueprintMarkdown] = useState<string | null>(null)
   const [currentReview, setCurrentReview] = useState<ReviewFull | null>(null)
   const [chapterForeshadowings, setChapterForeshadowings] = useState<ForeshadowingRecord[]>([])
   const [blueprintLoading, setBlueprintLoading] = useState(false)
@@ -111,13 +115,16 @@ export default function ProjectReferencePanel() {
     void useCharacterStore.getState().load(projectPath)
   }, [currentProject?.path, dataProjectKey])
 
-  // 当处于草稿编辑 Tab 时，实时查询该章节的蓝图与审稿状态
+  // 草稿蓝图只按数据库中实际绑定的 blueprint_chapter_number 读取，绝不回退到正文显示章号。
   const chapterNumber = activeTab?.chapterNumber
   useEffect(() => {
-    if (activeTab?.type !== 'chapter' || !chapterNumber || !currentProject) {
+    const draftId = activeTab?.draftId
+    if (activeTab?.type !== 'chapter' || !draftId || !currentProject) {
       queueMicrotask(() => {
         setCurrentBlueprint(null)
+        setCurrentBlueprintMarkdown(null)
         setCurrentReview(null)
+        setBlueprintLoading(false)
       })
       return
     }
@@ -125,45 +132,45 @@ export default function ProjectReferencePanel() {
     if (!projectSession) return
 
     let cancelled = false
-    queueMicrotask(() => {
-      if (!cancelled) setBlueprintLoading(true)
-    })
-
-    // 1. 获取蓝图
-    ipc.invokeWithProjectSession(projectSession, 'db:blueprint-get', chapterNumber, projectSession.projectPath)
-      .then((bp: unknown) => {
-        if (!cancelled && bp) {
-          setCurrentBlueprint(bp as ChapterBlueprint)
-        } else if (!cancelled) {
+    setBlueprintLoading(true)
+    void (async () => {
+      try {
+        const [meta, review] = await Promise.all([
+          ipc.invokeWithProjectSession(projectSession, 'db:draft-get-meta', draftId, projectSession.projectPath),
+          ipc.invokeWithProjectSession(projectSession, 'db:review-get-latest', draftId, projectSession.projectPath),
+        ])
+        if (cancelled) return
+        setCurrentReview(review ? review as ReviewFull : null)
+        const boundChapter = meta?.blueprintChapterNumber
+        if (!Number.isSafeInteger(boundChapter) || (boundChapter as number) < 1) {
           setCurrentBlueprint(null)
+          setCurrentBlueprintMarkdown(null)
+          setBlueprintLoading(false)
+          return
         }
-      })
-      .catch(() => {
-        if (!cancelled) setCurrentBlueprint(null)
-      })
-      .finally(() => {
+        const [bp, detail] = await Promise.all([
+          ipc.invokeWithProjectSession(projectSession, 'db:blueprint-get', boundChapter as number, projectSession.projectPath),
+          ipc.invokeWithProjectSession(projectSession, 'db:blueprint-v2-get', boundChapter as number, projectSession.projectPath),
+        ])
+        if (cancelled) return
+        setCurrentBlueprint(bp ? bp as ChapterBlueprint : null)
+        let markdown: string | null = null
+        if (detail) {
+          markdown = detail.readStatus
+            ? detail.rawMarkdown ?? null
+            : assertNoLossOnSerialize(detail)
+        }
+        setCurrentBlueprintMarkdown(markdown)
+      } catch {
+        if (!cancelled) {
+          setCurrentBlueprint(null)
+          setCurrentBlueprintMarkdown(null)
+          setCurrentReview(null)
+        }
+      } finally {
         if (!cancelled) setBlueprintLoading(false)
-      })
-
-    // 2. 获取最近审稿
-    const draftId = activeTab.draftId
-    if (draftId) {
-      ipc.invokeWithProjectSession(projectSession, 'db:review-get-latest', draftId, projectSession.projectPath)
-        .then((rev: unknown) => {
-          if (!cancelled && rev) {
-            setCurrentReview(rev as ReviewFull)
-          } else if (!cancelled) {
-            setCurrentReview(null)
-          }
-        })
-        .catch(() => {
-          if (!cancelled) setCurrentReview(null)
-        })
-    } else {
-      queueMicrotask(() => {
-        if (!cancelled) setCurrentReview(null)
-      })
-    }
+      }
+    })()
 
     return () => {
       cancelled = true
@@ -214,6 +221,7 @@ export default function ProjectReferencePanel() {
       currentBlueprint?.purpose || '',
       currentBlueprint?.keyEvents || '',
       currentBlueprint?.userGuidance || '',
+      currentBlueprintMarkdown || '',
       activeTab?.name || '',
       (activeTab?.content || '').slice(0, 3000),
     ].join(' ')
@@ -222,7 +230,7 @@ export default function ProjectReferencePanel() {
       c => bpCharNames.has(c.name) || (c.name && searchTarget.includes(c.name))
     )
     return matched.length > 0 ? matched : characters
-  }, [isChapterEditing, currentBlueprint, activeTab?.name, activeTab?.content, characters])
+  }, [isChapterEditing, currentBlueprint, currentBlueprintMarkdown, activeTab?.name, activeTab?.content, characters])
 
   // 关联的地图节点（根据蓝图细纲、标题、叙事目的和正文匹配）
   const linkedMapNodes = useMemo(() => {
@@ -233,12 +241,13 @@ export default function ProjectReferencePanel() {
       bp?.purpose || '',
       bp?.keyEvents || '',
       bp?.userGuidance || '',
+      currentBlueprintMarkdown || '',
       activeTab?.name || '',
       (activeTab?.content || '').slice(0, 3000),
     ].join(' ')
 
     return worldMapNodes.filter(node => node.name && searchTarget.includes(node.name))
-  }, [currentBlueprint, activeTab, worldMapNodes])
+  }, [currentBlueprint, currentBlueprintMarkdown, activeTab, worldMapNodes])
 
   // 地图册中当前选中的地点
   const activeMapNode = useMemo(() => {
@@ -309,7 +318,9 @@ export default function ProjectReferencePanel() {
             <div className="flex items-center justify-between gap-2">
               <span className="writer-context-block-title">
                 <BookOpen size={13} />
-                {text(`第 ${chapterNumber ?? '?'} 章蓝图与创作指导`, `Chapter ${chapterNumber ?? '?'} blueprint & guidance`)}
+                {currentBlueprint
+                  ? text(`第 ${currentBlueprint.chapterNumber} 章蓝图与创作指导`, `Chapter ${currentBlueprint.chapterNumber} blueprint & guidance`)
+                  : text('当前正文未绑定章节蓝图', 'No chapter blueprint is bound to this text')}
               </span>
               <button
                 type="button"
@@ -343,23 +354,50 @@ export default function ProjectReferencePanel() {
                   )}
                 </div>
 
-                {/* 关键事件清单 */}
-                {currentBlueprint.keyEvents && (
+                {/* v1 简纲只在没有 v2 完整细纲时作为事件投影展示 */}
+                {!currentBlueprintMarkdown && currentBlueprint.keyEvents && (
                   <div className="writer-context-field">
                     <div className="writer-context-field-label">{text('关键事件', 'Key events')}</div>
                     <div className="writer-context-field-body">{currentBlueprint.keyEvents}</div>
                   </div>
                 )}
 
-                {/* user_guidance 创作指导与细纲 */}
+                {/* user_guidance 是独立作者指导字段，不属于 v2 Markdown */}
                 {currentBlueprint.userGuidance && (
                   <div className="writer-context-field" style={{ borderLeft: '2px solid var(--color-accent)' }}>
                     <div className="writer-context-field-label">
                       <Info size={11} />
-                      {text('创作指导与细纲 (user_guidance)', 'Creative guidance & outline (user_guidance)')}
+                      {text('独立作者指导 (user_guidance)', 'Separate author guidance (user_guidance)')}
                     </div>
                     <div className="writer-context-field-body">{currentBlueprint.userGuidance}</div>
                   </div>
+                )}
+
+                {currentBlueprintMarkdown && (
+                  <details className="writer-context-field" data-testid="reference-blueprint-full-markdown">
+                    <summary className="cursor-pointer text-[11px] font-medium">
+                      {text('查看完整章节细纲 Markdown', 'View complete chapter outline Markdown')}
+                    </summary>
+                    <div className="my-1 flex justify-end">
+                      <button
+                        type="button"
+                        className="flex items-center gap-1 text-[10px] hover:underline"
+                        data-testid="reference-blueprint-copy-markdown"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(currentBlueprintMarkdown).then(
+                            () => toast.success(text('完整细纲 Markdown 已复制', 'Complete outline Markdown copied')),
+                            () => toast.error(text('复制细纲失败', 'Could not copy the outline')),
+                          )
+                        }}
+                      >
+                        <Clipboard size={10} />
+                        {text('复制完整 Markdown', 'Copy full Markdown')}
+                      </button>
+                    </div>
+                    <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words text-[10px]" data-testid="reference-blueprint-full-markdown-text">
+                      {currentBlueprintMarkdown}
+                    </pre>
+                  </details>
                 )}
 
                 {/* 关联的地图册地点 */}
