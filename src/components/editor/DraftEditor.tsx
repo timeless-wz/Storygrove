@@ -981,14 +981,12 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
             {/* 落笔与提交 */}
             <div className="draft-chapter-group">
               {/* 字数 */}
-              {charCount > 0 && (
-                <span
-                  className="draft-chapter-count"
-                  title={text(`当前字数：${charCount.toLocaleString(locale)}`, `Word count: ${charCount.toLocaleString(locale)}`)}
-                >
-                  {text(`${charCount.toLocaleString(locale)} 字`, `${charCount.toLocaleString(locale)} words`)}
-                </span>
-              )}
+              <span
+                className="draft-chapter-count"
+                title={text(`当前字数：${charCount.toLocaleString(locale)}`, `Word count: ${charCount.toLocaleString(locale)}`)}
+              >
+                {text(`${charCount.toLocaleString(locale)} 字`, `${charCount.toLocaleString(locale)} words`)}
+              </span>
 
               {/* 未保存指示呼吸灯 */}
               {isDirty && (
@@ -1079,11 +1077,9 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
         {isReadonly && (
           <div className="draft-chapter-actions">
             <div className="draft-chapter-group">
-              {charCount > 0 && (
-                <span className="draft-chapter-count">
-                  {text(`${charCount.toLocaleString(locale)} 字`, `${charCount.toLocaleString(locale)} words`)}
-                </span>
-              )}
+              <span className="draft-chapter-count">
+                {text(`${charCount.toLocaleString(locale)} 字`, `${charCount.toLocaleString(locale)} words`)}
+              </span>
               <span className="draft-chapter-status" style={{ color: 'var(--color-text-muted)' }}>
                 <span className="draft-chapter-status-dot" style={{ backgroundColor: 'var(--color-text-muted)' }} />
                 {text('已归档（只读）', 'Archived (read-only)')}
