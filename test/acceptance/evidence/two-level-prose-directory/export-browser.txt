@@ -1,0 +1,8 @@
+
+ RUN  v4.1.11 D:/ai/AI-Novel-Writer-master
+
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  15:28:35
+   Duration  3.83s (transform 0ms, setup 61ms, import 473ms, tests 1.29s, environment 0ms)

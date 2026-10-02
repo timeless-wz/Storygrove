@@ -85,7 +85,8 @@ beforeEach(() => {
       ...(includeBlueprintWithoutVersion ? [{ chapterNumber: 3, volumeId: 'volume-a', title: '尚无版本', purpose: '', keyEvents: '' }] : []),
     ]
     if (channel === 'db:blueprint-v2-summary-list') return []
-    if (channel === 'db:blueprint-volume-list') return [{ id: 'volume-a', name: '第一卷', sortOrder: 1 }]
+    if (channel === 'db:chapter-volume-list') return []
+    if (channel === 'db:prose-volume-list' || channel === 'db:blueprint-volume-list') return [{ id: 'volume-a', name: '第一卷', sortOrder: 1 }]
     if (channel === 'db:draft-export-snapshot') return [{
       draftId: 203, chapterNumber: 2, version: 1, title: '回声', content: '当前正文 v1', finalizationId: 'final-203', contentHash: 'c'.repeat(64),
     }]

@@ -13,7 +13,8 @@ export interface EditorTabSaveSnapshot {
 export interface EditorTab {
   id: string
   name: string
-  type: 'chapter' | 'outline' | 'character' | 'config' | 'diff' | 'chapter-card' | 'world-building' | 'arch-file' | 'version-history' | 'review-report' | 'narrative-thread' | 'world-map' | 'story-timeline' | 'world' | 'overview' | 'project-document' | 'foreshadowing' | 'cultivation'
+  type: 'chapter-directory' | 'chapter' | 'outline' | 'character' | 'config' | 'diff' | 'chapter-card' | 'world-building' | 'arch-file' | 'version-history' | 'review-report' | 'narrative-thread' | 'world-map' | 'story-timeline' | 'world' | 'overview' | 'project-document' | 'foreshadowing' | 'cultivation'
+  proseDirectoryKind?: 'draft' | 'manuscript'
   filePath?: string
   content?: string
   /** 架构文档已持久化的基准内容，用于跨 Tab/项目切换后恢复脏状态。 */
@@ -127,6 +128,7 @@ const BACKGROUND_LEDGER_BY_EDITOR_TYPE: Partial<Record<EditorTab['type'], string
   'chapter-card': 'chapter-card-editor',
 }
 const PROJECT_SCOPED_BUILTIN_TYPES = new Set<EditorTab['type']>([
+  'chapter-directory',
   'cultivation',
   'character',
   'config',

@@ -1,3 +1,4 @@
+import { volumeChapterNumbers as getVolumeChapterNumbers } from '../../shared/prose-volume'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CheckCircle2, Download, FileText, Files, Type, XCircle, RefreshCw } from 'lucide-react'
 import { useProjectStore } from '../../stores/project-store'
@@ -37,8 +38,10 @@ import { resolveWritingLanguage } from '../../shared/writing-language'
 type ExportScope = 'full-book' | 'chapter' | 'volume' | 'settings'
 type SelectionCatalog = {
   drafts: DraftMeta[]
+  assignments: Array<{ chapterNumber: number; volumeId: string | null }>
   blueprints: BlueprintListSummary[]
   volumes: BlueprintVolumeData[]
+  planningVolumes: BlueprintVolumeData[]
   finalized: FinalizedDraftExportSnapshot[]
 }
 
@@ -98,14 +101,16 @@ export default function ExportDialog({ isOpen, onClose }: { isOpen: boolean; onC
     setCatalogError('')
     setPreview(null)
     try {
-      const [drafts, blueprints, volumes, finalized] = await Promise.all([
+      const [drafts, blueprints, volumes, finalized, assignments, planningVolumes] = await Promise.all([
         ipc.invokeWithProjectSession(session, 'db:draft-list-all', session.projectPath),
         ipc.invokeWithProjectSession(session, 'db:blueprint-list-summary', session.projectPath),
-        ipc.invokeWithProjectSession(session, 'db:blueprint-volume-list', session.projectPath),
+        ipc.invokeWithProjectSession(session, 'db:prose-volume-list', session.projectPath),
         ipc.invokeWithProjectSession(session, 'db:draft-export-snapshot', session.projectPath),
+        ipc.invokeWithProjectSession(session, 'db:chapter-volume-list', session.projectPath),
+        ipc.invokeWithProjectSession(session, 'db:blueprint-volume-list', session.projectPath),
       ])
       if (!isProjectSessionCurrent(session)) return
-      const value = { drafts, blueprints, volumes, finalized }
+      const value = { drafts, blueprints, volumes, finalized, assignments: assignments ?? [], planningVolumes }
       setCatalog({ session, value })
       const firstChapter = [...new Set([
         ...drafts.map(draft => draft.chapterNumber),
@@ -122,13 +127,18 @@ export default function ExportDialog({ isOpen, onClose }: { isOpen: boolean; onC
   }, [currentProject, text])
 
   useEffect(() => {
-    if (isOpen) void loadCatalog()
-    else {
-      setCatalog(null)
-      setPreview(null)
-      setSettingsPreview(null)
-      setTaskState(null)
-    }
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled) return
+      if (isOpen) void loadCatalog()
+      else {
+        setCatalog(null)
+        setPreview(null)
+        setSettingsPreview(null)
+        setTaskState(null)
+      }
+    })
+    return () => { cancelled = true }
   }, [isOpen, loadCatalog])
 
   const finalByChapter = useMemo(() => {
@@ -144,25 +154,23 @@ export default function ExportDialog({ isOpen, onClose }: { isOpen: boolean; onC
 
   const volumeChapterNumbers = useMemo(() => {
     if (!activeCatalog || !volumeId) return []
-    return [...new Set(activeCatalog.blueprints
-      .filter(blueprint => (blueprint.volumeId ?? 'volume-1') === volumeId)
-      .map(blueprint => blueprint.chapterNumber))].sort((left, right) => left - right)
+    return getVolumeChapterNumbers(volumeId, activeCatalog.blueprints, activeCatalog.assignments)
   }, [activeCatalog, volumeId])
 
   const unassignedChapterNumbers = useMemo(() => {
     if (!activeCatalog) return []
-    const blueprinted = new Set(activeCatalog.blueprints.map(blueprint => blueprint.chapterNumber))
+    const assigned = new Set(activeCatalog.volumes.flatMap(volume => getVolumeChapterNumbers(volume.id, activeCatalog.blueprints, activeCatalog.assignments)))
     return [...new Set([
       ...activeCatalog.drafts.map(draft => draft.chapterNumber),
       ...activeCatalog.finalized.map(draft => draft.chapterNumber),
     ])]
-      .filter(number => !blueprinted.has(number))
+      .filter(number => !assigned.has(number))
       .sort((left, right) => left - right)
   }, [activeCatalog])
 
   const invalidVolumeBlueprints = useMemo(() => {
     if (!activeCatalog) return []
-    const volumeIds = new Set(activeCatalog.volumes.map(volume => volume.id))
+    const volumeIds = new Set(activeCatalog.planningVolumes.map(volume => volume.id))
     return activeCatalog.blueprints.filter(blueprint => blueprint.volumeId && !volumeIds.has(blueprint.volumeId))
   }, [activeCatalog])
 

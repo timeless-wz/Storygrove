@@ -21,6 +21,8 @@ interface NewDraftDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   suggestedChapterNumber: number
+  volumeId?: string | null
+  volumeName?: string
 }
 
 /**
@@ -31,15 +33,20 @@ export function NewDraftDialog({
   open,
   onOpenChange,
   suggestedChapterNumber,
+  volumeId,
+  volumeName,
 }: NewDraftDialogProps) {
   const text = useLocaleStore(s => s.text)
   const currentProject = useProjectStore(s => s.currentProject)
   const projectKey = currentProject?.path
   const [chapterNumberInput, setChapterNumberInput] = useState(String(suggestedChapterNumber))
+  const [chapterTitle, setChapterTitle] = useState('')
   const [creating, setCreating] = useState(false)
 
   useEffect(() => {
-    if (open) setChapterNumberInput(String(suggestedChapterNumber))
+    let cancelled = false
+    if (open) queueMicrotask(() => { if (!cancelled) { setChapterNumberInput(String(suggestedChapterNumber)); setChapterTitle('') } })
+    return () => { cancelled = true }
   }, [open, suggestedChapterNumber])
 
   const createDraft = async () => {
@@ -51,6 +58,7 @@ export function NewDraftDialog({
     const projectSession = captureProjectSession(currentProject)
     if (!projectKey || !projectSession || !isProjectSessionPath(projectSession, projectKey)) return
 
+    const resolvedTitle = chapterTitle.trim() || text('未命名章节', 'Untitled chapter')
     setCreating(true)
     try {
       const version = await ipc.invokeWithProjectSession(
@@ -64,7 +72,7 @@ export function NewDraftDialog({
       const result = await ipc.invokeWithProjectSession(
         projectSession,
         'db:draft-create',
-        { chapterNumber, version, source: 'write', content: '', wordCount: 0 },
+        { chapterNumber, version, chapterTitle: resolvedTitle, source: 'write', content: '', wordCount: 0, ...(volumeId !== undefined ? { volumeId } : {}) },
         projectKey,
       )
       if (!isProjectSessionCurrent(projectSession)) return
@@ -83,8 +91,9 @@ export function NewDraftDialog({
       const draftPath = `vela://draft/${result.id}`
       useEditorStore.getState().openFile({
         id: draftPath,
-        name: text(`第${chapterNumber}章 · 自由创作 v${version}`, `Chapter ${chapterNumber} · Free draft v${version}`),
+        name: text(`第${chapterNumber}章 ${resolvedTitle} v${version}`, `Chapter ${chapterNumber} ${resolvedTitle} v${version}`),
         type: 'chapter',
+        proseDirectoryKind: 'draft',
         filePath: draftPath,
         content: '',
         savedContent: '',
@@ -97,7 +106,7 @@ export function NewDraftDialog({
       onOpenChange(false)
       toast.success(text(`已创建第 ${chapterNumber} 章草稿；定稿后会自动发布到正文`, `Created Chapter ${chapterNumber} draft. It will move to the manuscript when finalized.`))
     } catch (error) {
-      toast.error(text(`创建草稿失败：${String(error)}`, `Could not create draft: ${String(error)}`))
+      if (isProjectSessionCurrent(projectSession)) toast.error(text(`创建草稿失败：${String(error)}`, `Could not create draft: ${String(error)}`))
     } finally {
       if (isProjectSessionCurrent(projectSession)) setCreating(false)
     }
@@ -113,6 +122,7 @@ export function NewDraftDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="px-6 py-5">
+          {volumeName && <p className="text-sm mb-3">{text('所属卷：', 'Volume: ')}{volumeName}</p>}
           <label className="block text-sm font-medium mb-2" htmlFor="new-draft-chapter-number">
             {text('章节号', 'Chapter number')}
           </label>
@@ -125,6 +135,8 @@ export function NewDraftDialog({
             onChange={event => setChapterNumberInput(event.target.value)}
             autoFocus
           />
+          <label className="block text-sm font-medium mb-2 mt-4" htmlFor="new-draft-chapter-title">{text('章节名称', 'Chapter title')}</label>
+          <Input id="new-draft-chapter-title" value={chapterTitle} onChange={event => setChapterTitle(event.target.value)} maxLength={500} placeholder={text('例如：接错的人', 'For example: An unexpected encounter')} disabled={creating} />
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={creating}>

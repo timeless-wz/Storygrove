@@ -105,3 +105,23 @@
   }
   .chapter-outline-backdrop { position: absolute; z-index: 21; inset: 0; background: rgb(0 0 0 / 25%); }
 }
+
+.chapter-outline-actions { display: flex; gap: 6px; padding: 8px; border-bottom: 1px solid var(--color-border); }
+.chapter-outline-actions button { display: inline-flex; align-items: center; gap: 4px; padding: 5px 7px; border-radius: 6px; font-size: 12px; color: var(--color-accent); }
+.chapter-outline-actions button:hover, .chapter-outline-arrow:hover { background: var(--color-hover); }
+.chapter-outline-actions button:disabled { opacity: .5; }
+.chapter-outline-volume-row { display: flex; align-items: center; border-radius: 6px; }
+.chapter-outline-volume-row.is-selected { background: var(--color-hover); }
+.chapter-outline-volume-button { min-width: 0; flex: 1; }
+.chapter-outline-arrow { display: grid; place-items: center; flex: 0 0 26px; height: 30px; border-radius: 5px; }
+.chapter-outline-volume-select { display: block; width: 100%; margin-top: 8px; padding: 8px; background: var(--color-bg); color: var(--color-text); border: 1px solid var(--color-border); border-radius: 6px; }
+.chapter-directory-empty { display: flex; align-items: center; justify-content: center; height: 100%; padding: 24px; color: var(--color-text-secondary); font-size: 14px; }
+.chapter-outline-actions button:focus-visible, .chapter-outline-arrow:focus-visible, .chapter-outline-volume-button:focus-visible, .chapter-outline-volume-select:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+.chapter-outline-volume-actions { padding: 3px 10px 3px 30px; }
+.chapter-outline-volume-actions button { display: inline-flex; align-items: center; gap: 4px; padding: 5px 7px; border-radius: 6px; font-size: 12px; color: var(--color-accent); }
+.chapter-outline-volume-actions button:hover { background: var(--color-hover); }
+.chapter-outline-target-row { display: inline-flex; align-items: center; }
+.chapter-outline-target-row .chapter-outline-arrow { flex-basis: 22px; width: 22px; height: 25px; }
+.chapter-outline-delete:hover { color: var(--color-danger, #b13a2c); }
+.chapter-outline-volume-actions button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }

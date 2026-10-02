@@ -7,6 +7,7 @@
 import { createHash } from 'node:crypto'
 import type BetterSqlite3 from 'better-sqlite3'
 import { getProjectDb } from '../database'
+import { ChapterVolumeRepository } from './chapter-volume-repository'
 import { ContentRepository } from './content-repository'
 import type { DraftSourceDependency } from '../../src/shared/draft-source-dependency'
 
@@ -349,6 +350,8 @@ export class DraftRepository {
         chapterNumber: number
         /** Explicit chapter-blueprint binding; omitted for free/unbound drafts. */
         blueprintChapterNumber?: number | null
+        volumeId?: string | null
+        chapterTitle?: string
         version?: number
         source: 'write' | 'rewrite'
         content: string
@@ -360,6 +363,9 @@ export class DraftRepository {
 
         // 事务内原子分配 version，避免 getNextVersion + create 竞态
         const tx = db.transaction(() => {
+            if (params.volumeId !== undefined && db.prepare('SELECT 1 FROM drafts WHERE chapter_number = ? AND status != ?').get(params.chapterNumber, 'archived')) {
+                throw new Error('章节号已存在，请选择新的章节号')
+            }
             const blueprintChapterNumber = params.blueprintChapterNumber ?? null
             if (blueprintChapterNumber !== null) {
                 if (!Number.isSafeInteger(blueprintChapterNumber) || blueprintChapterNumber < 1) {
@@ -399,6 +405,11 @@ export class DraftRepository {
                 params.wordCount,
                 serializedDependencies,
             )
+            if (params.chapterTitle !== undefined) {
+                if (typeof params.chapterTitle !== 'string' || params.chapterTitle.length > 500) throw new Error('章节名称无效或超过 500 字')
+                db.prepare('UPDATE drafts SET imported_title = ? WHERE id = ?').run(params.chapterTitle.trim(), Number(result.lastInsertRowid))
+            }
+            if (params.volumeId !== undefined) ChapterVolumeRepository.set(params.chapterNumber, params.volumeId)
             return Number(result.lastInsertRowid)
         })
 
@@ -584,6 +595,7 @@ export class DraftRepository {
             }
 
             db.prepare('DELETE FROM drafts WHERE id = ?').run(id)
+            ChapterVolumeRepository.prune()
 
             // 【DB 迁移备注】：如果 contents.id 仍被 revision 或 review 引用，
             // SQLite 外键约束会阻止删除；此处保留原有孤立内容兼容策略。
@@ -604,6 +616,7 @@ export class DraftRepository {
             db.prepare('DELETE FROM revisions').run()
             db.prepare('DELETE FROM foreshadowings').run()
             db.prepare('DELETE FROM drafts').run()
+            ChapterVolumeRepository.prune()
             db.prepare('DELETE FROM contents').run()
             db.prepare('DELETE FROM summary_snapshots').run()
         })

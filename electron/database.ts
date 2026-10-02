@@ -413,6 +413,15 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
       updated_at TEXT DEFAULT (datetime('now')),
       FOREIGN KEY (content_id) REFERENCES contents(id) ON DELETE RESTRICT
     );
+    CREATE TABLE IF NOT EXISTS chapter_volume_assignments (
+      chapter_number INTEGER PRIMARY KEY,
+      volume_id TEXT DEFAULT NULL
+    );
+    CREATE TRIGGER IF NOT EXISTS cleanup_empty_prose_chapter_volume AFTER DELETE ON drafts
+    WHEN NOT EXISTS (SELECT 1 FROM drafts WHERE chapter_number = OLD.chapter_number)
+    BEGIN
+      DELETE FROM chapter_volume_assignments WHERE chapter_number = OLD.chapter_number;
+    END;
     CREATE INDEX IF NOT EXISTS idx_drafts_chapter ON drafts(chapter_number);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_drafts_chapter_version
       ON drafts(chapter_number, version);

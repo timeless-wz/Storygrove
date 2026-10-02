@@ -1129,7 +1129,11 @@ export interface DatabaseChannels {
     args: [request: FinalizedDraftImportRequest, expectedProjectPath: string]
     return: { success: boolean; receipt?: FinalizedDraftImportReceipt; error?: string }
   }
-  'db:draft-create': { args: [params: { chapterNumber: number; blueprintChapterNumber?: number | null; version: number; source: 'write' | 'rewrite'; content: string; wordCount: number; sourceDependencies?: DraftSourceDependency[] }, expectedProjectPath: string]; return: { success: boolean; id?: number; error?: string } }
+  'db:prose-volume-list': { args: [expectedProjectPath: string]; return: BlueprintVolumeData[] }
+  'db:prose-volume-delete': { args: [volumeId: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:chapter-volume-list': { args: [expectedProjectPath: string]; return: Array<{ chapterNumber: number; volumeId: string | null }> }
+  'db:chapter-volume-set': { args: [chapterNumber: number, volumeId: string | null, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:draft-create': { args: [params: { chapterNumber: number; blueprintChapterNumber?: number | null; volumeId?: string | null; chapterTitle?: string; version: number; source: 'write' | 'rewrite'; content: string; wordCount: number; sourceDependencies?: DraftSourceDependency[] }, expectedProjectPath: string]; return: { success: boolean; id?: number; error?: string } }
   'db:draft-list': { args: [chapterNumber: number, expectedProjectPath: string]; return: DraftMeta[] }
   'db:draft-list-all': { args: [expectedProjectPath: string]; return: DraftMeta[] }
   'db:draft-get-meta': { args: [id: number, expectedProjectPath: string]; return: DraftMeta | null }

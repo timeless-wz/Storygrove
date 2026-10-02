@@ -1,3 +1,4 @@
+import { ChapterVolumeRepository } from '../repositories/chapter-volume-repository'
 import { CultivationRepository } from '../repositories/cultivation-repository'
 import type { CultivationSaveRequest } from '../../src/shared/cultivation'
 import { ipcMain, type IpcMainInvokeEvent } from 'electron'
@@ -148,6 +149,8 @@ const MUTATING_DATABASE_CHANNELS = new Set([
   'db:character-relationship-delete',
   'db:character-graph-positions-save',
   'db:draft-import-finalized-batch',
+  'db:prose-volume-delete',
+  'db:chapter-volume-set',
   'db:draft-create',
   'db:draft-import-markdown',
   'db:draft-update-status',
@@ -937,9 +940,35 @@ export function registerDatabaseController() {
     }
   })
 
+  ipcMain.handle('db:prose-volume-list', async (_event, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return ChapterVolumeRepository.volumes()
+  })
+  ipcMain.handle('db:prose-volume-delete', async (_event, volumeId: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      ChapterVolumeRepository.deleteVolume(volumeId)
+      return { success: true }
+    } catch (error) { return { success: false, error: String(error) } }
+  })
+
+  ipcMain.handle('db:chapter-volume-list', async (_event, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return ChapterVolumeRepository.list()
+  })
+  ipcMain.handle('db:chapter-volume-set', async (_event, chapterNumber: number, volumeId: string | null, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      ChapterVolumeRepository.set(chapterNumber, volumeId)
+      return { success: true }
+    } catch (error) { return { success: false, error: String(error) } }
+  })
+
   ipcMain.handle('db:draft-create', async (_event, params: {
     chapterNumber: number
     blueprintChapterNumber?: number | null
+    volumeId?: string | null
+    chapterTitle?: string
     version: number
     source: 'write' | 'rewrite'
     content: string

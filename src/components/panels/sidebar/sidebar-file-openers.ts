@@ -211,6 +211,7 @@ export async function openChapterFile(filePath: string, name: string): Promise<v
     id: filePath,
     name,
     type: 'chapter',
+    proseDirectoryKind: filePath.startsWith('vela://manuscript/') ? 'manuscript' : 'draft',
     filePath,
     content,
     savedContent: content,

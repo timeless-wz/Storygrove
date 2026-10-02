@@ -1,3 +1,4 @@
+import { volumeChapterNumbers } from '../shared/prose-volume'
 /**
  * 导出服务 — 将小说项目导出为多种格式
  *
@@ -708,16 +709,15 @@ export async function exportSelectedMarkdown(
       if (!options.volumeId || !options.expectedChapterNumbers?.length) {
         return { success: false, error: textFor(locale, '缺少卷和卷内章节清单；请重新预览。', 'The volume and chapter manifest is missing. Reload the preview.') }
       }
-      const [volumes, blueprints] = await Promise.all([
-        ipc.invokeWithProjectSession(projectSession, 'db:blueprint-volume-list', projectSession.projectPath),
+      const [volumes, blueprints, assignments] = await Promise.all([
+        ipc.invokeWithProjectSession(projectSession, 'db:prose-volume-list', projectSession.projectPath),
         ipc.invokeWithProjectSession(projectSession, 'db:blueprint-list-summary', projectSession.projectPath),
+        ipc.invokeWithProjectSession(projectSession, 'db:chapter-volume-list', projectSession.projectPath),
       ])
       if (!isProjectSessionCurrent(projectSession)) return staleExportResult(locale)
       if (!volumes.some(volume => volume.id === options.volumeId)) return exportSelectionChanged(locale)
       const expected = [...options.expectedChapterNumbers].sort((left, right) => left - right)
-      const currentNumbers = [...new Set(blueprints
-        .filter(blueprint => (blueprint.volumeId ?? 'volume-1') === options.volumeId)
-        .map(blueprint => blueprint.chapterNumber))].sort((left, right) => left - right)
+      const currentNumbers = volumeChapterNumbers(options.volumeId, blueprints, assignments ?? [])
       const selectedNumbers = snapshot.chapters.map(chapter => chapter.chapterNumber)
       if (JSON.stringify(expected) !== JSON.stringify(currentNumbers)
         || JSON.stringify(expected) !== JSON.stringify(selectedNumbers)) return exportSelectionChanged(locale)

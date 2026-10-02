@@ -9,12 +9,15 @@ import { useProjectStore } from '../../../stores/project-store'
 import { registerEditorExitSaveHandler, useEditorStore, type EditorTab } from '../../../stores/editor-store'
 import { openChapterFile } from '../../panels/sidebar/sidebar-file-openers'
 import ChapterOutlineSidebar from '../ChapterOutlineSidebar'
+import { confirm } from '../../ui/Confirm'
+import { deleteFinalizedChapter } from '../../panels/sidebar/finalized-chapter-deletion'
+import { useDraftStore } from '../../../stores/draft-store'
 import { globalEventBus } from '../../../shared/event-bus'
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-const invoke = vi.fn(async (channel: string) => {
-  if (channel === 'db:blueprint-volume-list') return [{ id: 'volume-1', name: '第一卷', sortOrder: 1 }]
+const invoke = vi.fn<(channel: string, ...args: unknown[]) => Promise<unknown>>(async (channel: string) => {
+  if (channel === 'db:prose-volume-list') return [{ id: 'volume-1', name: '第一卷', sortOrder: 1 }]
   if (channel === 'db:blueprint-list-summary') return [
     { chapterNumber: 1, volumeId: 'volume-1', title: '雨夜' },
     { chapterNumber: 2, volumeId: 'volume-1', title: '回声' },
@@ -34,6 +37,9 @@ vi.mock('../../panels/sidebar/sidebar-file-openers', () => ({
   openChapterFile: vi.fn(async () => {}),
   openBuiltinEditor: vi.fn(),
 }))
+
+vi.mock('../../ui/Confirm', () => ({ confirm: vi.fn(async () => true) }))
+vi.mock('../../panels/sidebar/finalized-chapter-deletion', () => ({ deleteFinalizedChapter: vi.fn(async () => null) }))
 
 vi.mock('../../ui/Toast', () => ({
   toast: { error: vi.fn(), info: vi.fn() },
@@ -75,8 +81,8 @@ afterEach(async () => {
 })
 
 describe('chapter outline sidebar', () => {
-  async function renderExpanded() {
-    await act(async () => root.render(<ChapterOutlineSidebar tab={tab} />))
+  async function renderExpanded(kind: 'draft' | 'manuscript' = 'draft') {
+    await act(async () => root.render(<ChapterOutlineSidebar tab={{ ...tab, proseDirectoryKind: kind }} />))
     const expand = container.querySelector<HTMLButtonElement>('.chapter-outline-toggle')
     expect(expand).toBeTruthy()
     if (expand?.getAttribute('aria-label') === '展开卷章目录') {
@@ -85,12 +91,14 @@ describe('chapter outline sidebar', () => {
     await act(async () => {
       await vi.waitFor(() => expect(container.textContent).toContain('第一卷'))
     })
+    const arrow = container.querySelector<HTMLButtonElement>('.chapter-outline-arrow[aria-expanded]')
+    if (arrow?.getAttribute('aria-expanded') === 'false') await act(async () => arrow.click())
   }
 
-  it('shows the volume and opens published prose separately from its draft', async () => {
-    await renderExpanded()
+  it('opens published prose from its own directory without mixing draft entries', async () => {
+    await renderExpanded('manuscript')
     expect(container.textContent).toContain('第 1 章')
-    expect(container.textContent).toContain('草稿 v1')
+    expect(container.textContent).not.toContain('草稿 v1')
     const manuscript = [...container.querySelectorAll<HTMLButtonElement>('.chapter-outline-target')]
       .find(button => button.textContent?.includes('正文 v2'))
     expect(manuscript).toBeTruthy()
@@ -105,7 +113,7 @@ describe('chapter outline sidebar', () => {
       save: async () => { throw new Error('save failed') },
     })
     try {
-      await renderExpanded()
+      await renderExpanded('manuscript')
       const manuscript = [...container.querySelectorAll<HTMLButtonElement>('.chapter-outline-target')]
         .find(button => button.textContent?.includes('正文 v2'))
       await act(async () => manuscript?.click())
@@ -136,9 +144,10 @@ describe('chapter outline sidebar', () => {
     const toggle = container.querySelector<HTMLButtonElement>('.chapter-outline-toggle')!
     if (toggle.getAttribute('aria-label') === '展开卷章目录') await act(async () => toggle.click())
     await act(async () => {
-      await vi.waitFor(() => expect(container.textContent).toContain('暂无草稿或正文章节'))
+      await vi.waitFor(() => expect(container.textContent).toContain('第一卷'))
     })
-    expect(container.querySelector('.chapter-outline-volume')).toBeNull()
+    expect(container.querySelector('.chapter-outline-volume')).not.toBeNull()
+    expect(container.querySelectorAll('.chapter-outline-chapter')).toHaveLength(0)
   })
 
   it('refreshes actual prose records after creation without adding blueprint-only rows', async () => {
@@ -184,7 +193,7 @@ describe('chapter outline sidebar', () => {
   })
 
   it('keeps prose accessible when supplementary volume information fails, then recovers on refresh', async () => {
-    await renderExpanded()
+    await renderExpanded('manuscript')
     const original = invoke.getMockImplementation()!
     invoke.mockImplementation(async channel => {
       if (channel === 'db:blueprint-list-summary') throw new Error('summary unavailable')
@@ -194,6 +203,7 @@ describe('chapter outline sidebar', () => {
       await act(async () => container.querySelector<HTMLButtonElement>('.chapter-outline-refresh')!.click())
       await vi.waitFor(() => expect(container.textContent).toContain('卷信息读取失败'))
       expect(container.textContent).toContain('未归卷')
+      await act(async () => container.querySelector<HTMLButtonElement>('.chapter-outline-arrow[aria-expanded]')!.click())
       const manuscript = [...container.querySelectorAll<HTMLButtonElement>('.chapter-outline-target')]
         .find(button => button.textContent?.includes('正文 v2'))!
       await act(async () => manuscript.click())
@@ -235,4 +245,136 @@ describe('chapter outline sidebar', () => {
       invoke.mockImplementation(original)
     }
   })
+})
+
+describe('two-level prose directory', () => {
+  async function renderDirectory(kind: 'draft' | 'manuscript') {
+    await act(async () => root.render(<ChapterOutlineSidebar tab={{ ...tab, type: 'chapter-directory', proseDirectoryKind: kind }} />))
+    await vi.waitFor(() => expect(container.textContent).toContain('第一卷'))
+  }
+  it('starts with collapsed volumes, selects by name, expands only by arrow and filters prose states', async () => {
+    await renderDirectory('draft')
+    expect(container.querySelectorAll('.chapter-outline-chapter')).toHaveLength(0)
+    await act(async () => container.querySelector<HTMLButtonElement>('.chapter-outline-volume-button')!.click())
+    expect(container.querySelectorAll('.chapter-outline-chapter')).toHaveLength(0)
+    await act(async () => container.querySelector<HTMLButtonElement>('.chapter-outline-arrow[aria-expanded]')!.click())
+    expect(container.textContent).toContain('草稿 v1')
+    expect(container.textContent).not.toContain('正文 v2')
+    await act(async () => container.querySelector<HTMLButtonElement>('.chapter-outline-arrow[aria-expanded]')!.click())
+    expect(container.querySelectorAll('.chapter-outline-chapter')).toHaveLength(0)
+  })
+  it('shows finalized chapters only in the manuscript entrance', async () => {
+    await renderDirectory('manuscript')
+    await act(async () => container.querySelector<HTMLButtonElement>('.chapter-outline-arrow[aria-expanded]')!.click())
+    expect(container.textContent).toContain('正文 v2')
+    expect(container.textContent).not.toContain('草稿 v1')
+  })
+  it('adds an empty volume and creates an unbound chapter in the selected volume', async () => {
+    const original = invoke.getMockImplementation()!
+    const calls: Array<[string, unknown[]]> = []
+    const volumes = [{ id: 'volume-1', name: '第一卷', sortOrder: 1 }]
+    const loadDrafts = vi.spyOn(useDraftStore.getState(), 'loadChapterDrafts').mockResolvedValue(undefined)
+    invoke.mockImplementation(async (channel, ...args: unknown[]) => {
+      calls.push([channel, args])
+      if (channel === 'db:prose-volume-list') return volumes
+      if (channel === 'db:blueprint-volume-upsert') { volumes.push(args[0] as typeof volumes[0]); return { success: true } }
+      if (channel === 'db:draft-next-version') return 1
+      if (channel === 'db:draft-create') return { success: true, id: 9 }
+      return original(channel)
+    })
+    try {
+      await renderDirectory('draft')
+      await act(async () => [...container.querySelectorAll<HTMLButtonElement>('.chapter-outline-actions button')].find(item => item.textContent === '添加卷')!.click())
+      await page.getByRole('textbox', { name: '卷名称（留空自动编号）' }).fill('第2卷')
+      await page.getByRole('button', { name: '创建卷', exact: true }).click()
+      await vi.waitFor(() => expect(container.textContent).toContain('第2卷'))
+      const volume = [...container.querySelectorAll<HTMLElement>('.chapter-outline-volume')].find(item => item.textContent?.includes('第2卷'))!
+      expect(volume.querySelectorAll('.chapter-outline-chapter')).toHaveLength(0)
+      await act(async () => volume.querySelector<HTMLButtonElement>('.chapter-outline-arrow[aria-expanded]')!.click())
+      expect(volume.textContent).toContain('暂无章节')
+      await act(async () => volume.querySelector<HTMLButtonElement>('button[aria-label="向第2卷添加章节"]')!.click())
+      expect(document.body.textContent).toContain('所属卷：第2卷')
+      await page.getByRole('textbox', { name: '章节名称' }).fill('新增章节名称')
+      await page.getByRole('button', { name: '创建并开始写作' }).click()
+      await vi.waitFor(() => expect(calls.some(([channel]) => channel === 'db:draft-create')).toBe(true))
+      const created = calls.find(([channel]) => channel === 'db:draft-create')![1][0] as Record<string, unknown>
+      expect(created).toMatchObject({ chapterNumber: 2, volumeId: volumes[1].id, chapterTitle: '新增章节名称', source: 'write' })
+      expect(created).not.toHaveProperty('blueprintChapterNumber')
+      expect(useEditorStore.getState().tabs.find(item => item.draftId === 9)).toMatchObject({ type: 'chapter', proseDirectoryKind: 'draft' })
+    } finally { invoke.mockImplementation(original); loadDrafts.mockRestore() }
+  })
+  it('moves a chapter through the explicit assignment channel and preserves the dialog after failure', async () => {
+    const original = invoke.getMockImplementation()!
+    const calls: unknown[][] = []
+    let refuse = true
+    invoke.mockImplementation(async (channel, ...args: unknown[]) => {
+      if (channel === 'db:chapter-volume-set') { calls.push(args); return refuse ? { success: false, error: '移动失败' } : { success: true } }
+      return original(channel)
+    })
+    try {
+      await renderDirectory('draft')
+      await act(async () => container.querySelector<HTMLButtonElement>('.chapter-outline-arrow[aria-expanded]')!.click())
+      await page.getByRole('button', { name: '移动第 1 章到卷' }).click()
+      await page.getByRole('combobox', { name: '目标卷' }).selectOptions('')
+      await page.getByRole('button', { name: '确认移动' }).click()
+      expect(document.querySelector('#prose-move-volume')).not.toBeNull()
+      refuse = false
+      await page.getByRole('button', { name: '确认移动' }).click()
+      await vi.waitFor(() => expect(document.querySelector('#prose-move-volume')).toBeNull())
+      expect(calls[0].slice(0, 3)).toEqual([1, null, projectPath])
+    } finally { invoke.mockImplementation(original) }
+  })
+})
+
+it('captures the second-level directory on desktop and narrow screens with usable creation controls', async () => {
+  document.documentElement.setAttribute('data-theme', 'light')
+  container.style.cssText = 'height:600px;display:flex;position:relative;overflow:hidden;background:var(--color-bg)'
+  await page.viewport(1280, 820)
+  await act(async () => root.render(<><ChapterOutlineSidebar tab={{ ...tab, type: 'chapter-directory', proseDirectoryKind: 'draft' }} /><div className="chapter-directory-empty" style={{ flex: 1 }}>展开左侧的卷，选择章节开始写作；也可以添加卷或章节。</div></>))
+  await vi.waitFor(() => expect(container.textContent).toContain('第一卷'))
+  await act(async () => container.querySelector<HTMLButtonElement>('.chapter-outline-arrow[aria-expanded]')!.click())
+  expect(container.textContent).toContain('添加章节')
+  await page.screenshot({ path: '../../../../output/playwright/prose-directory-desktop.png' })
+  await act(async () => {
+    await page.viewport(800, 700)
+    window.dispatchEvent(new Event('resize'))
+  })
+  await vi.waitFor(() => expect(container.querySelector('.chapter-outline-sidebar.is-narrow')).not.toBeNull())
+  await page.screenshot({ path: '../../../../output/playwright/prose-directory-narrow.png' })
+})
+
+it('places chapter creation inside a selected volume and retains volume/draft deletion actions', async () => {
+  const original = invoke.getMockImplementation()!
+  const calls: string[] = []
+  const loadDrafts = vi.spyOn(useDraftStore.getState(), 'loadChapterDrafts').mockResolvedValue(undefined)
+  invoke.mockImplementation(async (channel, ...args: unknown[]) => {
+    calls.push(channel)
+    if (channel === 'db:draft-delete' || channel === 'db:prose-volume-delete') return { success: true }
+    return original(channel, ...args)
+  })
+  try {
+    await act(async () => root.render(<ChapterOutlineSidebar tab={{ ...tab, type: 'chapter-directory', proseDirectoryKind: 'draft' }} />))
+    await vi.waitFor(() => expect(container.textContent).toContain('第一卷'))
+    expect(container.querySelector('.chapter-outline-actions')?.textContent).not.toContain('添加章节')
+    expect(container.querySelector('.chapter-outline-volume-actions')).toBeNull()
+    await act(async () => container.querySelector<HTMLButtonElement>('.chapter-outline-volume-button')!.click())
+    expect(container.querySelector('.chapter-outline-volume-actions')?.textContent).toContain('添加章节')
+    expect(container.querySelectorAll('.chapter-outline-chapter')).toHaveLength(0)
+    await act(async () => container.querySelector<HTMLButtonElement>('.chapter-outline-arrow[aria-expanded]')!.click())
+    await page.getByRole('button', { name: '删除第 1 章草稿 v1' }).click()
+    await vi.waitFor(() => expect(calls).toContain('db:draft-delete'))
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('这一稿'), expect.objectContaining({ danger: true }))
+    await page.getByRole('button', { name: '删除第一卷', exact: true }).click()
+    await vi.waitFor(() => expect(calls).toContain('db:prose-volume-delete'))
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('未归卷'), expect.objectContaining({ danger: true }))
+  } finally { invoke.mockImplementation(original); loadDrafts.mockRestore() }
+})
+
+it('routes finalized prose deletion through the existing publication cleanup action', async () => {
+  await act(async () => root.render(<ChapterOutlineSidebar tab={{ ...tab, type: 'chapter-directory', proseDirectoryKind: 'manuscript' }} />))
+  await vi.waitFor(() => expect(container.textContent).toContain('第一卷'))
+  await act(async () => container.querySelector<HTMLButtonElement>('.chapter-outline-arrow[aria-expanded]')!.click())
+  await page.getByRole('button', { name: '删除第 1 章正文 v2' }).click()
+  expect(deleteFinalizedChapter).toHaveBeenCalledWith(expect.objectContaining({ draftId: 2, chapterNumber: 1, surface: 'manuscript', projectPath }))
+  expect(invoke.mock.calls.some(([channel]) => channel === 'db:draft-delete')).toBe(false)
 })

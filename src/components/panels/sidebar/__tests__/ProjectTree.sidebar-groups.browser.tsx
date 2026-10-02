@@ -214,22 +214,20 @@ describe('ProjectTree shadcn/ui collapsible groups', () => {
     ).toBeTruthy()
   })
 
-  it('preserves inner "+" buttons in draft box and manuscript chapters', async () => {
+  it('keeps only draft and manuscript entrances in the main tree and opens their second-level directories', async () => {
     await renderProjectTree()
-
-    // 草稿箱内部的「新建草稿」按钮
-    const draftBoxNewBtn = Array.from(container.querySelectorAll('button')).find(
-      btn => btn.textContent?.includes('新建草稿')
-    )
-    expect(draftBoxNewBtn, 'Draft box inner "新建草稿" button should exist').toBeDefined()
-    expect(draftBoxNewBtn?.querySelector('svg'), 'Draft box new button should contain icon').not.toBeNull()
-
-    // 正文章节内部的「新建章节」按钮
-    const manuscriptNewBtn = Array.from(container.querySelectorAll('button')).find(
-      btn => btn.textContent?.includes('新建章节')
-    )
-    expect(manuscriptNewBtn, 'Manuscript inner "新建章节" button should exist').toBeDefined()
-    expect(manuscriptNewBtn?.querySelector('svg'), 'Manuscript new button should contain icon').not.toBeNull()
+    const manuscript = container.querySelector('[data-group-id="manuscript"]')!
+    expect(manuscript.textContent).not.toContain('新建草稿')
+    expect(manuscript.textContent).not.toContain('新建章节')
+    const entrances = [...manuscript.querySelectorAll<HTMLElement>('[role="button"]')]
+    const drafts = entrances.find(item => item.textContent === '草稿箱')!
+    const prose = entrances.find(item => item.textContent === '正文章节')!
+    expect(drafts).toBeTruthy()
+    expect(prose).toBeTruthy()
+    await act(async () => drafts.click())
+    expect(useEditorStore.getState().tabs.find(tab => tab.id === useEditorStore.getState().activeTabId)).toMatchObject({ type: 'chapter-directory', proseDirectoryKind: 'draft', projectKey: PROJECT_SESSION.projectPath })
+    await act(async () => prose.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+    expect(useEditorStore.getState().tabs.find(tab => tab.id === useEditorStore.getState().activeTabId)).toMatchObject({ type: 'chapter-directory', proseDirectoryKind: 'manuscript', projectKey: PROJECT_SESSION.projectPath })
   })
 
   it('toggles collapse/expand when group header is clicked and updates aria-expanded and store state', async () => {

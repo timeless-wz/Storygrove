@@ -99,6 +99,7 @@ export class ProjectClearRepository {
                     db.prepare('DELETE FROM reviews').run()
                     db.prepare('DELETE FROM revisions').run()
                     db.prepare('DELETE FROM foreshadowings').run()
+                    db.prepare('DELETE FROM chapter_volume_assignments').run()
                     db.prepare('DELETE FROM drafts').run()
                     db.prepare('DELETE FROM contents').run()
                     db.prepare('DELETE FROM summary_snapshots').run()

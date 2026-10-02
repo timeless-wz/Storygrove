@@ -626,11 +626,12 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
 
       {/* 编辑区主体 */}
       <div className="flex-1 min-h-0 overflow-hidden flex relative">
-        {activeTab?.type === 'chapter' && activeTab.projectKey === currentProject.path
+        {(activeTab?.type === 'chapter' || activeTab?.type === 'chapter-directory') && activeTab.projectKey === currentProject.path
           && !activeTab.filePath?.startsWith('vela://recovery/') && (
-          <ChapterOutlineSidebar tab={activeTab} />
+          <ChapterOutlineSidebar key={`${currentProject.id}:${currentProject.sessionLease}:${activeTab.draftStatus === 'finalized' || activeTab.filePath?.startsWith('vela://manuscript/') ? 'manuscript' : activeTab.proseDirectoryKind || 'draft'}`} tab={activeTab} />
         )}
         <div className="min-w-0 flex-1 overflow-hidden">
+        {activeTab?.type === 'chapter-directory' && activeTab.projectKey === currentProject.path && <div className="chapter-directory-empty">{text('展开左侧的卷，选择章节开始写作；也可以添加卷或章节。', 'Expand a volume and select a chapter, or add a volume or chapter.')}</div>}
         {activeTab?.type === 'chapter' && activeTab.projectKey === currentProject.path && (
           activeTab.filePath?.startsWith('vela://draft/')
           || activeTab.filePath?.startsWith('vela://manuscript/')

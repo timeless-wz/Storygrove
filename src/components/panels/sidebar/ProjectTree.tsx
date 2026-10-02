@@ -36,8 +36,7 @@ import {
 import { renderIcon } from './sidebar-icons'
 import { showSidebarMenu } from './sidebar-menu'
 import { createProjectArchTabId } from '../../editor/arch-file-refresh-policy'
-import DraftBoxGroup from './DraftBoxGroup'
-import ManuscriptGroup from './ManuscriptGroup'
+import { openProseDirectory } from './prose-directory-openers'
 import { useLocaleStore } from '../../../stores/locale-store'
 import { LatestRequestGate } from '../../editor/latest-request-gate'
 import { beginProjectTreeIdentityTransition } from './project-tree-refresh-policy'
@@ -226,7 +225,6 @@ export default function ProjectTree() {
     )
   }
 
-  const p = currentProject.path
   // 改为彻底的数据驱动：从内存的全部草稿中提取已发布正文。
   const manuscriptFiles = Object.values(draftsByChapter)
     .map(drafts => drafts.find(d => d.status === 'finalized'))
@@ -515,10 +513,10 @@ export default function ProjectTree() {
         onOpenChange={(nextOpen) => setProjectTreeGroupOpen('manuscript', nextOpen)}
       >
         <SidebarMenuItem>
-          <DraftBoxGroup draftsByChapter={draftsByChapter} />
+          <LeafItem iconName="file-pen" label={text('草稿箱', 'Draft box')} onClick={() => openProseDirectory('draft')} />
         </SidebarMenuItem>
         <SidebarMenuItem>
-          <ManuscriptGroup files={manuscriptFiles} projectPath={p} />
+          <LeafItem iconName="book-open" label={text('正文章节', 'Manuscript chapters')} onClick={() => openProseDirectory('manuscript')} />
         </SidebarMenuItem>
       </ProjectTreeCollapsibleGroup>
 

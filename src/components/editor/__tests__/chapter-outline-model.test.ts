@@ -61,3 +61,13 @@ describe('chapter outline grouping', () => {
     expect(groupOutline({ ...data, drafts: [] }, '第1卷')).toEqual([])
   })
 })
+
+it('uses explicit prose membership before blueprint membership, including a deliberate unassigned override', () => {
+  const groups = groupOutline({ volumes: [{ id: 'second', name: '第2卷', sortOrder: 2 }],
+    blueprints: [blueprint(1, 'second', '细纲')],
+    assignments: [{ chapterNumber: 1, volumeId: null }, { chapterNumber: 2, volumeId: 'second' }],
+    drafts: [draft(1, 1, 1, 'draft', 1), draft(2, 2, 1, 'draft')],
+  }, '第1卷', true)
+  expect(groups.map(group => [group.volume.id, group.chapters.map(chapter => chapter.number)])).toEqual([['second', [2]], ['ungrouped', [1]]])
+  expect(groupOutline({ volumes: [{ id: 'empty', name: '空卷', sortOrder: 1 }], blueprints: [], drafts: [] }, '第1卷', true)[0].chapters).toEqual([])
+})

@@ -84,7 +84,8 @@ beforeEach(() => {
   vi.mocked(ipc.invokeWithProjectSession).mockImplementation((async (_context: ProjectSessionContext, channel: string) => {
     if (channel === 'db:draft-export-selection') return { chapters: selected, receipt: selected.map(receipt) } as never
     if (channel === 'db:draft-export-selection-current') return true as never
-    if (channel === 'db:blueprint-volume-list') return [{ id: 'volume-1', name: '第1卷', sortOrder: 1 }] as never
+    if (channel === 'db:chapter-volume-list') return [] as never
+    if (channel === 'db:prose-volume-list') return [{ id: 'volume-1', name: '第1卷', sortOrder: 1 }] as never
     if (channel === 'db:blueprint-list-summary') return [{ chapterNumber: 1, volumeId: 'volume-1' }] as never
     if (channel === 'db:blueprint-get-all') return [{ chapterNumber: 1, volumeId: 'volume-1' }] as never
     if (channel === 'db:project-core-get') return settingsData.core as never
@@ -194,7 +195,8 @@ describe('selected Markdown export', () => {
         receipt: selected.map(receipt),
       } as never
       if (channel === 'db:draft-export-selection-current') return true as never
-      if (channel === 'db:blueprint-volume-list') return [{ id: 'volume-1', name: '第1卷', sortOrder: 1 }] as never
+      if (channel === 'db:chapter-volume-list') return [] as never
+    if (channel === 'db:prose-volume-list') return [{ id: 'volume-1', name: '第1卷', sortOrder: 1 }] as never
       if (channel === 'db:blueprint-list-summary') return [
         { chapterNumber: 1, volumeId: 'volume-1' }, { chapterNumber: 2, volumeId: 'volume-1' },
       ] as never
@@ -216,7 +218,8 @@ describe('selected Markdown export', () => {
   it('refuses a volume export when one chapter has no explicitly selected version', async () => {
     vi.mocked(ipc.invokeWithProjectSession).mockImplementation((async (_context: ProjectSessionContext, channel: string) => {
       if (channel === 'db:draft-export-selection') return { chapters: selected, receipt: selected.map(receipt) } as never
-      if (channel === 'db:blueprint-volume-list') return [{ id: 'volume-1', name: '第1卷', sortOrder: 1 }] as never
+      if (channel === 'db:chapter-volume-list') return [] as never
+    if (channel === 'db:prose-volume-list') return [{ id: 'volume-1', name: '第1卷', sortOrder: 1 }] as never
       if (channel === 'db:blueprint-list-summary') return [
         { chapterNumber: 1, volumeId: 'volume-1' }, { chapterNumber: 2, volumeId: 'volume-1' },
       ] as never
@@ -250,7 +253,8 @@ describe('selected Markdown export', () => {
   it('refuses a volume export when the blueprint volume membership changed after preview', async () => {
     vi.mocked(ipc.invokeWithProjectSession).mockImplementation((async (_context: ProjectSessionContext, channel: string) => {
       if (channel === 'db:draft-export-selection') return { chapters: selected, receipt: selected.map(receipt) } as never
-      if (channel === 'db:blueprint-volume-list') return [{ id: 'volume-1', name: '第1卷', sortOrder: 1 }] as never
+      if (channel === 'db:chapter-volume-list') return [] as never
+    if (channel === 'db:prose-volume-list') return [{ id: 'volume-1', name: '第1卷', sortOrder: 1 }] as never
       if (channel === 'db:blueprint-list-summary') return [{ chapterNumber: 1, volumeId: 'volume-1' }, { chapterNumber: 2, volumeId: 'volume-1' }] as never
       throw new Error(`Unexpected project channel: ${String(channel)}`)
     }) as never)
@@ -262,4 +266,32 @@ describe('selected Markdown export', () => {
     expect(response.error).toContain('数据已变化')
     expect(ipc.invoke).not.toHaveBeenCalledWith('fs:grant-write-file', expect.anything(), expect.anything(), expect.anything())
   })
+})
+
+it('exports an independently assigned prose chapter without requiring a blueprint', async () => {
+  const original = vi.mocked(ipc.invokeWithProjectSession).getMockImplementation()!
+  vi.mocked(ipc.invokeWithProjectSession).mockImplementation((async (context: ProjectSessionContext, channel: string, ...args: unknown[]) => {
+    if (channel === 'db:blueprint-list-summary') return []
+    if (channel === 'db:chapter-volume-list') return [{ chapterNumber: 1, volumeId: 'volume-1' }]
+    return (original as (...args: unknown[]) => unknown)(context, channel, ...args)
+  }) as never)
+  const response = await exportSelectedMarkdown({ range: 'volume', format: 'merged-md', grantId: 'temporary-export-grant',
+    selections: [{ draftId: 11, kind: 'draft' }], volumeId: 'volume-1', expectedChapterNumbers: [1],
+  }, project, session, selected.map(receipt))
+  expect(response.success).toBe(true)
+  expect(fs.readFileSync(path.join(outputRoot, response.path!), 'utf8')).toContain('Café 与月光\r\n第二行')
+})
+
+it('refuses export after a prose chapter moves out of the previewed volume', async () => {
+  const original = vi.mocked(ipc.invokeWithProjectSession).getMockImplementation()!
+  vi.mocked(ipc.invokeWithProjectSession).mockImplementation((async (context: ProjectSessionContext, channel: string, ...args: unknown[]) => {
+    if (channel === 'db:chapter-volume-list') return [{ chapterNumber: 1, volumeId: null }]
+    return (original as (...args: unknown[]) => unknown)(context, channel, ...args)
+  }) as never)
+  const response = await exportSelectedMarkdown({ range: 'volume', format: 'merged-md', grantId: 'temporary-export-grant',
+    selections: [{ draftId: 11, kind: 'draft' }], volumeId: 'volume-1', expectedChapterNumbers: [1],
+  }, project, session, selected.map(receipt))
+  expect(response.success).toBe(false)
+  expect(response.error).toContain('数据已变化')
+  expect(fs.readdirSync(outputRoot)).toHaveLength(0)
 })
