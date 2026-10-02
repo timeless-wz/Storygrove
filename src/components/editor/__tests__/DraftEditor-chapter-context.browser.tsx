@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { page } from 'vitest/browser'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { globalEventBus } from '../../../shared/event-bus'
 import { setActiveProjectSessionContext } from '../../../shared/project-session-context'
 import { assertNoLossOnSerialize, parseChapterBlueprintMarkdown } from '../../../shared/blueprint-v2-markdown'
 import { useEditorStore } from '../../../stores/editor-store'
@@ -478,7 +479,7 @@ describe('DraftEditor 本章创作上下文', () => {
     expect(sidebarRoot()?.textContent).toContain('让主角在码头拿到账本')
   })
 
-  it('同一草稿改绑蓝图期间隐藏旧章要点，元数据重读后才显示新章', async () => {
+  it('改绑成功即显示新章要点，不等待延迟的元数据重读', async () => {
     let boundChapter = 4
     let deferMeta = false
     let resolveMeta: ((value: unknown) => void) | null = null
@@ -529,12 +530,58 @@ describe('DraftEditor 本章创作上下文', () => {
         .find(button => button.textContent?.includes('保存绑定'))
       save?.click()
     })
-    await waitForSidebar('chapter-context-loading')
+    await waitForSidebar('chapter-context-purpose')
+    await vi.waitFor(() => expect(sidebarRoot()?.textContent).toContain('新章目标'))
     expect(sidebarRoot()?.textContent).not.toContain('旧章目标')
+    expect(resolveMeta).not.toBeNull()
 
     await act(async () => { resolveMeta?.(draftMeta(12)) })
-    await waitForSidebar('chapter-context-purpose')
     expect(sidebarRoot()?.textContent).toContain('新章目标')
+  })
+
+  it('目录入口的解绑收据即时应用，保留正文脏状态并拒绝旧会话收据', async () => {
+    installIpc({ boundBlueprintChapter: 4 })
+    openDraftTab({ filePath: FILE_PATH, draftId: DRAFT_ID, chapterNumber: 4 })
+    useEditorStore.setState(state => ({ tabs: state.tabs.map(tab => ({ ...tab, dirty: true, content: '尚未保存的正文' })) }))
+    await renderEditor({ tabId: FILE_PATH })
+    await waitForVditorReady()
+    await waitForSidebar('chapter-context-purpose')
+    // 让后台重读停住，确认即时应用依赖提交收据而不是重开章节。
+    installApi(channel => channel === 'db:draft-get-meta' ? new Promise(() => {}) : [])
+    const receipt = {
+      resources: ['drafts'] as Array<'drafts'>,
+      projectPath: PROJECT_PATH,
+      projectSession: PROJECT_SESSION,
+      blueprintBinding: { draftId: DRAFT_ID, blueprintChapterNumber: null },
+    }
+    await act(async () => globalEventBus.emit('REFRESH_RESOURCE', {
+      ...receipt, projectSession: { ...PROJECT_SESSION, leaseId: 'old-lease' },
+    }))
+    expect(sidebarRoot()?.textContent).toContain('让主角在码头拿到账本')
+    await act(async () => globalEventBus.emit('REFRESH_RESOURCE', receipt))
+    await waitForSidebar('chapter-context-unbound')
+    expect(sidebarRoot()?.textContent).not.toContain('让主角在码头拿到账本')
+    expect(useEditorStore.getState().tabs[0]).toMatchObject({ dirty: true, content: '尚未保存的正文' })
+  })
+
+  it('绑定失败或取消不清空当前上下文，也不触发元数据重读', async () => {
+    installIpc({ boundBlueprintChapter: 4 })
+    await renderEditor()
+    await waitForVditorReady()
+    await waitForSidebar('chapter-context-purpose')
+    const originalInvoke = invoke.getMockImplementation()! as (channel: string, ...args: unknown[]) => Promise<unknown>
+    invoke.mockImplementation(async (channel: string, ...args: unknown[]) => channel === 'db:draft-set-blueprint'
+      ? { success: false, error: '保存失败' }
+      : originalInvoke(channel, ...args))
+    const readsBefore = invoke.mock.calls.filter(([channel]) => channel === 'db:draft-get-meta').length
+    await act(async () => document.body.querySelector<HTMLButtonElement>('[title="绑定或更换章节蓝图"]')!.click())
+    await expect.element(page.getByRole('heading', { name: '绑定章节蓝图' })).toBeVisible()
+    await act(async () => Array.from(document.body.querySelectorAll('button')).find(button => button.textContent === '保存绑定')!.click())
+    expect(sidebarRoot()?.textContent).toContain('让主角在码头拿到账本')
+    await expect.element(page.getByRole('heading', { name: '绑定章节蓝图' })).toBeVisible()
+    await act(async () => Array.from(document.body.querySelectorAll('button')).find(button => button.textContent === '取消')!.click())
+    expect(sidebarRoot()?.textContent).toContain('让主角在码头拿到账本')
+    expect(invoke.mock.calls.filter(([channel]) => channel === 'db:draft-get-meta')).toHaveLength(readsBefore)
   })
 
   it('跳转到蓝图与场景画布：打开同一章节蓝图 Tab，并带上绑定章号与目标视图', async () => {

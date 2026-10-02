@@ -358,8 +358,18 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
   }, [bindingRevision, currentProject, filePath, projectKey, tabId, text])
 
   useEffect(() => globalEventBus.on('REFRESH_RESOURCE', payload => {
-    if (isProjectSessionCurrent(payload.projectSession) && isProjectSessionPath(payload.projectSession, projectKey)) setBindingRevision(revision => revision + 1)
-  }), [projectKey])
+    if (!isProjectSessionCurrent(payload.projectSession) || !isProjectSessionPath(payload.projectSession, projectKey)) return
+    if (!payload.resources.some(resource => ['all', 'drafts', 'blueprints'].includes(resource))) return
+    const binding = payload.blueprintBinding
+    if (binding) {
+      setMeta(previous => previous?.id === binding.draftId
+        ? { ...previous, blueprintChapterNumber: binding.blueprintChapterNumber ?? undefined }
+        : previous)
+      // 立即隐藏旧上下文；只替换绑定元数据，正文与未保存输入保持原样。
+      if (binding.draftId === meta?.id) setChapterContext(null)
+    }
+    setBindingRevision(revision => revision + 1)
+  }), [meta?.id, projectKey])
 
   const status: DraftStatus = tabDraftStatus ?? meta?.status ?? 'draft'
   const isReadonly = status === 'archived'
@@ -1233,16 +1243,7 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
       </Dialog>
       <BlueprintBindingDialog
         open={bindingDialogOpen}
-        onOpenChange={(open) => {
-          setBindingDialogOpen(open)
-          // 对话框里的保存可能改写绑定关系；关闭时重新读取 meta 与本章上下文，
-          // 让侧栏立刻反映新的绑定，而不是停留在旧快照上。
-          if (!open) {
-            setMeta(null)
-            setChapterContext(null)
-            setBindingRevision(revision => revision + 1)
-          }
-        }}
+        onOpenChange={setBindingDialogOpen}
         target={meta ? {
           draftId: meta.id,
           chapterNumber: meta.chapterNumber,

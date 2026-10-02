@@ -39,6 +39,8 @@ export interface EventPayloadMap {
   }
   'REFRESH_RESOURCE': {
     resources: Array<'fileTree' | 'characterCards' | 'drafts' | 'blueprints' | 'all'>
+    /** 已成功持久化的绑定收据；编辑器可即时应用，不等待目录刷新。 */
+    blueprintBinding?: { draftId: number; blueprintChapterNumber: number | null }
     /** 事件生产者开始操作时冻结的项目路径（只作显示/定位，不是身份）。 */
     projectPath: string
     /** 完整冻结身份；同路径重新打开后旧事件必须被丢弃。 */

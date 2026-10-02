@@ -79,6 +79,7 @@ export function BlueprintBindingDialog({
       if (!result.success) throw new Error(result.error || text('绑定失败', 'Could not bind the blueprint'))
       globalEventBus.emit('REFRESH_RESOURCE', {
         resources: ['drafts', 'fileTree', 'blueprints'],
+        blueprintBinding: { draftId: target.draftId, blueprintChapterNumber: selectedChapter },
         projectPath: projectSession.projectPath,
         projectSession,
       })
