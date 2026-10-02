@@ -1,3 +1,4 @@
+import { ProseDirectoryRepository } from './prose-directory-repository'
 /**
  * DraftRepository — 草稿 (drafts 表 + contents 联动)
  *
@@ -16,7 +17,7 @@ const DRAFT_META_SELECT = `
          blueprints.title AS blueprint_title
   FROM drafts
   LEFT JOIN finalization_outbox
-    ON drafts.status = 'finalized' AND finalization_outbox.draft_id = drafts.id
+    ON finalization_outbox.draft_id = drafts.id
   LEFT JOIN blueprints
     ON blueprints.chapter_number = COALESCE(drafts.blueprint_chapter_number, drafts.chapter_number)
 `
@@ -25,6 +26,7 @@ const DRAFT_META_SELECT = `
 export interface DraftMeta {
     id: number
     chapterNumber: number
+    displayNumber?: number
     blueprintChapterNumber?: number
     chapterTitle?: string
     version: number
@@ -269,7 +271,9 @@ function rowsToMeta(db: BetterSqlite3.Database, rows: Record<string, unknown>[])
         parsed.flatMap(item => item.dependencies.map(dependency => dependency.draftId)),
     )
     const memo = new Map<number, boolean>()
-    return parsed.map(({ row, dependencies, valid }) => rowToMeta(row, dependencies, valid, states, memo))
+    const numbers = new Map(ProseDirectoryRepository.order().map(row => [row.chapterNumber, row.displayNumber]))
+    return parsed.map(({ row, dependencies, valid }) => ({ ...rowToMeta(row, dependencies, valid, states, memo),
+      ...(row.status === 'finalized' && numbers.get(row.chapter_number as number) ? { displayNumber: numbers.get(row.chapter_number as number)! } : {}) }))
 }
 
 /** DB 行 → DraftMeta */
@@ -352,6 +356,8 @@ export class DraftRepository {
         blueprintChapterNumber?: number | null
         volumeId?: string | null
         chapterTitle?: string
+        insertRelativeTo?: number
+        insertSide?: 'before' | 'after'
         version?: number
         source: 'write' | 'rewrite'
         content: string
@@ -363,9 +369,10 @@ export class DraftRepository {
 
         // 事务内原子分配 version，避免 getNextVersion + create 竞态
         const tx = db.transaction(() => {
-            if (params.volumeId !== undefined && db.prepare('SELECT 1 FROM drafts WHERE chapter_number = ? AND status != ?').get(params.chapterNumber, 'archived')) {
-                throw new Error('章节号已存在，请选择新的章节号')
-            }
+            if (params.insertRelativeTo !== undefined && db.prepare('SELECT 1 FROM drafts WHERE chapter_number = ?').get(params.chapterNumber)) throw new Error('插入新章节需使用新的草稿章号；同章候选稿请使用添加候选稿')
+            const priorChapter = params.volumeId !== undefined ? db.prepare(`SELECT d.blueprint_chapter_number, b.volume_id
+                FROM drafts d LEFT JOIN blueprints b ON b.chapter_number = d.blueprint_chapter_number
+                WHERE d.chapter_number = ? ORDER BY CASE WHEN d.blueprint_chapter_number IS NOT NULL THEN 0 ELSE 1 END, d.id LIMIT 1`).get(params.chapterNumber) as { blueprint_chapter_number: number | null; volume_id: string | null } | undefined : undefined
             const blueprintChapterNumber = params.blueprintChapterNumber ?? null
             if (blueprintChapterNumber !== null) {
                 if (!Number.isSafeInteger(blueprintChapterNumber) || blueprintChapterNumber < 1) {
@@ -409,7 +416,12 @@ export class DraftRepository {
                 if (typeof params.chapterTitle !== 'string' || params.chapterTitle.length > 500) throw new Error('章节名称无效或超过 500 字')
                 db.prepare('UPDATE drafts SET imported_title = ? WHERE id = ?').run(params.chapterTitle.trim(), Number(result.lastInsertRowid))
             }
-            if (params.volumeId !== undefined) ChapterVolumeRepository.set(params.chapterNumber, params.volumeId)
+            if (params.volumeId !== undefined && !db.prepare('SELECT 1 FROM chapter_volume_assignments WHERE chapter_number = ?').get(params.chapterNumber)) {
+                const inherited = priorChapter?.blueprint_chapter_number ? priorChapter.volume_id || 'volume-1' : null
+                const volume = priorChapter ? (ChapterVolumeRepository.volumes().some(row => row.id === inherited) ? inherited : null) : params.volumeId
+                ChapterVolumeRepository.set(params.chapterNumber, volume)
+            }
+            if (params.insertRelativeTo !== undefined) ProseDirectoryRepository.move(params.chapterNumber, params.insertRelativeTo, params.insertSide ?? 'before')
             return Number(result.lastInsertRowid)
         })
 
@@ -423,7 +435,7 @@ export class DraftRepository {
 
         const rows = db.prepare(`
       ${DRAFT_META_SELECT}
-      WHERE drafts.chapter_number = ?
+      WHERE drafts.chapter_number = ? AND drafts.status != 'archived'
       ORDER BY drafts.version ASC
     `).all(chapterNumber) as Record<string, unknown>[]
 
@@ -437,6 +449,7 @@ export class DraftRepository {
 
         const rows = db.prepare(`
       ${DRAFT_META_SELECT}
+      WHERE drafts.status != 'archived'
       ORDER BY drafts.chapter_number ASC, drafts.version ASC
     `).all() as Record<string, unknown>[]
 
@@ -450,7 +463,7 @@ export class DraftRepository {
 
         const row = db.prepare(`
           ${DRAFT_META_SELECT}
-          WHERE drafts.id = ?
+          WHERE drafts.id = ? AND drafts.status != 'archived'
         `).get(id) as Record<string, unknown> | undefined
 
         return row ? rowsToMeta(db, [row])[0] ?? null : null
@@ -472,7 +485,7 @@ export class DraftRepository {
 
         const row = db.prepare(`
       ${DRAFT_META_SELECT}
-      WHERE drafts.chapter_number = ?
+      WHERE drafts.chapter_number = ? AND drafts.status != 'archived'
       ORDER BY drafts.version DESC LIMIT 1
     `).get(chapterNumber) as Record<string, unknown> | undefined
 
@@ -546,7 +559,7 @@ export class DraftRepository {
     /** 更新草稿正文（同时更新 contents 表） */
     static updateContent(id: number, content: string, wordCount: number): void {
         const meta = DraftRepository.getMeta(id)
-        if (!meta) return
+        if (!meta) throw new Error('稿件不存在或已在回收站，请刷新后重试')
         ContentRepository.updateBody(meta.contentId, content)
 
         const db = getProjectDb()
@@ -609,6 +622,9 @@ export class DraftRepository {
         if (!db) throw new Error('[DraftRepository] 数据库未连接')
 
         const tx = db.transaction(() => {
+            for (const table of ['prose_trash', 'prose_chapter_order', 'prose_deleted_volumes']) {
+                if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)) db.exec(`DELETE FROM ${table}`)
+            }
             db.prepare('DELETE FROM finalized_draft_import_operations').run()
             db.prepare('DELETE FROM post_process_steps').run()
             db.prepare('DELETE FROM post_process_runs').run()

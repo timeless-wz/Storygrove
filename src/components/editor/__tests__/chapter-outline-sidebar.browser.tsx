@@ -2,6 +2,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { page } from 'vitest/browser'
+import { toast } from '../../ui/Toast'
 import '../../../index.css'
 import { setActiveProjectSessionContext } from '../../../shared/project-session-context'
 import { useLocaleStore } from '../../../stores/locale-store'
@@ -9,8 +10,6 @@ import { useProjectStore } from '../../../stores/project-store'
 import { registerEditorExitSaveHandler, useEditorStore, type EditorTab } from '../../../stores/editor-store'
 import { openChapterFile } from '../../panels/sidebar/sidebar-file-openers'
 import ChapterOutlineSidebar from '../ChapterOutlineSidebar'
-import { confirm } from '../../ui/Confirm'
-import { deleteFinalizedChapter } from '../../panels/sidebar/finalized-chapter-deletion'
 import { useDraftStore } from '../../../stores/draft-store'
 import { globalEventBus } from '../../../shared/event-bus'
 
@@ -308,7 +307,7 @@ describe('two-level prose directory', () => {
     const calls: unknown[][] = []
     let refuse = true
     invoke.mockImplementation(async (channel, ...args: unknown[]) => {
-      if (channel === 'db:chapter-volume-set') { calls.push(args); return refuse ? { success: false, error: '移动失败' } : { success: true } }
+      if (channel === 'db:prose-directory-action') { calls.push(args); return refuse ? { success: false, error: '移动失败' } : { success: true } }
       return original(channel)
     })
     try {
@@ -321,7 +320,7 @@ describe('two-level prose directory', () => {
       refuse = false
       await page.getByRole('button', { name: '确认移动' }).click()
       await vi.waitFor(() => expect(document.querySelector('#prose-move-volume')).toBeNull())
-      expect(calls[0].slice(0, 3)).toEqual([1, null, projectPath])
+      expect(calls[0][0]).toMatchObject({ type: 'relocate', chapterNumber: 1, volumeId: null })
     } finally { invoke.mockImplementation(original) }
   })
 })
@@ -333,7 +332,7 @@ it('captures the second-level directory on desktop and narrow screens with usabl
   await act(async () => root.render(<><ChapterOutlineSidebar tab={{ ...tab, type: 'chapter-directory', proseDirectoryKind: 'draft' }} /><div className="chapter-directory-empty" style={{ flex: 1 }}>展开左侧的卷，选择章节开始写作；也可以添加卷或章节。</div></>))
   await vi.waitFor(() => expect(container.textContent).toContain('第一卷'))
   await act(async () => container.querySelector<HTMLButtonElement>('.chapter-outline-arrow[aria-expanded]')!.click())
-  expect(container.textContent).toContain('添加章节')
+  expect(container.querySelector('[aria-label="向第一卷添加章节"]')).not.toBeNull()
   await page.screenshot({ path: '../../../../output/playwright/prose-directory-desktop.png' })
   await act(async () => {
     await page.viewport(800, 700)
@@ -343,38 +342,71 @@ it('captures the second-level directory on desktop and narrow screens with usabl
   await page.screenshot({ path: '../../../../output/playwright/prose-directory-narrow.png' })
 })
 
-it('places chapter creation inside a selected volume and retains volume/draft deletion actions', async () => {
+it('places plus on the volume row and exposes reversible deletion through a context menu', async () => {
   const original = invoke.getMockImplementation()!
-  const calls: string[] = []
+  const actions: unknown[] = []
   const loadDrafts = vi.spyOn(useDraftStore.getState(), 'loadChapterDrafts').mockResolvedValue(undefined)
   invoke.mockImplementation(async (channel, ...args: unknown[]) => {
-    calls.push(channel)
-    if (channel === 'db:draft-delete' || channel === 'db:prose-volume-delete') return { success: true }
+    if (channel === 'db:prose-directory-action') { actions.push(args[0]); return { success: true, ...(actions.length === 1 ? { trashId: 7 } : {}) } }
+    if (channel === 'db:prose-trash') return []
     return original(channel, ...args)
   })
   try {
     await act(async () => root.render(<ChapterOutlineSidebar tab={{ ...tab, type: 'chapter-directory', proseDirectoryKind: 'draft' }} />))
     await vi.waitFor(() => expect(container.textContent).toContain('第一卷'))
-    expect(container.querySelector('.chapter-outline-actions')?.textContent).not.toContain('添加章节')
     expect(container.querySelector('.chapter-outline-volume-actions')).toBeNull()
-    await act(async () => container.querySelector<HTMLButtonElement>('.chapter-outline-volume-button')!.click())
-    expect(container.querySelector('.chapter-outline-volume-actions')?.textContent).toContain('添加章节')
-    expect(container.querySelectorAll('.chapter-outline-chapter')).toHaveLength(0)
+    expect(container.querySelector('.chapter-outline-actions')?.textContent).not.toContain('添加章节')
+    expect(container.querySelector('[aria-label="向第一卷添加章节"]')).not.toBeNull()
+    expect(container.querySelector('.chapter-outline-delete')).toBeNull()
     await act(async () => container.querySelector<HTMLButtonElement>('.chapter-outline-arrow[aria-expanded]')!.click())
-    await page.getByRole('button', { name: '删除第 1 章草稿 v1' }).click()
-    await vi.waitFor(() => expect(calls).toContain('db:draft-delete'))
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('这一稿'), expect.objectContaining({ danger: true }))
-    await page.getByRole('button', { name: '删除第一卷', exact: true }).click()
-    await vi.waitFor(() => expect(calls).toContain('db:prose-volume-delete'))
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('未归卷'), expect.objectContaining({ danger: true }))
+    await page.getByRole('button', { name: '稿件 v1 操作' }).click()
+    await page.getByRole('button', { name: '移入回收站', exact: true }).click()
+    await vi.waitFor(() => expect(actions[0]).toEqual({ type: 'trash-draft', draftId: 1 }))
+    await page.getByRole('button', { name: '撤销删除', exact: true }).click()
+    await vi.waitFor(() => expect(actions[1]).toEqual({ type: 'restore', trashId: 7 }))
+    await act(async () => container.querySelector('.chapter-outline-volume-row')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 170, clientY: 170 })))
+    await page.screenshot({ path: '../../../../output/playwright/prose-directory-context-menu.png' })
+    await page.getByRole('button', { name: '重命名卷', exact: true }).click()
+    await page.getByRole('textbox', { name: '名称', exact: true }).fill('新的卷名')
+    await page.getByRole('button', { name: '保存名称', exact: true }).click()
+    await vi.waitFor(() => expect(actions[2]).toEqual({ type: 'rename-volume', volumeId: 'volume-1', name: '新的卷名' }))
+    await page.getByRole('button', { name: '回收站', exact: true }).click()
+    await vi.waitFor(() => expect(document.body.textContent).toContain('项目回收站'))
+    await page.screenshot({ path: '../../../../output/playwright/prose-directory-recycle-bin.png' })
   } finally { invoke.mockImplementation(original); loadDrafts.mockRestore() }
 })
 
-it('routes finalized prose deletion through the existing publication cleanup action', async () => {
-  await act(async () => root.render(<ChapterOutlineSidebar tab={{ ...tab, type: 'chapter-directory', proseDirectoryKind: 'manuscript' }} />))
-  await vi.waitFor(() => expect(container.textContent).toContain('第一卷'))
-  await act(async () => container.querySelector<HTMLButtonElement>('.chapter-outline-arrow[aria-expanded]')!.click())
-  await page.getByRole('button', { name: '删除第 1 章正文 v2' }).click()
-  expect(deleteFinalizedChapter).toHaveBeenCalledWith(expect.objectContaining({ draftId: 2, chapterNumber: 1, surface: 'manuscript', projectPath }))
-  expect(invoke.mock.calls.some(([channel]) => channel === 'db:draft-delete')).toBe(false)
+it('opens insertion at the selected chapter and preserves all candidate drafts', async () => {
+  const original = invoke.getMockImplementation()!
+  invoke.mockImplementation(async (channel, ...args: unknown[]) => {
+    const result = await original(channel, ...args)
+    if (channel === 'db:draft-list-all') return [...(result as unknown[]), { id: 9, chapterNumber: 1, version: 3, status: 'draft', chapterTitle: '另一稿', blueprintChapterNumber: 1 }]
+    return result
+  })
+  try {
+    await act(async () => root.render(<ChapterOutlineSidebar tab={{ ...tab, type: 'chapter-directory', proseDirectoryKind: 'draft' }} />))
+    await vi.waitFor(() => expect(container.textContent).toContain('第一卷'))
+    await act(async () => container.querySelector<HTMLButtonElement>('.chapter-outline-arrow[aria-expanded]')!.click())
+    expect(container.textContent).toContain('草稿 v1')
+    expect(container.textContent).toContain('草稿 v3')
+    await act(async () => container.querySelector('.chapter-outline-chapter')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 170, clientY: 220 })))
+    await page.getByRole('button', { name: '在前面插入新章节', exact: true }).click()
+    expect(document.body.querySelector<HTMLInputElement>('#new-draft-chapter-number')?.disabled).toBe(true)
+    expect(document.body.querySelector('#new-draft-chapter-title')).not.toBeNull()
+  } finally { invoke.mockImplementation(original) }
+})
+
+it('preserves unsaved input when saving a legacy tab fails before trashing its draft', async () => {
+  useEditorStore.setState({ tabs: [{ ...tab, filePath: 'vela://draft/1', draftId: undefined, dirty: true, content: '不能丢失的输入' }] })
+  const unregister = registerEditorExitSaveHandler({ tabId: tab.id, type: 'chapter', projectKey: projectPath, save: async () => { throw new Error('保存失败') } })
+  try {
+    await act(async () => root.render(<ChapterOutlineSidebar tab={{ ...tab, type: 'chapter-directory', proseDirectoryKind: 'draft' }} />))
+    await vi.waitFor(() => expect(container.textContent).toContain('第一卷'))
+    await act(async () => container.querySelector<HTMLButtonElement>('.chapter-outline-arrow[aria-expanded]')!.click())
+    await page.getByRole('button', { name: '稿件 v1 操作' }).click()
+    await page.getByRole('button', { name: '移入回收站', exact: true }).click()
+    await vi.waitFor(() => expect(toast.error).toHaveBeenCalled())
+    expect(invoke.mock.calls.some(([channel]) => channel === 'db:prose-directory-action')).toBe(false)
+    expect(useEditorStore.getState().tabs[0]).toMatchObject({ dirty: true, content: '不能丢失的输入' })
+  } finally { unregister() }
 })

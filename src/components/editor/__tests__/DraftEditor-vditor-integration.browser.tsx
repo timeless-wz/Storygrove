@@ -31,6 +31,7 @@ const READY_TIMEOUT = 20000
 
 let root: Root
 let container: HTMLDivElement
+let published = false
 let invoke: ReturnType<typeof vi.fn>
 let startWorkflow: ReturnType<typeof vi.fn>
 const originalLocaleState = useLocaleStore.getState()
@@ -66,6 +67,7 @@ async function typeIntoProse(textToInsert: string): Promise<void> {
 
 beforeEach(async () => {
   useLocaleStore.setState({ locale: 'zh-CN', initialized: true })
+  published = false
   mockConfirm.mockClear()
   mockConfirm.mockResolvedValue(true)
   container = document.createElement('div')
@@ -79,7 +81,7 @@ beforeEach(async () => {
         id: draftId,
         chapterNumber: draftId === 11 ? 3 : 2,
         version: 1,
-        status: 'draft',
+        status: published ? 'finalized' : 'draft',
         source: 'write',
         contentId: 100,
         wordCount: INITIAL_CONTENT.length,
@@ -99,7 +101,11 @@ beforeEach(async () => {
       : { content: INITIAL_CONTENT }
     if (channel === 'db:revision-get-pending' || channel === 'db:review-list') return []
     if (channel === 'db:draft-update-content') return { success: true }
+    if (channel === 'db:draft-get-finalized') return null
+    if (channel === 'db:prose-order') return [{ chapterNumber: 2, position: 1, displayNumber: null }, { chapterNumber: 3, position: 2, displayNumber: null }]
+    if (channel === 'db:draft-list-all') return [{ id: 10, chapterNumber: 2, status: 'draft' }, { id: 11, chapterNumber: 3, status: 'draft' }]
     if (channel === 'publication:publish') {
+      published = true
       return { success: true, committed: true, finalizationId: 'publication-10', publicationStatus: 'published' }
     }
     throw new Error(`Unexpected IPC channel: ${channel}`)

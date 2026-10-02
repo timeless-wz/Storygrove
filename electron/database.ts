@@ -213,6 +213,12 @@ export function initProjectDatabase(projectPath: string, importSourceSecret?: Bu
   // 创建表结构
   createTables(projectDb, importSourceSecret)
   ensureForeshadowingSchema(projectDb)
+  // Retain every former manuscript as an editable candidate; one current manuscript per chapter.
+  projectDb.exec(`UPDATE drafts SET status = 'draft' WHERE status = 'finalized' AND EXISTS (
+    SELECT 1 FROM drafts newer WHERE newer.chapter_number = drafts.chapter_number AND newer.status = 'finalized'
+      AND (newer.version > drafts.version OR (newer.version = drafts.version AND newer.id > drafts.id))
+  ); CREATE UNIQUE INDEX IF NOT EXISTS idx_one_current_manuscript ON drafts(chapter_number) WHERE status = 'finalized';`)
+
 
   // 旧项目只有「一张项目底图 + 图层筛选」的结构。一次性把旧图层转换成同名地图，
   // 并把旧底图迁入其中一张地图的受控目录；迁移不删除任何既有地点、图层或连接。

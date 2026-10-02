@@ -54,6 +54,7 @@ beforeEach(() => {
   setActiveProjectSessionContext(projectSession)
   vi.mocked(ipc.invoke).mockResolvedValue({ success: true } as never)
   vi.mocked(ipc.invokeWithProjectSession).mockImplementation((async (_session: ProjectSessionContext, channel: string) => {
+    if (channel === 'db:prose-order') return [] as never
     if (channel === 'db:draft-export-snapshot') return [{
       draftId: 1,
       chapterNumber: 1,
@@ -160,7 +161,8 @@ describe('exportNovel project session ownership', () => {
   it('passes mixed UTF-8 finalized prose to the export capability without transcoding', async () => {
     const finalizedContent = 'The sign reads “夜航 Café” — déjà vu.'
     vi.mocked(ipc.invokeWithProjectSession).mockImplementation((async (_session: ProjectSessionContext, channel: string) => {
-      if (channel === 'db:draft-export-snapshot') return [{
+      if (channel === 'db:prose-order') return [] as never
+    if (channel === 'db:draft-export-snapshot') return [{
         draftId: 1, chapterNumber: 1, version: 1, title: '', content: finalizedContent,
         finalizationId: 'finalization-1', contentHash: 'a'.repeat(64),
       }] as never
@@ -201,7 +203,8 @@ describe('exportNovel project session ownership', () => {
     expectedHeading,
   }) => {
     vi.mocked(ipc.invokeWithProjectSession).mockImplementation((async (_session: ProjectSessionContext, channel: string) => {
-      if (channel === 'db:draft-export-snapshot') return [{
+      if (channel === 'db:prose-order') return [] as never
+    if (channel === 'db:draft-export-snapshot') return [{
         draftId: 1, chapterNumber: 1, version: 1, title, content: 'Final chapter',
         finalizationId: 'finalization-1', contentHash: 'a'.repeat(64),
       }] as never
@@ -363,7 +366,8 @@ describe('exportNovel project session ownership', () => {
   it('uses a fresh split directory so a later export cannot retain a withdrawn chapter', async () => {
     let exportIndex = 0
     vi.mocked(ipc.invokeWithProjectSession).mockImplementation((async (_session: ProjectSessionContext, channel: string) => {
-      if (channel === 'db:draft-export-snapshot') {
+      if (channel === 'db:prose-order') return [] as never
+    if (channel === 'db:draft-export-snapshot') {
         const snapshots = [
           [
             { draftId: 1, chapterNumber: 1, version: 1, title: '', content: 'one', ...authority(1) },
@@ -417,6 +421,7 @@ describe('exportNovel project session ownership', () => {
         draftId: 1, chapterNumber: 1, version: 1, title: '', content: 'one',
         ...authority(1),
       }] as never)
+      .mockResolvedValueOnce([] as never)
       .mockResolvedValueOnce(false as never)
 
     await expect(exportNovel(
@@ -441,8 +446,11 @@ describe('exportNovel project session ownership', () => {
         { draftId: 1, chapterNumber: 1, version: 1, title: '', content: 'one', ...authority(1) },
         { draftId: 2, chapterNumber: 2, version: 1, title: '', content: 'two', ...authority(2) },
       ] as never)
+      .mockResolvedValueOnce([] as never)
       .mockResolvedValueOnce(true as never)
+      .mockResolvedValueOnce([] as never)
       .mockResolvedValueOnce(true as never)
+      .mockResolvedValueOnce([] as never)
       .mockResolvedValueOnce(false as never)
 
     await expect(exportNovel(

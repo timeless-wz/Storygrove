@@ -84,6 +84,7 @@ beforeEach(() => {
   vi.mocked(ipc.invokeWithProjectSession).mockImplementation((async (_context: ProjectSessionContext, channel: string) => {
     if (channel === 'db:draft-export-selection') return { chapters: selected, receipt: selected.map(receipt) } as never
     if (channel === 'db:draft-export-selection-current') return true as never
+    if (channel === 'db:prose-order') return [] as never
     if (channel === 'db:chapter-volume-list') return [] as never
     if (channel === 'db:prose-volume-list') return [{ id: 'volume-1', name: '第1卷', sortOrder: 1 }] as never
     if (channel === 'db:blueprint-list-summary') return [{ chapterNumber: 1, volumeId: 'volume-1' }] as never
@@ -195,6 +196,7 @@ describe('selected Markdown export', () => {
         receipt: selected.map(receipt),
       } as never
       if (channel === 'db:draft-export-selection-current') return true as never
+      if (channel === 'db:prose-order') return [] as never
       if (channel === 'db:chapter-volume-list') return [] as never
     if (channel === 'db:prose-volume-list') return [{ id: 'volume-1', name: '第1卷', sortOrder: 1 }] as never
       if (channel === 'db:blueprint-list-summary') return [
@@ -218,6 +220,7 @@ describe('selected Markdown export', () => {
   it('refuses a volume export when one chapter has no explicitly selected version', async () => {
     vi.mocked(ipc.invokeWithProjectSession).mockImplementation((async (_context: ProjectSessionContext, channel: string) => {
       if (channel === 'db:draft-export-selection') return { chapters: selected, receipt: selected.map(receipt) } as never
+      if (channel === 'db:prose-order') return [] as never
       if (channel === 'db:chapter-volume-list') return [] as never
     if (channel === 'db:prose-volume-list') return [{ id: 'volume-1', name: '第1卷', sortOrder: 1 }] as never
       if (channel === 'db:blueprint-list-summary') return [
@@ -253,6 +256,7 @@ describe('selected Markdown export', () => {
   it('refuses a volume export when the blueprint volume membership changed after preview', async () => {
     vi.mocked(ipc.invokeWithProjectSession).mockImplementation((async (_context: ProjectSessionContext, channel: string) => {
       if (channel === 'db:draft-export-selection') return { chapters: selected, receipt: selected.map(receipt) } as never
+      if (channel === 'db:prose-order') return [] as never
       if (channel === 'db:chapter-volume-list') return [] as never
     if (channel === 'db:prose-volume-list') return [{ id: 'volume-1', name: '第1卷', sortOrder: 1 }] as never
       if (channel === 'db:blueprint-list-summary') return [{ chapterNumber: 1, volumeId: 'volume-1' }, { chapterNumber: 2, volumeId: 'volume-1' }] as never

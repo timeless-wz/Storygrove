@@ -8,6 +8,7 @@ export interface FinalizationSnapshot {
   draftId: number
   chapterNumber: number
   chapterTitle: string
+  expectedCurrentDraftId?: number | null
   content: string
   contentRevision: number
 }

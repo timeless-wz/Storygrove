@@ -59,6 +59,7 @@ export function registerFinalizationController(): void {
         draftId: candidate.draftId,
         chapterNumber: candidate.chapterNumber,
         chapterTitle: candidate.chapterTitle,
+        expectedCurrentDraftId: candidate.expectedCurrentDraftId,
         content: candidate.content,
         contentRevision: candidate.contentRevision,
       })
@@ -101,6 +102,7 @@ export function registerFinalizationController(): void {
         draftId: candidate.draftId,
         chapterNumber: candidate.chapterNumber,
         chapterTitle: candidate.chapterTitle,
+        expectedCurrentDraftId: candidate.expectedCurrentDraftId,
         content: candidate.content,
         contentRevision: candidate.contentRevision,
       })

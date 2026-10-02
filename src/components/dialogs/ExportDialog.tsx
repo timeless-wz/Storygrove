@@ -1,3 +1,4 @@
+import type { ProseOrderEntry } from '../../shared/prose-directory'
 import { volumeChapterNumbers as getVolumeChapterNumbers } from '../../shared/prose-volume'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CheckCircle2, Download, FileText, Files, Type, XCircle, RefreshCw } from 'lucide-react'
@@ -37,6 +38,7 @@ import { resolveWritingLanguage } from '../../shared/writing-language'
 
 type ExportScope = 'full-book' | 'chapter' | 'volume' | 'settings'
 type SelectionCatalog = {
+  order: ProseOrderEntry[]
   drafts: DraftMeta[]
   assignments: Array<{ chapterNumber: number; volumeId: string | null }>
   blueprints: BlueprintListSummary[]
@@ -101,16 +103,17 @@ export default function ExportDialog({ isOpen, onClose }: { isOpen: boolean; onC
     setCatalogError('')
     setPreview(null)
     try {
-      const [drafts, blueprints, volumes, finalized, assignments, planningVolumes] = await Promise.all([
+      const [drafts, blueprints, volumes, finalized, assignments, planningVolumes, order] = await Promise.all([
         ipc.invokeWithProjectSession(session, 'db:draft-list-all', session.projectPath),
         ipc.invokeWithProjectSession(session, 'db:blueprint-list-summary', session.projectPath),
         ipc.invokeWithProjectSession(session, 'db:prose-volume-list', session.projectPath),
         ipc.invokeWithProjectSession(session, 'db:draft-export-snapshot', session.projectPath),
         ipc.invokeWithProjectSession(session, 'db:chapter-volume-list', session.projectPath),
         ipc.invokeWithProjectSession(session, 'db:blueprint-volume-list', session.projectPath),
+        ipc.invokeWithProjectSession(session, 'db:prose-order', session.projectPath),
       ])
       if (!isProjectSessionCurrent(session)) return
-      const value = { drafts, blueprints, volumes, finalized, assignments: assignments ?? [], planningVolumes }
+      const value = { order: order ?? [], drafts, blueprints, volumes, finalized, assignments: assignments ?? [], planningVolumes }
       setCatalog({ session, value })
       const firstChapter = [...new Set([
         ...drafts.map(draft => draft.chapterNumber),
@@ -141,6 +144,7 @@ export default function ExportDialog({ isOpen, onClose }: { isOpen: boolean; onC
     return () => { cancelled = true }
   }, [isOpen, loadCatalog])
 
+  const displayNumber = (number: number) => activeCatalog?.order.find(row => row.chapterNumber === number)?.displayNumber ?? number
   const finalByChapter = useMemo(() => {
     const map = new Map<number, SelectionCatalog['finalized'][number]>()
     for (const item of activeCatalog?.finalized ?? []) map.set(item.chapterNumber, item)
@@ -346,7 +350,7 @@ export default function ExportDialog({ isOpen, onClose }: { isOpen: boolean; onC
               {scope === 'chapter' && activeCatalog && (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <label className="space-y-1 text-xs"><span>{text('章号', 'Chapter')}</span><select className="w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2" value={chapterNumber} onChange={event => { setChapterNumber(event.target.value); setPreview(null) }}>
-                    <option value="">{text('选择章号', 'Choose a chapter')}</option>{chapterNumbers.map(number => <option key={number} value={number}>{text(`第 ${number} 章`, `Chapter ${number}`)}</option>)}
+                    <option value="">{text('选择章号', 'Choose a chapter')}</option>{chapterNumbers.map(number => <option key={number} value={number}>{text(`第 ${displayNumber(number)} 章`, `Chapter ${displayNumber(number)}`)}</option>)}
                   </select></label>
                   {chapterNumber && <label className="space-y-1 text-xs"><span>{text('该章导出版本', 'Version to export')}</span><select className="w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2" value={selectedVersions[Number(chapterNumber)] ?? ''} onChange={event => { setSelectedVersions(previous => ({ ...previous, [Number(chapterNumber)]: event.target.value })); setPreview(null) }}>
                     <option value="">{text('明确选择一个版本', 'Choose exactly one version')}</option>{getChapterOptions(Number(chapterNumber)).map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
@@ -365,7 +369,7 @@ export default function ExportDialog({ isOpen, onClose }: { isOpen: boolean; onC
                       const options = getChapterOptions(number)
                       const blueprint = activeCatalog.blueprints.find(item => item.chapterNumber === number)
                       return <label key={number} className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-[minmax(120px,0.7fr)_minmax(240px,1.3fr)] sm:items-center">
-                        <span>{text(`第 ${number} 章`, `Chapter ${number}`)}{blueprint?.title ? ` · ${blueprint.title}` : ''}</span>
+                        <span>{text(`第 ${displayNumber(number)} 章`, `Chapter ${displayNumber(number)}`)}{blueprint?.title ? ` · ${blueprint.title}` : ''}</span>
                         <select className="w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] p-2" value={selectedVersions[number] ?? ''} onChange={event => { setSelectedVersions(previous => ({ ...previous, [number]: event.target.value })); setPreview(null) }}>
                           <option value="">{options.length ? text('请选择草稿版本或正文', 'Choose a draft or finalized text') : text('缺少可导出版本', 'No exportable version')}</option>{options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                         </select>
@@ -393,7 +397,7 @@ export default function ExportDialog({ isOpen, onClose }: { isOpen: boolean; onC
                 <div className="mb-2 font-medium">{text('将导出的章节与正文预览', 'Chapters and prose selected for export')}</div>
                 {preview.chapters.map(chapter => {
                   const chapterLabel = chapter.kind === 'finalized'
-                    ? text(`第 ${chapter.chapterNumber} 章 · 正文 v${chapter.version}`, `Chapter ${chapter.chapterNumber} · Manuscript v${chapter.version}`)
+                    ? text(`第 ${displayNumber(chapter.chapterNumber)} 章 · 正文 v${chapter.version}`, `Chapter ${displayNumber(chapter.chapterNumber)} · Manuscript v${chapter.version}`)
                     : text(`第 ${chapter.chapterNumber} 章 · 草稿 v${chapter.version}（${chapter.status}）`, `Chapter ${chapter.chapterNumber} · Draft v${chapter.version} (${chapter.status})`)
                   return (
                     <section key={chapter.draftId} className="mb-3 border-b border-[var(--color-border)] pb-3 last:border-0">

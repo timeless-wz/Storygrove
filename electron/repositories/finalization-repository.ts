@@ -259,6 +259,7 @@ export class FinalizationRepository {
       if (draft.chapter_number !== input.chapterNumber) {
         throw new Error('草稿与定稿章节不匹配')
       }
+      if (draft.status === 'archived') throw new Error('稿件已移入回收站，不能发布')
       if (draft.status === 'finalized') {
         throw new Error('草稿已定稿但缺少可恢复发布记录')
       }
@@ -269,6 +270,7 @@ export class FinalizationRepository {
         LIMIT 1
       `).get(input.chapterNumber, input.draftId)
       if (replacesFinalized) invalidateContinuityProjectionFrom(db, input.chapterNumber)
+      db.prepare("UPDATE drafts SET status = 'draft' WHERE chapter_number = ? AND status = 'finalized' AND id <> ?").run(input.chapterNumber, input.draftId)
 
       db.prepare('UPDATE contents SET body = ? WHERE id = ?')
         .run(input.content, draft.content_id)
@@ -328,9 +330,12 @@ export class FinalizationRepository {
       }
 
       const draft = db.prepare(`
-        SELECT content_id FROM drafts WHERE id = ?
-      `).get(input.draftId) as { content_id: number } | undefined
+        SELECT content_id, status FROM drafts WHERE id = ?
+      `).get(input.draftId) as { content_id: number; status: string } | undefined
       if (!draft) throw new Error(`草稿不存在：${input.draftId}`)
+      if (draft.status === 'archived') throw new Error('稿件已移入回收站，不能发布')
+      const replaced = db.prepare("UPDATE drafts SET status = 'draft' WHERE chapter_number = ? AND status = 'finalized' AND id <> ?").run(input.chapterNumber, input.draftId)
+      if (replaced.changes > 0) invalidateContinuityProjectionFrom(db, input.chapterNumber)
       db.prepare('UPDATE contents SET body = ? WHERE id = ?').run(input.content, draft.content_id)
       db.prepare(`
         UPDATE drafts

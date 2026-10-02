@@ -5,11 +5,15 @@ export interface OutlineData {
   volumes: BlueprintVolumeData[]
   blueprints: Array<{ chapterNumber: number; title: string; volumeId?: string | null }>
   assignments?: Array<{ chapterNumber: number; volumeId: string | null }>
+  order?: Array<{ chapterNumber: number; position: number; displayNumber: number | null }>
   drafts: DraftMeta[]
 }
 
 export interface ChapterEntry {
   number: number
+  chapterNumber: number
+  position: number
+  drafts: DraftMeta[]
   title: string
   draft?: DraftMeta
   manuscript?: DraftMeta
@@ -26,6 +30,7 @@ export function groupOutline(data: OutlineData, fallbackVolumeName: string, incl
     ? [...data.volumes].sort((a, b) => a.sortOrder - b.sortOrder)
     : [{ id: DEFAULT_VOLUME_ID, name: fallbackVolumeName, sortOrder: 1 }]
   const blueprints = new Map(data.blueprints.map(blueprint => [blueprint.chapterNumber, blueprint]))
+  const order = new Map(data.order?.map(row => [row.chapterNumber, row]))
   const chapters = new Map<string, ChapterEntry>()
   const assignments = new Map(data.assignments?.map(item => [item.chapterNumber, item]))
   const volumeForBlueprint = (chapterNumber: number) => {
@@ -45,12 +50,16 @@ export function groupOutline(data: OutlineData, fallbackVolumeName: string, incl
         : volumeForBlueprint(draft.blueprintChapterNumber)
     const key = `${volumeId}:${draft.chapterNumber}`
     const entry = chapters.get(key) ?? {
-      number: draft.chapterNumber,
+      number: draft.status === 'finalized' ? order.get(draft.chapterNumber)?.displayNumber ?? draft.displayNumber ?? draft.chapterNumber : draft.chapterNumber,
+      chapterNumber: draft.chapterNumber,
+      position: order.get(draft.chapterNumber)?.position ?? draft.chapterNumber,
+      drafts: [],
       title: draft.chapterTitle || blueprints.get(draft.blueprintChapterNumber ?? -1)?.title || '',
     }
     if (draft.status === 'finalized') {
       entry.manuscript = latest([draft, ...(entry.manuscript ? [entry.manuscript] : [])])
     } else {
+      entry.drafts.push(draft)
       entry.draft = latest([draft, ...(entry.draft ? [entry.draft] : [])])
     }
     entry.title = entry.draft?.chapterTitle || entry.manuscript?.chapterTitle
@@ -59,7 +68,7 @@ export function groupOutline(data: OutlineData, fallbackVolumeName: string, incl
   }
   const groups = volumes.map(volume => ({ volume, chapters: [] as ChapterEntry[] }))
   const ungrouped = { volume: { id: 'ungrouped', name: '', sortOrder: Infinity }, chapters: [] as ChapterEntry[] }
-  for (const [key, entry] of [...chapters.entries()].sort((a, b) => a[1].number - b[1].number)) {
+  for (const [key, entry] of [...chapters.entries()].sort((a, b) => a[1].position - b[1].position)) {
     const volumeId = key.slice(0, key.lastIndexOf(':'))
     const group = groups.find(item => item.volume.id === volumeId)
     ;(group ?? ungrouped).chapters.push(entry)

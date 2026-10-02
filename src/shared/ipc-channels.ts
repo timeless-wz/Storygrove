@@ -1,3 +1,4 @@
+import type { ProseDirectoryAction, ProseOrderEntry, ProseTrashEntry } from './prose-directory'
 /**
  * IPC 频道定义 — 渲染进程与主进程的类型安全通信契约
  * 所有 IPC 调用都通过此文件定义频道名和参数/返回值类型
@@ -1129,11 +1130,14 @@ export interface DatabaseChannels {
     args: [request: FinalizedDraftImportRequest, expectedProjectPath: string]
     return: { success: boolean; receipt?: FinalizedDraftImportReceipt; error?: string }
   }
+  'db:prose-order': { args: [expectedProjectPath: string]; return: ProseOrderEntry[] }
+  'db:prose-trash': { args: [expectedProjectPath: string]; return: ProseTrashEntry[] }
+  'db:prose-directory-action': { args: [action: ProseDirectoryAction, expectedProjectPath: string]; return: { success: boolean; trashId?: number; warning?: string; error?: string } }
   'db:prose-volume-list': { args: [expectedProjectPath: string]; return: BlueprintVolumeData[] }
   'db:prose-volume-delete': { args: [volumeId: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
   'db:chapter-volume-list': { args: [expectedProjectPath: string]; return: Array<{ chapterNumber: number; volumeId: string | null }> }
   'db:chapter-volume-set': { args: [chapterNumber: number, volumeId: string | null, expectedProjectPath: string]; return: { success: boolean; error?: string } }
-  'db:draft-create': { args: [params: { chapterNumber: number; blueprintChapterNumber?: number | null; volumeId?: string | null; chapterTitle?: string; version: number; source: 'write' | 'rewrite'; content: string; wordCount: number; sourceDependencies?: DraftSourceDependency[] }, expectedProjectPath: string]; return: { success: boolean; id?: number; error?: string } }
+  'db:draft-create': { args: [params: { chapterNumber: number; blueprintChapterNumber?: number | null; volumeId?: string | null; chapterTitle?: string; insertRelativeTo?: number; insertSide?: 'before' | 'after'; version: number; source: 'write' | 'rewrite'; content: string; wordCount: number; sourceDependencies?: DraftSourceDependency[] }, expectedProjectPath: string]; return: { success: boolean; id?: number; error?: string } }
   'db:draft-list': { args: [chapterNumber: number, expectedProjectPath: string]; return: DraftMeta[] }
   'db:draft-list-all': { args: [expectedProjectPath: string]; return: DraftMeta[] }
   'db:draft-get-meta': { args: [id: number, expectedProjectPath: string]; return: DraftMeta | null }

@@ -124,6 +124,7 @@ describe('project clear repositories', () => {
 
     const statements = db.prepare.mock.calls.map(([sql]) => sql)
     expect(statements).toEqual([
+      ...Array(3).fill("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?"),
       'DELETE FROM finalized_draft_import_operations',
       'DELETE FROM post_process_steps',
       'DELETE FROM post_process_runs',

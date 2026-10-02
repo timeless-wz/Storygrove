@@ -27,6 +27,7 @@ export function captureFinalizationSnapshot(input: {
   tab: EditorTab
   projectSession: ProjectSessionContext
   chapterTitle: string
+  expectedCurrentDraftId?: number | null
 }): FinalizationSnapshot {
   const { tab, projectSession, chapterTitle } = input
   if (!tab.projectKey || !sameProjectPathKey(tab.projectKey, projectSession.projectPath)) {
@@ -47,6 +48,7 @@ export function captureFinalizationSnapshot(input: {
     draftId: tab.draftId,
     chapterNumber: tab.chapterNumber,
     chapterTitle,
+    expectedCurrentDraftId: input.expectedCurrentDraftId,
     content: tab.content ?? '',
     contentRevision: tab.contentRevision ?? 0,
   })

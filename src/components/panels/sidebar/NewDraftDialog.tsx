@@ -23,6 +23,8 @@ interface NewDraftDialogProps {
   suggestedChapterNumber: number
   volumeId?: string | null
   volumeName?: string
+  insertRelativeTo?: number
+  insertSide?: 'before' | 'after'
 }
 
 /**
@@ -35,6 +37,8 @@ export function NewDraftDialog({
   suggestedChapterNumber,
   volumeId,
   volumeName,
+  insertRelativeTo,
+  insertSide,
 }: NewDraftDialogProps) {
   const text = useLocaleStore(s => s.text)
   const currentProject = useProjectStore(s => s.currentProject)
@@ -72,7 +76,7 @@ export function NewDraftDialog({
       const result = await ipc.invokeWithProjectSession(
         projectSession,
         'db:draft-create',
-        { chapterNumber, version, chapterTitle: resolvedTitle, source: 'write', content: '', wordCount: 0, ...(volumeId !== undefined ? { volumeId } : {}) },
+        { chapterNumber, version, chapterTitle: resolvedTitle, source: 'write', content: '', wordCount: 0, ...(volumeId !== undefined ? { volumeId } : {}), ...(insertRelativeTo !== undefined ? { insertRelativeTo, insertSide } : {}) },
         projectKey,
       )
       if (!isProjectSessionCurrent(projectSession)) return
@@ -124,11 +128,12 @@ export function NewDraftDialog({
         <div className="px-6 py-5">
           {volumeName && <p className="text-sm mb-3">{text('所属卷：', 'Volume: ')}{volumeName}</p>}
           <label className="block text-sm font-medium mb-2" htmlFor="new-draft-chapter-number">
-            {text('章节号', 'Chapter number')}
+            {text(insertRelativeTo !== undefined ? '草稿章号（正文发布时按位置连续编号）' : '草稿章号（可重复，作为同章的另一稿）', 'Draft chapter number (duplicates create another version)')}
           </label>
           <Input
             id="new-draft-chapter-number"
             type="number"
+            disabled={creating || insertRelativeTo !== undefined}
             min={1}
             step={1}
             value={chapterNumberInput}

@@ -1,0 +1,10 @@
+Isolated SQLite 12.8.0, Node ABI 137: D:\ai\AI-Novel-Writer-master\.runtime\acceptance-native\12.8.0-node-137-cf91c2200c72\build\Release\better_sqlite3.node
+
+ RUN  v4.1.11 D:/ai/AI-Novel-Writer-master
+
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  16:44:52
+   Duration  985ms (transform 405ms, setup 132ms, import 402ms, tests 30ms, environment 0ms)
+

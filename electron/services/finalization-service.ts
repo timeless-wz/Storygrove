@@ -1,3 +1,5 @@
+import { syncDirectoryProjections } from './prose-directory-projection'
+import { getProjectDb } from '../database'
 import { createHash, randomUUID } from 'node:crypto'
 import type { FinalizationResult } from '../../src/shared/finalization'
 export type { FinalizationResult } from '../../src/shared/finalization'
@@ -18,6 +20,7 @@ export interface FinalizationRequest {
   draftId: number
   chapterNumber: number
   chapterTitle: string
+  expectedCurrentDraftId?: number | null
   content: string
   contentRevision: number
 }
@@ -79,11 +82,13 @@ function snapshotIntegrityError(record: FinalizationRecord): string | null {
  */
 export class FinalizationService {
   private readonly createFinalizationId: () => string
+  private readonly syncDirectory: boolean
   private readonly publisher: FinalizationPublisher
 
   constructor(options: FinalizationServiceOptions = {}) {
     this.createFinalizationId = options.createFinalizationId ?? randomUUID
     this.publisher = options.publisher ?? manuscriptPublisher
+    this.syncDirectory = !options.publisher
   }
 
   async finalize(request: FinalizationRequest): Promise<FinalizationResult> {
@@ -91,11 +96,14 @@ export class FinalizationService {
     const contentHash = snapshotHash(request.content)
     let record: FinalizationRecord
     try {
+      const current = getProjectDb()?.prepare("SELECT id FROM drafts WHERE chapter_number = ? AND status = 'finalized' ORDER BY id DESC LIMIT 1").get(request.chapterNumber) as { id: number } | undefined
+      if (current && current.id !== request.draftId && request.expectedCurrentDraftId !== current.id) throw new Error('该章节已有正文，请确认替换后重试')
+      if (request.expectedCurrentDraftId !== undefined && request.expectedCurrentDraftId !== (current?.id ?? null)) throw new Error('当前正文已变化，请重新确认发布')
       const existing = FinalizationRepository.getByDraftId(request.draftId)
       if (existing) {
         // 发布不是锁定。后续保存以同一个发布身份和目标文件替换当前快照，
         // 因此正文列表始终读取作者最后一次保存的内容。
-        record = hasSameFrozenRequest(existing, request, contentHash)
+        record = (getProjectDb()?.prepare('SELECT status FROM drafts WHERE id = ?').get(request.draftId) as { status: string } | undefined)?.status === 'finalized' && hasSameFrozenRequest(existing, request, contentHash)
           ? existing
           : FinalizationRepository.replacePublishedContent({
               finalizationId: existing.finalizationId,
@@ -154,6 +162,8 @@ export class FinalizationService {
         error: '未找到可重试的定稿提交',
       }
     }
+    const target = getProjectDb()?.prepare('SELECT status FROM drafts WHERE id = ?').get(record.draftId) as { status: string } | undefined
+    if (!target || target.status !== 'finalized') return toResult(record, false, '该稿已不再是当前正文，不能重试发布')
     const integrityError = snapshotIntegrityError(record)
     if (integrityError) {
       return toResult(record, false, integrityError)
@@ -171,7 +181,8 @@ export class FinalizationService {
       if (record.publicationStatus === 'published') {
         return toResult(record, true)
       }
-      await this.publisher.publish({
+      if (this.syncDirectory) await syncDirectoryProjections(projectRoot)
+      else await this.publisher.publish({
         projectRoot,
         targetFileName: record.targetFileName,
         chapterNumber: record.chapterNumber,

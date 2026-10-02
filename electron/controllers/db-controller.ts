@@ -1,3 +1,6 @@
+import { directoryProjectionFiles, syncDirectoryProjections } from '../services/prose-directory-projection'
+import { ProseDirectoryRepository } from '../repositories/prose-directory-repository'
+import type { ProseDirectoryAction } from '../../src/shared/prose-directory'
 import { ChapterVolumeRepository } from '../repositories/chapter-volume-repository'
 import { CultivationRepository } from '../repositories/cultivation-repository'
 import type { CultivationSaveRequest } from '../../src/shared/cultivation'
@@ -150,6 +153,7 @@ const MUTATING_DATABASE_CHANNELS = new Set([
   'db:character-graph-positions-save',
   'db:draft-import-finalized-batch',
   'db:prose-volume-delete',
+  'db:prose-directory-action',
   'db:chapter-volume-set',
   'db:draft-create',
   'db:draft-import-markdown',
@@ -940,6 +944,25 @@ export function registerDatabaseController() {
     }
   })
 
+  ipcMain.handle('db:prose-order', async (_event, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return ProseDirectoryRepository.order()
+  })
+  ipcMain.handle('db:prose-trash', async (_event, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return ProseDirectoryRepository.trash()
+  })
+  ipcMain.handle('db:prose-directory-action', async (_event, action: ProseDirectoryAction, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      const previousFiles = directoryProjectionFiles()
+      const trashId = ProseDirectoryRepository.act(action)
+      try { await syncDirectoryProjections(expectedProjectPath, previousFiles) }
+      catch (error) { return { success: true, trashId, warning: `目录已保存，实体稿同步失败：${String(error)}` } }
+      return { success: true, trashId }
+    } catch (error) { return { success: false, error: String(error) } }
+  })
+
   ipcMain.handle('db:prose-volume-list', async (_event, expectedProjectPath: string) => {
     assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
     return ChapterVolumeRepository.volumes()
@@ -969,6 +992,8 @@ export function registerDatabaseController() {
     blueprintChapterNumber?: number | null
     volumeId?: string | null
     chapterTitle?: string
+    insertRelativeTo?: number
+    insertSide?: 'before' | 'after'
     version: number
     source: 'write' | 'rewrite'
     content: string

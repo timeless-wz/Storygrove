@@ -326,7 +326,14 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
       const bp = Array.isArray(bps) ? bps.find((b: unknown) => (
         b as { chapterNumber?: number }
       ).chapterNumber === (m.blueprintChapterNumber ?? m.chapterNumber)) : null
-      setMeta({ ...m, chapterTitle: bp ? (bp as { title?: string }).title : undefined, filePath, fileName: `v${m.version}`, createdAt: m.updatedAt ?? m.createdAt })
+      setMeta({ ...m, chapterTitle: m.chapterTitle || (bp ? (bp as { title?: string }).title : undefined), filePath, fileName: `v${m.version}`, createdAt: m.updatedAt ?? m.createdAt })
+      useEditorStore.setState(state => ({ tabs: state.tabs.map(tab => {
+        if (tab.id !== tabId || tab.projectKey !== projectKey || (tab.draftStatus === m.status && !bindingRevision)) return tab
+        const title = m.chapterTitle || (bp as { title?: string } | null)?.title || ''
+        return { ...tab, draftStatus: m.status, proseDirectoryKind: m.status === 'finalized' ? 'manuscript' as const : 'draft' as const,
+          filePath: `vela://${m.status === 'finalized' ? 'manuscript' : 'draft'}/${m.id}`,
+          name: text(`第 ${m.displayNumber ?? m.chapterNumber} 章 ${title} v${m.version}`, `Chapter ${m.displayNumber ?? m.chapterNumber} ${title} v${m.version}`) }
+      }) }))
       // 回到正文时还原编辑位置：位置在跳转前或上次卸载时记录，取走即不再复用。
       // 键一律用本 Tab 的 projectKey（而不是会话里的写法）：路径大小写或分隔符
       // 不同也会被会话门判为同一项目，用同一个字符串才能命中同一条记忆。
@@ -348,7 +355,11 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
     return () => {
       cancelled = true
     }
-  }, [bindingRevision, currentProject, filePath, projectKey])
+  }, [bindingRevision, currentProject, filePath, projectKey, tabId, text])
+
+  useEffect(() => globalEventBus.on('REFRESH_RESOURCE', payload => {
+    if (isProjectSessionCurrent(payload.projectSession) && isProjectSessionPath(payload.projectSession, projectKey)) setBindingRevision(revision => revision + 1)
+  }), [projectKey])
 
   const status: DraftStatus = tabDraftStatus ?? meta?.status ?? 'draft'
   const isReadonly = status === 'archived'
@@ -555,8 +566,8 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
   }, [projectKey, tabId])
 
   /** 卷章快速切换：保存当前草稿并跳转至目标章节草稿 */
-  const handleJumpChapter = async (targetChapterNumber: number) => {
-    if (targetChapterNumber < 1 || chapterJumpPending.current) return
+  const handleJumpChapter = async (direction: number) => {
+    if (!meta || chapterJumpPending.current) return
     const projectSession = captureProjectSession(currentProject)
     if (!projectSession || !isProjectSessionPath(projectSession, projectKey)) return
 
@@ -568,9 +579,17 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
       if (!isProjectSessionCurrent(projectSession)) return
       // 保存期间继续输入时留在当前章，不把新输入误认为已保存。
       if (useEditorStore.getState().tabs.find(tab => tab.id === tabId)?.dirty) return
+      const order = await ipc.invokeWithProjectSession(projectSession, 'db:prose-order', projectSession.projectPath)
+      if (!isProjectSessionCurrent(projectSession)) return
+      const all = await ipc.invokeWithProjectSession(projectSession, 'db:draft-list-all', projectSession.projectPath)
+      if (!isProjectSessionCurrent(projectSession)) return
+      const entries = (order ?? []).filter(row => all.some(draft => draft.chapterNumber === row.chapterNumber && (meta.status !== 'finalized' || draft.status === 'finalized')))
+      const index = entries.findIndex(row => row.chapterNumber === meta.chapterNumber)
+      const targetChapterNumber = entries[index + direction]?.chapterNumber
+      if (targetChapterNumber === undefined) return
       const targetDraft = await ipc.invokeWithProjectSession(
         projectSession,
-        'db:draft-get-latest',
+        meta.status === 'finalized' ? 'db:draft-get-finalized' : 'db:draft-get-latest',
         targetChapterNumber,
         projectSession.projectPath,
       )
@@ -672,13 +691,17 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
   const doPublish = async () => {
     const projectSession = captureProjectSession(currentProject)
     if (!projectMatches || !currentProject || !meta || isChapterBusy || !projectSession || !isProjectSessionPath(projectSession, projectKey)) return
+    const existingManuscript = await ipc.invokeWithProjectSession(projectSession, 'db:draft-get-finalized', meta.chapterNumber, projectKey).catch(error => { if (isProjectSessionCurrent(projectSession)) toast.error(String(error)); return undefined })
+    if (existingManuscript === undefined) return
+    if (!isProjectSessionCurrent(projectSession)) return
+    const replacing = existingManuscript && existingManuscript.id !== meta.id
     const ok = await confirm(
       text(
-        `将第 ${meta.chapterNumber} 章发布到正文吗？\n\n发布后会移到「正文章节」，仍可随时继续修改。`,
+        replacing ? `该章已有正文“${existingManuscript.chapterTitle || ''}”。替换为当前草稿吗？旧正文会保留在草稿箱。` : `将这一稿发布到正文吗？正文会按所在位置自动连续编号。`,
         `Publish Chapter ${meta.chapterNumber} to the manuscript?\n\nIt will move to “Manuscript” and remain editable.`,
       ),
       {
-        title: text('确认发布', 'Confirm publication'),
+        title: text(replacing ? '替换当前正文' : '确认发布', 'Confirm publication'),
         confirmText: text('发布到正文', 'Publish'),
       }
     )
@@ -701,6 +724,7 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
         },
         projectSession,
         chapterTitle: meta.chapterTitle ?? '未知标题',
+        expectedCurrentDraftId: existingManuscript?.id ?? null,
       })
       if (!isProjectSessionCurrent(projectSession)) return
       const result = await publishChapterSnapshot(snapshot)
@@ -813,19 +837,19 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
             <div className="draft-chapter-stepper">
               <button
                 type="button"
-                onClick={() => handleJumpChapter(meta.chapterNumber - 1)}
-                disabled={meta.chapterNumber <= 1}
+                onClick={() => handleJumpChapter(-1)}
+                disabled={(meta.displayNumber ?? meta.chapterNumber) <= 1}
                 className="draft-chapter-step"
                 title={text('上一章', 'Previous chapter')}
               >
                 <ChevronLeft size={13} />
               </button>
               <span className="draft-chapter-index">
-                {text(`第 ${meta.chapterNumber} 章`, `Ch. ${meta.chapterNumber}`)}
+                {text(`第 ${meta.displayNumber ?? meta.chapterNumber} 章`, `Ch. ${meta.displayNumber ?? meta.chapterNumber}`)}
               </span>
               <button
                 type="button"
-                onClick={() => handleJumpChapter(meta.chapterNumber + 1)}
+                onClick={() => handleJumpChapter(1)}
                 className="draft-chapter-step"
                 title={text('下一章', 'Next chapter')}
               >

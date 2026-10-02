@@ -1,3 +1,4 @@
+import { ProseDirectoryRepository } from '../../../electron/repositories/prose-directory-repository'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -108,6 +109,7 @@ describe('authoritative finalized export integration', () => {
     vi.stubGlobal('window', {
       velaAPI: {
         invoke: async (channel: string, ...args: unknown[]) => {
+          if (channel === 'db:prose-order') return ProseDirectoryRepository.order()
           if (channel === 'db:draft-export-snapshot') {
             expect(args).toEqual([projectPath, projectSession])
             return FinalizationRepository.listAuthoritativeForExport()
@@ -143,10 +145,10 @@ describe('authoritative finalized export integration', () => {
 
     expect(fs.readFileSync(path.join(exportPath, first.path, 'chapter_1.md'), 'utf8'))
       .toBe(`# 第1章 ${facts[0].title}\n\n${facts[0].content}`)
-    expect(fs.readFileSync(path.join(exportPath, first.path, 'chapter_4.md'), 'utf8'))
-      .toBe(`# 第4章 ${facts[1].title}\n\n${facts[1].content}`)
+    expect(fs.readFileSync(path.join(exportPath, first.path, 'chapter_2.md'), 'utf8'))
+      .toBe(`# 第2章 ${facts[1].title}\n\n${facts[1].content}`)
     expect(fs.readdirSync(path.join(exportPath, first.path)).sort())
-      .toEqual(['chapter_1.md', 'chapter_4.md'])
+      .toEqual(['chapter_1.md', 'chapter_2.md'])
 
     db.prepare("UPDATE drafts SET status = 'archived' WHERE chapter_number = 4").run()
     const second = await exportNovel(

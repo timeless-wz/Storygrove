@@ -287,13 +287,17 @@ export async function exportNovel(
     ))
     const authorityReceipt = exportAuthorityReceipt(frozenDrafts)
     if (!isProjectSessionCurrent(projectSession)) return staleExportResult(uiLocale)
-    const chapterContents = frozenDrafts.map(draft => ({
-      chapterNumber: draft.chapterNumber,
+    const proseOrder = await ipc.invokeWithProjectSession(projectSession, 'db:prose-order', projectSession.projectPath)
+    if (!isProjectSessionCurrent(projectSession)) return staleExportResult(uiLocale)
+    const numbers = new Map((proseOrder ?? []).map(row => [row.chapterNumber, row.displayNumber]))
+    const positions = new Map((proseOrder ?? []).map((row, index) => [row.chapterNumber, index]))
+    const chapterContents = [...frozenDrafts].sort((a, b) => (positions.get(a.chapterNumber) ?? a.chapterNumber) - (positions.get(b.chapterNumber) ?? b.chapterNumber)).map(draft => ({
+      chapterNumber: numbers.get(draft.chapterNumber) ?? draft.chapterNumber,
       title: draft.title.trim(),
-      name: `chapter_${draft.chapterNumber}.md`,
+      name: `chapter_${numbers.get(draft.chapterNumber) ?? draft.chapterNumber}.md`,
       content: draft.content,
       markdownContent: renderMarkdownChapter(
-        draft.chapterNumber,
+        numbers.get(draft.chapterNumber) ?? draft.chapterNumber,
         draft.title.trim(),
         draft.content,
         project.novelConfig.writingLanguage,
@@ -349,6 +353,9 @@ export async function exportNovel(
         )
         if (!isProjectSessionCurrent(projectSession)) return staleExportResult(uiLocale)
         if (!authorityCurrent) return changedFinalizationResult(uiLocale)
+        const currentOrder = await ipc.invokeWithProjectSession(projectSession, 'db:prose-order', projectSession.projectPath)
+        if (!isProjectSessionCurrent(projectSession)) return staleExportResult(uiLocale)
+        if (JSON.stringify(currentOrder ?? []) !== JSON.stringify(proseOrder ?? [])) return changedFinalizationResult(uiLocale)
         activeWritePath = outputPath
         const writeResult = await ipc.invoke('fs:grant-write-file', options.grantId, outputPath, content)
         requireExportWriteSuccess(
@@ -374,6 +381,9 @@ export async function exportNovel(
         )
         if (!isProjectSessionCurrent(projectSession)) return staleExportResult(uiLocale)
         if (!authorityCurrent) return changedFinalizationResult(uiLocale)
+        const currentOrder = await ipc.invokeWithProjectSession(projectSession, 'db:prose-order', projectSession.projectPath)
+        if (!isProjectSessionCurrent(projectSession)) return staleExportResult(uiLocale)
+        if (JSON.stringify(currentOrder ?? []) !== JSON.stringify(proseOrder ?? [])) return changedFinalizationResult(uiLocale)
         const mkdirResult = await ipc.invoke('fs:grant-mkdir', options.grantId, splitDir)
         if (!isProjectSessionCurrent(projectSession)) return staleExportResult(uiLocale)
         requireIpcSuccess(
@@ -393,6 +403,9 @@ export async function exportNovel(
             return staleSplitExportResult(uiLocale, writtenSplitFiles)
           }
           if (!stillCurrent) return changedFinalizationResult(uiLocale, writtenSplitFiles)
+          const currentOrder = await ipc.invokeWithProjectSession(projectSession, 'db:prose-order', projectSession.projectPath)
+          if (!isProjectSessionCurrent(projectSession)) return staleSplitExportResult(uiLocale, writtenSplitFiles)
+          if (JSON.stringify(currentOrder ?? []) !== JSON.stringify(proseOrder ?? [])) return changedFinalizationResult(uiLocale, writtenSplitFiles)
           activeWritePath = `${splitDir}/${ch.name}`
           const writeResult = await ipc.invoke('fs:grant-write-file', options.grantId, activeWritePath, ch.markdownContent)
           requireExportWriteSuccess(
@@ -440,6 +453,9 @@ export async function exportNovel(
         )
         if (!isProjectSessionCurrent(projectSession)) return staleExportResult(uiLocale)
         if (!authorityCurrent) return changedFinalizationResult(uiLocale)
+        const currentOrder = await ipc.invokeWithProjectSession(projectSession, 'db:prose-order', projectSession.projectPath)
+        if (!isProjectSessionCurrent(projectSession)) return staleExportResult(uiLocale)
+        if (JSON.stringify(currentOrder ?? []) !== JSON.stringify(proseOrder ?? [])) return changedFinalizationResult(uiLocale)
         activeWritePath = outputPath
         const writeResult = await ipc.invoke('fs:grant-write-file', options.grantId, outputPath, content)
         requireExportWriteSuccess(
@@ -469,6 +485,9 @@ export async function exportNovel(
         )
         if (!isProjectSessionCurrent(projectSession)) return staleExportResult(uiLocale)
         if (!authorityCurrent) return changedFinalizationResult(uiLocale)
+        const currentOrder = await ipc.invokeWithProjectSession(projectSession, 'db:prose-order', projectSession.projectPath)
+        if (!isProjectSessionCurrent(projectSession)) return staleExportResult(uiLocale)
+        if (JSON.stringify(currentOrder ?? []) !== JSON.stringify(proseOrder ?? [])) return changedFinalizationResult(uiLocale)
         activeWritePath = outputPath
         const writeResult = await ipc.invoke('fs:grant-write-base64-file', options.grantId, outputPath, content)
         requireExportWriteSuccess(
@@ -723,10 +742,15 @@ export async function exportSelectedMarkdown(
         || JSON.stringify(expected) !== JSON.stringify(selectedNumbers)) return exportSelectionChanged(locale)
     }
 
-    const chapters = snapshot.chapters.map(chapter => ({
+    const proseOrder = options.range === 'settings' ? [] : await ipc.invokeWithProjectSession(projectSession, 'db:prose-order', projectSession.projectPath)
+    if (!isProjectSessionCurrent(projectSession)) return staleExportResult(locale)
+    const numbers = new Map((proseOrder ?? []).map(row => [row.chapterNumber, row.displayNumber]))
+    const positions = new Map((proseOrder ?? []).map((row, index) => [row.chapterNumber, index]))
+    const chapters = [...snapshot.chapters].sort((a, b) => (positions.get(a.chapterNumber) ?? a.chapterNumber) - (positions.get(b.chapterNumber) ?? b.chapterNumber)).map(chapter => ({
       ...chapter,
+      chapterNumber: chapter.kind === 'finalized' ? numbers.get(chapter.chapterNumber) ?? chapter.chapterNumber : chapter.chapterNumber,
       markdownContent: renderMarkdownChapter(
-        chapter.chapterNumber,
+        chapter.kind === 'finalized' ? numbers.get(chapter.chapterNumber) ?? chapter.chapterNumber : chapter.chapterNumber,
         chapter.title.trim(),
         chapter.content,
         project.novelConfig.writingLanguage,
@@ -744,6 +768,9 @@ export async function exportSelectedMarkdown(
       )
       if (!isProjectSessionCurrent(projectSession)) return staleExportResult(locale)
       if (!current) return exportSelectionChanged(locale)
+      const currentOrder = await ipc.invokeWithProjectSession(projectSession, 'db:prose-order', projectSession.projectPath)
+      if (!isProjectSessionCurrent(projectSession)) return staleExportResult(locale)
+      if (JSON.stringify(currentOrder ?? []) !== JSON.stringify(proseOrder ?? [])) return exportSelectionChanged(locale)
     }
 
     const folder = `${exportFileStem(project.name)}-export-${randomUUID()}`
@@ -757,6 +784,8 @@ export async function exportSelectedMarkdown(
         const stillCurrent = await ipc.invokeWithProjectSession(projectSession, 'db:draft-export-selection-current', snapshot.receipt, projectSession.projectPath)
         if (!isProjectSessionCurrent(projectSession)) throw new Error(staleExportResult(locale).error)
         if (!stillCurrent) throw new Error(exportSelectionChanged(locale).error)
+        const currentOrder = await ipc.invokeWithProjectSession(projectSession, 'db:prose-order', projectSession.projectPath)
+        if (JSON.stringify(currentOrder ?? []) !== JSON.stringify(proseOrder ?? [])) throw new Error(exportSelectionChanged(locale).error)
       }
       const relativePath = `${folder}/${name}`
       activeWritePath = relativePath

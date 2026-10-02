@@ -1,0 +1,77 @@
+`resolve.alias` contains an alias with `customResolver` option. This is deprecated and will be removed in Vite 9. Please use a custom plugin with a resolveId hook and `enforce: 'pre'` instead.
+vite v8.2.2 building client environment for production...
+Warning: Invalid output options (1 issue found)
+- For the "freeze". Invalid key: Expected never but received "freeze". 
+transforming...
+✓ 2345 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                                     4.96 kB │ gzip:   2.05 kB
+dist/assets/inkwash-C8rzr74W.webp                                 203.70 kB
+dist/assets/starfield-D2XOwTdl.webp                               204.80 kB
+dist/assets/shell-Dbci47SQ.jpg                                    248.62 kB
+dist/assets/verdant-CKolEMbk.webp                                 273.83 kB
+dist/assets/parchment-C-pXyqZt.webp                               294.00 kB
+dist/assets/inkwash-hero-panorama-BlX00OUc.png                  2,273.71 kB
+dist/assets/feedback-surface-BqAou5oL.css                           6.96 kB │ gzip:   1.69 kB
+dist/assets/index-D1PIHWkJ.css                                    374.06 kB │ gzip:  57.87 kB
+dist/assets/id-CREQ0uiu.js                                          0.21 kB │ gzip:   0.17 kB
+dist/assets/event-bus-DkAXcZbI.js                                   0.30 kB │ gzip:   0.21 kB
+dist/assets/structured-contract-diagnostic-CCENyCbL.js              0.50 kB │ gzip:   0.35 kB
+dist/assets/workflow-draft-meta-DLUPrUNa.js                         0.57 kB │ gzip:   0.36 kB
+dist/assets/source-draft-changed-KYVfiwGB.js                        0.74 kB │ gzip:   0.44 kB
+dist/assets/architecture-service-DwICEZL7.js                        0.81 kB │ gzip:   0.39 kB
+dist/assets/character-role-DuwB9nTe.js                              1.04 kB │ gzip:   0.46 kB
+dist/assets/project-session-context-DrG_X2Ny.js                     1.23 kB │ gzip:   0.60 kB
+dist/assets/ipc-client-BNsgKAxH.js                                  1.54 kB │ gzip:   0.78 kB
+dist/assets/zh_CN-BR959Q2g.js                                       2.07 kB │ gzip:   1.27 kB
+dist/assets/analyze-style.command-Deo6bnlm.js                       4.01 kB │ gzip:   1.82 kB
+dist/assets/blueprint-v2-lqELNlKc.js                                6.05 kB │ gzip:   3.07 kB
+dist/assets/editor-store-BuGf-lqm.js                                6.39 kB │ gzip:   2.35 kB
+dist/assets/generate-field.command-BeWLHMAh.js                      7.67 kB │ gzip:   3.72 kB
+dist/assets/project-service-C9xBFU4k.js                             7.68 kB │ gzip:   2.80 kB
+dist/assets/legacy-character-roster-repair.command-BCGwLDOl.js      8.21 kB │ gzip:   3.44 kB
+dist/assets/refine-from-review.command-CTh1lQch.js                  8.55 kB │ gzip:   3.31 kB
+dist/assets/react-BjXZPcFZ.js                                       8.77 kB │ gzip:   3.41 kB
+dist/assets/planning-material.command-mjVNK6gH.js                  11.61 kB │ gzip:   5.10 kB
+dist/assets/directory.command-Cvrw7x1s.js                          14.58 kB │ gzip:   6.41 kB
+dist/assets/finalize-chapter.command-Bbc2Lb1C.js                   15.11 kB │ gzip:   6.05 kB
+dist/assets/review-chapter.command-V8Dd8ybB.js                     15.99 kB │ gzip:   6.78 kB
+dist/assets/project-store-C6IqeDLl.js                              21.74 kB │ gzip:   7.47 kB
+dist/assets/import-novel.command-WGpRIMgU.js                       31.82 kB │ gzip:  11.28 kB
+dist/assets/AlertDialog-Da8KtnEd.js                                33.02 kB │ gzip:  11.00 kB
+dist/assets/generate-draft.command-DAJnZ6Ku.js                     43.28 kB │ gzip:  17.23 kB
+dist/assets/workflow-store-1iN8GK1f.js                             43.71 kB │ gzip:  16.17 kB
+dist/assets/generation-harness-CsCYTliX.js                         64.21 kB │ gzip:  21.08 kB
+dist/assets/prompt-templates-4zXuHrEk.js                           71.80 kB │ gzip:  24.54 kB
+dist/assets/feedback-surface-B42ZVeSR.js                          197.16 kB │ gzip:  63.73 kB
+dist/assets/index-CTUZ0lAH.js                                   2,452.31 kB │ gzip: 696.28 kB
+
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 4.40s
+vite v8.2.2 building client environment for production...
+transforming...
+✓ 303 modules transformed.
+rendering chunks...
+computing gzip size...
+[INEFFECTIVE_DYNAMIC_IMPORT] electron/knowledge-base.ts is dynamically imported by electron/services/knowledge-base-loader.ts but also statically imported by electron/services/rag-context-service.ts, electron/services/release-vector-smoke.ts, dynamic import will not move module into another chunk.
+dist-electron/embedding-b-o9ev5L.js      7.31 kB │ gzip:   3.20 kB
+dist-electron/main.js                1,118.01 kB │ gzip: 259.57 kB
+
+
+✓ built in 350ms
+vite v8.2.2 building client environment for production...
+
+ WARN  inlineDynamicImports option is deprecated, please use codeSplitting: false instead.
+
+transforming...
+✓ 2 modules transformed.
+rendering chunks...
+computing gzip size...
+dist-electron/preload.mjs  0.61 kB │ gzip: 0.33 kB
+
+✓ built in 28ms

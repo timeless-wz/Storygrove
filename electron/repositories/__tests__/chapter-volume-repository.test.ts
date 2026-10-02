@@ -55,12 +55,13 @@ it('rolls back draft and body creation when the requested volume does not exist'
   expect(() => ChapterVolumeRepository.set(99, 'vol-a')).toThrow('正文章节不存在')
 })
 
-it('rejects occupied chapter numbers without moving existing prose and clears assignments with deleted drafts', () => {
+it('accepts another candidate without moving existing prose and clears assignments after its last draft is deleted', () => {
   const params = { chapterNumber: 5, source: 'write' as const, content: '保留正文', wordCount: 4 }
   const id = DraftRepository.create({ ...params, volumeId: 'vol-a' })
-  expect(() => DraftRepository.create({ ...params, volumeId: 'vol-b' })).toThrow('章节号已存在')
+  const second = DraftRepository.create({ ...params, volumeId: 'vol-b' })
   expect(ChapterVolumeRepository.list()).toEqual([{ chapterNumber: 5, volumeId: 'vol-a' }])
   DraftRepository.delete(id)
+  DraftRepository.delete(second)
   expect(ChapterVolumeRepository.list()).toEqual([])
 })
 
