@@ -39,12 +39,14 @@ let invoke: ReturnType<typeof vi.fn>
 const onClose = vi.fn(() => {})
 const onImported = vi.fn((_chapterNumber: number) => {})
 let persistedContent: ChapterBlueprintV2Content | null
+let savedInput: { baseRevision: number; content: ChapterBlueprintV2Content } | null
 const originalLocaleState = useLocaleStore.getState()
 
 beforeEach(() => {
   useLocaleStore.setState({ locale: 'zh-CN' })
   setActiveProjectSessionContext(PROJECT_SESSION)
   persistedContent = null
+  savedInput = null
   invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
     if (channel === 'db:blueprint-v2-get') return null
     if (channel === 'db:blueprint-v2-save') {
@@ -93,6 +95,29 @@ async function clickButton(testId: string) {
     return found
   })
   await act(async () => button.click())
+}
+
+/** 模拟统一迁移产物的 r1 细纲（合并基底）。 */
+function migratedStyleContent(): ChapterBlueprintV2Content {
+  return {
+    schemaVersion: 2,
+    chapterNumber: 2,
+    chapterTitle: '第2章｜旧标题',
+    chapterTitleLevel: 3,
+    docPreamble: '',
+    sections: [
+      {
+        kind: 'canonical',
+        id: 'positioning',
+        title: '【本章定位与四维指标】',
+        level: 4,
+        preamble: '',
+        items: [],
+        postamble: '',
+      },
+    ],
+    origin: 'upgrade',
+  }
 }
 
 describe('BlueprintV2ImportDialog', () => {
@@ -145,5 +170,58 @@ describe('BlueprintV2ImportDialog', () => {
     expect(importedScenes[3].markdown).toContain('这辆车在往天上开！')
     expect(onImported).toHaveBeenCalledWith(1)
     expect(onClose).toHaveBeenCalledOnce()
+  })
+
+  it('re-reads the existing detail when the same target chapter is re-selected, keeping the baseRevision', async () => {
+    // 回归：重复选择同一目标章曾把 existingDetail 清成 null 且不再重读，
+    // 导致保存以 baseRevision 0 发送（与现有 r1 冲突）并丢失重导入合并基底。
+    const existing = { ...migratedStyleContent(), revision: 1, contentHash: 'c'.repeat(64) }
+    invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
+      if (channel === 'db:blueprint-v2-get') return existing
+      if (channel === 'db:blueprint-v2-save') {
+        savedInput = args[0] as { baseRevision: number; content: ChapterBlueprintV2Content }
+        return { success: true, revision: 2, contentHash: 'd'.repeat(64) }
+      }
+      throw new Error(`unexpected IPC ${channel}`)
+    })
+    Object.defineProperty(window, 'velaAPI', {
+      configurable: true,
+      value: { invoke, on: vi.fn(() => () => {}), once: vi.fn(), send: vi.fn() },
+    })
+    await act(async () => root?.render(
+      <BlueprintV2ImportDialog
+        open
+        onClose={onClose}
+        chapters={[{ chapterNumber: 1, title: '接错的人' }, { chapterNumber: 2, title: '旧标题' }]}
+        projectSession={PROJECT_SESSION}
+        projectKey={PROJECT_PATH}
+        onImported={onImported}
+      />,
+    ))
+
+    const textarea = document.body.querySelector<HTMLTextAreaElement>('[data-testid="blueprint-v2-import-raw"]')!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(textarea, MARKDOWN)
+      textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await clickButton('blueprint-v2-import-preview-btn')
+    await vi.waitFor(() => expect(
+      document.body.textContent,
+    ).toContain('该章已有细纲（版本 r1）'))
+
+    // 与当前值相同的重复选择：必须重新读取该章现有细纲（回归点）。
+    const select = document.body.querySelector<HTMLSelectElement>('[data-testid="blueprint-v2-import-target"]')!
+    await act(async () => {
+      select.value = '2'
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2))
+    await vi.waitFor(() => expect(
+      document.body.textContent,
+    ).toContain('该章已有细纲（版本 r1）'))
+
+    await clickButton('blueprint-v2-import-confirm')
+    await vi.waitFor(() => expect(savedInput).not.toBeNull())
+    expect(savedInput!.baseRevision).toBe(1)
   })
 })

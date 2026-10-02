@@ -209,6 +209,24 @@ export class RepairLegacyCharacterRosterCommand extends BaseWorkflowCommand<stri
   }
 
   async execute(params: CommandExecuteParams): Promise<string> {
+    const projectSession = requireWorkflowProjectSession(params.context)
+    assertLegacyRepairSessionCurrent(projectSession)
+    /*
+     * 采用/校准分支只做数据库校验与 roster commit，没有任何模型调用。它必须在
+     * GenerationRuntime 之前分流：未配置默认生成模型的作者也必须能以既有角色卡
+     * 重建只读图谱，否则受保护项目里的手工保存会被永远拒绝且没有任何出口。
+     * 旧 Markdown 提取仍然需要模型，走原有运行时约束。
+     */
+    const preflightSnapshot = await ipc.invokeWithProjectSession(
+      projectSession,
+      'db:character-roster-read',
+      this.input.expectedProjectPath,
+    )
+    assertLegacyRepairSessionCurrent(projectSession)
+    if (preflightSnapshot.migrationState === 'legacy_cards_preserved'
+      || (preflightSnapshot.status === 'inconsistent' && preflightSnapshot.entries.length > 0)) {
+      return this.adoptExistingCards(preflightSnapshot, projectSession, params.context, params.callbacks)
+    }
     return this.executeWithGenerationRuntime('structured', params, () => this.executeWithinGeneration(params))
   }
 

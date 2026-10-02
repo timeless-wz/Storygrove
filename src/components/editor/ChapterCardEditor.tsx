@@ -66,7 +66,7 @@ import {
   assertNoLossOnSerialize,
 } from '../../shared/blueprint-v2-markdown'
 import {
-  buildBlueprintV2UpgradeScaffold,
+  buildBlueprintV2MigrationContent,
   extractBlueprintV2WordBudget,
   getBlueprintV2Scenes,
   projectV2ToV1,
@@ -519,9 +519,17 @@ export default function ChapterCardEditor({
   }, [projectKey])
 
   // 所选章变化（或从画布视图返回）时：拉取数据库事实 + 恢复本地未保存草稿。
+  // 统一编辑界面：数据库尚无细纲的章（启动迁移未覆盖的旧数据、工作流本轮
+  // 写入的简纲行、本地新建章节）按同一迁移映射生成种子内容并进入本地草稿
+  // 账本；保存时经 db:blueprint-v2-save 落库，取消/不保存则无任何数据库写入。
+  // 种子内容确定性（条目 ID 派生自章节号），因此「未编辑过的种子」可跨会话
+  // 识别，允许直接从 v1 行启动写作。
+  const v2SeedJsonRef = useRef<string | null>(null)
+
   useEffect(() => {
     if (!projectDataReady || selectedChapterNumber === null || chapterView === 'canvas') {
       v2LoadGateRef.current.begin()
+      v2SeedJsonRef.current = null
       return
     }
     const projectSession = currentProjectSessionForPath(projectKey)
@@ -530,12 +538,37 @@ export default function ChapterCardEditor({
     let stale = false
     setV2Loading(true)
     setV2LoadError(null)
+    // 立刻清空上一章的数据库事实：载入期间显示载入态，而不是把旧章内容挂在新章标题下。
+    setV2Detail(null)
+    v2SeedJsonRef.current = null
     void (async () => {
       try {
         const detail = await ipc.invokeWithProjectSession(
           projectSession, 'db:blueprint-v2-get', selectedChapterNumber, projectKey,
         )
         if (stale || !v2LoadGateRef.current.isLatest(requestId)) return
+        if (detail === null) {
+          const source = blueprintsRef.current.find(
+            item => item.chapterNumber === selectedChapterNumber,
+          ) ?? null
+          if (source) {
+            const seedContent = buildBlueprintV2MigrationContent(source, { origin: 'manual' })
+            v2SeedJsonRef.current = JSON.stringify(seedContent)
+            if (!getChapterCardV2Draft(readV2Ledger(), projectKey, selectedChapterNumber)) {
+              const seedDraft: ChapterCardBlueprintV2Draft = {
+                chapterNumber: selectedChapterNumber,
+                content: seedContent,
+                baseRevision: 0,
+              }
+              // 展示未编辑的种子不是作者修改；首次实际编辑时再进入持久草稿账本。
+              setV2Draft(seedDraft)
+            }
+          } else {
+            v2SeedJsonRef.current = null
+          }
+        } else {
+          v2SeedJsonRef.current = null
+        }
         setV2Detail(detail)
       } catch (error) {
         if (!stale && v2LoadGateRef.current.isLatest(requestId)) {
@@ -558,6 +591,14 @@ export default function ChapterCardEditor({
   const v2BaseRevision = v2Draft?.baseRevision ?? (v2Detail && v2Detail.readStatus === undefined ? v2Detail.revision : 0)
   const v2ConflictRevision = v2Draft?.conflictCurrentRevision ?? null
   const v2Dirty = v2Draft !== null
+  // 种子未编辑 = 草稿内容与确定性种子完全一致且数据库确无细纲行。
+  // 此时写作入口可直接走 v1 行数据，无需先保存种子。
+  const v2SeedUnsaved = Boolean(
+    v2Draft
+    && v2Detail === null
+    && v2SeedJsonRef.current !== null
+    && JSON.stringify(v2Draft.content) === v2SeedJsonRef.current,
+  )
 
   /** 更新 v2 细纲内容：写入本地草稿 + 持久到账本（输入永不因视图切换丢失）。 */
   const updateV2Content = useCallback((next: ChapterBlueprintV2Content) => {
@@ -623,6 +664,7 @@ export default function ChapterCardEditor({
       if (v2SelectedChapterRef.current === chapterNumber) {
         setV2Detail({ ...contentSnapshot, revision: savedRevision, contentHash: result.contentHash ?? '' })
         setV2Draft(retainedDraft)
+        v2SeedJsonRef.current = null
       }
       // 本地同步 v1 投影四列（title/purpose/keyEvents/suspenseHook），不整页重载，
       // 避免选中章跳回第一章；其余章节由下次读取自然刷新。
@@ -664,51 +706,12 @@ export default function ChapterCardEditor({
       )
       if (!isCurrentProjectSession(projectSession) || v2SelectedChapterRef.current !== chapterNumber) return
       setV2Detail(detail)
+      v2SeedJsonRef.current = detail ? null : v2SeedJsonRef.current
       setV2LoadError(null)
     } catch {
       // 保留已有 detail；用户可手动刷新。
     }
   }, [persistV2Ledger, projectKey, selectedChapterNumber])
-
-  /** v1-only 章 → v2 细纲的显式升级脚手架（契约 §7.4；分镜留空，不伪造）。 */
-  const handleUpgradeToV2 = useCallback(async () => {
-    if (!selected) return
-    const projectSession = currentProjectSessionForPath(projectKey)
-    if (!projectSession || !projectMatches) return
-    const ok = await confirm(text(
-      '将基于当前简纲生成 v2 细纲脚手架：章题、核心使命与番茄追读钩子会带入对应分区；逐场分镜留空待补（不会把关键事件伪造成分镜）；role、出场角色与作者微操指导会逐字存档到「旧版简纲字段」分区。v1 字段本身不变。继续？',
-      'This creates a v2 outline scaffold from the simple outline: the chapter title, mission, and hook map to their sections; the storyboard starts empty (key events are never faked into scenes); role, characters, and author guidance are archived verbatim into an “legacy outline fields” section. The v1 fields themselves stay unchanged. Continue?',
-    ), {
-      title: text('升级为 v2 细纲', 'Upgrade to v2 outline'),
-      confirmText: text('生成脚手架', 'Create scaffold'),
-    })
-    if (!ok || !isCurrentProjectSession(projectSession)) return
-    setV2Saving(true)
-    try {
-      const scaffold = buildBlueprintV2UpgradeScaffold(selected)
-      const result = await ipc.invokeWithProjectSession(projectSession, 'db:blueprint-v2-save', {
-        chapterNumber: selected.chapterNumber,
-        baseRevision: v2Detail && v2Detail.readStatus === undefined ? v2Detail.revision : 0,
-        content: scaffold,
-      }, projectKey)
-      if (!isCurrentProjectSession(projectSession)) return
-      if (!result.success) {
-        toast.error(text(`升级失败\n\n${result.error ?? '未知错误'}`, `Could not upgrade.\n\n${result.error ?? 'Unknown error'}`))
-        return
-      }
-      persistV2Ledger(null, selected.chapterNumber)
-      if (v2SelectedChapterRef.current === selected.chapterNumber) {
-        setV2Detail({ ...scaffold, revision: result.revision ?? 1, contentHash: result.contentHash ?? '' })
-        setV2Draft(null)
-      }
-      toast.success(text(
-        `第 ${selected.chapterNumber} 章已升级为 v2 细纲脚手架，请补写逐场分镜。`,
-        `Chapter ${selected.chapterNumber} is upgraded to a v2 outline scaffold; fill in the storyboard next.`,
-      ))
-    } finally {
-      if (isCurrentProjectSession(projectSession)) setV2Saving(false)
-    }
-  }, [persistV2Ledger, projectKey, projectMatches, selected, v2Detail])
 
   /** 导出规范 Markdown（先无损自检，再复制到剪贴板）。 */
   const handleExportV2 = useCallback(async () => {
@@ -728,16 +731,16 @@ export default function ChapterCardEditor({
     }
   }, [v2Content])
 
-  /** 删除 v2 细纲（独立用户动作；v1 字段保留投影值，画布卡保留并显示引用失效）。 */
+  /** 删除细纲（独立用户动作；v1 行字段保留投影值，画布卡保留并显示引用失效）。 */
   const handleDeleteV2Detail = useCallback(async () => {
     if (!selected) return
     const projectSession = currentProjectSessionForPath(projectKey)
     if (!projectSession || !projectMatches) return
     const ok = await confirm(text(
-      `确认删除第 ${selected.chapterNumber} 章的 v2 正式细纲（含分镜正文、规则与禁忌）？\n\n此操作不可撤销；v1 蓝图字段保留删除前的投影值；画布上已关联的场景卡会保留并显示「引用失效」。`,
-      `Delete the v2 formal outline for Chapter ${selected.chapterNumber} (including scene bodies, rules, and taboos)?\n\nThis cannot be undone; the v1 fields keep their last projected values; linked canvas cards stay and show a “broken reference” badge.`,
+      `确认删除第 ${selected.chapterNumber} 章的正式细纲（含分镜正文、规则与禁忌）？\n\n此操作不可撤销；章节概要字段保留删除前的投影值，画布上已关联的场景卡会保留并显示「引用失效」。`,
+      `Delete the formal outline for Chapter ${selected.chapterNumber} (including scene bodies, rules, and taboos)?\n\nThis cannot be undone; the summary fields keep their last projected values; linked canvas cards stay and show a “broken reference” badge.`,
     ), {
-      title: text('删除 v2 细纲', 'Delete v2 outline'),
+      title: text('删除细纲', 'Delete outline'),
       confirmText: text('删除细纲', 'Delete outline'),
       danger: true,
     })
@@ -756,7 +759,9 @@ export default function ChapterCardEditor({
         setV2Draft(null)
         setV2Detail(null)
       }
-      toast.success(text(`已删除第 ${selected.chapterNumber} 章 v2 细纲`, `Deleted the v2 outline for Chapter ${selected.chapterNumber}`))
+      // 重新载入：章仍可能有 v1 行（迁移来源），按统一规则重新生成种子内容。
+      setV2ReloadNonce(value => value + 1)
+      toast.success(text(`已删除第 ${selected.chapterNumber} 章细纲`, `Deleted the outline for Chapter ${selected.chapterNumber}`))
     } catch (error) {
       toast.error(text(
         `删除失败\n\n${error instanceof Error ? error.message : String(error)}`,
@@ -776,6 +781,7 @@ export default function ChapterCardEditor({
       )
       if (!isCurrentProjectSession(projectSession) || v2SelectedChapterRef.current !== chapterNumber) return
       setV2Detail(detail)
+      v2SeedJsonRef.current = detail ? null : v2SeedJsonRef.current
       setV2LoadError(null)
     } catch {
       // 下次进入页面会重新读取。
@@ -793,6 +799,7 @@ export default function ChapterCardEditor({
       )
       if (!isCurrentProjectSession(projectSession) || v2SelectedChapterRef.current !== chapterNumber) return
       setV2Detail(detail)
+      v2SeedJsonRef.current = detail ? null : v2SeedJsonRef.current
       setV2LoadError(null)
       persistV2Ledger(null, chapterNumber)
       setV2Draft(null)
@@ -860,6 +867,9 @@ export default function ChapterCardEditor({
         ))
       }
     }
+    if (getChapterCardV2ProjectDraft(readV2Ledger(), projectKey)?.drafts.length) {
+      throw new Error(text('细纲仍有未保存修改，请处理冲突或保存失败后重试', 'Outline edits remain unsaved. Resolve conflicts or save errors before retrying.'))
+    }
   }, [persistV2Ledger, projectKey, projectMatches, readV2Ledger, text])
 
   // 独立 ref 持有 v1 全量保存（每渲染同步），供组合保存调用，避免互相递归。
@@ -870,12 +880,6 @@ export default function ChapterCardEditor({
     await handleSaveAllV2Drafts()
     await saveAllRef.current?.()
   }, [handleSaveAllV2Drafts])
-
-  // 后注册的赋值生效：退出保存 = v2 草稿 → v1 蓝图。
-  useEffect(() => {
-    exitSaveRef.current = handleSaveAllWithV2
-  })
-
 
   /** 更新选中章节蓝图的字段 */
   const updateField = <K extends EditableChapterBlueprintField>(
@@ -982,7 +986,7 @@ export default function ChapterCardEditor({
 
   const exitSaveRef = useRef(handleSaveAll)
   useEffect(() => {
-    exitSaveRef.current = handleSaveAll
+    exitSaveRef.current = handleSaveAllWithV2
     saveAllRef.current = handleSaveAll
   })
   useEffect(() => {
@@ -1087,8 +1091,8 @@ export default function ChapterCardEditor({
     ) return
     const deletedSnapshots = captureBlueprintSnapshots([selected])
     const ok = await confirm(text(
-      `确认删除第 ${selected.chapterNumber} 章蓝图？\n此操作不可撤销。${v2Detail || v2Draft ? '\n该章的 v2 正式细纲（含分镜正文）将一并删除。' : ''}`,
-      `Delete the blueprint for Chapter ${selected.chapterNumber}?\nThis cannot be undone.${v2Detail || v2Draft ? '\nThe v2 formal outline (including scene bodies) will be deleted with it.' : ''}`,
+      `确认删除第 ${selected.chapterNumber} 章蓝图？\n此操作不可撤销。${v2Detail || v2Draft ? '\n该章的正式细纲（含分镜正文）将一并删除。' : ''}`,
+      `Delete the blueprint for Chapter ${selected.chapterNumber}?\nThis cannot be undone.${v2Detail || v2Draft ? '\nThe formal outline (including scene bodies) will be deleted with it.' : ''}`,
     ), {
       title: text('删除章节蓝图', 'Delete chapter blueprint'),
       confirmText: text('删除', 'Delete'),
@@ -1176,7 +1180,8 @@ export default function ChapterCardEditor({
   const handleAIWriting = (bp: ChapterBlueprint) => {
     const session = currentProjectSessionForPath(projectKey)
     if (!session || !sameProjectSessionContext(dataProjectSessionRef.current, session)
-      || bp.chapterNumber !== nextWriteChapter || dirty || v2Dirty || v2Loading
+      || bp.chapterNumber !== nextWriteChapter || dirty
+      || (v2Dirty && !v2SeedUnsaved) || v2Loading
       || v2Detail?.readStatus) return
     useLayoutStore.getState().openChapterCreation({
       chapterNumber: bp.chapterNumber, title: bp.title, role: bp.role,
@@ -1366,8 +1371,8 @@ export default function ChapterCardEditor({
       icon={<BookOpen size={15} />}
       title={text('章节蓝图', 'Chapter blueprints')}
       description={text(
-        '逐章细纲：作者先在这里写清每章的小目标、冲突转折、悬念钩子与微操指导，它同时是 AI 写正文和人工写正文的共同依据。章节号是稳定标识，不与正文草稿共用存储。',
-        'Per-chapter outlines: write each chapter’s goal, conflict, hook, and author guidance here. This is the shared basis for both AI and manual drafting. Chapter numbers are stable identifiers and are stored separately from prose drafts.',
+        '逐章细纲：作者在这里维护每章的分区细纲与逐场分镜，并补充小目标、冲突转折、悬念钩子与微操指导；它是 AI 写正文和人工写正文的共同依据。章节号是稳定标识，不与正文草稿共用存储。',
+        'Per-chapter outlines: maintain per-section outlines and scene storyboards here, plus goals, conflicts, hooks, and author guidance. This is the shared basis for both AI and manual drafting. Chapter numbers are stable identifiers and are stored separately from prose drafts.',
       )}
       meta={text(
         `${visibleBlueprints.length} 章蓝图 · ${hasDraftCount} 章已写正文`,
@@ -1399,7 +1404,7 @@ export default function ChapterCardEditor({
             title={text('在项目树中展开草稿箱与正文章节', 'Reveal the draft box and manuscript in the project tree')}
           >
             <PenLine size={12} />
-            {text('正文创作', 'Manuscript')}
+            {text('正文写作', 'Manuscript')}
           </Button>
           <Button variant="ghost" size="icon" onClick={() => loadBlueprints()} title={text('重新加载', 'Reload')} disabled={loading}>
             <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
@@ -1415,7 +1420,7 @@ export default function ChapterCardEditor({
             {text('清空全部蓝图', 'Clear all')}
           </Button>
           {(visibleDirty || v2Dirty) && (
-            <Button variant="outline" size="sm" onClick={handleSaveAllWithV2} disabled={saving || v2Saving || !projectDataReady}>
+            <Button variant="outline" size="sm" onClick={() => { void handleSaveAllWithV2().catch(error => toast.error(error instanceof Error ? error.message : String(error))) }} disabled={saving || v2Saving || !projectDataReady}>
             <Save size={12} /> {saving || v2Saving ? text('保存中...', 'Saving...') : text('保存全部', 'Save all')}
             </Button>
           )}
@@ -1699,7 +1704,7 @@ export default function ChapterCardEditor({
             </div>
           ) : selected && v2Content ? (
             <div className="max-w-3xl mx-auto px-5 py-4" data-testid="blueprint-v2-view">
-              {/* v2 编辑区头部 */}
+              {/* 统一细纲编辑区头部 */}
               <div className="flex items-start justify-between gap-3 mb-3">
                 <div className="min-w-0">
                   <h3 className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>
@@ -1712,24 +1717,43 @@ export default function ChapterCardEditor({
                     {v2Loading
                       ? text('读取细纲…', 'Loading outline…')
                       : text(
-                        `v2 正式细纲 r${v2BaseRevision} · ${getBlueprintV2Scenes(v2Content).length} 个分镜 · 字数预算 ${extractBlueprintV2WordBudget(v2Content) ?? '—'}${v2Dirty ? ' · 有未保存修改' : ''}`,
-                        `v2 outline r${v2BaseRevision} · ${getBlueprintV2Scenes(v2Content).length} scene(s) · word budget ${extractBlueprintV2WordBudget(v2Content) ?? '—'}${v2Dirty ? ' · unsaved changes' : ''}`,
+                        `正式细纲 r${v2BaseRevision} · ${getBlueprintV2Scenes(v2Content).length} 个分镜 · 字数预算 ${extractBlueprintV2WordBudget(v2Content) ?? '—'}${v2Dirty ? ' · 有未保存修改' : ''}`,
+                        `Outline r${v2BaseRevision} · ${getBlueprintV2Scenes(v2Content).length} scene(s) · word budget ${extractBlueprintV2WordBudget(v2Content) ?? '—'}${v2Dirty ? ' · unsaved changes' : ''}`,
                       )}
                   </p>
                 </div>
                 <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap justify-end">
-                  <Button variant="ai" size="sm" onClick={() => handleAIWriting(selected)} disabled={selected.chapterNumber !== nextWriteChapter || dirty || v2Dirty || v2Loading || !!v2Detail?.readStatus} title={text('保存修改后从此章蓝图启动 AI 写作', 'Save changes, then start AI writing from this blueprint')}>
+                  <Button variant="ai" size="sm" onClick={() => handleAIWriting(selected)} disabled={selected.chapterNumber !== nextWriteChapter || dirty || (v2Dirty && !v2SeedUnsaved) || v2Loading || !!v2Detail?.readStatus} title={text('保存修改后从此章蓝图启动 AI 写作', 'Save changes, then start AI writing from this blueprint')}>
                     {text('写作此章', 'Write this chapter')}
                   </Button>
+                  {canOpenOrCreateDraft(selected) && <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => handleOpenOrNewDraft(selected)}
+                    title={
+                      (draftsByChapter[selected.chapterNumber]?.length ?? 0) > 0
+                        ? text('打开已有正文草稿', 'Open existing draft')
+                        : text('新建空白草稿直接开始创作', 'Create blank draft and write')
+                    }
+                  >
+                    <PenLine size={12} />
+                    {(draftsByChapter[selected.chapterNumber]?.length ?? 0) > 0
+                      ? text('打开正文草稿', 'Open draft')
+                      : text('新建正文草稿', 'New draft')}
+                  </Button>}
                   <Button variant="outline" size="sm" onClick={() => setV2ImportOpen(true)} data-testid="blueprint-v2-import">
                     {text('导入 Markdown', 'Import Markdown')}
                   </Button>
                   <Button variant="outline" size="sm" onClick={() => void handleExportV2()} title={text('先无损自检，再复制规范 Markdown', 'Run the lossless check, then copy the canonical Markdown')}>
                     {text('导出', 'Export')}
                   </Button>
-                  <Button variant="ghost" size="sm" onClick={() => void handleDeleteV2Detail()} title={text('仅删除 v2 细纲；v1 字段与画布卡保留', 'Delete the v2 outline only; v1 fields and canvas cards remain')}>
+                  <Button variant="ghost" size="sm" onClick={() => void handleDeleteV2Detail()} title={text('仅删除细纲；章节信息字段与画布卡保留', 'Delete the outline only; chapter info fields and canvas cards remain')}>
                     <Trash2 size={12} />
                     {text('删除细纲', 'Delete outline')}
+                  </Button>
+                  <Button variant="destructive" size="sm" onClick={handleDeleteChapter} title={text('删除此章', 'Delete this chapter')}>
+                    <Trash2 size={12} />
+                    {text('删除此章', 'Delete chapter')}
                   </Button>
                   <Button variant="default" size="sm" onClick={() => void handleSaveV2()} disabled={v2Saving} data-testid="blueprint-v2-save">
                     <Save size={12} />
@@ -1798,12 +1822,12 @@ export default function ChapterCardEditor({
 
               <BlueprintV2Editor content={v2Content} onChange={updateV2Content} />
 
-              {/* v1 独立字段（v2 永不投影/覆盖） */}
+              {/* 章节信息与作者指导（细纲不携带这些字段；修改后单独保存） */}
               <div className="mt-5 p-3 rounded-lg border" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-panel)' }}>
                 <Label className="flex items-center gap-1.5 font-medium">
-                  {text('v1 独立字段', 'v1-only fields')}
+                  {text('章节信息与作者指导', 'Chapter info & author guidance')}
                   <span className="text-[0.7rem] font-normal" style={{ color: 'var(--color-text-muted)' }}>
-                    {text('（细纲不投影这些字段；修改后单独保存）', '(never projected from the outline; save separately)')}
+                    {text('（细纲不携带这些字段；修改后单独保存）', '(not carried by the outline; save separately)')}
                   </span>
                 </Label>
                 <div className="grid grid-cols-3 gap-3 mt-2">
@@ -1836,6 +1860,9 @@ export default function ChapterCardEditor({
                 </div>
                 <div className="mt-3">
                   <Label>{text('作者微操指导', 'Author guidance')}</Label>
+                  <span className="text-[0.7rem]" style={{ color: 'var(--color-text-muted)' }}>
+                    {text('（写稿时会作为最高优先级注入 AI — 可覆盖细纲）', '(Used as the highest-priority instruction during drafting; it can override the outline.)')}
+                  </span>
                   <Textarea
                     value={selected.userGuidance}
                     onChange={e => updateField('userGuidance', e.target.value)}
@@ -1845,7 +1872,13 @@ export default function ChapterCardEditor({
                 <div className="mt-3">
                   <Label>{text('章节要点', 'Chapter notes')}</Label>
                   <span className="text-[0.7rem]" style={{ color: 'var(--color-text-muted)' }}>
-                    {text('（定稿后自动生成，也可手动填写）', '(Generated after finalization, or enter it manually.)')}
+                    {selected.notesUpdatedAt
+                      ? text(
+                        `（定稿后自动生成 — ${new Date(selected.notesUpdatedAt).toLocaleDateString(locale)}）`,
+                        `(Generated after finalization — ${new Date(selected.notesUpdatedAt).toLocaleDateString(locale)})`,
+                      )
+                      : text('（定稿后自动生成，也可手动填写）', '(Generated after finalization, or enter it manually.)')
+                    }
                   </span>
                   <Textarea
                     value={selected.notes || ''}
@@ -1856,316 +1889,103 @@ export default function ChapterCardEditor({
                 {dirty && (
                   <div className="mt-3 flex justify-end">
                     <Button variant="outline" size="sm" onClick={handleSaveOne} disabled={saving}>
-                      <Save size={12} /> {saving ? text('保存中...', 'Saving...') : text('保存 v1 字段', 'Save v1 fields')}
+                      <Save size={12} /> {saving ? text('保存中...', 'Saving...') : text('保存章节信息', 'Save chapter info')}
                     </Button>
                   </div>
                 )}
               </div>
 
-              {/* v1 投影预览（只读） */}
-              <details className="mt-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                <summary className="cursor-pointer select-none">{text('v1 投影预览（保存细纲时自动刷新）', 'v1 projection preview (refreshed when the outline is saved)')}</summary>
-                <div className="mt-2 space-y-1 whitespace-pre-wrap" data-testid="blueprint-v2-projection-preview">
-                  <p><b>{text('标题', 'Title')}:</b> {selected.title || text('（空）', '(empty)')}</p>
-                  <p><b>{text('核心目的', 'Purpose')}:</b> {selected.purpose || text('（空）', '(empty)')}</p>
-                  <p><b>{text('关键事件', 'Key events')}:</b> {selected.keyEvents || text('（空）', '(empty)')}</p>
-                  <p><b>{text('悬念钩子', 'Suspense hook')}:</b> {selected.suspenseHook || text('（空）', '(empty)')}</p>
+              {/* 关联世界地图节点（按本章细纲文本自动识别，只读展示） */}
+              <div
+                className="mt-3 p-3 rounded-lg border"
+                style={{
+                  borderColor: 'var(--color-border)',
+                  backgroundColor: 'var(--color-panel)',
+                }}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <Label className="flex items-center gap-1.5 font-medium">
+                    <MapPin size={13} style={{ color: 'var(--color-accent)' }} />
+                    <span>{text('关联地图节点', 'Linked map nodes')}</span>
+                    <span className="text-[0.7rem] font-normal" style={{ color: 'var(--color-text-muted)' }}>
+                      {text('（根据本章细纲与事件中提及的地点自动关联）', '(Automatically recognized from chapter text and outline)')}
+                    </span>
+                  </Label>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      useEditorStore.getState().openFile({
+                        id: 'world-map',
+                        name: text('多地图地图册', 'Map atlas'),
+                        type: 'world-map',
+                        projectKey,
+                      })
+                    }}
+                  >
+                    {text('在地图册中查看', 'View in map atlas')}
+                  </Button>
                 </div>
-              </details>
+                {(() => {
+                  const matched = worldMapNodes.filter(node =>
+                    node.name && (
+                      (selected.title || '').includes(node.name)
+                      || (selected.purpose || '').includes(node.name)
+                      || (selected.keyEvents || '').includes(node.name)
+                      || (selected.userGuidance || '').includes(node.name)
+                    )
+                  )
+                  if (matched.length === 0) {
+                    return (
+                      <p className="text-xs py-1" style={{ color: 'var(--color-text-muted)' }}>
+                        {text('本章细纲或事件中未提及已收录的地图节点。', 'No recognized world map nodes mentioned in this chapter.')}
+                      </p>
+                    )
+                  }
+                  return (
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {matched.map(node => (
+                        <div
+                          key={node.id}
+                          className="text-xs px-2.5 py-1.5 rounded border flex items-center gap-2"
+                          style={{
+                            borderColor: 'var(--color-border)',
+                            backgroundColor: 'var(--color-bg)',
+                          }}
+                        >
+                          <span className="font-semibold">{node.name}</span>
+                          <span className="text-[0.7rem] px-1 rounded" style={{ backgroundColor: 'var(--color-panel)' }}>
+                            {WORLD_MAP_NODE_TYPE_LABELS[node.type]?.[locale === 'zh-CN' ? 'zh' : 'en'] || node.type}
+                          </span>
+                          <span className="text-[0.7rem]" style={{ color: 'var(--color-text-muted)' }}>
+                            {getWorldMapName(worldMaps, node.mapId)}
+                          </span>
+                          {node.description && (
+                            <span className="text-[0.7rem] truncate max-w-[200px]" style={{ color: 'var(--color-text-muted)' }}>
+                              {node.description}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })()}
+              </div>
             </div>
           ) : selected ? (
-            <div className="max-w-2xl mx-auto px-5 py-4">
-              {/* 编辑区头部 */}
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>
-                  {text(
-                    `第 ${selected.chapterNumber} 章：${selected.title || '未命名'}`,
-                    `Chapter ${selected.chapterNumber}: ${selected.title || 'Untitled'}`,
-                  )}
-                </h3>
-                <div className="flex items-center gap-1.5">
-                  <Button variant="ai" size="sm" onClick={() => handleAIWriting(selected)} disabled={selected.chapterNumber !== nextWriteChapter || dirty || v2Loading} title={text('保存修改后从此章蓝图启动 AI 写作', 'Save changes, then start AI writing from this blueprint')}>
-                    {text('写作此章', 'Write this chapter')}
-                  </Button>
-                  {canOpenOrCreateDraft(selected) && <Button
-                    variant="default"
-                    size="sm"
-                    onClick={() => handleOpenOrNewDraft(selected)}
-                    title={
-                      (draftsByChapter[selected.chapterNumber]?.length ?? 0) > 0
-                        ? text('打开已有正文草稿', 'Open existing draft')
-                        : text('新建空白草稿直接开始创作', 'Create blank draft and write')
-                    }
-                  >
-                    <PenLine size={12} />
-                    {(draftsByChapter[selected.chapterNumber]?.length ?? 0) > 0
-                      ? text('打开正文草稿', 'Open draft')
-                      : text('新建正文草稿', 'New draft')}
-                  </Button>}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setV2ImportOpen(true)}
-                    title={text('导入完整 Markdown 细纲（解析预览 + 确认后写入）', 'Import a full Markdown outline (parse preview, writes only after confirmation)')}
-                    data-testid="blueprint-v2-import-v1"
-                  >
-                    {text('导入 Markdown 细纲', 'Import Markdown outline')}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void handleUpgradeToV2()}
-                    title={text('基于当前简纲生成 v2 细纲脚手架（分镜留空）', 'Create a v2 outline scaffold from the simple outline (storyboard starts empty)')}
-                    data-testid="blueprint-v2-upgrade"
-                  >
-                    {text('升级为 v2 细纲', 'Upgrade to v2 outline')}
-                  </Button>
-                  <Button variant="destructive" size="sm" onClick={handleDeleteChapter} title={text('删除此章', 'Delete this chapter')}>
-                    <Trash2 size={12} />
-                    {text('删除此章', 'Delete chapter')}
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={handleSaveOne} disabled={saving}>
-                    <Save size={12} /> {saving ? text('保存中...', 'Saving...') : text('保存', 'Save')}
-                  </Button>
-                </div>
-              </div>
-              <p className="text-xs mb-3 -mt-2" style={{ color: 'var(--color-text-muted)' }} data-testid="blueprint-v1-hint">
-                {text(
-                  '此章还是旧版简纲（未建立七项分区细纲）。可直接编辑下方字段，或导入 Markdown 细纲 / 升级为 v2 细纲；细纲一经建立，标题、目的、关键事件与钩子将以细纲为准。',
-                  'This chapter still uses the legacy simple outline (no seven-section outline yet). Edit the fields below, import a Markdown outline, or upgrade to a v2 outline; once the v2 outline exists, title, purpose, key events, and the hook follow the outline.',
-                )}
-              </p>
-
-              <div className="space-y-3">
-                {/* 基本信息 */}
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <Label>{text('章节号', 'Chapter number')}</Label>
-                    <Input
-                      type="number"
-                      value={selected.chapterNumber}
-                      readOnly
-                      aria-readonly="true"
-                      title={text('章节号是现有内容的稳定标识，不能在普通编辑中修改', 'The chapter number is a stable identifier and cannot be changed in ordinary editing.')}
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <Label>{text('章节标题', 'Chapter title')}</Label>
-                    <Input
-                      value={selected.title}
-                      onChange={e => updateField('title', e.target.value)}
-                      placeholder={text('引人入胜的章节标题', 'A compelling chapter title')}
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>{text('所属卷', 'Volume')}</Label>
-                    <NativeSelect
-                      value={blueprintVolumeId(selected)}
-                      onChange={event => {
-                        const volumeId = event.target.value
-                        updateField('volumeId', volumeId)
-                        setSelectedVolumeId(volumeId)
-                      }}
-                    >
-                      {volumes.map(volume => <option key={volume.id} value={volume.id}>{volume.name}</option>)}
-                    </NativeSelect>
-                  </div>
-                  <div>
-                    <Label>{text('章节定位', 'Chapter role')}</Label>
-                    <NativeSelect value={selected.role} onChange={e => updateField('role', e.target.value)}>
-                      {ROLES.map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
-                    </NativeSelect>
-                  </div>
-                  <div>
-                    <Label>{text('出场关键人（逗号分隔）', 'Key characters (comma-separated)')}</Label>
-                    <Input
-                      value={selected.characters.join('、')}
-                      onChange={e => updateField('characters', e.target.value.split(/[,，、\s]+/).filter(Boolean))}
-                      placeholder={text('如：主角、反派A', 'For example: protagonist, antagonist A')}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <Label>{text('主角小目标（本章最想解决的事）', 'Protagonist goal (the main thing to resolve in this chapter)')}</Label>
-                  <Textarea
-                    value={selected.purpose}
-                    onChange={e => updateField('purpose', e.target.value)}
-                    placeholder={text('本章主角最迫切要解决的一件事...', 'The most urgent thing the protagonist needs to resolve in this chapter...')}
-                    rows={2}
-                  />
-                </div>
-
-                <div>
-                  <Label>{text('实质冲突与转折', 'Core conflict and turning point')}</Label>
-                  <Textarea
-                    value={selected.keyEvents}
-                    onChange={e => updateField('keyEvents', e.target.value)}
-                    placeholder={text('主角做了什么，遭遇了什么反转，金手指怎么用的...', 'What the protagonist does, the reversal they encounter, and how special abilities are used...')}
-                    rows={4}
-                  />
-                </div>
-
-                <div>
-                  <Label>{text('末尾悬念钩子', 'Ending suspense hook')}</Label>
-                  <Textarea
-                    value={selected.suspenseHook}
-                    onChange={e => updateField('suspenseHook', e.target.value)}
-                    placeholder={text('一句话说明结尾留了什么悬念...', 'In one sentence, describe the suspense left at the end...')}
-                    rows={2}
-                  />
-                </div>
-
-                {/* 作者微操指导 — 特别标注，写稿时注入为最高优先级 */}
-                <div
-                  className="p-3 rounded-lg border"
-                  style={{
-                    borderColor: 'var(--color-accent)',
-                    backgroundColor: 'rgba(var(--accent-rgb, 99 102 241), 0.06)',
-                  }}
-                >
-                  <Label className="flex items-center gap-1.5">
-                    <span>{text('作者微操指导', 'Author guidance')}</span>
-                    <span
-                      className="text-[0.7rem] font-normal"
-                      style={{ color: 'var(--color-text-muted)' }}
-                    >
-                      {text('（写稿时会作为最高优先级注入 AI — 可覆盖蓝图）', '(Used as the highest-priority instruction during drafting; it can override the blueprint.)')}
-                    </span>
-                  </Label>
-                  <Textarea
-                    value={selected.userGuidance}
-                    onChange={e => updateField('userGuidance', e.target.value)}
-                    placeholder={text(
-                      '我想在这章加入一个意外的背叛...\n让反派在这章露出破绽...\n（不填则完全按蓝图走）',
-                      'Add an unexpected betrayal in this chapter...\nLet the antagonist reveal a weakness...\n(Leave blank to follow the blueprint exactly.)',
-                    )}
-                    rows={3}
-                    style={{ marginTop: 6 }}
-                  />
-                </div>
-                {/* 章节要点（定稿后自动生成，也可手动编辑） */}
-                <div
-                  className="p-3 rounded-lg border"
-                  style={{
-                    borderColor: 'var(--color-border)',
-                    backgroundColor: 'rgba(34,197,94,0.04)',
-                  }}
-                >
-                  <Label className="flex items-center gap-1.5">
-                    <span>{text('章节要点', 'Chapter notes')}</span>
-                    <span
-                      className="text-[0.7rem] font-normal"
-                      style={{ color: 'var(--color-text-muted)' }}
-                    >
-                      {selected.notesUpdatedAt
-                        ? text(
-                          `（定稿后自动生成 — ${new Date(selected.notesUpdatedAt).toLocaleDateString(locale)}）`,
-                          `(Generated after finalization — ${new Date(selected.notesUpdatedAt).toLocaleDateString(locale)})`,
-                        )
-                        : text('（定稿后自动生成，也可手动填写）', '(Generated after finalization, or enter it manually.)')
-                      }
-                    </span>
-                  </Label>
-                  <Textarea
-                    value={selected.notes || ''}
-                    onChange={e => updateField('notes', e.target.value)}
-                    placeholder={text(
-                      '定稿后 AI 会自动填充本章要点（事件进展/角色变化/伏笔埋点），也可以提前手动输入给 AI 作参考',
-                      'After finalization, AI fills these notes with plot progress, character changes, and foreshadowing. You can also enter them beforehand as AI reference.',
-                    )}
-                    rows={4}
-                  />
-                </div>
-
-                {/* 关联世界地图节点 */}
-                <div
-                  className="p-3 rounded-lg border"
-                  style={{
-                    borderColor: 'var(--color-border)',
-                    backgroundColor: 'var(--color-panel)',
-                  }}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <Label className="flex items-center gap-1.5 font-medium">
-                      <MapPin size={13} style={{ color: 'var(--color-accent)' }} />
-                      <span>{text('关联地图节点', 'Linked map nodes')}</span>
-                      <span className="text-[0.7rem] font-normal" style={{ color: 'var(--color-text-muted)' }}>
-                        {text('（根据本章细纲与事件中提及的地点自动关联）', '(Automatically recognized from chapter text and outline)')}
-                      </span>
-                    </Label>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        useEditorStore.getState().openFile({
-                          id: 'world-map',
-                          name: text('多地图地图册', 'Map atlas'),
-                          type: 'world-map',
-                          projectKey,
-                        })
-                      }}
-                    >
-                      {text('在地图册中查看', 'View in map atlas')}
-                    </Button>
-                  </div>
-                  {(() => {
-                    const matched = worldMapNodes.filter(node =>
-                      node.name && (
-                        (selected.title || '').includes(node.name)
-                        || (selected.purpose || '').includes(node.name)
-                        || (selected.keyEvents || '').includes(node.name)
-                        || (selected.userGuidance || '').includes(node.name)
-                      )
-                    )
-                    if (matched.length === 0) {
-                      return (
-                        <p className="text-xs py-1" style={{ color: 'var(--color-text-muted)' }}>
-                          {text('本章细纲或事件中未提及已收录的地图节点。', 'No recognized world map nodes mentioned in this chapter.')}
-                        </p>
-                      )
-                    }
-                    return (
-                      <div className="flex flex-wrap gap-2 pt-1">
-                        {matched.map(node => (
-                          <div
-                            key={node.id}
-                            className="text-xs px-2.5 py-1.5 rounded border flex items-center gap-2"
-                            style={{
-                              borderColor: 'var(--color-border)',
-                              backgroundColor: 'var(--color-bg)',
-                            }}
-                          >
-                            <span className="font-semibold">{node.name}</span>
-                            <span className="text-[0.7rem] px-1 rounded" style={{ backgroundColor: 'var(--color-panel)' }}>
-                              {WORLD_MAP_NODE_TYPE_LABELS[node.type]?.[locale === 'zh-CN' ? 'zh' : 'en'] || node.type}
-                            </span>
-                            <span className="text-[0.7rem]" style={{ color: 'var(--color-text-muted)' }}>
-                              {getWorldMapName(worldMaps, node.mapId)}
-                            </span>
-                            {node.description && (
-                              <span className="text-[0.7rem] truncate max-w-[200px]" style={{ color: 'var(--color-text-muted)' }}>
-                                {node.description}
-                              </span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )
-                  })()}
-                </div>
-              </div>
+            <div className="flex items-center justify-center gap-2 px-5 py-10 text-sm" style={{ color: 'var(--color-text-muted)' }} data-testid="blueprint-loading">
+              <RefreshCw size={14} className={v2Loading ? 'animate-spin' : ''} />
+              {v2Loading
+                ? text('正在载入本章细纲…', 'Loading this chapter outline…')
+                : text('本章细纲尚未建立，正在生成统一编辑视图…', 'This chapter has no outline yet; preparing the unified editor…')}
             </div>
           ) : (
             <PlanningEmptyState
               icon={<BookOpen size={20} />}
               title={text('在左侧选择一章开始编辑', 'Choose a chapter on the left to start editing')}
               description={text(
-                '右侧会显示这一章的细纲字段：小目标、冲突转折、悬念钩子、作者微操指导与关联地图节点。',
-                'The detail pane shows this chapter’s outline fields: goal, conflict, hook, author guidance, and linked map nodes.',
+                '右侧是这一章的统一细纲编辑器：分区细纲、逐场分镜、章节信息与作者指导、关联地图节点。',
+                'The detail pane is the unified outline editor for this chapter: sections, scenes, chapter info, author guidance, and linked map nodes.',
               )}
               steps={visibleBlueprints.length === 0 ? [
                 text('先在左侧新建一卷，再新增章节；', 'Create a volume on the left, then add chapters to it.'),
@@ -2180,7 +2000,7 @@ export default function ChapterCardEditor({
                 </Button>
               ) : (
                 <Button variant="outline" size="sm" onClick={() => revealSidebarGroup('manuscript')}>
-                  <PenLine size={13} /> {text('打开正文创作', 'Open manuscript')}
+                  <PenLine size={13} /> {text('打开正文写作', 'Open manuscript')}
                 </Button>
               )}
             />

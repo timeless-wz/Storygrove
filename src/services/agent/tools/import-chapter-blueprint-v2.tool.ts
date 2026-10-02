@@ -101,8 +101,8 @@ function previewText(summary: ImportPreviewSummary, writingLanguage: 'zh-CN' | '
     `一级分区：${summary.sectionTitles.join('、') || '（无）'}`,
     `分镜：${summary.sceneCount} 个${summary.wordBudget !== null ? `；字数预算：${summary.wordBudget}` : ''}`,
     summary.hasExistingDetail
-      ? `该章已有 v2 细纲（r${summary.existingRevision}）：匹配沿用分镜 ${summary.matchedSceneCount} 个、新增分镜 ${summary.newSceneCount} 个、将被移除分镜 ${summary.removedSceneCount} 个。`
-      : `该章尚无 v2 细纲；将新建。`,
+      ? `该章已有细纲（r${summary.existingRevision}）：匹配沿用分镜 ${summary.matchedSceneCount} 个、新增分镜 ${summary.newSceneCount} 个、将被移除分镜 ${summary.removedSceneCount} 个。`
+      : `该章尚无细纲；将新建。`,
     ...summary.removedScenePreviews.map(preview => `将被移除：${preview}`),
     `确认无误后携带 confirm_write: true 再次调用即可写入（应用层确认仍会先行）。匹配分镜沿用旧分镜 ID，章节画布链接因此存活。`,
   ]

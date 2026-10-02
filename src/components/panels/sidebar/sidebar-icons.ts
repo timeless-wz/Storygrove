@@ -3,7 +3,7 @@ import {
   Target, Users, Globe, Map, BookOpen, FolderTree, LayoutList,
   FilePen, PenTool, BrainCircuit, Sparkles, FolderOpen, Zap,
   FileText, MessageCircle, RefreshCw, GitCompare, GitBranch, Archive, RotateCcw,
-  Compass, LayoutDashboard, Clock3, Bookmark, Globe2,
+  Compass, LayoutDashboard, Clock3, Bookmark, Globe2, BarChart3,
 } from 'lucide-react'
 
 type SidebarIcon = ComponentType<{ size?: number; className?: string; style?: CSSProperties }>
@@ -34,6 +34,7 @@ const ICON_MAP: Record<string, SidebarIcon> = {
   'git-branch': GitBranch,
   archive: Archive,
   'rotate-ccw': RotateCcw,
+  'bar-chart-3': BarChart3,
 }
 
 /** 根据 iconName 渲染 Lucide 图标；未找到时返回空占位。 */

@@ -1,0 +1,107 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90mD:/ai/AI-Novel-Writer-master[39m
+
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mLeftToolWindowBar Navigation (NAV-RAIL-01 ~ NAV-RAIL-09)[2m > [22m[2mnavigates through all primary sidebar activities and bottom tabs with return paths
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mLeftToolWindowBar Navigation (NAV-RAIL-01 ~ NAV-RAIL-09)[2m > [22m[2mnavigates through all primary sidebar activities and bottom tabs with return paths
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mLeftToolWindowBar Navigation (NAV-RAIL-01 ~ NAV-RAIL-09)[2m > [22m[2mnavigates through all primary sidebar activities and bottom tabs with return paths
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mLeftToolWindowBar Navigation (NAV-RAIL-01 ~ NAV-RAIL-09)[2m > [22m[2mnavigates through all primary sidebar activities and bottom tabs with return paths
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mHomeSidebarPanel Navigation (NAV-HOME-SIDE-01 ~ NAV-HOME-SIDE-13)[2m > [22m[2mexecutes surface switching, recent project removal, and dialog openers with return paths
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mHomeSidebarPanel Navigation (NAV-HOME-SIDE-01 ~ NAV-HOME-SIDE-13)[2m > [22m[2mexecutes surface switching, recent project removal, and dialog openers with return paths
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mHomeSidebarPanel Navigation (NAV-HOME-SIDE-01 ~ NAV-HOME-SIDE-13)[2m > [22m[2mexecutes surface switching, recent project removal, and dialog openers with return paths
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mHomeSidebarPanel Navigation (NAV-HOME-SIDE-01 ~ NAV-HOME-SIDE-13)[2m > [22m[2mexecutes surface switching, recent project removal, and dialog openers with return paths
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mSidebar Container Commands (NAV-SIDE-TOP & NAV-SIDE-SUB)[2m > [22m[2mexecutes header actions in project view and sub-view return commands with verification
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mSidebar Container Commands (NAV-SIDE-TOP & NAV-SIDE-SUB)[2m > [22m[2mexecutes header actions in project view and sub-view return commands with verification
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mSidebar Container Commands (NAV-SIDE-TOP & NAV-SIDE-SUB)[2m > [22m[2mexecutes header actions in project view and sub-view return commands with verification
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mSidebar Container Commands (NAV-SIDE-TOP & NAV-SIDE-SUB)[2m > [22m[2mexecutes header actions in project view and sub-view return commands with verification
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22mLeftToolWindowBar Navigation (NAV-RAIL-01 ~ NAV-RAIL-09)[2m > [22mnavigates through all primary sidebar activities and bottom tabs with return paths[32m 248[2mms[22m[39m
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22mHomeSidebarPanel Navigation (NAV-HOME-SIDE-01 ~ NAV-HOME-SIDE-13)[2m > [22mexecutes surface switching, recent project removal, and dialog openers with return paths[32m 49[2mms[22m[39m
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mWelcomePage Hero Actions (NAV-WELCOME-01, NAV-WELCOME-02)[2m > [22m[2mopens and returns from NewProjectDialog and ImportNovelDialog from Hero actions
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mWelcomePage Hero Actions (NAV-WELCOME-01, NAV-WELCOME-02)[2m > [22m[2mopens and returns from NewProjectDialog and ImportNovelDialog from Hero actions
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mWelcomePage Hero Actions (NAV-WELCOME-01, NAV-WELCOME-02)[2m > [22m[2mopens and returns from NewProjectDialog and ImportNovelDialog from Hero actions
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mWelcomePage Hero Actions (NAV-WELCOME-01, NAV-WELCOME-02)[2m > [22m[2mopens and returns from NewProjectDialog and ImportNovelDialog from Hero actions
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mProjectTree Leaf Entries and Editor Mounting (NAV-TREE-01 ~ NAV-TREE-31)[2m > [22m[2mmounts correct editors for all leaf items and sub-documents with return paths verified
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mProjectTree Leaf Entries and Editor Mounting (NAV-TREE-01 ~ NAV-TREE-31)[2m > [22m[2mmounts correct editors for all leaf items and sub-documents with return paths verified
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mProjectTree Leaf Entries and Editor Mounting (NAV-TREE-01 ~ NAV-TREE-31)[2m > [22m[2mmounts correct editors for all leaf items and sub-documents with return paths verified
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mProjectTree Leaf Entries and Editor Mounting (NAV-TREE-01 ~ NAV-TREE-31)[2m > [22m[2mmounts correct editors for all leaf items and sub-documents with return paths verified
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22mSidebar Container Commands (NAV-SIDE-TOP & NAV-SIDE-SUB)[2m > [22mexecutes header actions in project view and sub-view return commands with verification[32m 248[2mms[22m[39m
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22mWelcomePage Hero Actions (NAV-WELCOME-01, NAV-WELCOME-02)[2m > [22mopens and returns from NewProjectDialog and ImportNovelDialog from Hero actions[32m 87[2mms[22m[39m
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mKeyboard & Context Menu Navigation (NAV-TREE-KEY)[2m > [22m[2mactivates tree items using Enter and Space keys with clean return path
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mKeyboard & Context Menu Navigation (NAV-TREE-KEY)[2m > [22m[2mactivates tree items using Enter and Space keys with clean return path
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mKeyboard & Context Menu Navigation (NAV-TREE-KEY)[2m > [22m[2mactivates tree items using Enter and Space keys with clean return path
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mKeyboard & Context Menu Navigation (NAV-TREE-KEY)[2m > [22m[2mactivates tree items using Enter and Space keys with clean return path
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mProjectOverviewPage Timeline Anomaly Separation (Requirement 3)[2m > [22m[2mrenders ProjectOverviewPage smoothly with normal IPC snapshot and return path
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mProjectOverviewPage Timeline Anomaly Separation (Requirement 3)[2m > [22m[2mrenders ProjectOverviewPage smoothly with normal IPC snapshot and return path
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mProjectOverviewPage Timeline Anomaly Separation (Requirement 3)[2m > [22m[2mrenders ProjectOverviewPage smoothly with normal IPC snapshot and return path
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mProjectOverviewPage Timeline Anomaly Separation (Requirement 3)[2m > [22m[2mrenders ProjectOverviewPage smoothly with normal IPC snapshot and return path
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22mProjectTree Leaf Entries and Editor Mounting (NAV-TREE-01 ~ NAV-TREE-31)[2m > [22mmounts correct editors for all leaf items and sub-documents with return paths verified[33m 323[2mms[22m[39m
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22mKeyboard & Context Menu Navigation (NAV-TREE-KEY)[2m > [22mactivates tree items using Enter and Space keys with clean return path[32m 81[2mms[22m[39m
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mProjectOverviewPage Timeline Anomaly Separation (Requirement 3)[2m > [22m[2mreproduces TypeError when timeline snapshot lacks events property
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mProjectOverviewPage Timeline Anomaly Separation (Requirement 3)[2m > [22m[2mreproduces TypeError when timeline snapshot lacks events property
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mProjectOverviewPage Timeline Anomaly Separation (Requirement 3)[2m > [22m[2mreproduces TypeError when timeline snapshot lacks events property
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mProjectOverviewPage Timeline Anomaly Separation (Requirement 3)[2m > [22m[2mreproduces TypeError when timeline snapshot lacks events property
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mDialog Lifecycle and Strong Cancel Assertions (Requirement 5)[2m > [22m[2mstrongly asserts ClearProjectDataDialog cancel button and no dirty writes
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mDialog Lifecycle and Strong Cancel Assertions (Requirement 5)[2m > [22m[2mstrongly asserts ClearProjectDataDialog cancel button and no dirty writes
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mDialog Lifecycle and Strong Cancel Assertions (Requirement 5)[2m > [22m[2mstrongly asserts ClearProjectDataDialog cancel button and no dirty writes
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mDialog Lifecycle and Strong Cancel Assertions (Requirement 5)[2m > [22m[2mstrongly asserts ClearProjectDataDialog cancel button and no dirty writes
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mDialog Lifecycle and Strong Cancel Assertions (Requirement 5)[2m > [22m[2mstrongly asserts NewProjectDialog cancel button closes dialog without write
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mDialog Lifecycle and Strong Cancel Assertions (Requirement 5)[2m > [22m[2mstrongly asserts NewProjectDialog cancel button closes dialog without write
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mDialog Lifecycle and Strong Cancel Assertions (Requirement 5)[2m > [22m[2mstrongly asserts NewProjectDialog cancel button closes dialog without write
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mDialog Lifecycle and Strong Cancel Assertions (Requirement 5)[2m > [22m[2mstrongly asserts NewProjectDialog cancel button closes dialog without write
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mDialog Lifecycle and Strong Cancel Assertions (Requirement 5)[2m > [22m[2mstrongly asserts ExportDialog cancel/close button closes dialog
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mDialog Lifecycle and Strong Cancel Assertions (Requirement 5)[2m > [22m[2mstrongly asserts ExportDialog cancel/close button closes dialog
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mDialog Lifecycle and Strong Cancel Assertions (Requirement 5)[2m > [22m[2mstrongly asserts ExportDialog cancel/close button closes dialog
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+[90mstderr[2m | src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22m[2mDialog Lifecycle and Strong Cancel Assertions (Requirement 5)[2m > [22m[2mstrongly asserts ExportDialog cancel/close button closes dialog
+[22m[39m[Vela IPC] velaAPI 未注入，可能不在 Electron 环境中运行
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22mProjectOverviewPage Timeline Anomaly Separation (Requirement 3)[2m > [22mrenders ProjectOverviewPage smoothly with normal IPC snapshot and return path[32m 120[2mms[22m[39m
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22mProjectOverviewPage Timeline Anomaly Separation (Requirement 3)[2m > [22mreproduces TypeError when timeline snapshot lacks events property[32m 6[2mms[22m[39m
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22mDialog Lifecycle and Strong Cancel Assertions (Requirement 5)[2m > [22mstrongly asserts ClearProjectDataDialog cancel button and no dirty writes[32m 14[2mms[22m[39m
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22mDialog Lifecycle and Strong Cancel Assertions (Requirement 5)[2m > [22mstrongly asserts NewProjectDialog cancel button closes dialog without write[32m 48[2mms[22m[39m
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/__tests__/nav-browser-audit.browser.tsx[2m > [22mDialog Lifecycle and Strong Cancel Assertions (Requirement 5)[2m > [22mstrongly asserts ExportDialog cancel/close button closes dialog[32m 36[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m11 passed[39m[22m[90m (11)[39m
+[2m   Start at [22m 10:02:56
+[2m   Duration [22m 4.04s[2m (transform 0ms, setup 70ms, import 819ms, tests 1.26s, environment 0ms)[22m

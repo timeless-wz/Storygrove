@@ -10,7 +10,7 @@ import type { ChapterBlueprintV2DetailRead } from '../../../shared/blueprint-v2'
 
 export const readBlueprintTool = buildAgentTool({
   name: 'read_blueprint',
-  description: '读取指定章节蓝图。按 chapter_number 读取时默认返回该章完整 v2 Markdown 细纲；不带章号时只返回有界列表摘要。',
+  description: '读取指定章节蓝图。按 chapter_number 读取时默认返回该章完整 Markdown 细纲；不带章号时只返回有界列表摘要。',
   descriptionEn: 'Read a chapter blueprint. With chapter_number, return the full v2 Markdown outline by default; without it, return a bounded summary list.',
   source: 'builtin',
   inputSchema: {
@@ -69,7 +69,7 @@ export const readBlueprintTool = buildAgentTool({
         }
       }
       const legacy = bp ? text(
-        `\n\n【旧版简纲与独立字段】\n标题：${bp.title}\n章节定位：${bp.role}\n目的：${bp.purpose}\n关键事件：${bp.keyEvents}\n角色：${bp.characters.join('、')}\n悬念：${bp.suspenseHook}\n定稿记录：${bp.notes}\n作者微操指导：${bp.userGuidance}`,
+        `\n\n【章节概要与独立字段】\n标题：${bp.title}\n章节定位：${bp.role}\n目的：${bp.purpose}\n关键事件：${bp.keyEvents}\n角色：${bp.characters.join('、')}\n悬念：${bp.suspenseHook}\n定稿记录：${bp.notes}\n作者微操指导：${bp.userGuidance}`,
         `\n\n[Legacy simple-outline and independent fields]\nTitle: ${bp.title}\nRole: ${bp.role}\nPurpose: ${bp.purpose}\nKey events: ${bp.keyEvents}\nCharacters: ${bp.characters.join(', ')}\nSuspense hook: ${bp.suspenseHook}\nFinalized notes: ${bp.notes}\nAuthor guidance: ${bp.userGuidance}`,
       ) : ''
       const full = markdown
@@ -108,7 +108,7 @@ export const readBlueprintTool = buildAgentTool({
         )
       }).join('\n')
       const omitted = chapterNumbers.length - rows.length
-      return { success: true, content: text(`📋 蓝图列表（${chapterNumbers.length} 个；最多显示 100 个）\n${list}${omitted > 0 ? `\n…另有 ${omitted} 章` : ''}\n\n使用 chapter_number 参数可按需读取该章完整 v2 细纲。`, `📋 Blueprint list (${chapterNumbers.length}; showing up to 100)\n${list}${omitted > 0 ? `\n…${omitted} more chapters` : ''}\n\nUse chapter_number to read that chapter's full v2 outline on demand.`) }
+      return { success: true, content: text(`📋 蓝图列表（${chapterNumbers.length} 个；最多显示 100 个）\n${list}${omitted > 0 ? `\n…另有 ${omitted} 章` : ''}\n\n使用 chapter_number 参数可按需读取该章完整细纲。`, `📋 Blueprint list (${chapterNumbers.length}; showing up to 100)\n${list}${omitted > 0 ? `\n…${omitted} more chapters` : ''}\n\nUse chapter_number to read that chapter's full outline on demand.`) }
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
       return {

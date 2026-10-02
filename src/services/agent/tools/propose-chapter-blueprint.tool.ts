@@ -49,7 +49,7 @@ function validateBlueprintChanges(args: Record<string, unknown>, context?: Agent
       return { valid: true, changes: {}, v2Content: parsed.content, suggestedChapterNumber: parsed.suggestedChapterNumber }
     } catch (error) {
       return { valid: false, error: agentToolText(context,
-        `v2 细纲 Markdown 无法解析：${error instanceof Error ? error.message : String(error)}`,
+        `细纲 Markdown 无法解析：${error instanceof Error ? error.message : String(error)}`,
         `Could not parse v2 outline Markdown: ${error instanceof Error ? error.message : String(error)}`,
       ) }
     }
@@ -308,8 +308,8 @@ export const proposeChapterBlueprintTool = buildAgentTool({
       return {
         success: true,
         content: text(
-          `第 ${chapterNumber} 章 v2 细纲已更新（${proposal.v2Diffs?.length ?? 0} 个分区差异，r${result.revision}）；匹配分镜保留原 ID。`,
-          `Chapter ${chapterNumber} v2 outline updated (${proposal.v2Diffs?.length ?? 0} section diff(s), r${result.revision}); matching scene IDs were preserved.`,
+          `第 ${chapterNumber} 章细纲已更新（${proposal.v2Diffs?.length ?? 0} 个分区差异，r${result.revision}）；匹配分镜保留原 ID。`,
+          `Chapter ${chapterNumber} outline updated (${proposal.v2Diffs?.length ?? 0} section diff(s), r${result.revision}); matching scene IDs were preserved.`,
         ),
       }
     }

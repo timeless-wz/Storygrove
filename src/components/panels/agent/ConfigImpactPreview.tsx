@@ -249,8 +249,8 @@ export default function ConfigImpactPreview({ preview, selectedKeys, onSelection
           <div className="font-medium">{text('已有完整细纲', 'Complete outlines already exist')}</div>
           <p className="mt-1 opacity-75">
             {text(
-              '这些章节不会套用旧版字段提案。需要调整时，请通过章节蓝图提交完整 Markdown 提案。',
-              'Legacy field proposals are not applied to these chapters. Submit a complete Markdown proposal from the chapter blueprint when changes are needed.',
+              '这些章节不会套用字段提案。需要调整时，请通过章节蓝图提交完整 Markdown 提案。',
+              'Field proposals are not applied to these chapters. Submit a complete Markdown proposal from the chapter blueprint when changes are needed.',
             )}
           </p>
           <ul className="mt-1 list-disc pl-4">

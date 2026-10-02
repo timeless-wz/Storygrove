@@ -48,14 +48,14 @@ describe('planning area visual contract', () => {
     )
 
     const text = pageText()
-    for (const label of ['项目总览', '创作规划', '正文创作', '故事设定', '资料库', '项目管理']) {
+    for (const label of ['项目总览', '故事设定', '创作规划', '正文写作', '资料库', '项目管理']) {
       expect(text, `project tree must present ${label}`).toContain(label)
     }
     for (const entry of ['章节蓝图', '章节脉络', '故事时间线', '伏笔管理', '多地图地图册', '草稿箱', '正文章节']) {
       expect(text, `project tree must keep the ${entry} entry`).toContain(entry)
     }
-    // 作者任务顺序：总览 → 创作规划 → 正文创作 → 故事设定 → 资料库 → 项目管理
-    const positions = ['项目总览', '创作规划', '正文创作', '故事设定', '资料库', '项目管理']
+    // 作者任务顺序：总览 → 故事设定 → 创作规划 → 正文写作 → 资料库 → 项目管理
+    const positions = ['项目总览', '故事设定', '创作规划', '正文写作', '资料库', '项目管理']
       .map(label => text.indexOf(label))
     expect(positions).toEqual([...positions].sort((left, right) => left - right))
   })
@@ -74,7 +74,7 @@ describe('planning area visual contract', () => {
 
     const text = pageText()
     // 空项目里五个任务区同样在，且都给出「待生成 / 待创建 / 待配置」的真实状态。
-    for (const label of ['项目总览', '创作规划', '正文创作', '故事设定', '资料库', '项目管理']) {
+    for (const label of ['项目总览', '故事设定', '创作规划', '正文写作', '资料库', '项目管理']) {
       expect(text, `empty project tree must present ${label}`).toContain(label)
     }
     expect(text).toContain('待生成')
@@ -91,6 +91,8 @@ describe('planning area visual contract', () => {
     expect(text).toContain('点上方文件夹图标新建一卷')
     expect(text).toContain('在右侧填写本章小目标、冲突与钩子')
     expect(text).toContain('卷与章节')
+    // 工具栏的「正文写作」入口（与主侧边栏分组同名）在空态同样可用
+    expect(text).toContain('正文写作')
     expect(container().querySelector<HTMLInputElement>('input[type="search"]')?.placeholder)
       .toBe('搜索章节号或标题…')
   })
@@ -106,7 +108,7 @@ describe('planning area visual contract', () => {
     expect(text).toContain('灯塔停摆')
     expect(text).toContain('有指导')
     // 正文入口与蓝图进度都在工具栏上
-    expect(text).toContain('正文创作')
+    expect(text).toContain('正文写作')
     expect(text).toContain('3 章蓝图 · 1 章已写正文')
   })
 

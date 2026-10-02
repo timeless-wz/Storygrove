@@ -1,0 +1,4 @@
+# 任务C 验证日志：eslint（仅本任务修改的两个文件，--max-warnings 0）
+npm warn Unknown project config "shamefully-hoist". This will stop working in the next major version of npm.
+npm warn Unknown project config "auto-install-peers". This will stop working in the next major version of npm.
+exit=0

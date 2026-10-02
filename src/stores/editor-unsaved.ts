@@ -1,10 +1,11 @@
 import type { EditorTab } from './editor-store'
 
-const LEDGER_TYPE_BY_KEY: Record<string, EditorTab['type']> = {
+export const LEDGER_TYPE_BY_KEY: Record<string, EditorTab['type']> = {
   'cultivation-settings': 'cultivation',
   'character-editor-drafts': 'character',
   config: 'config',
   'chapter-card-editor': 'chapter-card',
+  'chapter-card-editor-v2': 'chapter-card',
 }
 const BACKGROUND_LEDGER_TYPES = new Set(Object.values(LEDGER_TYPE_BY_KEY))
 

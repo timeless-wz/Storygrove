@@ -165,12 +165,14 @@ describe('ProjectTree shadcn/ui collapsible groups', () => {
     await renderProjectTree()
 
     const expectedGroups = [
-      { id: 'plan', title: '创作规划' },
       { id: 'setting', title: '故事设定' },
+      { id: 'plan', title: '创作规划' },
+      { id: 'manuscript', title: '正文写作' },
       { id: 'library', title: '资料库' },
       { id: 'management', title: '项目管理' },
-      { id: 'manuscript', title: '正文创作' },
     ]
+
+    expect(container.querySelectorAll('[data-group-id]')).toHaveLength(expectedGroups.length)
 
     for (const group of expectedGroups) {
       const groupEl = container.querySelector(`[data-group-id="${group.id}"]`)
@@ -191,6 +193,25 @@ describe('ProjectTree shadcn/ui collapsible groups', () => {
       expect(triggerBtn?.textContent).not.toContain('+')
       expect(triggerBtn?.textContent).not.toContain('新建')
     }
+  })
+
+  it('renders the required author-task order: overview pinned on top, then setup, plan, drafting, library, management', async () => {
+    await renderProjectTree()
+
+    // 五个一级分组在 DOM 中严格按「故事设定 → 创作规划 → 正文写作 → 资料库 → 项目管理」排列
+    const orderedIds = Array.from(container.querySelectorAll('[data-group-id]'))
+      .map(groupEl => groupEl.getAttribute('data-group-id'))
+    expect(orderedIds).toEqual(['setting', 'plan', 'manuscript', 'library', 'management'])
+
+    // 「项目总览」固定在项目树最上方，先于所有分组出现
+    const overviewRow = Array.from(container.querySelectorAll<HTMLElement>('.tree-item, .writer-tree-item'))
+      .find(el => el.textContent?.includes('项目总览'))
+    expect(overviewRow, 'Project overview entry should exist').toBeDefined()
+    const firstGroup = container.querySelector('[data-group-id="setting"]')!
+    expect(
+      overviewRow!.compareDocumentPosition(firstGroup) & Node.DOCUMENT_POSITION_FOLLOWING,
+      'Project overview must precede every collapsible group',
+    ).toBeTruthy()
   })
 
   it('preserves inner "+" buttons in draft box and manuscript chapters', async () => {

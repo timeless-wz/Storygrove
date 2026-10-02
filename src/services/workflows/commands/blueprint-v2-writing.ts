@@ -122,7 +122,7 @@ export function assembleBlueprintV2WritingBlock(
   const parts: string[] = [
     promptLanguageText(
       writingLanguage,
-      `【本章细纲（蓝图 v2 任务书）｜${chapterHeader}】`,
+      `【本章细纲任务书｜${chapterHeader}】`,
       `[Chapter detailed outline (blueprint v2 task sheet) | ${chapterHeader}]`,
     ),
     BLUEPRINT_V2_CONSTRAINT_SCAFFOLD[writingLanguage === 'en-US' ? 'enUS' : 'zhCN'],

@@ -356,13 +356,17 @@ v2 保存成功时，**同一事务**内更新 `blueprints` 的且仅更新以�
 - 删除 v2 细纲 = 独立的用户动作（UI 二次确认），只删 `blueprint_details` 行；`blueprints` v1 字段保持删除前的投影值，画布卡片保留（其 `refs.sceneId` 悬空显示"引用失效"，§8.4）。
 - 重复导入按 §4.3 执行。
 
-### 7.4 升级与 AI 覆盖防护（红线 4）
+### 7.4 统一迁移与 AI 覆盖防护（红线 4；章节蓝图统一版本后修订）
 
-- **渐进升级**：v1-only 章可由用户显式"升级为 v2"（`origin: 'upgrade'`）：生成章节脚手架——`chapterTitle = 第N章｜<title>`、positioning 的核心使命←purpose、番茄追读钩子←suspenseHook、storyboard **留空**（**禁止把 keyEvents 节拍伪造成分镜**），另建 custom 分区逐字保存 role/characters/userGuidance 旧值以便细纲界面可见；`rawMarkdown` = serialize 结果；v1 字段一律不动。
+- **统一迁移**：章节蓝图已统一为 v2 权威数据与统一编辑界面（ChapterCardEditor 只有细纲编辑分支），不再提供用户显式"升级为 v2"动作。v1-only 章由两条路径自动进入 v2：
+  - **启动迁移**（主进程）：`initProjectDatabase` → `BlueprintDetailRepository.migrateLegacyRows()`，把所有"有 v1 行且无 v2 行"的章迁移为 v2 细纲；
+  - **编辑器种子**（渲染进程）：打开尚无 v2 行的章（启动迁移未覆盖的工作流新写入行、本地新建章）时，按同一映射生成种子内容进入本地草稿账本，保存时经 `db:blueprint-v2-save` 落库，不保存则无数据库写入。
+  - 唯一映射函数 `buildBlueprintV2MigrationContent`（`src/shared/blueprint-v2.ts`，两条路径共用）：`chapterTitle = 第N章｜<title>`（H3）、positioning「核心使命」←purpose、cliffhanger「章末钩子」←suspenseHook（写作注入与审查检查的锚点）、conflict「实质冲突与转折」←keyEvents **逐字存档**（**禁止把 keyEvents 节拍伪造成分镜**，storyboard 留空）；role/characters/userGuidance/notes/volumeId **不进入 v2**（仍是 v1 行独立字段，由统一编辑器「章节信息与作者指导」区继续编辑）。条目 markdown 以换行结尾、条目 ID 由章节号确定性派生（种子可跨会话复现）。迁移映射的完整说明与前后对比见 `docs/blueprint-unification-migration.md`。
+  - **安全语义**：幂等（只补 `blueprint_details` 缺行，重复执行不产生重复内容）；内容全空的 v1 行跳过（保持可被工作流批量写入）；单章失败只记录并跳过，原 v1 行原样保留，下次打开重试；迁移绝不删除或改写 `blueprints` 行。
 - **AI 覆盖防护**：A 在仓库层提供 `BlueprintDetailRepository.chaptersWithDetails(chapterNumbers: number[]): Set<number>`。所有会写 v1 字段的既有流程**必须先调用它过滤**，被跳过的章在流程结果中明示：
   - `directory-workflow.ts`（批量蓝图生成）→ 归属 C 的流程面；
   - `import-novel.command.ts`（导入小说）→ 归属 B 的流程面；
-  - `propose-chapter-blueprint.tool.ts`（智能体提案）→ 归属 E：目标章有 v2 时 diff 面板必须提示"该章已有 v2 细纲，此提案会覆盖其投影字段"。
+  - `propose-chapter-blueprint.tool.ts`（智能体提案）→ 归属 E：目标章有完整细纲时 diff 面板必须提示"该章已有完整细纲，此提案会覆盖其概要字段"。
   - 用户**显式选择"替换细纲"**时，流程先调 `db:blueprint-v2-delete` 再写 v1，不得绕行。
 - 例外说明：`db:blueprint-upsert` / `db:blueprint-commit-range` 通道签名冻结、不加守卫参数，防护在调用方实施（已登记 §13 缺口 1）。
 
@@ -461,7 +465,7 @@ export interface ChapterCanvasNodeRefs {
 | --- | --- | --- |
 | **A 数据与契约层** | ✚ `src/shared/blueprint-v2.ts`（§3 全部类型/常量/纯函数）；✚ `electron/repositories/blueprint-detail-repository.ts`；✎ `electron/database.ts`（blueprint_details DDL）；✎ `src/shared/ipc-channels.ts`、`electron/controllers/db-controller.ts`（§6 五通道） | §3 类型与纯函数；`BlueprintDetailRepository.get / getSummaryList / save(乐观并发+投影事务) / delete / chaptersWithDetails`；五条 IPC |
 | **B 导入导出** | ✚ `src/shared/blueprint-v2-markdown.ts`（parse/serialize/assertNoLoss/matchScenesForReimport）；✚ 导入预览与差异 UI（对话框/面板位置自定，必须复用共享模块）；流程面：`import-novel.command.ts` 的跳过守卫 | §4 全部纯函数；重复导入预览差异；导入守卫报告 |
-| **C 章节蓝图编辑器** | ✎ `src/components/editor/ChapterCardEditor.tsx`（v2 编辑态：分区/分镜/检查 mode 编辑、增删分镜、拖动重排、"升级为 v2"入口、导出入口）；流程面：`directory-workflow.ts` 跳过守卫 | 消费 A 通道 + B 的 serialize/parse；对已有 detail 的章，v1 字段编辑改为经由 v2 保存 |
+| **C 章节蓝图编辑器** | ✎ `src/components/editor/ChapterCardEditor.tsx`（统一细纲编辑态：分区/分镜/检查 mode 编辑、增删分镜、拖动重排、导入/导出入口、章节信息与作者指导区；无独立旧版分支与升级入口）；流程面：`directory-workflow.ts` 跳过守卫 | 消费 A 通道 + B 的 serialize/parse；对已有 detail 的章，v1 字段编辑改为经由 v2 保存 |
 | **D 章节画布** | ✎ `src/components/canvas/ChapterCanvasWorkbench.tsx`；✎ `src/shared/chapter-canvas.ts`（仅 §8.1 的 `sceneId` 一处 additive 修改，与 A 协调） | 排上画布/移出画布/删除分镜三动作（§8.2 表）；顺序权威与镜像（§8.3）；悬空引用渲染 |
 | **E 写作调用与一致性检查** | ✎ `src/services/workflows/commands/generate-draft.command.ts`（v2 注入路径 + 常量脚手架）；✎ `src/shared/consistency-preflight.ts` 或其旁路模块（检查条目层）；✎ `src/services/agent/tools/propose-chapter-blueprint.tool.ts`（v2 警示）；✚ 智能体"Codex 导入细纲"工具（复用 B parser + A save） | §9 注入契约；§10 检查语义；§7.4 提案警示 |
 

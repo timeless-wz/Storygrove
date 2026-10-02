@@ -559,7 +559,7 @@ export class GenerateDirectoryCommand extends BaseWorkflowCommand<ChapterBluepri
           .join('、')
         callbacks.log(workflowUiText(
           context,
-          `已跳过 ${guardedCommit.skippedChapters.length} 章已有 v2 完整细纲的章，未做任何覆盖：${skippedLabels}`,
+          `已跳过 ${guardedCommit.skippedChapters.length} 章已有完整细纲的章，未做任何覆盖：${skippedLabels}`,
           `Skipped ${guardedCommit.skippedChapters.length} chapter(s) that already have v2 detailed outlines; nothing was overwritten: ${skippedLabels}`,
         ))
       }

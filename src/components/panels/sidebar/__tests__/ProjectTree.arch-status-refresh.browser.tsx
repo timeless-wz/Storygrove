@@ -68,9 +68,10 @@ beforeEach(() => {
 
   invoke = vi.fn(async (channel: string) => {
     if (channel === 'fs:list-dir' || channel === 'db:draft-list-all' || channel === 'db:map-get-all') return []
-    if (channel === 'db:blueprint-get-all') {
+    if (channel === 'db:blueprint-list-summary') {
       return Array.from({ length: blueprintCount }, (_, index) => ({ chapterNumber: index + 1 }))
     }
+    if (channel === 'db:blueprint-v2-summary-list') return []
     if (channel === 'db:project-core-get') {
       return {
         premise: 'P'.repeat(60),
@@ -142,7 +143,7 @@ describe('ProjectTree architecture status refresh', () => {
   it('reflects committed blueprint count when the blueprint resource event arrives', async () => {
     await act(async () => root.render(<ProjectTree />))
 
-    const blueprintReadCount = () => invoke.mock.calls.filter(([channel]) => channel === 'db:blueprint-get-all').length
+    const blueprintReadCount = () => invoke.mock.calls.filter(([channel]) => channel === 'db:blueprint-list-summary').length
     await act(async () => {
       await vi.waitFor(() => expect(blueprintReadCount()).toBeGreaterThanOrEqual(2))
     })

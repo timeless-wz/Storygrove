@@ -355,7 +355,50 @@ export default function ProjectTree() {
         aria-hidden="true"
       />
 
-      {/* 1. 创作规划 */}
+      {/* 1. 故事设定 */}
+      <ProjectTreeCollapsibleGroup
+        id="setting"
+        title={text('故事设定', 'Story setup')}
+        detail={text('创作参数、架构文档与角色档案', 'Creative parameters, architecture documents, and characters')}
+        icon={BookOpen}
+        isOpen={projectTreeGroupOpen.setting ?? true}
+        onOpenChange={(nextOpen) => setProjectTreeGroupOpen('setting', nextOpen)}
+      >
+        <SidebarMenuItem>
+          <LeafItem
+            iconName="book-open"
+            label={text('创作参数', 'Creative parameters')}
+            desc={text('书名、题材、受众、章数与叙事视角', 'Title metadata, genre, audience, chapters, and point of view')}
+            badge={configDone ? text('已完成', 'Complete') : text('待配置', 'Pending')}
+            badgeDone={configDone}
+            onClick={openConfigEditor}
+            onContextMenu={e => showSidebarMenu([
+              {
+                key: 'open',
+                label: text('打开创作参数', 'Open creative parameters'),
+                icon: <FolderOpen size={13} />,
+                onClick: openConfigEditor,
+              },
+            ], e)}
+          />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <LeafItem iconName="bar-chart-3" label={text('修炼等级设置', 'Cultivation settings')} desc={text('项目境界体系、等级顺序与角色绑定', 'Project realms, level order and character bindings')} onClick={openCultivationEditor} />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <WorldBuildingGroup archStatus={archStatus} archDone={archDone} onCleared={refreshAll} />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <LeafItem
+            iconName="users"
+            label={text('角色档案', 'Character profile')}
+            desc={text('角色事实来源：档案、关系、动机、弧光与当前状态', 'Single source of truth: profiles, relationships, motivations, arcs, and state')}
+            onClick={() => useLayoutStore.getState().openCharacterProfile('overview')}
+          />
+        </SidebarMenuItem>
+      </ProjectTreeCollapsibleGroup>
+
+      {/* 2. 创作规划 */}
       <ProjectTreeCollapsibleGroup
         id="plan"
         title={text('创作规划', 'Writing plan')}
@@ -453,10 +496,10 @@ export default function ProjectTree() {
         </SidebarMenuItem>
       </ProjectTreeCollapsibleGroup>
 
-      {/* 2. 正文创作：紧跟创作规划，让写正文的入口在项目树上半部分就能看到 */}
+      {/* 3. 正文写作：紧随创作规划，让写正文的入口在项目树上半部分就能看到 */}
       <ProjectTreeCollapsibleGroup
         id="manuscript"
-        title={text('正文创作', 'Manuscript')}
+        title={text('正文写作', 'Manuscript')}
         detail={text(
           '草稿箱与正文章节；章节蓝图页的「写作第 N 章」也直达这里',
           'Draft box and published chapters; the “Write Chapter N” action on the blueprint page lands here too',
@@ -479,50 +522,7 @@ export default function ProjectTree() {
         </SidebarMenuItem>
       </ProjectTreeCollapsibleGroup>
 
-      {/* 3. 故事设定 */}
-      <ProjectTreeCollapsibleGroup
-        id="setting"
-        title={text('故事设定', 'Story setup')}
-        detail={text('创作参数、架构文档与角色档案', 'Creative parameters, architecture documents, and characters')}
-        icon={BookOpen}
-        isOpen={projectTreeGroupOpen.setting ?? true}
-        onOpenChange={(nextOpen) => setProjectTreeGroupOpen('setting', nextOpen)}
-      >
-        <SidebarMenuItem>
-          <LeafItem
-            iconName="book-open"
-            label={text('创作参数', 'Creative parameters')}
-            desc={text('书名、题材、受众、章数与叙事视角', 'Title metadata, genre, audience, chapters, and point of view')}
-            badge={configDone ? text('已完成', 'Complete') : text('待配置', 'Pending')}
-            badgeDone={configDone}
-            onClick={openConfigEditor}
-            onContextMenu={e => showSidebarMenu([
-              {
-                key: 'open',
-                label: text('打开创作参数', 'Open creative parameters'),
-                icon: <FolderOpen size={13} />,
-                onClick: openConfigEditor,
-              },
-            ], e)}
-          />
-        </SidebarMenuItem>
-        <SidebarMenuItem>
-          <LeafItem iconName="settings" label={text('修炼等级设置', 'Cultivation settings')} desc={text('项目境界体系、等级顺序与角色绑定', 'Project realms, level order and character bindings')} onClick={openCultivationEditor} />
-        </SidebarMenuItem>
-        <SidebarMenuItem>
-          <WorldBuildingGroup archStatus={archStatus} archDone={archDone} onCleared={refreshAll} />
-        </SidebarMenuItem>
-        <SidebarMenuItem>
-          <LeafItem
-            iconName="users"
-            label={text('角色档案', 'Character profile')}
-            desc={text('角色事实来源：档案、关系、动机、弧光与当前状态', 'Single source of truth: profiles, relationships, motivations, arcs, and state')}
-            onClick={() => useLayoutStore.getState().openCharacterProfile('overview')}
-          />
-        </SidebarMenuItem>
-      </ProjectTreeCollapsibleGroup>
-
-      {/* 3. 资料库 */}
+      {/* 4. 资料库 */}
       <ProjectTreeCollapsibleGroup
         id="library"
         title={text('资料库', 'Library')}
@@ -557,7 +557,7 @@ export default function ProjectTree() {
         </SidebarMenuItem>
       </ProjectTreeCollapsibleGroup>
 
-      {/* 4. 项目管理 */}
+      {/* 5. 项目管理 */}
       <ProjectTreeCollapsibleGroup
         id="management"
         title={text('项目管理', 'Project management')}

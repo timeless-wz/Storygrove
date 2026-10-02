@@ -1,0 +1,268 @@
+[
+  {
+    "name": "build.current-source",
+    "ok": true,
+    "data": {
+      "script": "build",
+      "exitCode": 0,
+      "ok": true
+    }
+  },
+  {
+    "name": "abi.rebuild-electron",
+    "ok": true,
+    "data": {
+      "script": "rebuild:electron",
+      "exitCode": 0,
+      "ok": true
+    }
+  },
+  {
+    "name": "launch1.project-opened",
+    "ok": true,
+    "data": {
+      "projectTreeVisible": true,
+      "visibleDialogCount": 0,
+      "failureText": null,
+      "ok": true,
+      "screenshotPath": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-task-d-2026-10-02T04-09-56-624Z-5575cd92\\evidence\\01-first-launch.png"
+    }
+  },
+  {
+    "name": "launch1.quit",
+    "ok": true,
+    "data": {
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "stages": {
+        "titlebarClose": "clicked",
+        "exitConfirm": "auto-proceed",
+        "gracefulKill": "skipped",
+        "forceKill": false
+      },
+      "forced": false,
+      "ok": true,
+      "reason": null
+    }
+  },
+  {
+    "name": "fixture.legacy-project-written",
+    "ok": true,
+    "data": {
+      "chapters": 3,
+      "details": 0
+    }
+  },
+  {
+    "name": "launch1.project-opened",
+    "ok": true,
+    "data": {
+      "projectTreeVisible": true,
+      "visibleDialogCount": 0,
+      "failureText": null,
+      "ok": true,
+      "screenshotPath": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-task-d-2026-10-02T04-09-56-624Z-5575cd92\\evidence\\02-launch-1.png"
+    }
+  },
+  {
+    "name": "ui.unified-editor-only",
+    "ok": true,
+    "data": {
+      "upgradeButtonCount": 0,
+      "legacyHintCount": 0,
+      "unifiedViewCount": 1,
+      "statusText": "正式细纲 r1 · 0 个分镜 · 字数预算 —"
+    }
+  },
+  {
+    "name": "ui.migrated-content-visible",
+    "ok": true,
+    "data": {
+      "chapterTitle": "第1章｜雨夜追击",
+      "hasMission": true,
+      "hasKeyEvents": true,
+      "hasHook": true
+    }
+  },
+  {
+    "name": "ui.aux-fields-preserved",
+    "ok": true,
+    "data": {
+      "guidanceKept": true,
+      "notesKept": true
+    }
+  },
+  {
+    "name": "ui.empty-chapter-seeded",
+    "ok": true,
+    "data": {
+      "statusText": "正式细纲 r0 · 0 个分镜 · 字数预算 — · 有未保存修改"
+    }
+  },
+  {
+    "name": "ui.empty-chapter-no-db-write",
+    "ok": true,
+    "data": {
+      "details": [
+        1,
+        2
+      ]
+    }
+  },
+  {
+    "name": "ui.save-produces-r2",
+    "ok": true,
+    "data": {
+      "statusText": "r2 visible"
+    }
+  },
+  {
+    "name": "ui.cancel-keeps-input-not-db",
+    "ok": true,
+    "data": {
+      "retainedValue": "第1章｜雨夜追击（未保存哨兵）",
+      "savedTitle": "第1章｜雨夜追击（修订）"
+    }
+  },
+  {
+    "name": "ui.canvas-opens",
+    "ok": true,
+    "data": {
+      "canvas": true
+    }
+  },
+  {
+    "name": "ui.markdown-import-applied",
+    "ok": true,
+    "data": {
+      "sceneVisible": true
+    }
+  },
+  {
+    "name": "ui.prose-reference-works",
+    "ok": true,
+    "data": {
+      "purposeVisible": true,
+      "hookVisible": true
+    }
+  },
+  {
+    "name": "launch2.quit",
+    "ok": true,
+    "data": {
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "stages": {
+        "titlebarClose": "clicked",
+        "exitConfirm": "auto-proceed",
+        "gracefulKill": "skipped",
+        "forceKill": false
+      },
+      "forced": false,
+      "ok": true,
+      "reason": null
+    }
+  },
+  {
+    "name": "db.after-readback",
+    "ok": true,
+    "data": {
+      "detailChapters": [
+        1,
+        2
+      ],
+      "chapter1": {
+        "revision": 2,
+        "title": "第1章｜雨夜追击（修订）",
+        "origin": "upgrade"
+      },
+      "chapter2": {
+        "revision": 2,
+        "title": "第2章｜码头接头",
+        "scenes": 2,
+        "origin": "import"
+      },
+      "chapter3HasDetail": false,
+      "chapter1Legacy": {
+        "userGuidance": "TASK-D-GUIDANCE-保留雨夜的压迫感，不要提前揭底。",
+        "notes": "TASK-D-NOTES-既有章节记录",
+        "keyEvents": "主角伪装成司机混入码头。\n遭遇第一次反转，接头人失踪。\n  缩进行保持原样。",
+        "suspenseHook": "账本里夹着第二张名单。",
+        "purpose": "主角必须在雨夜前拿到账本。",
+        "characters": "[\"沈砺\",\"账房\"]",
+        "volumeId": "volume-1"
+      },
+      "drafts": [
+        {
+          "id": 1,
+          "chapter_number": 1,
+          "blueprint_chapter_number": 1,
+          "version": 1,
+          "status": "draft",
+          "source": "write"
+        }
+      ]
+    }
+  },
+  {
+    "name": "launch2.project-opened",
+    "ok": true,
+    "data": {
+      "projectTreeVisible": true,
+      "visibleDialogCount": 0,
+      "failureText": null,
+      "ok": true,
+      "screenshotPath": "C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-task-d-2026-10-02T04-09-56-624Z-5575cd92\\evidence\\02-launch-2.png"
+    }
+  },
+  {
+    "name": "restart.unified-and-stable",
+    "ok": true,
+    "data": {
+      "upgradeButtonCount": 0,
+      "legacyHintCount": 0,
+      "statusText": "正式细纲 r2 · 0 个分镜 · 字数预算 —",
+      "chapterTitle": "第1章｜雨夜追击（修订）"
+    }
+  },
+  {
+    "name": "restart.data-unchanged",
+    "ok": true,
+    "data": {
+      "unchanged": true,
+      "dbTitle": "第1章｜雨夜追击（修订）"
+    }
+  },
+  {
+    "name": "launch3.quit",
+    "ok": true,
+    "data": {
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "stages": {
+        "titlebarClose": "clicked",
+        "exitConfirm": "auto-proceed",
+        "gracefulKill": "skipped",
+        "forceKill": false
+      },
+      "forced": false,
+      "ok": true,
+      "reason": null
+    }
+  },
+  {
+    "name": "abi.restore-node",
+    "ok": true,
+    "data": {
+      "script": "prepare:native-node",
+      "exitCode": 0,
+      "ok": true
+    }
+  }
+]

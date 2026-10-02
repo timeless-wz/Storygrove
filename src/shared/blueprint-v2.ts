@@ -483,79 +483,85 @@ export function assertValidChapterBlueprintV2Content(content: ChapterBlueprintV2
   }
 }
 
-// ===== v1 → v2 显式升级脚手架（契约 §7.4） =====
+// ===== v1 → v2 统一迁移构建（章节蓝图统一版本；契约 §7.4） =====
+
+/** 多行正文并入单个列表条目：续行统一缩进两空格，保证序列化后仍解析回同一条目。 */
+function migrationFieldMarkdown(label: string, value: string): string {
+  const lines = value.split('\n')
+  const indented = lines.map((line, index) => (
+    index === 0 || line.trim() === '' ? line : `  ${line}`
+  ))
+  return `- **${label}**：${indented.join('\n')}\n`
+}
 
 /**
- * 渐进升级：storyboard 留空（禁止把 keyEvents 节拍伪造成分镜），role/
- * characters/userGuidance 以 custom 分区逐字保存；v1 字段一律不动。
+ * v1 简纲行 → v2 细纲内容的唯一迁移映射（章节蓝图统一版本；启动迁移、
+ * 编辑器种子共用此函数）。映射规则：
+ * - title → 章题行 `第N章｜title`（H3）；
+ * - purpose → positioning「核心使命」（projectV2ToV1 的投影锚点）；
+ * - suspenseHook → cliffhanger「章末钩子」（投影锚点 + 写作注入 + 审查检查）；
+ * - keyEvents → conflict「实质冲突与转折」逐字存档（不伪造成分镜）；
+ * - storyboard 留空（分镜必须作者逐场补写或导入）；
+ * - role/characters/userGuidance/notes/volumeId 不进入 v2（仍是 v1 行的
+ *   独立字段，由统一编辑器的「章节信息与作者指导」区继续编辑）。
+ * 条目 markdown 一律以换行结尾：此前脚手架缺少尾随换行会让相邻条目与
+ * 分区标题拼行，无法通过无损自检（保存即失败）。条目 ID 确定性派生自
+ * 章节号，使种子内容跨会话可复现（本地草稿与重新种子可按 JSON 比对）。
  */
-export function buildBlueprintV2UpgradeScaffold(v1: BlueprintData): ChapterBlueprintV2Content {
+export function buildBlueprintV2MigrationContent(
+  v1: Pick<BlueprintData, 'chapterNumber' | 'title' | 'purpose' | 'keyEvents' | 'suspenseHook'>,
+  options?: { origin?: 'upgrade' | 'manual' },
+): ChapterBlueprintV2Content {
   const chapterTitle = v1.title ? `第${v1.chapterNumber}章｜${v1.title}` : `第${v1.chapterNumber}章`
-  const positioning: BlueprintV2Section = {
-    kind: 'canonical',
-    id: 'positioning',
-    title: '【本章定位与四维指标】',
+  const migrationItemId = (slug: string): string => `bpc-mig-${v1.chapterNumber}-${slug}`
+  const positioningItems: BlueprintV2SectionItem[] = [
+    ...(v1.purpose.trim()
+      ? [{
+        kind: 'field' as const,
+        id: migrationItemId('mission'),
+        label: '核心使命',
+        markdown: migrationFieldMarkdown('核心使命', v1.purpose.trim()),
+      }]
+      : []),
+  ]
+  const conflictItems: BlueprintV2SectionItem[] = [
+    ...(v1.keyEvents.trim()
+      ? [{
+        kind: 'field' as const,
+        id: migrationItemId('key-events'),
+        label: '实质冲突与转折',
+        markdown: migrationFieldMarkdown('实质冲突与转折', v1.keyEvents.trim()),
+      }]
+      : []),
+  ]
+  const cliffhangerItems: BlueprintV2SectionItem[] = [
+    ...(v1.suspenseHook.trim()
+      ? [{
+        kind: 'field' as const,
+        id: migrationItemId('hook'),
+        label: '章末钩子',
+        markdown: migrationFieldMarkdown('章末钩子', v1.suspenseHook.trim()),
+      }]
+      : []),
+  ]
+  const itemsBySection: Record<BlueprintV2SectionId, BlueprintV2SectionItem[]> = {
+    positioning: positioningItems,
+    conflict: conflictItems,
+    storyboard: [],
+    rules: [],
+    cliffhanger: cliffhangerItems,
+    foreshadow: [],
+    taboos: [],
+  }
+  const sections: BlueprintV2Section[] = BLUEPRINT_V2_CANONICAL_SECTIONS.map(entry => ({
+    kind: 'canonical' as const,
+    id: entry.id,
+    title: `【${entry.title}】`,
     level: 4,
     preamble: '',
-    items: [
-      ...(v1.purpose.trim()
-        ? [{
-          kind: 'field' as const,
-          id: createBlueprintV2ItemId(),
-          label: '核心使命',
-          markdown: `- **核心使命**：${v1.purpose.trim()}`,
-        }]
-        : []),
-      ...(v1.suspenseHook.trim()
-        ? [{
-          kind: 'field' as const,
-          id: createBlueprintV2ItemId(),
-          label: '番茄追读钩子',
-          markdown: `- **番茄追读钩子**：${v1.suspenseHook.trim()}`,
-        }]
-        : []),
-    ],
+    items: itemsBySection[entry.id],
     postamble: '',
-  }
-  const storyboard: BlueprintV2Section = {
-    kind: 'canonical',
-    id: 'storyboard',
-    title: '【逐场分镜拆解】',
-    level: 4,
-    preamble: '',
-    items: [],
-    postamble: '',
-  }
-  const legacyLines = [
-    v1.role.trim() ? `- **章节定位（role）**：${v1.role.trim()}` : '',
-    v1.characters.length > 0 ? `- **出场角色（characters）**：${v1.characters.join('、')}` : '',
-    v1.userGuidance.trim() ? `- **作者微操指导（userGuidance）**：${v1.userGuidance.trim()}` : '',
-  ].filter(Boolean)
-  const legacyArchive: BlueprintV2Section = {
-    kind: 'custom',
-    id: customBlueprintV2SectionId('旧版简纲字段（升级存档）'),
-    title: '【旧版简纲字段（升级存档）】',
-    level: 4,
-    body: legacyLines.length > 0 ? `${legacyLines.join('\n')}\n` : '',
-  }
-  const sections: BlueprintV2Section[] = [positioning]
-  for (const entry of BLUEPRINT_V2_CANONICAL_SECTIONS) {
-    if (entry.id === 'positioning') continue
-    if (entry.id === 'storyboard') {
-      sections.push(storyboard)
-      continue
-    }
-    sections.push({
-      kind: 'canonical',
-      id: entry.id,
-      title: `【${entry.title}】`,
-      level: 4,
-      preamble: '',
-      items: [],
-      postamble: '',
-    })
-  }
-  sections.push(legacyArchive)
+  }))
   return {
     schemaVersion: BLUEPRINT_V2_SCHEMA_VERSION,
     chapterNumber: v1.chapterNumber,
@@ -563,6 +569,6 @@ export function buildBlueprintV2UpgradeScaffold(v1: BlueprintData): ChapterBluep
     chapterTitleLevel: 3,
     docPreamble: '',
     sections,
-    origin: 'upgrade',
+    origin: options?.origin ?? 'upgrade',
   }
 }

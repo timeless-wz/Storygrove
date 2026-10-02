@@ -5,6 +5,7 @@ import {
   saveDirtyEditorChangesForExit,
   useEditorStore,
 } from '../editor-store'
+import { countUnsavedEditorItems } from '../editor-unsaved'
 
 const PROJECT_A = 'C:\\novels\\exit-a'
 const PROJECT_B = 'C:\\novels\\exit-b'
@@ -15,6 +16,26 @@ beforeEach(() => {
 })
 
 describe('editor exit save settlement', () => {
+  it('saves a background unified blueprint draft and blocks exit if it remains unsaved', async () => {
+    const ledger = JSON.stringify({ version: 1, projects: [{ projectKey: PROJECT_A, drafts: [{ chapterNumber: 1 }] }] })
+    useEditorStore.setState({ draftLedgers: { 'chapter-card-editor-v2': ledger } })
+    expect(countUnsavedEditorItems([], useEditorStore.getState().draftLedgers)).toBe(1)
+    const save = vi.fn(async () => undefined)
+    registerEditorExitSaveHandler({ type: 'chapter-card', projectKey: PROJECT_A, save })
+    await expect(saveDirtyEditorChangesForExit(PROJECT_A)).rejects.toThrow('仍有未保存')
+    expect(save).toHaveBeenCalledOnce()
+    save.mockImplementation(async () => {
+      useEditorStore.getState().setDraftLedger('chapter-card-editor-v2', JSON.stringify({ version: 1, projects: [] }))
+    })
+    await expect(saveDirtyEditorChangesForExit(PROJECT_A)).resolves.toBeUndefined()
+  })
+
+  it('never ignores unified blueprint drafts belonging to another project', async () => {
+    useEditorStore.setState({ draftLedgers: {
+      'chapter-card-editor-v2': JSON.stringify({ version: 1, projects: [{ projectKey: PROJECT_B, drafts: [{}] }] }),
+    } })
+    await expect(saveDirtyEditorChangesForExit(PROJECT_A)).rejects.toThrow('另一个项目')
+  })
   it('lets a clean workspace exit without a registered save handler', async () => {
     await expect(saveDirtyEditorChangesForExit(PROJECT_A)).resolves.toBeUndefined()
   })

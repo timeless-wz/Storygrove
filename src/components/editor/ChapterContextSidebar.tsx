@@ -167,8 +167,8 @@ function ChapterContextBody({
           {detailReadStatus === 'needs-newer-app'
             ? text('这份细纲由较新版本保存；当前版本仅展示可读的原始 Markdown。', 'This outline was saved by a newer app version. This version can only show its stored Markdown.')
             : detailReadStatus === 'corrupt'
-              ? text('细纲结构读取异常；保留展示存储的原始 Markdown，请勿用旧版内容覆盖。', 'The outline structure could not be read. Its stored Markdown is shown; do not overwrite it with an older projection.')
-              : text('完整细纲读取失败；下方仅显示旧版简纲投影。', 'Could not read the full outline. Only the legacy outline projection is shown below.')}
+              ? text('细纲结构读取异常；保留展示存储的原始 Markdown，请勿直接覆盖。', 'The outline structure could not be read. Its stored Markdown is shown; do not overwrite it directly.')
+              : text('完整细纲读取失败；下方仅显示章节概要投影。', 'Could not read the full outline. Only the summary projection is shown below.')}
         </p>
       )}
 
@@ -212,7 +212,7 @@ function ChapterContextBody({
           <EmptyHint>
             {detailMarkdown
               ? text('这份细纲尚未建立正式分镜。', 'This outline has no formal storyboard scenes yet.')
-              : text('旧版简纲没有正式分镜数据。', 'Legacy outline data has no formal storyboard scenes.')}
+              : text('本章细纲暂无正式分镜数据。', 'This chapter outline has no formal storyboard scenes yet.')}
           </EmptyHint>
         )}
       </section>

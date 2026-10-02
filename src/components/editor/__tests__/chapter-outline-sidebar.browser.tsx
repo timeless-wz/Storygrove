@@ -7,8 +7,9 @@ import { setActiveProjectSessionContext } from '../../../shared/project-session-
 import { useLocaleStore } from '../../../stores/locale-store'
 import { useProjectStore } from '../../../stores/project-store'
 import { registerEditorExitSaveHandler, useEditorStore, type EditorTab } from '../../../stores/editor-store'
-import { openBuiltinEditor, openChapterFile } from '../../panels/sidebar/sidebar-file-openers'
+import { openChapterFile } from '../../panels/sidebar/sidebar-file-openers'
 import ChapterOutlineSidebar from '../ChapterOutlineSidebar'
+import { globalEventBus } from '../../../shared/event-bus'
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -115,15 +116,47 @@ describe('chapter outline sidebar', () => {
     }
   })
 
-  it('opens a planned chapter in its blueprint', async () => {
+  it('omits blueprint-only chapters and scene badges from the prose directory', async () => {
     await renderExpanded()
     const planned = [...container.querySelectorAll<HTMLButtonElement>('.chapter-outline-chapter-button')]
       .find(button => button.textContent?.includes('第 2 章'))
-    expect(planned).toBeTruthy()
-    await act(async () => planned?.click())
-    expect(openBuiltinEditor).toHaveBeenCalledWith(
-      'chapter-card-editor', '章节蓝图', 'chapter-card', undefined, 2,
-    )
+    expect(planned).toBeUndefined()
+    expect(container.querySelectorAll('.chapter-outline-chapter')).toHaveLength(1)
+    expect(container.querySelector('.chapter-outline-volume-button small')?.textContent).toBe('1')
+    expect(container.textContent).not.toContain('章节蓝图')
+    expect(container.querySelector('.chapter-outline-scene-count')).toBeNull()
+    expect(invoke.mock.calls.some(([channel]) => channel === 'db:blueprint-v2-summary-list')).toBe(false)
+  })
+
+  it('shows a prose empty state when only blueprints exist', async () => {
+    invoke.mockImplementationOnce(async () => [{ id: 'volume-1', name: '第一卷', sortOrder: 1 }])
+      .mockImplementationOnce(async () => [{ chapterNumber: 1, volumeId: 'volume-1', title: '只有细纲' }])
+      .mockImplementationOnce(async () => [])
+    await act(async () => root.render(<ChapterOutlineSidebar tab={tab} />))
+    const toggle = container.querySelector<HTMLButtonElement>('.chapter-outline-toggle')!
+    if (toggle.getAttribute('aria-label') === '展开卷章目录') await act(async () => toggle.click())
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain('暂无草稿或正文章节'))
+    })
+    expect(container.querySelector('.chapter-outline-volume')).toBeNull()
+  })
+
+  it('refreshes actual prose records after creation without adding blueprint-only rows', async () => {
+    await renderExpanded()
+    const original = invoke.getMockImplementation()!
+    invoke.mockImplementation(async channel => channel === 'db:draft-list-all'
+      ? [{ id: 3, chapterNumber: 2, blueprintChapterNumber: 2, version: 1, status: 'draft' }]
+      : original(channel))
+    try {
+      await act(async () => {
+        globalEventBus.emit('REFRESH_RESOURCE', { resources: ['drafts'], projectPath, projectSession: session })
+      })
+      await vi.waitFor(() => expect(container.textContent).toContain('第 2 章'))
+      expect(container.querySelectorAll('.chapter-outline-chapter')).toHaveLength(1)
+      expect(container.querySelector('.chapter-outline-volume-button small')?.textContent).toBe('1')
+    } finally {
+      invoke.mockImplementation(original)
+    }
   })
 
   it('keeps the outline beside prose on desktop and opens a drawer on narrow screens', async () => {
@@ -148,5 +181,58 @@ describe('chapter outline sidebar', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('.chapter-outline-toggle')?.click())
     expect(sidebar.classList.contains('is-collapsed')).toBe(true)
     expect(container.querySelector('.chapter-outline-backdrop')).toBeNull()
+  })
+
+  it('keeps prose accessible when supplementary volume information fails, then recovers on refresh', async () => {
+    await renderExpanded()
+    const original = invoke.getMockImplementation()!
+    invoke.mockImplementation(async channel => {
+      if (channel === 'db:blueprint-list-summary') throw new Error('summary unavailable')
+      return original(channel)
+    })
+    try {
+      await act(async () => container.querySelector<HTMLButtonElement>('.chapter-outline-refresh')!.click())
+      await vi.waitFor(() => expect(container.textContent).toContain('卷信息读取失败'))
+      expect(container.textContent).toContain('未归卷')
+      const manuscript = [...container.querySelectorAll<HTMLButtonElement>('.chapter-outline-target')]
+        .find(button => button.textContent?.includes('正文 v2'))!
+      await act(async () => manuscript.click())
+      expect(openChapterFile).toHaveBeenCalledWith('vela://manuscript/2', expect.any(String))
+      invoke.mockImplementation(original)
+      if (!container.querySelector('.chapter-outline-refresh')) {
+        await act(async () => container.querySelector<HTMLButtonElement>('.chapter-outline-toggle')!.click())
+      }
+      await act(async () => container.querySelector<HTMLButtonElement>('.chapter-outline-refresh')!.click())
+      await vi.waitFor(() => expect(container.textContent).toContain('第一卷'))
+      expect(container.textContent).not.toContain('卷信息读取失败')
+    } finally {
+      invoke.mockImplementation(original)
+    }
+  })
+
+  it('ignores an older refresh result arriving after a newly created prose record', async () => {
+    await renderExpanded()
+    const original = invoke.getMockImplementation()!
+    let releaseOld!: (value: Awaited<ReturnType<typeof original>>) => void
+    const oldResponse = new Promise<Awaited<ReturnType<typeof original>>>(resolve => { releaseOld = resolve })
+    let reads = 0
+    invoke.mockImplementation(async channel => {
+      if (channel !== 'db:draft-list-all') return original(channel)
+      if (++reads === 1) return oldResponse
+      return [{ id: 3, chapterNumber: 2, blueprintChapterNumber: 2, version: 1, status: 'draft' }]
+    })
+    try {
+      await act(async () => container.querySelector<HTMLButtonElement>('.chapter-outline-refresh')!.click())
+      await act(async () => {
+        globalEventBus.emit('REFRESH_RESOURCE', { resources: ['drafts'], projectPath, projectSession: session })
+      })
+      await vi.waitFor(() => expect(container.textContent).toContain('第 2 章'))
+      await act(async () => releaseOld(await original('db:draft-list-all')))
+      expect(container.textContent).toContain('第 2 章')
+      expect(container.textContent).not.toContain('第 1 章')
+      expect(container.querySelector('.chapter-outline-volume-button small')?.textContent).toBe('1')
+    } finally {
+      invoke.mockImplementation(original)
+    }
   })
 })

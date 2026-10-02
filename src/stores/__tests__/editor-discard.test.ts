@@ -7,6 +7,7 @@ import {
   getChapterCardProjectDraft,
   parseChapterCardDraftLedger,
   updateChapterCardProjectDraft,
+  CHAPTER_CARD_V2_TAB_ID,
 } from '../../components/editor/chapter-card-draft-ledger'
 import type { ChapterBlueprint } from '../../services/workflows/directory-workflow'
 import {
@@ -135,6 +136,30 @@ beforeEach(() => {
 })
 
 describe('editor discard semantics', () => {
+  it('discards unified blueprint drafts only for the current project and keeps other projects intact', () => {
+    const ledger = { version: 1, projects: ['A', 'B'].map(key => ({
+      projectKey: project(key as 'A' | 'B').path,
+      drafts: [{ chapterNumber: 1, baseRevision: 1, content: { schemaVersion: 2, sections: [] } }],
+    })) }
+    useEditorStore.setState({ draftLedgers: { [CHAPTER_CARD_V2_TAB_ID]: JSON.stringify(ledger) } })
+    expect(countUnsavedEditorItems([], useEditorStore.getState().draftLedgers)).toBe(2)
+    discardCurrentProjectEditorChanges(project('A').path, projectSession('A'))
+    expect(JSON.parse(useEditorStore.getState().draftLedgers[CHAPTER_CARD_V2_TAB_ID]).projects
+      .map((entry: { projectKey: string }) => entry.projectKey)).toEqual([project('B').path])
+    expect(countUnsavedEditorItems([], useEditorStore.getState().draftLedgers)).toBe(1)
+  })
+
+  it('marks a reopened blueprint tab dirty and removes its unified draft when explicitly discarded', () => {
+    useEditorStore.setState({ draftLedgers: { [CHAPTER_CARD_V2_TAB_ID]: JSON.stringify({ version: 1, projects: [{
+      projectKey: project('A').path,
+      drafts: [{ chapterNumber: 1, baseRevision: 1, content: { schemaVersion: 2, sections: [] } }],
+    }] }) } })
+    useEditorStore.getState().openFile({ id: 'blueprint', name: '章节蓝图', type: 'chapter-card', projectKey: project('A').path })
+    const tab = useEditorStore.getState().tabs[0]
+    expect(tab.dirty).toBe(true)
+    discardAndCloseEditorTab(tab.id, projectSession('A'))
+    expect(countUnsavedEditorItems(useEditorStore.getState().tabs, useEditorStore.getState().draftLedgers)).toBe(0)
+  })
   it('discards only project A character rename, preserves project B draft, and reopens without a duplicate rename', async () => {
     expect(useCharacterStore.getState().renameCharacter('旧名', '新名')).toBe(true)
 

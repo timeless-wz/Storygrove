@@ -245,6 +245,12 @@ function valuesMatch(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right)
 }
 
+/** 主进程用 String(error) 序列化失败原因；剥离多余的 “Error: ” 前缀，提示保持可读。 */
+function rosterCommitErrorText(value: string | undefined): string {
+  const text = value?.trim() || '角色卡保存失败'
+  return text.replace(/^(?:Error:\s*)+/, '')
+}
+
 function removeFirstCharacterNamed(
   characters: readonly CharacterCard[],
   name: string,
@@ -869,7 +875,7 @@ export const useCharacterStore = create<CharacterState>()((set, get) => ({
         projectKey,
       )
       if (!result.success || !result.receipt) {
-        throw new Error(result.error ?? '角色卡保存失败')
+        throw new Error(rosterCommitErrorText(result.error))
       }
       if (!isCharacterProjectSessionCurrent(projectSession)) return
       // A cultivation migration may already have committed a later roster while

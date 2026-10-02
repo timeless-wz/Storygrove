@@ -257,19 +257,15 @@ describe('chapter-card draft ledger', () => {
     expect(getChapterCardProjectDraft(ledger, 'project-a')?.dirtyChapterNumbers).toEqual([7])
   })
 
-  it('renders the chapter number as a readonly field with no ordinary renumber action', () => {
+  it('keeps the chapter number stable: display-only in the unified editor with no renumber action', () => {
     const source = normalizeSourceEol(
       readFileSync('src/components/editor/ChapterCardEditor.tsx', 'utf8'),
     )
-    const chapterNumberInput = source.match(
-      /<Input\s+type="number"\s+value=\{selected\.chapterNumber\}[\s\S]*?\/>/,
-    )?.[0]
 
     expect(source).toContain('K extends EditableChapterBlueprintField')
-    expect(chapterNumberInput).toContain('readOnly')
-    expect(chapterNumberInput).not.toContain('onChange')
-    expect(chapterNumberInput).not.toContain('onBlur')
+    // 统一编辑器不再提供章节号输入框（章节号只作为标题文本展示），也没有改号动作。
     expect(source).not.toContain("updateField('chapterNumber'")
+    expect(source).toContain('第 ${selected.chapterNumber} 章`')
   })
 
   it('binds chapter-card IPC reads and writes to the loaded project identity', () => {

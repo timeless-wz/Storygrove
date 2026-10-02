@@ -1546,7 +1546,7 @@ export default function ChapterCanvasWorkbench({
                 <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
                   {blueprint
                     ? text('所有分镜都已排上画布。', 'Every scene is already on the canvas.')
-                    : text('本章还没有 v2 细纲分镜；先在章节蓝图页导入或编辑细纲。', 'No v2 outline scenes for this chapter yet; import or edit the outline in the blueprint page first.')}
+                    : text('本章还没有细纲分镜；先在章节蓝图页导入或编辑细纲。', 'No outline scenes for this chapter yet; import or edit the outline in the blueprint page first.')}
                 </p>
               )
               : unplacedBlueprintScenes.map(scene => (

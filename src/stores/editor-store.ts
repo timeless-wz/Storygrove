@@ -2,7 +2,7 @@ import { create } from 'zustand'
 
 import type { DraftStatus } from '../shared/draft-status'
 import { sameProjectPathKey } from '../shared/project-session-context'
-import { countUnsavedEditorItems } from './editor-unsaved'
+import { countUnsavedEditorItems, LEDGER_TYPE_BY_KEY } from './editor-unsaved'
 
 export interface EditorTabSaveSnapshot {
   content: string
@@ -194,17 +194,17 @@ function hasBackgroundProjectDraft(
   draftLedgers: Record<string, string>,
   tab: EditorTab,
 ): boolean {
-  const ledgerKey = BACKGROUND_LEDGER_BY_EDITOR_TYPE[tab.type]
-  if (!ledgerKey || !tab.projectKey) return false
-  const content = draftLedgers[ledgerKey]
-  if (!content) return false
-  try {
-    const parsed = JSON.parse(content) as { projects?: Array<{ projectKey?: unknown }> }
-    return Array.isArray(parsed.projects)
-      && parsed.projects.some(project => project.projectKey === tab.projectKey)
-  } catch {
-    return false
-  }
+  if (!tab.projectKey) return false
+  return Object.entries(LEDGER_TYPE_BY_KEY).some(([ledgerKey, type]) => {
+    if (type !== tab.type || !draftLedgers[ledgerKey]) return false
+    try {
+      const parsed = JSON.parse(draftLedgers[ledgerKey]) as { projects?: Array<{ projectKey?: unknown }> }
+      return Array.isArray(parsed.projects)
+        && parsed.projects.some(project => project.projectKey === tab.projectKey)
+    } catch {
+      return false
+    }
+  })
 }
 
 export const useEditorStore = create<EditorState>()((set, get) => ({
@@ -486,8 +486,7 @@ export async function saveDirtyEditorChangesForExit(currentProjectKey: string | 
   }
 
   for (const [ledgerKey, content] of Object.entries(initial.draftLedgers)) {
-    const type = Object.entries(BACKGROUND_LEDGER_BY_EDITOR_TYPE)
-      .find(([, key]) => key === ledgerKey)?.[0] as EditorTab['type'] | undefined
+    const type = LEDGER_TYPE_BY_KEY[ledgerKey]
     if (!type || !content) continue
     let projects: Array<{ projectKey?: unknown }>
     try {

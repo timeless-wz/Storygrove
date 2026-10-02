@@ -175,7 +175,12 @@ export function installApi({ withData }: { withData: boolean }): void {
           case 'db:draft-list-all':
             return withData ? Object.values(DRAFTS_BY_CHAPTER).flat() : []
           case 'db:blueprint-get-all':
+          case 'db:blueprint-list-summary':
             return withData ? BLUEPRINTS : []
+          case 'db:blueprint-v2-summary-list':
+            return []
+          case 'db:blueprint-v2-get':
+            return null
           case 'db:blueprint-volume-list':
             return withData ? [{ id: 'volume-1', name: '第1卷', sortOrder: 1 }] : []
           case 'db:project-core-get':

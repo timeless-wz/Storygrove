@@ -240,6 +240,7 @@ describe('legacy character roster repair public workflow seam', () => {
     expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel.startsWith('db:character-roster'))).toEqual([
       'db:character-roster-read',
       'db:character-roster-read',
+      'db:character-roster-read',
       'db:character-roster-commit',
     ])
   })
@@ -261,7 +262,10 @@ describe('legacy character roster repair public workflow seam', () => {
 
     await expect(migrateLegacyCharacterRoster(projectPath)).rejects.toThrow('已自动续写 2 次，尚未完整生成')
     expect(generateStream).toHaveBeenCalledTimes(3)
-    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel.startsWith('db:character-roster'))).toEqual(['db:character-roster-read'])
+    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel.startsWith('db:character-roster'))).toEqual([
+      'db:character-roster-read',
+      'db:character-roster-read',
+    ])
   })
 
   it('adopts protected existing cards without a model call, then rebuilds only the read-only projection', async () => {
@@ -300,6 +304,63 @@ describe('legacy character roster repair public workflow seam', () => {
     )
   })
 
+  it('adopts protected existing cards with no default model configured — the blocked manual-save exit must not require one', async () => {
+    const existingCards: CharacterRosterSnapshot = {
+      ...pendingLegacyRoster,
+      migrationState: 'legacy_cards_preserved',
+      status: 'inconsistent',
+      entries: repairedEntries,
+    }
+    const adoptedRoster: CharacterRosterSnapshot = {
+      ...readyRoster,
+      legacyMarkdown: existingCards.legacyMarkdown,
+    }
+    const generateStream = vi.fn()
+    useLLMStore.setState({ generateStream, defaultModelId: null })
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'db:character-roster-read') return existingCards
+      if (channel === 'db:character-roster-commit') {
+        return {
+          success: true,
+          receipt: { operationId: 'adopt-cards-no-model', payloadHash: 'hash', revision: 1, idempotent: false, snapshot: adoptedRoster },
+        }
+      }
+      throw new Error(`Unexpected IPC channel: ${channel}`)
+    })
+    installVela(invoke)
+
+    await migrateLegacyCharacterRoster(projectPath)
+
+    expect(generateStream).not.toHaveBeenCalled()
+    expect(invoke.mock.calls.map(([channel]) => channel)).not.toContain('llm:begin-execution-lease')
+    expect(invoke).toHaveBeenCalledWith(
+      'db:character-roster-commit',
+      expect.objectContaining({ intent: 'legacy_cards_adoption' }),
+      projectPath,
+      projectSession,
+    )
+    expect(useWorkflowStore.getState().history[0]).toMatchObject({ status: 'completed' })
+  })
+
+  it('still requires a default model for legacy-markdown extraction and never commits without one', async () => {
+    useLLMStore.setState({ defaultModelId: null })
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'db:character-roster-read') return pendingLegacyRoster
+      if (channel === 'db:character-roster-commit') {
+        throw new Error('Unexpected IPC commit without a model')
+      }
+      throw new Error(`Unexpected IPC channel: ${channel}`)
+    })
+    installVela(invoke)
+
+    await expect(migrateLegacyCharacterRoster(projectPath)).rejects.toThrow('未配置默认生成模型')
+    // 只有一次预检读取：模型租约在进入命令执行体之前就被拒绝。
+    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel.startsWith('db:character-roster'))).toEqual([
+      'db:character-roster-read',
+    ])
+    expect(invoke.mock.calls.map(([channel]) => channel)).not.toContain('db:character-roster-commit')
+  })
+
   it('does not commit a completed candidate when the frozen project session changes', async () => {
     const response = JSON.stringify({ schemaVersion: 1, entries: repairedEntries })
     let finishGeneration: (() => void) | undefined
@@ -329,7 +390,10 @@ describe('legacy character roster repair public workflow seam', () => {
     finishGeneration?.()
 
     await expect(execution).rejects.toThrow('当前项目已切换，旧角色图谱修复已停止以避免写入错误项目')
-    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel.startsWith('db:character-roster'))).toEqual(['db:character-roster-read'])
+    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel.startsWith('db:character-roster'))).toEqual([
+      'db:character-roster-read',
+      'db:character-roster-read',
+    ])
   })
 
   it('does not commit when cancellation reaches the repair before its atomic boundary', async () => {
@@ -356,7 +420,10 @@ describe('legacy character roster repair public workflow seam', () => {
     finishGeneration?.()
 
     await expect(execution).rejects.toThrow('工作流已取消')
-    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel.startsWith('db:character-roster'))).toEqual(['db:character-roster-read'])
+    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel.startsWith('db:character-roster'))).toEqual([
+      'db:character-roster-read',
+      'db:character-roster-read',
+    ])
   })
 
   it('leaves semantic validation to the atomic seam and never falls back to Markdown parsing', async () => {
@@ -378,6 +445,7 @@ describe('legacy character roster repair public workflow seam', () => {
     await expect(migrateLegacyCharacterRoster(projectPath)).rejects.toThrow('角色名单不能为空')
     expect(generateStream).toHaveBeenCalledOnce()
     expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel.startsWith('db:character-roster'))).toEqual([
+      'db:character-roster-read',
       'db:character-roster-read',
       'db:character-roster-read',
       'db:character-roster-commit',

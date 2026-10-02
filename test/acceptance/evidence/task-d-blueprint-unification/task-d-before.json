@@ -1,0 +1,59 @@
+{
+  "integrity": "ok",
+  "blueprints": [
+    {
+      "chapter_number": 1,
+      "volume_id": "volume-1",
+      "title": "雨夜追击",
+      "role": "冲突",
+      "purpose": "主角必须在雨夜前拿到账本。",
+      "key_events": "主角伪装成司机混入码头。\n遭遇第一次反转，接头人失踪。\n  缩进行保持原样。",
+      "characters": "[\"沈砺\",\"账房\"]",
+      "suspense_hook": "账本里夹着第二张名单。",
+      "user_guidance": "TASK-D-GUIDANCE-保留雨夜的压迫感，不要提前揭底。",
+      "notes": "TASK-D-NOTES-既有章节记录",
+      "notes_updated_at": "",
+      "created_at": "2026-10-02 04:10:52",
+      "updated_at": "2026-10-02 04:10:52"
+    },
+    {
+      "chapter_number": 2,
+      "volume_id": "volume-1",
+      "title": "码头接头",
+      "role": "发展",
+      "purpose": "与账房核对名单。",
+      "key_events": "账房交出半页名单后消失。",
+      "characters": "[]",
+      "suspense_hook": "名单背面画着一只眼睛。",
+      "user_guidance": "TASK-D-GUIDANCE-CH2",
+      "notes": "TASK-D-NOTES-CH2",
+      "notes_updated_at": "",
+      "created_at": "2026-10-02 04:10:52",
+      "updated_at": "2026-10-02 04:10:52"
+    },
+    {
+      "chapter_number": 3,
+      "volume_id": "volume-1",
+      "title": "",
+      "role": "",
+      "purpose": "",
+      "key_events": "",
+      "characters": "[]",
+      "suspense_hook": "",
+      "user_guidance": "",
+      "notes": "",
+      "notes_updated_at": "",
+      "created_at": "2026-10-02 04:10:52",
+      "updated_at": "2026-10-02 04:10:52"
+    }
+  ],
+  "details": [],
+  "drafts": [],
+  "volumes": [
+    {
+      "id": "volume-1",
+      "name": "第1卷",
+      "sort_order": 1
+    }
+  ]
+}

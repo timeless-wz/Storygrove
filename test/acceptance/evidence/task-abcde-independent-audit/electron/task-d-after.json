@@ -1,0 +1,85 @@
+{
+  "integrity": "ok",
+  "blueprints": [
+    {
+      "chapter_number": 1,
+      "volume_id": "volume-1",
+      "title": "雨夜追击（未保存哨兵）",
+      "role": "冲突",
+      "purpose": "主角必须在雨夜前拿到账本。",
+      "key_events": "主角伪装成司机混入码头。\n遭遇第一次反转，接头人失踪。\n  缩进行保持原样。",
+      "characters": "[\"沈砺\",\"账房\"]",
+      "suspense_hook": "账本里夹着第二张名单。",
+      "user_guidance": "TASK-D-GUIDANCE-保留雨夜的压迫感，不要提前揭底。",
+      "notes": "TASK-D-NOTES-既有章节记录",
+      "notes_updated_at": "",
+      "created_at": "2026-10-02 05:26:15",
+      "updated_at": "2026-10-02 05:26:35"
+    },
+    {
+      "chapter_number": 2,
+      "volume_id": "volume-1",
+      "title": "码头接头",
+      "role": "发展",
+      "purpose": "与账房核对名单。",
+      "key_events": "账房交出半页名单后消失。",
+      "characters": "[]",
+      "suspense_hook": "名单背面画着一只眼睛。",
+      "user_guidance": "TASK-D-GUIDANCE-CH2",
+      "notes": "TASK-D-NOTES-CH2",
+      "notes_updated_at": "",
+      "created_at": "2026-10-02 05:26:15",
+      "updated_at": "2026-10-02 05:26:35"
+    },
+    {
+      "chapter_number": 3,
+      "volume_id": "volume-1",
+      "title": "",
+      "role": "",
+      "purpose": "",
+      "key_events": "",
+      "characters": "[]",
+      "suspense_hook": "",
+      "user_guidance": "",
+      "notes": "",
+      "notes_updated_at": "",
+      "created_at": "2026-10-02 05:26:15",
+      "updated_at": "2026-10-02 05:26:35"
+    }
+  ],
+  "details": [
+    {
+      "chapter_number": 1,
+      "schema_version": 2,
+      "detail_json": "{\"schemaVersion\":2,\"chapterNumber\":1,\"chapterTitle\":\"第1章｜雨夜追击（未保存哨兵）\",\"chapterTitleLevel\":3,\"docPreamble\":\"\",\"sections\":[{\"kind\":\"canonical\",\"id\":\"positioning\",\"title\":\"【本章定位与四维指标】\",\"level\":4,\"preamble\":\"\",\"items\":[{\"kind\":\"field\",\"id\":\"bpc-mig-1-mission\",\"label\":\"核心使命\",\"markdown\":\"- **核心使命**：主角必须在雨夜前拿到账本。\\n\"}],\"postamble\":\"\"},{\"kind\":\"canonical\",\"id\":\"conflict\",\"title\":\"【核心矛盾与博弈结构】\",\"level\":4,\"preamble\":\"\",\"items\":[{\"kind\":\"field\",\"id\":\"bpc-mig-1-key-events\",\"label\":\"实质冲突与转折\",\"markdown\":\"- **实质冲突与转折**：主角伪装成司机混入码头。\\n  遭遇第一次反转，接头人失踪。\\n    缩进行保持原样。\\n\"}],\"postamble\":\"\"},{\"kind\":\"canonical\",\"id\":\"storyboard\",\"title\":\"【逐场分镜拆解】\",\"level\":4,\"preamble\":\"\",\"items\":[],\"postamble\":\"\"},{\"kind\":\"canonical\",\"id\":\"rules\",\"title\":\"【超凡物理与规则交互细节】\",\"level\":4,\"preamble\":\"\",\"items\":[],\"postamble\":\"\"},{\"kind\":\"canonical\",\"id\":\"cliffhanger\",\"title\":\"【章末爆点与断章定格】\",\"level\":4,\"preamble\":\"\",\"items\":[{\"kind\":\"field\",\"id\":\"bpc-mig-1-hook\",\"label\":\"章末钩子\",\"markdown\":\"- **章末钩子**：账本里夹着第二张名单。\\n\"}],\"postamble\":\"\"},{\"kind\":\"canonical\",\"id\":\"foreshadow\",\"title\":\"【线索埋设与伏笔自检】\",\"level\":4,\"preamble\":\"\",\"items\":[],\"postamble\":\"\"},{\"kind\":\"canonical\",\"id\":\"taboos\",\"title\":\"【写作禁忌与防坑自检】\",\"level\":4,\"preamble\":\"\",\"items\":[],\"postamble\":\"\"}],\"origin\":\"upgrade\",\"revision\":3,\"contentHash\":\"3e5c9facead9039585b7e84f9f1f15aaea88e472f57c03f2c4e4962f9d0cda16\"}",
+      "raw_markdown": "### 第1章｜雨夜追击（未保存哨兵）\n#### 【本章定位与四维指标】\n- **核心使命**：主角必须在雨夜前拿到账本。\n#### 【核心矛盾与博弈结构】\n- **实质冲突与转折**：主角伪装成司机混入码头。\n  遭遇第一次反转，接头人失踪。\n    缩进行保持原样。\n#### 【逐场分镜拆解】\n#### 【超凡物理与规则交互细节】\n#### 【章末爆点与断章定格】\n- **章末钩子**：账本里夹着第二张名单。\n#### 【线索埋设与伏笔自检】\n#### 【写作禁忌与防坑自检】\n",
+      "revision": 3,
+      "content_hash": "3e5c9facead9039585b7e84f9f1f15aaea88e472f57c03f2c4e4962f9d0cda16"
+    },
+    {
+      "chapter_number": 2,
+      "schema_version": 2,
+      "detail_json": "{\"schemaVersion\":2,\"chapterNumber\":2,\"chapterTitle\":\"第2章｜码头接头\",\"chapterTitleLevel\":3,\"docPreamble\":\"\",\"sections\":[{\"kind\":\"canonical\",\"id\":\"positioning\",\"title\":\"【本章定位与四维指标】\",\"level\":4,\"preamble\":\"\",\"items\":[{\"kind\":\"field\",\"id\":\"bpc-fc5204ec-79a3-46b3-87e6-01a5f5936102\",\"label\":\"核心使命\",\"markdown\":\"- **核心使命**：与账房核对名单，发现内鬼。\\n\"},{\"kind\":\"field\",\"id\":\"bpc-dfd63b47-1c07-4b42-b075-bdfcd7005bad\",\"label\":\"正文字数预算\",\"markdown\":\"- **正文字数预算**：4200\\n\"}],\"postamble\":\"\"},{\"kind\":\"canonical\",\"id\":\"conflict\",\"title\":\"【核心矛盾与博弈结构】\",\"level\":4,\"preamble\":\"\",\"items\":[{\"kind\":\"field\",\"id\":\"bpc-4371ca19-7d5e-4103-8fa5-afcb32106157\",\"label\":\"实质冲突与转折\",\"markdown\":\"- **实质冲突与转折**：账房交出半页名单后消失，酒馆老板翻脸。\\n\"}],\"postamble\":\"\"},{\"kind\":\"canonical\",\"id\":\"storyboard\",\"title\":\"【逐场分镜拆解】\",\"level\":4,\"preamble\":\"\",\"items\":[{\"kind\":\"scene\",\"id\":\"bps-6737b7f6-1556-4220-9394-325b972dea4b\",\"level\":5,\"title\":\"场景一：雨棚下的接头\",\"markdown\":\"苏砚压低帽檐，观察码头入口的人流。账房迟到十七分钟，袖口沾着煤灰。\\n\",\"presence\":\"off-canvas\"},{\"kind\":\"scene\",\"id\":\"bps-714e3424-f704-476a-a150-87cd5c674dc4\",\"level\":5,\"title\":\"场景二：仓库后的追逐\",\"markdown\":\"账房突然折返仓库，苏砚翻窗追入，发现成箱的同款信封。\\n\",\"presence\":\"off-canvas\"}],\"postamble\":\"\"},{\"kind\":\"canonical\",\"id\":\"cliffhanger\",\"title\":\"【章末爆点与断章定格】\",\"level\":4,\"preamble\":\"\",\"items\":[{\"kind\":\"field\",\"id\":\"bpc-2eb9e1c4-fa08-4d40-957c-1e64915bcbb1\",\"label\":\"章末钩子\",\"markdown\":\"- **章末钩子**：名单背面画着一只眼睛。\\n\"}],\"postamble\":\"\"}],\"origin\":\"import\",\"revision\":2,\"contentHash\":\"4fb14dd1060da058b634d8e89510db61a7d511d5a4065d636c10805a35f3b0fd\"}",
+      "raw_markdown": "### 第2章｜码头接头\n#### 【本章定位与四维指标】\n- **核心使命**：与账房核对名单，发现内鬼。\n- **正文字数预算**：4200\n#### 【核心矛盾与博弈结构】\n- **实质冲突与转折**：账房交出半页名单后消失，酒馆老板翻脸。\n#### 【逐场分镜拆解】\n##### 场景一：雨棚下的接头\n苏砚压低帽檐，观察码头入口的人流。账房迟到十七分钟，袖口沾着煤灰。\n##### 场景二：仓库后的追逐\n账房突然折返仓库，苏砚翻窗追入，发现成箱的同款信封。\n#### 【章末爆点与断章定格】\n- **章末钩子**：名单背面画着一只眼睛。\n",
+      "revision": 2,
+      "content_hash": "4fb14dd1060da058b634d8e89510db61a7d511d5a4065d636c10805a35f3b0fd"
+    }
+  ],
+  "drafts": [
+    {
+      "id": 1,
+      "chapter_number": 1,
+      "blueprint_chapter_number": 1,
+      "version": 1,
+      "status": "draft",
+      "source": "write"
+    }
+  ],
+  "volumes": [
+    {
+      "id": "volume-1",
+      "name": "第1卷",
+      "sort_order": 1
+    }
+  ]
+}

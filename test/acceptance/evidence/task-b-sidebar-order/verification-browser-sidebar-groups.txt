@@ -1,0 +1,18 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90mD:/ai/AI-Novel-Writer-master[39m
+
+[2m10:02:48[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m Re-optimizing dependencies because vite config has changed
+[2m10:02:49[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [optimizer] scanning dependencies...
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/panels/sidebar/__tests__/ProjectTree.sidebar-groups.browser.tsx[2m > [22mProjectTree shadcn/ui collapsible groups[2m > [22mrenders exactly 5 level-1 collapsible groups with icon, title, chevron arrow, and NO "+" button on headers[32m 155[2mms[22m[39m
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/panels/sidebar/__tests__/ProjectTree.sidebar-groups.browser.tsx[2m > [22mProjectTree shadcn/ui collapsible groups[2m > [22mrenders the required author-task order: overview pinned on top, then setup, plan, drafting, library, management[32m 87[2mms[22m[39m
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/panels/sidebar/__tests__/ProjectTree.sidebar-groups.browser.tsx[2m > [22mProjectTree shadcn/ui collapsible groups[2m > [22mpreserves inner "+" buttons in draft box and manuscript chapters[32m 56[2mms[22m[39m
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/panels/sidebar/__tests__/ProjectTree.sidebar-groups.browser.tsx[2m > [22mProjectTree shadcn/ui collapsible groups[2m > [22mtoggles collapse/expand when group header is clicked and updates aria-expanded and store state[32m 183[2mms[22m[39m
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/panels/sidebar/__tests__/ProjectTree.sidebar-groups.browser.tsx[2m > [22mProjectTree shadcn/ui collapsible groups[2m > [22mallows navigating items in other expanded groups when one group is collapsed[32m 64[2mms[22m[39m
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/panels/sidebar/__tests__/ProjectTree.sidebar-groups.browser.tsx[2m > [22mProjectTree shadcn/ui collapsible groups[2m > [22msupports real browser keyboard operation on group header (focus, Enter, Space with single toggle each time)[32m 137[2mms[22m[39m
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/panels/sidebar/__tests__/ProjectTree.sidebar-groups.browser.tsx[2m > [22mProjectTree shadcn/ui collapsible groups[2m > [22msupports real browser keyboard operation on leaf items (focus and Enter activates item)[32m 62[2mms[22m[39m
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/panels/sidebar/__tests__/ProjectTree.sidebar-groups.browser.tsx[2m > [22mProjectTree shadcn/ui collapsible groups[2m > [22mexecutes cleanly without any unhandled IPC console errors[32m 31[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m8 passed[39m[22m[90m (8)[39m
+[2m   Start at [22m 10:02:48
+[2m   Duration [22m 4.52s[2m (transform 0ms, setup 73ms, import 585ms, tests 778ms, environment 0ms)[22m

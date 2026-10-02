@@ -1,0 +1,57 @@
+[
+  {
+    "at": "2026-10-02T05:26:11.906Z",
+    "kind": "main-stdout",
+    "text": "\r\n"
+  },
+  {
+    "at": "2026-10-02T05:26:12.782Z",
+    "kind": "main-stderr",
+    "text": "\r\nDevTools listening on ws://127.0.0.1:3710/devtools/browser/5ca42e85-0e53-4fd5-9d42-59dc4f0778d2\r\n"
+  },
+  {
+    "at": "2026-10-02T05:26:12.800Z",
+    "kind": "main-stdout",
+    "text": "[Vela IPC] 所有 Controller 已注册完成 | 全局工作区: C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-task-d-2026-10-02T05-25-29-353Z-1a3d3ab0\\global-home\n"
+  },
+  {
+    "at": "2026-10-02T05:26:12.801Z",
+    "kind": "main-stdout",
+    "text": "[MCP] IPC 处理器已注册\n"
+  },
+  {
+    "at": "2026-10-02T05:26:13.731Z",
+    "kind": "main-stdout",
+    "text": "[Vela DB] 项目数据库已打开: C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-task-d-2026-10-02T05-25-29-353Z-1a3d3ab0\\project-a\\.vela\\vela.db\n"
+  },
+  {
+    "at": "2026-10-02T05:26:15.499Z",
+    "kind": "main-stdout",
+    "text": "\r\n"
+  },
+  {
+    "at": "2026-10-02T05:26:16.183Z",
+    "kind": "main-stderr",
+    "text": "\r\nDevTools listening on ws://127.0.0.1:3765/devtools/browser/c9bb6542-f2b1-4560-9926-34a145aa7e80\r\n"
+  },
+  {
+    "at": "2026-10-02T05:26:16.192Z",
+    "kind": "main-stdout",
+    "text": "[Vela IPC] 所有 Controller 已注册完成 | 全局工作区: C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-task-d-2026-10-02T05-25-29-353Z-1a3d3ab0\\global-home\n"
+  },
+  {
+    "at": "2026-10-02T05:26:16.192Z",
+    "kind": "main-stdout",
+    "text": "[MCP] IPC 处理器已注册\n"
+  },
+  {
+    "at": "2026-10-02T05:26:16.922Z",
+    "kind": "main-stdout",
+    "text": "[Vela DB] 章节蓝图统一迁移：已迁移 2 章\n"
+  },
+  {
+    "at": "2026-10-02T05:26:16.922Z",
+    "kind": "main-stdout",
+    "text": "[Vela DB] 项目数据库已打开: C:\\Users\\Administrator\\AppData\\Local\\Temp\\vela-acc-task-d-2026-10-02T05-25-29-353Z-1a3d3ab0\\project-a\\.vela\\vela.db\n"
+  }
+]

@@ -71,8 +71,8 @@ export function useDomainProposalPreview(toolCall: ToolCallInfo): DomainProposal
       const readStatus = (detail as { readStatus?: string } | null)?.readStatus
       setV2Warning(detail && !readStatus && typeof toolCall.arguments.v2_markdown !== 'string'
         ? (locale === 'en-US'
-          ? 'This chapter already has a v2 detailed outline. Applying this proposal overwrites its projected fields (title / purpose / key events / suspense hook); the detailed outline itself is unchanged.'
-          : '该章已有 v2 完整细纲，此提案会覆盖其投影字段（标题/目的/关键事件/悬念钩子）；细纲正文本身不受影响。')
+          ? 'This chapter already has a detailed outline. Applying this proposal overwrites its projected summary fields (title / purpose / key events / suspense hook); the detailed outline itself is unchanged.'
+          : '该章已有完整细纲，此提案会覆盖其概要字段（标题/目的/关键事件/悬念钩子）；细纲正文本身不受影响。')
         : null)
     }).catch(() => {
       if (!disposed) setV2Warning(null)

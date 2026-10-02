@@ -607,7 +607,7 @@ describe('ProjectTree Leaf Entries and Editor Mounting (NAV-TREE-01 ~ NAV-TREE-3
     act(() => useEditorStore.getState().closeTab(synopsisTab.id))
     expect(useEditorStore.getState().tabs.some(t => t.filePath === 'vela://core/synopsis')).toBe(false)
 
-    // 8. NAV-TREE-17: 正文创作 - 草稿项点击打开 DraftEditor (无条件判断)
+    // 8. NAV-TREE-17: 正文写作 - 草稿项点击打开 DraftEditor (无条件判断)
     let draftRow: HTMLElement | undefined
     await vi.waitFor(() => {
       draftRow = Array.from(container.querySelectorAll<HTMLElement>('div[title*="点击打开"]')).find(
@@ -622,7 +622,7 @@ describe('ProjectTree Leaf Entries and Editor Mounting (NAV-TREE-01 ~ NAV-TREE-3
     act(() => useEditorStore.getState().closeTab(draftTab!.id))
     expect(useEditorStore.getState().tabs.some(t => t.id === draftTab!.id)).toBe(false)
 
-    // 9. NAV-TREE-19: 正文创作 - 正文章节项点击打开 ProseEditor (无条件判断)
+    // 9. NAV-TREE-19: 正文写作 - 正文章节项点击打开 ProseEditor (无条件判断)
     let manuscriptRow: HTMLElement | undefined
     await vi.waitFor(() => {
       manuscriptRow = Array.from(container.querySelectorAll<HTMLElement>('.tree-item')).find(

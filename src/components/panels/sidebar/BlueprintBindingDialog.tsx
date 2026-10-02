@@ -47,7 +47,7 @@ export function BlueprintBindingDialog({
           for (const summary of v2Summaries) {
             if (!byChapter.has(summary.chapterNumber)) {
               const sceneHint = summary.sceneTitles[0]
-              byChapter.set(summary.chapterNumber, sceneHint ? `${sceneHint}（v2）` : `第${summary.chapterNumber}章（v2）`)
+              byChapter.set(summary.chapterNumber, sceneHint || `第${summary.chapterNumber}章`)
             }
           }
           setBlueprints([...byChapter]

@@ -1,0 +1,94 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90mD:/ai/AI-Novel-Writer-master[39m
+
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/planning/__tests__/planning-area-structure.visual.tsx[2m > [22mplanning area visual contract[2m > [22mproject tree: five author-task areas in author order[33m 598[2mms[22m[39m
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/planning/__tests__/planning-area-structure.visual.tsx[2m > [22mplanning area visual contract[2m > [22mproject tree: same five areas before anything is generated[33m 450[2mms[22m[39m
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/planning/__tests__/planning-area-structure.visual.tsx[2m > [22mplanning area visual contract[2m > [22mchapter blueprints: empty state explains how to start[33m 330[2mms[22m[39m
+[90mstdout[2m | src/components/planning/__tests__/planning-area-structure.visual.tsx[2m > [22m[2mplanning area visual contract[2m > [22m[2mchapter thread: plans view empty then with a thread plan
+[22m[39m[ipc-client.invoke] 调用通道: llm:list-models 参数数量: 0
+[90mstdout[2m | src/components/planning/__tests__/planning-area-structure.visual.tsx[2m > [22m[2mplanning area visual contract[2m > [22m[2mchapter thread: plans view empty then with a thread plan
+[22m[39m[ipc-client.invoke] 调用完成: llm:list-models
+[90mstdout[2m | src/components/planning/__tests__/planning-area-structure.visual.tsx[2m > [22m[2mplanning area visual contract[2m > [22m[2mchapter thread: plans view empty then with a thread plan
+[22m[39m[ipc-client.invoke] 调用通道: llm:list-models 参数数量: 0
+[90mstdout[2m | src/components/planning/__tests__/planning-area-structure.visual.tsx[2m > [22m[2mplanning area visual contract[2m > [22m[2mchapter thread: plans view empty then with a thread plan
+[22m[39m[ipc-client.invoke] 调用完成: llm:list-models
+ [31m×[39m [30m[43m chromium [49m[39m src/components/planning/__tests__/planning-area-structure.visual.tsx[2m > [22mplanning area visual contract[2m > [22mchapter blueprints: list, filter and toolbar with data[33m 573[2mms[22m[39m
+[31m   → Cannot read properties of undefined (reading 'find')[39m
+[90mstdout[2m | src/components/planning/__tests__/planning-area-structure.visual.tsx[2m > [22m[2mplanning area visual contract[2m > [22m[2mchapter thread breadcrumb keeps arrows beside text and clear of the title
+[22m[39m[ipc-client.invoke] 调用通道: llm:list-models 参数数量: 0
+[90mstdout[2m | src/components/planning/__tests__/planning-area-structure.visual.tsx[2m > [22m[2mplanning area visual contract[2m > [22m[2mchapter thread breadcrumb keeps arrows beside text and clear of the title
+[22m[39m[ipc-client.invoke] 调用完成: llm:list-models
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/planning/__tests__/planning-area-structure.visual.tsx[2m > [22mplanning area visual contract[2m > [22mchapter thread: plans view empty then with a thread plan[33m 404[2mms[22m[39m
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/planning/__tests__/planning-area-structure.visual.tsx[2m > [22mplanning area visual contract[2m > [22mchapter thread breadcrumb keeps arrows beside text and clear of the title[33m 342[2mms[22m[39m
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/planning/__tests__/planning-area-structure.visual.tsx[2m > [22mplanning area visual contract[2m > [22mstory timeline: empty state then a populated canvas[33m 449[2mms[22m[39m
+[90mstdout[2m | src/components/planning/__tests__/planning-area-structure.visual.tsx[2m > [22m[2mplanning area visual contract[2m > [22m[2mmap atlas: empty state then atlas tree with a map selected
+[22m[39m[ipc-client.invoke] 调用通道: world-map-image:get 参数数量: 2
+[90mstdout[2m | src/components/planning/__tests__/planning-area-structure.visual.tsx[2m > [22m[2mplanning area visual contract[2m > [22m[2mmap atlas: empty state then atlas tree with a map selected
+[22m[39m[ipc-client.invoke] 调用完成: world-map-image:get
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/planning/__tests__/planning-area-structure.visual.tsx[2m > [22mplanning area visual contract[2m > [22mforeshadowing: empty state then list with detail[33m 384[2mms[22m[39m
+ [32m✓[39m [30m[43m chromium [49m[39m src/components/planning/__tests__/planning-area-structure.visual.tsx[2m > [22mplanning area visual contract[2m > [22mmap atlas: empty state then atlas tree with a map selected[33m 418[2mms[22m[39m
+[90mstderr[2m | src/components/planning/__tests__/planning-area-screenshots.visual.tsx[2m > [22m[2mplanning area screenshots[2m > [22m[2mcaptures every page in its empty and populated state
+[22m[39mAn update to ProjectTree inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+ [31m×[39m [30m[43m chromium [49m[39m src/components/planning/__tests__/planning-area-screenshots.visual.tsx[2m > [22mplanning area screenshots[2m > [22mcaptures every page in its empty and populated state[33m 1643[2mms[22m[39m
+[31m   → expected '潮汐纪年项目总览故事设定创作参数已完成修炼等级设置故事架构1/3故事前提待…' to contain '3/24 章'[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 2 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m [30m[43m chromium [49m[39m src/components/planning/__tests__/planning-area-screenshots.visual.tsx[2m > [22mplanning area screenshots[2m > [22mcaptures every page in its empty and populated state
+[31m[1mAssertionError[22m: expected '潮汐纪年项目总览故事设定创作参数已完成修炼等级设置故事架构1/3故事前提待…' to contain '3/24 章'[39m
+
+Failure screenshot:
+  - [2msrc/components/planning/__tests__/__screenshots__/planning-area-screenshots.visual.tsx/planning-area-screenshots-captures-every-page-in-its-empty-and-populated-state-2.png[22m
+
+Expected: [32m"3/24 章"[39m
+Received: [31m"潮汐纪年项目总览故事设定创作参数已完成修炼等级设置故事架构1/3故事前提待生成世界观情节大纲待生成角色档案创作规划章节蓝图待生成章节脉络故事时间线伏笔管理多地图地图册3 处地点世界待创建正文写作1 章草稿 · 0 章正文草稿箱新建草稿1 章第1章 第一章 灰潮初现草稿正文章节新建章节暂无正文章节资料库项目文档资料来源与审核知识检索项目管理导入创作资料导出项目备份项目恢复项目备份"[39m
+
+[36m [2m❯[22m src/components/planning/__tests__/planning-area-screenshots.visual.tsx:[2m77:36[22m[39m
+    [90m 75|[39m     [35mawait[39m [34mmount[39m([34msidebarTree[39m([32m'data'[39m))
+    [90m 76|[39m     [35mawait[39m [34msettleTreeRefresh[39m()
+    [90m 77|[39m     [34mexpect[39m([34mcontainer[39m()[33m.[39mtextContent)[33m.[39m[34mtoContain[39m([32m'3/24 章'[39m)
+    [90m   |[39m                                    [31m^[39m
+    [90m 78|[39m     [34mexpect[39m([34mcontainer[39m()[33m.[39mtextContent)[33m.[39m[34mtoContain[39m([32m'3 处地点'[39m)
+    [90m 79|[39m     [35mawait[39m [34mshoot[39m([32m'01-project-tree'[39m)
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m [30m[43m chromium [49m[39m src/components/planning/__tests__/planning-area-structure.visual.tsx[2m > [22mplanning area visual contract[2m > [22mchapter blueprints: list, filter and toolbar with data
+[31m[1mTypeError[22m: Cannot read properties of undefined (reading 'find')[39m
+
+Failure screenshot:
+  - [2msrc/components/planning/__tests__/__screenshots__/planning-area-structure.visual.tsx/planning-area-visual-contract-chapter-blueprints--list--filter-and-toolbar-with-data-1.png[22m
+
+[36m [2m❯[22m findBlueprintV2CanonicalSection src/shared/blueprint-v2.ts:[2m188:35[22m[39m
+    [90m186|[39m   id[33m:[39m [33mBlueprintV2SectionId[39m[33m,[39m
+    [90m187|[39m )[33m:[39m [33mExtract[39m[33m<[39m[33mBlueprintV2Section[39m[33m,[39m { kind[33m:[39m [32m'canonical'[39m }[33m>[39m [33m|[39m [35mnull[39m {
+    [90m188|[39m   [35mconst[39m section [33m=[39m content[33m.[39msections[33m.[39m[34mfind[39m(
+    [90m   |[39m                                   [31m^[39m
+    [90m189|[39m     candidate [33m=>[39m candidate[33m.[39mkind [33m===[39m [32m'canonical'[39m [33m&&[39m candidate[33m.[39mid [33m===[39m id[33m,[39m
+    [90m190|[39m   )
+[90m [2m❯[22m getBlueprintV2Scenes src/shared/blueprint-v2.ts:[2m199:21[22m[39m
+[90m [2m❯[22m ChapterCardEditor src/components/editor/ChapterCardEditor.tsx:[2m1715:56[22m[39m
+[90m [2m❯[22m Object.react_stack_bottom_frame node_modules/.pnpm/react-dom@19.2.5_react@19.2.5/node_modules/react-dom/cjs/react-dom-client.development.js:[2m25904:19[22m[39m
+[90m [2m❯[22m renderWithHooks node_modules/.pnpm/react-dom@19.2.5_react@19.2.5/node_modules/react-dom/cjs/react-dom-client.development.js:[2m7662:21[22m[39m
+[90m [2m❯[22m updateFunctionComponent node_modules/.pnpm/react-dom@19.2.5_react@19.2.5/node_modules/react-dom/cjs/react-dom-client.development.js:[2m10166:18[22m[39m
+[90m [2m❯[22m beginWork node_modules/.pnpm/react-dom@19.2.5_react@19.2.5/node_modules/react-dom/cjs/react-dom-client.development.js:[2m11778:17[22m[39m
+[90m [2m❯[22m runWithFiberInDEV node_modules/.pnpm/react-dom@19.2.5_react@19.2.5/node_modules/react-dom/cjs/react-dom-client.development.js:[2m871:29[22m[39m
+[90m [2m❯[22m performUnitOfWork node_modules/.pnpm/react-dom@19.2.5_react@19.2.5/node_modules/react-dom/cjs/react-dom-client.development.js:[2m17641:21[22m[39m
+[90m [2m❯[22m workLoopSync node_modules/.pnpm/react-dom@19.2.5_react@19.2.5/node_modules/react-dom/cjs/react-dom-client.development.js:[2m17469:40[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m2 failed[39m[22m[90m (2)[39m
+[2m      Tests [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m8 passed[39m[22m[90m (10)[39m
+[2m   Start at [22m 10:02:27
+[2m   Duration [22m 11.21s[2m (transform 0ms, setup 80ms, import 3.48s, tests 5.59s, environment 0ms)[22m

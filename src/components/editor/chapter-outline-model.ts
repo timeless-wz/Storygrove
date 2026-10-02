@@ -1,18 +1,15 @@
 import type { BlueprintVolumeData } from '../../../electron/repositories/blueprint-repository'
 import type { DraftMeta } from '../../../electron/repositories/draft-repository'
-import type { BlueprintListProjection } from '../../shared/blueprint-list-projection'
 
 export interface OutlineData {
   volumes: BlueprintVolumeData[]
-  blueprints: BlueprintListProjection[]
+  blueprints: Array<{ chapterNumber: number; title: string; volumeId?: string | null }>
   drafts: DraftMeta[]
 }
 
 export interface ChapterEntry {
   number: number
   title: string
-  sceneCount: number
-  sceneTitles: string[]
   draft?: DraftMeta
   manuscript?: DraftMeta
 }
@@ -35,14 +32,6 @@ export function groupOutline(data: OutlineData, fallbackVolumeName: string) {
     const volumeId = blueprint.volumeId || volumes[0].id
     return volumes.some(volume => volume.id === volumeId) ? volumeId : 'ungrouped'
   }
-  for (const blueprint of data.blueprints) {
-    chapters.set(`${volumeForBlueprint(blueprint.chapterNumber)}:${blueprint.chapterNumber}`, {
-      number: blueprint.chapterNumber,
-      title: blueprint.title,
-      sceneCount: blueprint.sceneCount ?? 0,
-      sceneTitles: blueprint.sceneTitles ?? [],
-    })
-  }
   for (const draft of data.drafts) {
     if (draft.status === 'archived') continue
     // Volume membership follows the draft's explicit blueprint binding only.
@@ -53,15 +42,14 @@ export function groupOutline(data: OutlineData, fallbackVolumeName: string) {
     const entry = chapters.get(key) ?? {
       number: draft.chapterNumber,
       title: draft.chapterTitle || blueprints.get(draft.blueprintChapterNumber ?? -1)?.title || '',
-      sceneCount: blueprints.get(draft.blueprintChapterNumber ?? -1)?.sceneCount ?? 0,
-      sceneTitles: blueprints.get(draft.blueprintChapterNumber ?? -1)?.sceneTitles ?? [],
     }
     if (draft.status === 'finalized') {
       entry.manuscript = latest([draft, ...(entry.manuscript ? [entry.manuscript] : [])])
     } else {
       entry.draft = latest([draft, ...(entry.draft ? [entry.draft] : [])])
     }
-    if (!entry.title && draft.chapterTitle) entry.title = draft.chapterTitle
+    entry.title = entry.draft?.chapterTitle || entry.manuscript?.chapterTitle
+      || blueprints.get(draft.blueprintChapterNumber ?? -1)?.title || ''
     chapters.set(key, entry)
   }
   const groups = volumes.map(volume => ({ volume, chapters: [] as ChapterEntry[] }))
@@ -71,5 +59,5 @@ export function groupOutline(data: OutlineData, fallbackVolumeName: string) {
     const group = groups.find(item => item.volume.id === volumeId)
     ;(group ?? ungrouped).chapters.push(entry)
   }
-  return ungrouped.chapters.length > 0 ? [...groups, ungrouped] : groups
+  return [...groups, ungrouped].filter(group => group.chapters.length > 0)
 }

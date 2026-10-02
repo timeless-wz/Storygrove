@@ -77,6 +77,8 @@ export default function BlueprintV2ImportDialog({
   const [targetChapter, setTargetChapter] = useState<number | null>(null)
   const [existingDetail, setExistingDetail] = useState<ChapterBlueprintV2DetailRead | null>(null)
   const [existingLookupFailed, setExistingLookupFailed] = useState(false)
+  /** 每次手动选择目标章都递增：重复选择同一章时强制重读该章现有细纲。 */
+  const [existingLookupNonce, setExistingLookupNonce] = useState(0)
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [applying, setApplying] = useState(false)
   const [error, setError] = useState('')
@@ -163,7 +165,7 @@ export default function BlueprintV2ImportDialog({
       }
     })()
     return () => { cancelled = true }
-  }, [step, targetChapter, projectSession, projectKey])
+  }, [step, targetChapter, existingLookupNonce, projectSession, projectKey])
 
   const matchedByIncoming = useMemo(() => {
     if (!parsed || !existingDetail || existingDetail.readStatus !== undefined) return null
@@ -291,9 +293,9 @@ export default function BlueprintV2ImportDialog({
                 <NativeSelect
                   value={targetChapter ?? ''}
                   onChange={event => {
-                    setExistingDetail(null)
                     setExistingLookupFailed(false)
                     setTargetChapter(Number(event.target.value))
+                    setExistingLookupNonce(nonce => nonce + 1)
                   }}
                   data-testid="blueprint-v2-import-target"
                 >
@@ -330,8 +332,8 @@ export default function BlueprintV2ImportDialog({
             {existingDetail && (
               <p className="text-xs" style={{ color: 'var(--color-warning-text)' }}>
                 {text(
-                  `该章已有 v2 细纲（版本 r${existingDetail.revision}）。确认后将以本文档为准更新；同名分镜保留原分镜 ID 与画布链接。`,
-                  `This chapter already has a v2 outline (revision r${existingDetail.revision}). Confirming will replace it with this document; scenes with matching titles keep their IDs and canvas links.`,
+                  `该章已有细纲（版本 r${existingDetail.revision}）。确认后将以本文档为准更新；同名分镜保留原分镜 ID 与画布链接。`,
+                  `This chapter already has an outline (revision r${existingDetail.revision}). Confirming will replace it with this document; scenes with matching titles keep their IDs and canvas links.`,
                 )}
               </p>
             )}
@@ -339,7 +341,7 @@ export default function BlueprintV2ImportDialog({
               <div className="rounded-md border p-3 space-y-2" style={{ borderColor: 'var(--color-error)', color: 'var(--color-error-text)' }} data-testid="blueprint-v2-import-read-error">
                 <p className="text-xs">
                   {existingDetail.readStatus === 'corrupt'
-                    ? text('目标章已有损坏的 v2 细纲。为避免覆盖无法读取的数据，当前导入已锁定；请先在蓝图页检查原始 Markdown 并显式删除损坏记录。', 'The target chapter has a corrupt v2 outline. Import is locked to avoid overwriting unreadable data; inspect the raw Markdown in the blueprint page and explicitly delete the corrupt record first.')
+                    ? text('目标章的细纲数据损坏。为避免覆盖无法读取的数据，当前导入已锁定；请先在蓝图页检查原始 Markdown 并显式删除损坏记录。', 'The target chapter outline is corrupt. Import is locked to avoid overwriting unreadable data; inspect the raw Markdown in the blueprint page and explicitly delete the corrupt record first.')
                     : text(`目标章细纲由较新版本写入（schema ${existingDetail.storedSchemaVersion ?? '?'}）。请升级应用后再导入；当前不会覆盖该记录。`, `The target outline was written by a newer app version (schema ${existingDetail.storedSchemaVersion ?? '?'}). Upgrade the app before importing; this record will not be overwritten.`)}
                 </p>
                 {existingDetail.rawMarkdown !== undefined && (
@@ -414,8 +416,8 @@ export default function BlueprintV2ImportDialog({
               </p>
               <p>
                 {text(
-                  '保存时将同步投影 v1 字段（标题/核心目的/关键事件/悬念钩子）；role、出场角色、作者微操指导与定稿要点不会被改动。',
-                  'Saving also refreshes the v1 projection (title / purpose / key events / suspense hook); role, characters, author guidance, and finalized notes are never touched.',
+                  '保存时将同步更新章节概要字段（标题/核心目的/关键事件/悬念钩子）；role、出场角色、作者微操指导与定稿要点不会被改动。',
+                  'Saving also refreshes the chapter summary fields (title / purpose / key events / suspense hook); role, characters, author guidance, and finalized notes are never touched.',
                 )}
               </p>
             </div>

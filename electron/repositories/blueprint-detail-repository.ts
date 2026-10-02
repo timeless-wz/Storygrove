@@ -15,6 +15,7 @@ import {
   MAX_BLUEPRINT_V2_SCENE_TITLE,
   BLUEPRINT_V2_SCHEMA_VERSION,
   assertValidChapterBlueprintV2Content,
+  buildBlueprintV2MigrationContent,
   computeBlueprintV2ContentHash,
   getBlueprintV2Scenes,
   moveBlueprintV2Scene,
@@ -435,6 +436,88 @@ export class BlueprintDetailRepository {
     ).all(...chapterNumbers) as Array<{ chapter_number: number }>
     for (const row of rows) result.add(row.chapter_number)
     return result
+  }
+
+  /**
+   * 章节蓝图统一版本迁移：把仅有 v1 简纲行（blueprints）且尚无 v2 细纲的章
+   * 升级为 v2 权威数据。幂等：迁移目标以「blueprint_details 缺行」为准，重复
+   * 执行不会产生重复内容；内容全空的行（新建占位章）跳过，保持可被工作流
+   * 批量写入；单章失败只记录并跳过，原 v1 行原样保留。
+   */
+  static migrateLegacyRows(options?: { chapterNumbers?: readonly number[] }): {
+    migrated: number[]
+    skipped: Array<{ chapterNumber: number; reason: 'empty-legacy-content' | 'conflict' }>
+    failed: Array<{ chapterNumber: number; error: string }>
+  } {
+    const db = requireDb()
+    const migrated: number[] = []
+    const skipped: Array<{ chapterNumber: number; reason: 'empty-legacy-content' | 'conflict' }> = []
+    const failed: Array<{ chapterNumber: number; error: string }> = []
+    let rows: Array<{
+      chapter_number: number
+      title: string
+      purpose: string
+      key_events: string
+      suspense_hook: string
+    }>
+    try {
+      if (options?.chapterNumbers && options.chapterNumbers.length > 0) {
+        const placeholders = options.chapterNumbers.map(() => '?').join(', ')
+        rows = db.prepare(`
+          SELECT b.chapter_number, b.title, b.purpose, b.key_events, b.suspense_hook
+          FROM blueprints b
+          WHERE b.chapter_number IN (${placeholders})
+            AND NOT EXISTS (SELECT 1 FROM blueprint_details d WHERE d.chapter_number = b.chapter_number)
+          ORDER BY b.chapter_number ASC
+        `).all(...options.chapterNumbers) as typeof rows
+      } else {
+        rows = db.prepare(`
+          SELECT b.chapter_number, b.title, b.purpose, b.key_events, b.suspense_hook
+          FROM blueprints b
+          WHERE NOT EXISTS (SELECT 1 FROM blueprint_details d WHERE d.chapter_number = b.chapter_number)
+          ORDER BY b.chapter_number ASC
+          LIMIT 1000
+        `).all() as typeof rows
+      }
+    } catch {
+      // 极端旧库缺表等情况：本次不迁移，下一次项目打开重试。
+      return { migrated, skipped, failed }
+    }
+    for (const row of rows) {
+      const legacy = {
+        chapterNumber: row.chapter_number,
+        title: row.title ?? '',
+        purpose: row.purpose ?? '',
+        keyEvents: row.key_events ?? '',
+        suspenseHook: row.suspense_hook ?? '',
+      }
+      if (!legacy.title.trim() && !legacy.purpose.trim() && !legacy.keyEvents.trim() && !legacy.suspenseHook.trim()) {
+        skipped.push({ chapterNumber: row.chapter_number, reason: 'empty-legacy-content' })
+        continue
+      }
+      try {
+        const content = buildBlueprintV2MigrationContent(legacy, { origin: 'upgrade' })
+        const result = BlueprintDetailRepository.save({
+          chapterNumber: legacy.chapterNumber,
+          baseRevision: 0,
+          content,
+        })
+        if (result.success) {
+          migrated.push(legacy.chapterNumber)
+        } else if (result.conflict) {
+          // 迁移期间该章已出现 v2 细纲（并发窗口）：视为已完成，绝不覆盖。
+          skipped.push({ chapterNumber: legacy.chapterNumber, reason: 'conflict' })
+        } else {
+          failed.push({ chapterNumber: legacy.chapterNumber, error: result.error ?? '未知错误' })
+        }
+      } catch (error) {
+        failed.push({
+          chapterNumber: legacy.chapterNumber,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
+    return { migrated, skipped, failed }
   }
 
   /**

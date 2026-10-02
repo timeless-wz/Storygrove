@@ -306,7 +306,7 @@ describe('ProjectReferencePanel writer desktop workbench', () => {
     expect(container.textContent).toContain('林默偶得青石残印，离开青石村前往玄剑宗')
     expect(container.textContent).toContain('创作指导与细纲 (user_guidance)')
     expect(container.textContent).toContain('着重刻画青石村的环境与清晨出发的气氛')
-    expect(container.textContent).toContain('阅读完整 v2 细纲（1 个分区）')
+    expect(container.textContent).toContain('阅读完整细纲（1 个分区）')
     expect(container.textContent).toContain('完整分镜正文：林默带着残印走出青石村。')
     expect(container.textContent).toContain('关联地图节点')
     expect(container.textContent).toContain('青石村')

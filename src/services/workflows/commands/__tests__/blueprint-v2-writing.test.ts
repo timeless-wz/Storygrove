@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { parseChapterBlueprintMarkdown, serializeChapterBlueprintV2 } from '../../../../shared/blueprint-v2-markdown'
-import { buildBlueprintV2UpgradeScaffold, computeBlueprintV2ContentHash, type ChapterBlueprintV2DetailRead } from '../../../../shared/blueprint-v2'
+import { buildBlueprintV2MigrationContent, computeBlueprintV2ContentHash, type ChapterBlueprintV2DetailRead } from '../../../../shared/blueprint-v2'
 import {
   assembleBlueprintV2WritingBlock,
   BLUEPRINT_V2_CONSTRAINT_SCAFFOLD,
@@ -120,18 +120,13 @@ describe('blueprint v2 writing block assembly (contract §9)', () => {
     expect(en.text).toContain('场景一：02:14的冷汗与声学隔离席')
   })
 
-  it('returns null for an empty upgrade scaffold so the v1 path stays authoritative', () => {
-    const scaffold = buildBlueprintV2UpgradeScaffold({
+  it('returns null for an empty migration content so the v1 path stays authoritative', () => {
+    const scaffold = buildBlueprintV2MigrationContent({
       chapterNumber: 2,
       title: '旧章',
-      role: '',
       purpose: '',
       keyEvents: '',
-      characters: [],
       suspenseHook: '',
-      userGuidance: '',
-      notes: '',
-      notesUpdatedAt: '',
     })
     expect(assembleBlueprintV2WritingBlock(scaffold, 'zh-CN')).toBeNull()
   })

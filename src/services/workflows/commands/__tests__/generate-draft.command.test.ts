@@ -905,7 +905,7 @@ describe('GenerateDraftCommand generation runtime boundary', () => {
     expect(user).toContain('FALLBACK_EVENTS_SENTINEL')
     expect(user).toContain('FALLBACK_HOOK_SENTINEL')
     expect(user).toContain('MANUAL_GUIDANCE_SENTINEL')
-    expect(user).not.toContain('【本章细纲（蓝图 v2 任务书）')
+    expect(user).not.toContain('【本章细纲任务书')
     expect(user).not.toContain('场景一：02:14的冷汗与声学隔离席')
     expect(invoke).toHaveBeenCalledWith('db:blueprint-v2-get', 1, projectPath, context.projectSession)
     expect(runtime.complete).toHaveBeenCalledOnce()
@@ -945,7 +945,8 @@ describe('GenerateDraftCommand generation runtime boundary', () => {
     expect(user).not.toContain('用户目标 3000 字')
     expect(user).not.toContain('仅供旧投影的重复情节摘要 SENTINEL')
     expect(user).not.toContain('仅供旧投影的重复钩子 SENTINEL')
-    expect(user).not.toContain('仅供旧投影的重复使命摘要 SENTINEL')
+    // v2 注入块不携带「主角小目标」；v1 投影的 purpose 保留注入，统一迁移后的章不丢目标上下文。
+    expect(user).toContain('仅供旧投影的重复使命摘要 SENTINEL')
     // 规则、章末目标逐字在场。
     expect(user).toContain('- **源**：百年前异文明归航遗留的避难协议。')
     expect(user).toContain('下一站，老槐树平房。')
@@ -955,8 +956,8 @@ describe('GenerateDraftCommand generation runtime boundary', () => {
     expect(user).toContain('不是要求正文解释的题材')
     expect(user).toContain('不得直接讲解世界观设定、系统规则或神明名号')
     // 注入路径单一：v2 块只出现一次。
-    expect(user.split('【本章细纲（蓝图 v2 任务书）')).toHaveLength(2)
-    expect(callbacks.log).toHaveBeenCalledWith(expect.stringContaining('已注入本章 v2 细纲：4 个分镜，字数预算 4200 字'))
+    expect(user.split('【本章细纲任务书')).toHaveLength(2)
+    expect(callbacks.log).toHaveBeenCalledWith(expect.stringContaining('已注入本章细纲：4 个分镜，字数预算 4200 字'))
     expect(invoke).toHaveBeenCalledWith('db:blueprint-v2-get', 1, projectPath, context.projectSession)
     expect(invoke).toHaveBeenCalledWith(
       'db:draft-create',
@@ -987,7 +988,7 @@ describe('GenerateDraftCommand generation runtime boundary', () => {
     ))) {
       expect(prompt).toContain('场景四：开出地图的末班车')
       expect(prompt).toContain('严禁在第1章解释前世事故、原身死因全貌')
-      expect(prompt.split('【本章细纲（蓝图 v2 任务书）')).toHaveLength(2)
+      expect(prompt.split('【本章细纲任务书')).toHaveLength(2)
     }
   })
 

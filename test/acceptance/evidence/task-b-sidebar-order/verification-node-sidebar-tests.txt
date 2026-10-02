@@ -1,0 +1,17 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.11 [39m[90mD:/ai/AI-Novel-Writer-master[39m
+
+ [32m✓[39m test/source-contract.test.ts[2m > [22mdecorative SVG source boundary[2m > [22mallows only inert layout clip definitions and retains visible or executable SVG for rejection[32m 13[2mms[22m[39m
+ [32m✓[39m test/source-contract.test.ts[2m > [22msource contract normalization[2m > [22mtreats LF, CRLF, and CR source text as the same source contract[32m 1[2mms[22m[39m
+ [32m✓[39m test/source-contract.test.ts[2m > [22msource contract normalization[2m > [22mreads CRLF source files as their canonical LF source before hashing[32m 5[2mms[22m[39m
+ [32m✓[39m src/components/panels/sidebar/__tests__/sidebar-file-openers-session.test.ts[2m > [22msidebar file openers keep the original project session[2m > [22mhydrates a draft tab from the authoritative body before opening it[32m 16[2mms[22m[39m
+ [32m✓[39m src/components/panels/sidebar/__tests__/sidebar-file-openers-session.test.ts[2m > [22msidebar file openers keep the original project session[2m > [22mdoes not create a saved blank chapter tab when fs reports success:false[32m 1[2mms[22m[39m
+ [32m✓[39m src/components/panels/sidebar/__tests__/sidebar-file-openers-session.test.ts[2m > [22msidebar file openers keep the original project session[2m > [22mdrops a delayed same-path read after reopening with a new lease[32m 2[2mms[22m[39m
+ [32m✓[39m src/components/panels/sidebar/__tests__/sidebar-file-openers-session.test.ts[2m > [22msidebar file openers keep the original project session[2m > [22mrejects a confirmation that resolves after the same path is reopened with a new lease[32m 2[2mms[22m[39m
+ [32m✓[39m src/components/panels/sidebar/__tests__/project-tree-refresh-policy.test.ts[2m > [22mProjectTree project identity refresh gate[2m > [22minvalidates a deferred A response after detach and before reopening the same A path[32m 3[2mms[22m[39m
+ [32m✓[39m src/components/panels/sidebar/__tests__/project-tree-refresh-policy.test.ts[2m > [22mProjectTree project identity refresh gate[2m > [22mtreats a successful same-path open with a new session epoch as a new identity[32m 0[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m3 passed[39m[22m[90m (3)[39m
+[2m      Tests [22m [1m[32m9 passed[39m[22m[90m (9)[39m
+[2m   Start at [22m 10:02:42
+[2m   Duration [22m 2.06s[2m (transform 472ms, setup 211ms, import 822ms, tests 50ms, environment 0ms)[22m

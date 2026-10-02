@@ -1,0 +1,9 @@
+# 任务C 验证日志：typecheck（node node_modules/typescript/bin/tsc --noEmit）
+# 日期：2026-10-02 10:06:34，HEAD：7331f45 + 工作树（含任务B并发改动与本任务两处图标改动）
+# 退出码：0 = 通过
+electron/controllers/__tests__/character-save-repro.integration.test.ts(30,7): error TS6133: 'require' is declared but its value is never read.
+exit=2
+
+# 补充：以临时 tsconfig（仅排除并发代理新增的未跟踪文件 character-save-repro.integration.test.ts）复跑 typecheck，
+# 证明该错误与本任务无关、其余全部通过：
+exit=0

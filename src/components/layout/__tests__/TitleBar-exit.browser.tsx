@@ -196,7 +196,7 @@ describe('TitleBar native exit settlement', () => {
   it('blocks native close while the current project has an active workflow', async () => {
     useEditorStore.setState({ tabs: [], draftLedgers: {} })
     useWorkflowStore.setState({
-      activeRuns: [{ projectPath: PROJECT, status: 'running' }] as never,
+      activeRuns: [{ id: 'exit-workflow', projectPath: PROJECT, status: 'running', steps: [], currentStepIndex: 0 }] as never,
     })
     await act(async () => root.render(<TitleBar />))
 

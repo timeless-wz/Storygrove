@@ -5,7 +5,9 @@ import { createRoot, type Root } from 'react-dom/client'
 import type { ProjectData } from '../../../shared/ipc-channels'
 import type { AuthoritativeChapterSequence } from '../../../shared/author-manuscript-import'
 import type { ChapterBlueprint } from '../../../services/workflows/directory-workflow'
-import { useEditorStore } from '../../../stores/editor-store'
+import { useEditorStore, saveDirtyEditorChangesForExit } from '../../../stores/editor-store'
+import { buildBlueprintV2MigrationContent } from '../../../shared/blueprint-v2'
+import { CHAPTER_CARD_V2_TAB_ID } from '../chapter-card-draft-ledger'
 import { useLayoutStore } from '../../../stores/layout-store'
 import { useProjectStore } from '../../../stores/project-store'
 import { toast } from '../../ui/Toast'
@@ -67,10 +69,13 @@ function installIpc(options: {
   finalizedChapter?: (chapterNumber: number) => unknown
   onClearGeneratedText?: () => void
   authoritySequence?: AuthoritativeChapterSequence | (() => AuthoritativeChapterSequence)
+  saveOutline?: () => unknown
 } = {}) {
   const invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
     if (channel === 'db:blueprint-get-all') return options.blueprints ?? [blueprint(1)]
     if (channel === 'db:blueprint-v2-get') return null
+    if (channel === 'db:blueprint-v2-save') return options.saveOutline?.() ?? { success: true, revision: 1, contentHash: 'a'.repeat(64) }
+    if (channel === 'db:blueprint-upsert-many') return { success: true }
     if (channel === 'db:blueprint-volume-list') return [{ id: 'volume-1', name: '第1卷', sortOrder: 1 }]
     if (channel === 'db:draft-list') return []
     if (channel === 'db:draft-create') return { success: true, id: 101 }
@@ -137,6 +142,35 @@ afterEach(async () => {
 })
 
 describe('ChapterCardEditor writing entry', () => {
+  function seedOutlineDraft() {
+    useEditorStore.setState({ draftLedgers: {
+      [CHAPTER_CARD_V2_TAB_ID]: JSON.stringify({ version: 1, projects: [{ projectKey: PROJECT_PATH, drafts: [{
+        chapterNumber: 1, baseRevision: 0, content: buildBlueprintV2MigrationContent(blueprint(1)),
+      }] }] }),
+    } })
+  }
+
+  it('saves the unified outline ledger through the real editor exit handler', async () => {
+    seedOutlineDraft()
+    const invoke = installIpc()
+    await renderEditor()
+    await vi.waitFor(() => expect(container?.querySelector('[data-testid="blueprint-v2-view"]')).toBeTruthy())
+    await act(async () => { await saveDirtyEditorChangesForExit(PROJECT_PATH) })
+    expect(invoke.mock.calls.some(([channel]) => channel === 'db:blueprint-v2-save')).toBe(true)
+    expect(JSON.parse(useEditorStore.getState().draftLedgers[CHAPTER_CARD_V2_TAB_ID]).projects).toEqual([])
+  })
+
+  it('blocks exit on an outline conflict and preserves the draft without writing legacy projections', async () => {
+    seedOutlineDraft()
+    const invoke = installIpc({ saveOutline: () => ({ success: false, conflict: true, currentRevision: 2 }) })
+    await renderEditor()
+    await vi.waitFor(() => expect(container?.querySelector('[data-testid="blueprint-v2-view"]')).toBeTruthy())
+    await act(async () => {
+      await expect(saveDirtyEditorChangesForExit(PROJECT_PATH)).rejects.toThrow('细纲仍有未保存')
+    })
+    expect(JSON.parse(useEditorStore.getState().draftLedgers[CHAPTER_CARD_V2_TAB_ID]).projects[0].drafts).toHaveLength(1)
+    expect(invoke.mock.calls.some(([channel]) => channel === 'db:blueprint-upsert-many')).toBe(false)
+  })
   it('opens AI writing from the authoritative blueprint with the author fields intact', async () => {
     installIpc({ blueprints: [{ ...blueprint(1), userGuidance: '保留人工指导', notes: '既有章节记录' }] })
     await renderEditor()

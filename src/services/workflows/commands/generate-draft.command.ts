@@ -570,21 +570,23 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
       ? assembleBlueprintV2WritingBlock(blueprintV2Detail, writingLanguage)
       : null
     const legacyWriterChapterInfo = toWriterChapterInfo(this.chapterInfo)
-    // v2 已携带完整的本章事件与收束；不要再将 v1 投影摘要作为第二条
-    // 当前章任务路径重复注入。角色、章节功能和作者微操指导仍保留。
+    // v2 已携带完整的本章事件与收束；keyEvents/suspenseHook 的 v1 投影摘要不再
+    // 作为第二条当前章任务路径重复注入。角色、章节功能、作者微操指导仍保留；
+    // purpose（主角小目标）不被 v2 注入块携带（分镜/规则/章末/冲突），保留其
+    // v1 投影值，统一迁移后的章不会丢失目标上下文。
     const writerChapterInfo: WriterChapterInfo = blueprintV2Block
-      ? { ...legacyWriterChapterInfo, purpose: '', keyEvents: '', suspenseHook: '' }
+      ? { ...legacyWriterChapterInfo, keyEvents: '', suspenseHook: '' }
       : legacyWriterChapterInfo
     if (blueprintV2Detail && !blueprintV2Block) {
       callbacks.log(uiText(
-        '本章细纲存在但不含可注入内容，本次按简纲字段生成。',
-        'The chapter detailed outline exists but has no injectable content; using simple-outline fields.',
+        '本章细纲存在但不含可注入内容，本次按章节概要字段生成。',
+        'The chapter detailed outline exists but has no injectable content; using summary fields.',
       ))
     } else if (blueprintV2Block) {
       callbacks.log(uiText(
-        `已注入本章 v2 细纲：${blueprintV2Block.sceneCount} 个分镜` +
+        `已注入本章细纲：${blueprintV2Block.sceneCount} 个分镜` +
           (blueprintV2Block.wordBudget !== null ? `，字数预算 ${blueprintV2Block.wordBudget} 字` : ''),
-        `Injected the chapter v2 detailed outline: ${blueprintV2Block.sceneCount} scene(s)` +
+        `Injected the chapter detailed outline: ${blueprintV2Block.sceneCount} scene(s)` +
           (blueprintV2Block.wordBudget !== null ? `, word budget ${blueprintV2Block.wordBudget}` : ''),
       ))
     }

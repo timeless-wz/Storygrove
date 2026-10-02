@@ -15,7 +15,7 @@ const draft = (id: number, chapterNumber: number, version: number, status: strin
 }) satisfies DraftMeta
 
 describe('chapter outline grouping', () => {
-  it('groups planned and written chapters by volume and keeps prose states distinct', () => {
+  it('groups only written chapters by volume and keeps prose states distinct', () => {
     const groups = groupOutline({
       volumes: [
         { id: 'second', name: '下卷', sortOrder: 2 },
@@ -30,12 +30,11 @@ describe('chapter outline grouping', () => {
       ],
     }, '第1卷')
 
-    expect(groups.map(group => group.volume.name)).toEqual(['上卷', '下卷'])
+    expect(groups.map(group => group.volume.name)).toEqual(['上卷'])
     expect(groups[0].chapters[0]).toMatchObject({
       number: 1, title: '启程', draft: { id: 12 }, manuscript: { id: 13 },
     })
-    expect(groups[1].chapters[0]).toMatchObject({ number: 2, title: '归来' })
-    expect(groups[1].chapters[0].draft).toBeUndefined()
+    expect(groups.flatMap(group => group.chapters)).toHaveLength(1)
   })
 
   it('does not infer volume membership for an unbound draft from its chapter number', () => {
@@ -44,10 +43,21 @@ describe('chapter outline grouping', () => {
       blueprints: [blueprint(1, 'first', '蓝图标题')],
       drafts: [draft(21, 1, 1, 'draft')],
     }, '第1卷')
-    expect(groups[0].chapters).toMatchObject([{ number: 1, title: '蓝图标题' }])
-    expect(groups[0].chapters[0].draft).toBeUndefined()
-    expect(groups[1].volume.id).toBe('ungrouped')
-    expect(groups[1].chapters).toMatchObject([{ number: 1, draft: { id: 21 } }])
-    expect(groups[1].chapters[0].title).toBe('')
+    expect(groups).toHaveLength(1)
+    expect(groups[0].volume.id).toBe('ungrouped')
+    expect(groups[0].chapters).toMatchObject([{ number: 1, draft: { id: 21 } }])
+    expect(groups[0].chapters[0].title).toBe('')
+  })
+
+  it('shows one actual chapter for 58 blueprints and none when prose is absent', () => {
+    const data = {
+      volumes: [{ id: 'first', name: '上卷', sortOrder: 1 }],
+      blueprints: Array.from({ length: 58 }, (_, i) => blueprint(i + 1, 'first', `细纲${i + 1}`)),
+      drafts: [{ ...draft(1, 1, 1, 'draft', 1), chapterTitle: '正文标题' }],
+    }
+    const groups = groupOutline(data, '第1卷')
+    expect(groups[0].chapters).toMatchObject([{ number: 1, title: '正文标题' }])
+    expect(groups[0].chapters).toHaveLength(1)
+    expect(groupOutline({ ...data, drafts: [] }, '第1卷')).toEqual([])
   })
 })

@@ -765,7 +765,7 @@ describe('GenerateDirectoryCommand', () => {
     })
     expect(result.map(item => item.chapterNumber)).toEqual([1, 3])
     const logs = vi.mocked(callbacks.log).mock.calls.map(call => call.join('\n')).join('\n')
-    expect(logs).toContain('已跳过 1 章已有 v2 完整细纲的章')
+    expect(logs).toContain('已跳过 1 章已有完整细纲的章')
     expect(logs).toContain('第2章 第2章')
   })
 

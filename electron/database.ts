@@ -25,6 +25,7 @@ import {
   CharacterRelationshipRepository,
   ensureCharacterRelationshipSchema,
 } from './repositories/character-relationship-repository'
+import { BlueprintDetailRepository } from './repositories/blueprint-detail-repository'
 
 let projectDb: BetterSqlite3.Database | null = null
 let currentProjectPath: string | null = null
@@ -223,6 +224,24 @@ export function initProjectDatabase(projectPath: string, importSourceSecret?: Bu
   // 世界资料（世界/势力/秘境/通道/规则/人物行踪）。幂等：只新增表与可空列，
   // 不创建默认世界、不推断旧地图归属、不升级候选状态。
   ensureWorldWorkbenchSchema(projectDb)
+
+  // 章节蓝图统一版本：把仅剩 v1 简纲行的章安全迁移为 v2 权威细纲。
+  // 幂等（只补 blueprint_details 缺行）；单章失败保留原 v1 行，下次打开重试。
+  try {
+    const blueprintMigration = BlueprintDetailRepository.migrateLegacyRows()
+    if (blueprintMigration.migrated.length > 0) {
+      console.log(
+        `[Vela DB] 章节蓝图统一迁移：已迁移 ${blueprintMigration.migrated.length} 章`
+        + (blueprintMigration.failed.length > 0 ? `，${blueprintMigration.failed.length} 章失败（原数据保留）` : ''),
+      )
+    }
+    if (blueprintMigration.failed.length > 0) {
+      console.warn('[Vela DB] 蓝图迁移失败章号：', blueprintMigration.failed.map(item => item.chapterNumber))
+    }
+  } catch (error) {
+    // 迁移绝不阻断项目打开；v1 行未被改动，下一次打开会重试。
+    console.warn('[Vela DB] 章节蓝图统一迁移未执行：', error)
+  }
 
   console.log(`[Vela DB] 项目数据库已打开: ${dbPath}`)
 }

@@ -424,8 +424,8 @@ export default function ProjectReferencePanel() {
                   <details className="writer-context-field" data-testid="project-reference-blueprint-v2">
                     <summary className="cursor-pointer font-medium">
                       {text(
-                        `阅读完整 v2 细纲（${currentBlueprintDetail.sections.length} 个分区）`,
-                        `Read full v2 outline (${currentBlueprintDetail.sections.length} sections)`,
+                        `阅读完整细纲（${currentBlueprintDetail.sections.length} 个分区）`,
+                        `Read full outline (${currentBlueprintDetail.sections.length} sections)`,
                       )}
                     </summary>
                     <pre className="mt-2 whitespace-pre-wrap break-words font-sans text-[11px] leading-relaxed">{currentBlueprintMarkdown}</pre>
@@ -602,7 +602,7 @@ export default function ProjectReferencePanel() {
                 {currentBlueprintMarkdown ? (
                   <details className="writer-context-field" data-testid="project-reference-blueprint-v2">
                     <summary className="cursor-pointer font-medium">
-                      {text(`阅读完整 v2 细纲（${currentBlueprintDetail.sections.length} 个分区）`, `Read full v2 outline (${currentBlueprintDetail.sections.length} sections)`)}
+                      {text(`阅读完整细纲（${currentBlueprintDetail.sections.length} 个分区）`, `Read full outline (${currentBlueprintDetail.sections.length} sections)`)}
                     </summary>
                     <pre className="mt-2 whitespace-pre-wrap break-words font-sans text-[11px] leading-relaxed">{currentBlueprintMarkdown}</pre>
                   </details>
@@ -664,7 +664,7 @@ export default function ProjectReferencePanel() {
           </div>
         )}
 
-        {/* 3. 基础项目参考导航组：在草稿与正文创作时隐藏全局设定与资料，避免重复左侧栏并腾出写作空间 */}
+        {/* 3. 基础项目参考导航组：在草稿与正文写作时隐藏全局设定与资料，避免重复左侧栏并腾出写作空间 */}
         {!isChapterEditing && (
           <ReferenceGroup icon={BookMarked} title={text('项目设定', 'Project setup')}>
             <ReferenceLink

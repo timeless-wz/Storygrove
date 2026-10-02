@@ -3,6 +3,9 @@ import {
   discardChapterCardProjectDraft,
   parseChapterCardDraftLedger,
   persistChapterCardDraftLedger,
+  CHAPTER_CARD_V2_TAB_ID,
+  parseChapterCardV2DraftLedger,
+  persistChapterCardV2DraftLedger,
 } from '../components/editor/chapter-card-draft-ledger'
 import { useCharacterStore } from './character-store'
 import { useEditorStore } from './editor-store'
@@ -52,6 +55,15 @@ function discardDirtyTabs(dirtyTabIds: ReadonlySet<string>): void {
   })
 }
 
+function discardBlueprintV2Drafts(projectKey?: string): void {
+  const editor = useEditorStore.getState()
+  const ledger = parseChapterCardV2DraftLedger(editor.draftLedgers[CHAPTER_CARD_V2_TAB_ID])
+  persistChapterCardV2DraftLedger(editor, {
+    ...ledger,
+    projects: projectKey ? ledger.projects.filter(project => project.projectKey !== projectKey) : [],
+  })
+}
+
 /**
  * 放弃一个可见编辑器的修改，并在恢复对应已保存基准后关闭它。
  *
@@ -79,6 +91,7 @@ export function discardAndCloseEditorTab(
     } else if (tab.type === 'config') {
       useProjectStore.getState().discardNovelConfigDraft(projectKey, expectedProjectSession)
     } else if (tab.type === 'chapter-card') {
+      discardBlueprintV2Drafts(projectKey)
       const ledger = parseChapterCardDraftLedger(
         useEditorStore.getState().draftLedgers[CHAPTER_CARD_TAB_ID],
       )
@@ -122,6 +135,8 @@ export function discardCurrentProjectEditorChanges(
     editor,
     discardChapterCardProjectDraft(chapterLedger, projectKey),
   )
+
+  discardBlueprintV2Drafts(projectKey)
 
   discardDirtyTabs(dirtyTabIds)
 }
@@ -183,6 +198,7 @@ export function discardAllEditorChanges(): void {
     ...chapterLedger,
     projects: [],
   })
+  discardBlueprintV2Drafts()
 
   discardDirtyTabs(dirtyTabIds)
 }

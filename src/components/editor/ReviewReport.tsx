@@ -923,10 +923,10 @@ function ReviewReportSession({
         {blueprintReviewUnavailable && (
           <p className="mb-4 rounded-md border border-[var(--color-border)] px-3 py-2 text-xs text-[var(--color-text-muted)]">
             {blueprintReviewUnavailable === 'corrupt'
-              ? text('绑定蓝图 v2 数据损坏，本次未据此下结论。', 'The bound v2 blueprint is corrupt; no conclusions were drawn from it.')
+              ? text('绑定蓝图数据损坏，本次未据此下结论。', 'The bound blueprint is corrupt; no conclusions were drawn from it.')
               : blueprintReviewUnavailable === 'needs-newer-app'
                 ? text('绑定蓝图由较新版本写入，本次未据此下结论。', 'The bound blueprint requires a newer app; no conclusions were drawn from it.')
-                : text('绑定蓝图 v2 暂时不可读取，本次未据此下结论。', 'The bound v2 blueprint could not be read; no conclusions were drawn from it.')}
+                : text('绑定蓝图暂时不可读取，本次未据此下结论。', 'The bound blueprint could not be read; no conclusions were drawn from it.')}
           </p>
         )}
         {blueprintReview && (
