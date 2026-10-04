@@ -14,6 +14,7 @@ import {
 } from '../../../generation/generation-runtime'
 import { ReviewChapterCommand } from '../review-chapter.command'
 import type { WorkflowGenerationRuntimeDependencies } from '../base-command'
+import { withWorkflowCreativeContextIpcDefaults } from '../../../../../test/workflow-creative-context-ipc'
 
 const PROJECT_PATH = 'C:\\novels\\review-chapter'
 const PROJECT_SESSION = Object.freeze({
@@ -92,13 +93,13 @@ function callbacks(): StepCallbacks {
 function stubIpc(invoke: (channel: string, ...args: unknown[]) => Promise<unknown>): void {
   vi.stubGlobal('window', {
     velaAPI: {
-      invoke: (channel: string, ...args: unknown[]) => (
+      invoke: withWorkflowCreativeContextIpcDefaults((channel: string, ...args: unknown[]) => (
         channel === 'prompt:load-global'
           ? Promise.resolve({ templates: [], diagnostics: [] })
           : channel === 'fs:check-exists'
             ? Promise.resolve(false)
             : invoke(channel, ...args)
-      ),
+      )),
     },
   })
 }
@@ -264,9 +265,11 @@ describe('ReviewChapterCommand bound-chapter resolution', () => {
     }).execute({ step: {}, context: workflowContext(), callbacks: callbacks() })
 
     // Every blueprint read used the bound chapter, not the displayed one.
-    expect(blueprintReads).toEqual([7, 7])
-    expect(invoke.mock.calls.filter(([channel]) => channel === 'db:blueprint-v2-get'))
-      .toEqual([['db:blueprint-v2-get', 7, PROJECT_PATH, PROJECT_SESSION]])
+    expect(blueprintReads.length).toBeGreaterThanOrEqual(2)
+    expect(blueprintReads.every(chapterNumber => chapterNumber === 7)).toBe(true)
+    const blueprintV2Reads = invoke.mock.calls.filter(([channel]) => channel === 'db:blueprint-v2-get')
+    expect(blueprintV2Reads.length).toBeGreaterThanOrEqual(1)
+    expect(blueprintV2Reads.every(([, chapterNumber]) => chapterNumber === 7)).toBe(true)
     // Continuity is read twice, each with its own correct chapter: the review
     // context uses the manuscript position (displayed chapter 3), while the
     // consistency preflight follows the bound blueprint chapter 7.

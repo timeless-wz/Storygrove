@@ -3,6 +3,9 @@ import { CheckCircle2, Clock3, Film, GitBranch, Loader2, Pencil, Plus, Sparkles,
 
 import type { DatabaseChannels, ModelProfile } from '../../shared/ipc-channels'
 import {
+  DEFAULT_NARRATIVE_THREAD_DORMANT_THRESHOLD,
+  MAX_NARRATIVE_THREAD_DORMANT_THRESHOLD,
+  MIN_NARRATIVE_THREAD_DORMANT_THRESHOLD,
   resolveNarrativeThreadDormantThreshold,
   type NarrativeThreadEventType,
   type NarrativeThreadPlanInput,
@@ -201,6 +204,8 @@ export default function NarrativeThreadEditor({
   plotTreeGenerator: _plotTreeGenerator = generatePlotTree,
 }: NarrativeThreadEditorProps) {
   const currentProject = useProjectStore(s => s.currentProject)
+  const updateNovelConfig = useProjectStore(s => s.updateNovelConfig)
+  const saveProject = useProjectStore(s => s.saveProject)
   const text = useLocaleStore(s => s.text)
   const backPath = usePlanningBackPath()
   const models = useLLMStore(s => s.models)
@@ -234,12 +239,19 @@ export default function NarrativeThreadEditor({
   const [plotBusy, setPlotBusy] = useState(false)
   const [plotError, setPlotError] = useState('')
   const [sourcePlanId, setSourcePlanId] = useState<number | null>(null)
+  const [dormantThresholdDraft, setDormantThresholdDraft] = useState(() => String(resolveNarrativeThreadDormantThreshold(currentProject?.novelConfig.narrativeThreadDormantChapterThreshold)))
+  const [savingDormantThreshold, setSavingDormantThreshold] = useState(false)
+  const [dormantThresholdError, setDormantThresholdError] = useState('')
   const candidateAbortRef = useRef<AbortController | null>(null)
   const plotAbortRef = useRef<AbortController | null>(null)
   const previousViewRequestRef = useRef(viewRequest)
   const dormantThreshold = resolveNarrativeThreadDormantThreshold(
     currentProject?.novelConfig.narrativeThreadDormantChapterThreshold,
   )
+  useEffect(() => {
+    setDormantThresholdDraft(String(dormantThreshold))
+    setDormantThresholdError('')
+  }, [currentProject?.sessionLease, dormantThreshold])
   const generationModels = models.filter(isGenerationModel)
   const fallbackModelId = generationModels.some(model => model.id === defaultModelId)
     ? defaultModelId
@@ -661,6 +673,26 @@ export default function NarrativeThreadEditor({
     document.getElementById('narrative-plan-form')?.scrollIntoView({ block: 'start', behavior: 'smooth' })
   }, [])
 
+  const saveDormantThreshold = async () => {
+    const session = captureProjectSession(useProjectStore.getState().currentProject)
+    const value = resolveNarrativeThreadDormantThreshold(Number(dormantThresholdDraft))
+    if (!session || !isProjectSessionPath(session, projectKey) || savingDormantThreshold) return
+    setSavingDormantThreshold(true)
+    setDormantThresholdError('')
+    try {
+      updateNovelConfig({ narrativeThreadDormantChapterThreshold: value }, session)
+      const saved = await saveProject(session)
+      if (!isProjectSessionCurrent(session)) return
+      if (!saved) throw new Error(text('项目设置保存失败。', 'Could not save project settings.'))
+      setDormantThresholdDraft(String(value))
+      toast.success(text('章节脉络提醒阈值已保存。', 'Chapter thread reminder threshold saved.'))
+    } catch (error) {
+      if (isProjectSessionCurrent(session)) setDormantThresholdError(error instanceof Error ? error.message : String(error))
+    } finally {
+      if (isProjectSessionCurrent(session)) setSavingDormantThreshold(false)
+    }
+  }
+
   return (
     <>
       <PlanningPageShell
@@ -838,6 +870,20 @@ export default function NarrativeThreadEditor({
                 <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                   {text('设置埋设与预计回收章节；活跃计划会自动注入后续写作，逾期或沉寂时提醒。只有人工确认的定稿内容才记为已发生事件。', 'Set setup and expected payoff chapters. Active plans are injected into later writing and flagged when overdue or dormant; only user-confirmed finalized text becomes an event.')}
                 </p>
+                <section className="rounded-lg border p-3 space-y-2" style={{ borderColor: 'var(--color-border)', background: 'var(--color-panel)' }} aria-label={text('章节脉络提醒设置', 'Chapter thread reminder settings')}>
+                  <div>
+                    <h3 className="text-sm font-medium">{text('沉寂提醒阈值', 'Dormant reminder threshold')}</h3>
+                    <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>{text('项目级设置。线索连续多少章未推进后显示沉寂提醒；逾期状态仍按计划目标章节计算。', 'Project setting. Show a dormant reminder after this many chapters without progress; overdue state still follows the plan’s target chapter.')}</p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Label htmlFor="narrative-thread-dormant-threshold">{text('章节数', 'Chapters')}</Label>
+                    <Input id="narrative-thread-dormant-threshold" type="number" min={MIN_NARRATIVE_THREAD_DORMANT_THRESHOLD} max={MAX_NARRATIVE_THREAD_DORMANT_THRESHOLD} className="w-24" value={dormantThresholdDraft} onChange={event => setDormantThresholdDraft(event.target.value)} />
+                    <Button variant="ghost" size="sm" disabled={savingDormantThreshold} onClick={() => setDormantThresholdDraft(String(DEFAULT_NARRATIVE_THREAD_DORMANT_THRESHOLD))}>{text('恢复默认值', 'Restore default')}</Button>
+                    <Button size="sm" disabled={savingDormantThreshold || resolveNarrativeThreadDormantThreshold(Number(dormantThresholdDraft)) === dormantThreshold} onClick={() => void saveDormantThreshold()}>{savingDormantThreshold ? text('保存中…', 'Saving…') : text('保存提醒设置', 'Save reminder settings')}</Button>
+                    <span role="status" className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{text(`当前生效：${dormantThreshold} 章`, `Effective: ${dormantThreshold} chapters`)}</span>
+                  </div>
+                  {dormantThresholdError && <p role="alert" className="text-xs text-[var(--color-danger-text)]">{dormantThresholdError}</p>}
+                </section>
 
                 <section
                   id="narrative-plan-form"

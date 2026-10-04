@@ -20,6 +20,7 @@ import {
   type GenerationRuntimeEnvironment,
 } from '../../../generation/generation-runtime'
 import { GenerationHarnessError } from '../../../generation/generation-harness'
+import { withWorkflowCreativeContextIpcDefaults } from '../../../../../test/workflow-creative-context-ipc'
 import { clearProjectCustomPrompts } from '../../../prompt-templates'
 import { RefineDraftCommand } from '../refine-draft.command'
 import { RefineFromReviewCommand } from '../refine-from-review.command'
@@ -136,23 +137,30 @@ function callbacks(): StepCallbacks {
   }
 }
 
+const CREATIVE_CONTEXT_READ_CHANNELS = new Set([
+  'db:project-core-get', 'db:creative-legacy-list', 'db:cultivation-read',
+  'db:character-roster-read', 'db:character-identities-get', 'db:map-get-all',
+  'db:info-entry-list', 'db:knowledge-record-list', 'db:creative-material-list',
+])
+
 function stubIpc(
   invoke: (channel: string, ...args: unknown[]) => Promise<unknown>,
   projectPromptDirectoryExists?: () => Promise<boolean>,
 ): void {
   vi.stubGlobal('window', {
     velaAPI: {
-      invoke: async (channel: string, ...args: unknown[]) => {
+      invoke: withWorkflowCreativeContextIpcDefaults(async (channel: string, ...args: unknown[]) => {
         if (channel === 'prompt:load-global') return { templates: [], diagnostics: [] }
         if (channel === 'fs:check-exists' && String(args[0]).endsWith('/.vela/prompts')) {
           return projectPromptDirectoryExists?.() ?? false
         }
+        if (CREATIVE_CONTEXT_READ_CHANNELS.has(channel)) return undefined
         const result = await invoke(channel, ...args)
         if (channel === 'db:draft-get-meta' && result === undefined) {
           return { id: 1, chapterNumber: 1, version: 1, status: 'draft', source: 'write' }
         }
         return result
-      },
+      }),
     },
   })
 }
@@ -1443,11 +1451,13 @@ describe('ReviewChapterCommand reasoning stage', () => {
       .map(message => message.content).join('\n') ?? ''
     expect(reviewRequest).toContain('FINALIZED_HISTORY_FACT')
     expect(reviewRequest).toContain('唯一已发生事实源')
-    expect(reviewRequest).toContain('【作者全局创作指导｜约束而非已发生事实】')
+    expect(reviewRequest).toContain('【本次使用资料】')
+    expect(reviewRequest).toContain('legacy.globalGuidance')
     expect(reviewRequest).toContain('AUTHOR_GLOBAL_GUIDANCE')
-    expect(reviewRequest).toContain('【作者确认项目配置｜约束而非已发生事实】')
+    expect(reviewRequest).toContain('【项目篇幅参数】')
     expect(reviewRequest).toContain('AUTHOR_WRITING_STYLE')
-    expect(reviewRequest).toContain('first_person')
+    expect(reviewRequest).toContain('project_core.narrative_pov')
+    expect(reviewRequest).toContain('第一人称')
     expect(reviewRequest).toContain('AUTHOR_CORE_OUTLINE')
     expect(reviewRequest).toContain('AUTHOR_WORLD_SETTING')
     expect(reviewRequest).toContain('AUTHOR_GOLDEN_FINGER')

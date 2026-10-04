@@ -22,6 +22,7 @@ import {
   loadProjectCustomPrompts,
   saveProjectCustomPrompt,
 } from '../../../prompt-templates'
+import { withWorkflowCreativeContextIpcDefaults } from '../../../../../test/workflow-creative-context-ipc'
 
 class GenerateConfigCommand extends RuntimeGenerateConfigCommand {
   constructor(...args: ConstructorParameters<typeof RuntimeGenerateConfigCommand>) {
@@ -45,9 +46,17 @@ const callbacks: StepCallbacks = {
   appendText: vi.fn(),
 }
 
+const CREATIVE_CONTEXT_READ_CHANNELS = new Set([
+  'db:creative-legacy-list', 'db:cultivation-read', 'db:character-roster-read',
+  'db:character-identities-get', 'db:map-get-all', 'db:info-entry-list',
+  'db:knowledge-record-list', 'db:creative-material-list',
+])
+
+// These assertions check persistence and workflow side effects; creative-context
+// source reads are verified separately and should not count as mutations.
 const domainIpcChannels = (invoke: ReturnType<typeof vi.fn>) => invoke.mock.calls
   .map(([channel]) => channel as string)
-  .filter(channel => !channel.startsWith('prompt:') && !channel.startsWith('fs:'))
+  .filter(channel => !channel.startsWith('prompt:') && !channel.startsWith('fs:') && !CREATIVE_CONTEXT_READ_CHANNELS.has(channel))
 const validConfigJson = JSON.stringify({
   genre: '玄幻',
   targetAudience: '男频',
@@ -193,6 +202,29 @@ const context: WorkflowContext = {
   uiLocale: 'zh-CN',
   data: {},
   cancelled: false,
+}
+
+// Architecture command cases install focused IPC mocks. Fill only the new
+// creative-context reads they do not model, while preserving explicit replies.
+const viWithStubGlobal = vi as unknown as {
+  stubGlobal: (name: string, value: unknown) => unknown
+}
+const nativeStubGlobal = viWithStubGlobal.stubGlobal.bind(vi)
+viWithStubGlobal.stubGlobal = (name, value) => {
+  if (name === 'window' && value && typeof value === 'object') {
+    const windowValue = value as { velaAPI?: Record<string, unknown> }
+    const invoke = windowValue.velaAPI?.invoke
+    if (typeof invoke === 'function') {
+      value = {
+        ...windowValue,
+        velaAPI: {
+          ...windowValue.velaAPI,
+          invoke: withWorkflowCreativeContextIpcDefaults(invoke as (channel: string, ...args: unknown[]) => Promise<unknown>),
+        },
+      }
+    }
+  }
+  return nativeStubGlobal(name, value)
 }
 
 function project(path: string) {
@@ -590,7 +622,9 @@ describe('GenerateCharactersCommand structured roster seam', () => {
       .execute({ step: {}, context: runContext, callbacks: englishCallbacks })
     await new GenerateWorldBuildingCommand(snapshot, workflowRuntimeDependencies)
       .execute({ step: {}, context: runContext, callbacks: englishCallbacks })
-    await new GeneratePlotArchitectureCommand(['synopsis'], snapshot, workflowRuntimeDependencies)
+    await new GeneratePlotArchitectureCommand(['synopsis'], snapshot, workflowRuntimeDependencies, {
+      synopsisRange: { from: 1, to: 20 },
+    })
       .execute({ step: {}, context: runContext, callbacks: englishCallbacks })
 
     const persistedUpdates = (invoke.mock.calls as unknown as Array<[string, unknown]>)
@@ -755,7 +789,9 @@ describe('GenerateCharactersCommand structured roster seam', () => {
       [new GenerateCoreSeedCommand(snapshot, workflowRuntimeDependencies), 'Generating story premise...'],
       [new GenerateCharactersCommand(snapshot), 'Generating character graph...'],
       [new GenerateWorldBuildingCommand(snapshot, workflowRuntimeDependencies), 'Generating worldbuilding...'],
-      [new GeneratePlotArchitectureCommand(['synopsis'], snapshot, workflowRuntimeDependencies), 'Generating plot outline...'],
+      [new GeneratePlotArchitectureCommand(['synopsis'], snapshot, workflowRuntimeDependencies, {
+        synopsisRange: { from: 1, to: 20 },
+      }), 'Generating plot outline...'],
     ] as const
     for (const [command, expectedStartLog] of commands) {
       const stepCallbacks = callbacks
@@ -784,7 +820,10 @@ describe('GenerateCharactersCommand structured roster seam', () => {
       if (channel === 'prompt:load-global') return { templates: [], diagnostics: [] }
       if (channel === 'fs:check-exists') return false
       if (channel === 'db:project-core-get') {
-        return { premise: 'A sufficiently detailed premise for prompt-budget attribution before character generation.' }
+        return {
+          premise: 'A sufficiently detailed premise for prompt-budget attribution before character generation.',
+          globalGuidance: 'G'.repeat(32_769),
+        }
       }
       throw new Error(`Unexpected IPC channel: ${channel}`)
     })
@@ -824,10 +863,7 @@ describe('GenerateCharactersCommand structured roster seam', () => {
         modelId: 'model-1',
         errorCode: 'PROMPT_BUDGET_EXHAUSTED',
         sections: expect.arrayContaining([
-          {
-            sectionName: 'global-guidance',
-            utf8Bytes: 32_788,
-          },
+          expect.objectContaining({ sectionName: 'legacy-pending-references' }),
         ]),
       },
     })
@@ -836,12 +872,13 @@ describe('GenerateCharactersCommand structured roster seam', () => {
   })
 
   it('keeps a complete 12 KB author context instead of requiring the author to delete project guidance', async () => {
+    const authorGuidance = 'G'.repeat(9_607)
     const generateStream = createResponseStream([JSON.stringify({ slots: [] })])
     useLLMStore.setState({ defaultModelId: 'model-1', generateStream })
     const invoke = vi.fn(async (channel: string) => {
       if (channel === 'prompt:load-global') return { templates: [], diagnostics: [] }
       if (channel === 'fs:check-exists') return false
-      if (channel === 'db:project-core-get') return { premise: 'P'.repeat(1_747) }
+      if (channel === 'db:project-core-get') return { premise: 'P'.repeat(1_747), globalGuidance: authorGuidance }
       throw new Error(`Unexpected IPC channel: ${channel}`)
     })
     vi.stubGlobal('window', {
@@ -853,7 +890,7 @@ describe('GenerateCharactersCommand structured roster seam', () => {
         genre: 'fantasy',
         totalChapters: 20,
         wordsPerChapter: 2_500,
-        globalGuidance: 'G'.repeat(9_607),
+        globalGuidance: authorGuidance,
       } as never,
     })
 
@@ -876,7 +913,10 @@ describe('GenerateCharactersCommand structured roster seam', () => {
       if (channel === 'prompt:load-global') return { templates: [], diagnostics: [] }
       if (channel === 'fs:check-exists') return false
       if (channel === 'db:project-core-get') {
-        return { premise: 'A sufficiently detailed premise for a large-window character-planning request.' }
+        return {
+          premise: 'A sufficiently detailed premise for a large-window character-planning request.',
+          globalGuidance: authorGuidance,
+        }
       }
       throw new Error(`Unexpected IPC channel: ${channel}`)
     })
@@ -1623,7 +1663,6 @@ describe('GenerateCharactersCommand structured roster seam', () => {
 
     expect(domainIpcChannels(invoke)).toEqual([
       'db:project-core-get',
-      'db:character-roster-read',
       'db:character-roster-commit',
     ])
     expect(vi.mocked(callbacks.log)).toHaveBeenCalledWith('角色图谱与 3 张角色卡已生成；后续工作流已取消')
@@ -1784,7 +1823,10 @@ describe('GenerateCharactersCommand structured roster seam', () => {
         case 'fs:check-exists':
           return false
         case 'db:project-core-get':
-          return { premise: 'A sufficiently detailed premise for a protected character-manifest continuation request.' }
+          return {
+            premise: 'A sufficiently detailed premise for a protected character-manifest continuation request.',
+            globalGuidance: authorGuidance,
+          }
         case 'db:character-roster-read':
           return { ...readyRoster, revision: 0, migrationState: 'empty', entries: [], renderedMarkdown: '' }
         case 'db:character-roster-commit':
@@ -1840,11 +1882,12 @@ describe('GenerateCharactersCommand structured roster seam', () => {
     expect(generateStream).toHaveBeenCalledTimes(3)
     const continuationPrompt = generateStream.mock.calls[1]?.[0]
       .find(message => message.role === 'user')?.content ?? ''
-    expect(continuationPrompt).toContain(JSON.stringify({ globalGuidance: authorGuidance }).slice(1, -1))
+    expect(continuationPrompt).toContain('Legacy global writing guidance')
+    expect(continuationPrompt).toContain(JSON.stringify(authorGuidance).slice(1, -1))
     expect(continuationPrompt).not.toContain('[content truncated to fit the context budget]')
     expect(promptBudgetDiagnostic.mock.calls[1]?.[1]).toMatchObject({
       sections: expect.arrayContaining([
-        expect.objectContaining({ sectionName: 'global-guidance' }),
+        expect.objectContaining({ sectionName: 'legacy-pending-references' }),
       ]),
     })
     expect(promptBudgetDiagnostic.mock.calls[1]?.[1]).not.toMatchObject({
@@ -1857,13 +1900,17 @@ describe('GenerateCharactersCommand structured roster seam', () => {
 
   it('fails the protected length replacement before an additional provider call when its complete prompt exceeds the product budget', async () => {
     vi.spyOn(console, 'info').mockImplementation(() => {})
+    const authorGuidance = 'G'.repeat(30_000)
     const generateStream = createResponseStream(['{"slots":['], ['length'])
     useLLMStore.setState({ defaultModelId: 'model-1', generateStream })
     const invoke = vi.fn(async (channel: string) => {
       if (channel === 'prompt:load-global') return { templates: [], diagnostics: [] }
       if (channel === 'fs:check-exists') return false
       if (channel === 'db:project-core-get') {
-        return { premise: 'A sufficiently detailed premise for a protected character-manifest continuation request.' }
+        return {
+          premise: 'A sufficiently detailed premise for a protected character-manifest continuation request.',
+          globalGuidance: authorGuidance,
+        }
       }
       throw new Error(`Unexpected IPC channel: ${channel}`)
     })
@@ -1891,7 +1938,7 @@ describe('GenerateCharactersCommand structured roster seam', () => {
         genre: 'fantasy',
         totalChapters: 100,
         wordsPerChapter: 3000,
-        globalGuidance: 'G'.repeat(30_500),
+        globalGuidance: authorGuidance,
       } as never,
     })
 
@@ -1909,7 +1956,7 @@ describe('GenerateCharactersCommand structured roster seam', () => {
         limitUtf8Bytes: 32_768,
         errorCode: 'PROMPT_BUDGET_EXHAUSTED',
         sections: expect.arrayContaining([
-          { sectionName: 'global-guidance', utf8Bytes: 30_519 },
+          expect.objectContaining({ sectionName: 'legacy-pending-references' }),
           expect.objectContaining({ sectionName: 'prompt-overhead' }),
         ]),
       },

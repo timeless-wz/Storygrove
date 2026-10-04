@@ -15,10 +15,10 @@ export const KNOWLEDGE_GAP_SCHEMA_VERSION = 1
 export const INFO_ENTRY_ID_PREFIX = 'info'
 export const KNOWLEDGE_RECORD_ID_PREFIX = 'knw'
 
-/** 信息条目标题/说明上限（防失控，不限制正常内容）。 */
+/** Information title/summary stay compact; the author’s truth supports long Markdown. */
 export const MAX_INFO_ENTRY_TITLE = 120
 export const MAX_INFO_ENTRY_SUMMARY = 2000
-export const MAX_INFO_ENTRY_TRUTH = 8000
+export const MAX_INFO_ENTRY_TRUTH = 500_000
 export const MAX_KNOWN_CONTENT = 4000
 export const MAX_BELIEVED_STATEMENT = 2000
 export const MAX_CHANNEL_NOTE = 500

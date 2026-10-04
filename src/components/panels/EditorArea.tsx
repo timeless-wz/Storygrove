@@ -14,6 +14,8 @@ import ChapterCardEditor from '../editor/ChapterCardEditor'
 import WorldBuildingEditor from '../editor/WorldBuildingEditor'
 import ArchFileViewer from '../editor/ArchFileViewer'
 import ProjectDocumentEditor from '../editor/ProjectDocumentEditor'
+import CreativeMaterialsEditor from '../editor/CreativeMaterialsEditor'
+import LocationManagementEditor from '../editor/LocationManagementEditor'
 import DraftEditor from '../editor/DraftEditor'
 import ChapterOutlineSidebar from '../editor/ChapterOutlineSidebar'
 import VersionHistory from '../editor/VersionHistory'
@@ -703,7 +705,25 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
             }}
           />
         )}
-        {activeTab?.type === 'cultivation' && activeTab.projectKey === currentProject.path && <CultivationSettingsPage key={activeTab.id} projectKey={activeTab.projectKey} />}
+        {activeTab?.type === 'cultivation' && activeTab.projectKey === currentProject.path && <CultivationSettingsPage key={activeTab.id} tabId={activeTab.id} projectKey={activeTab.projectKey} initialContent={activeTab.content ?? ''} initialDirty={!!activeTab.dirty} />}
+        {activeTab?.type === 'creative-materials' && activeTab.projectKey === currentProject.path && (
+          <CreativeMaterialsEditor
+            key={activeTab.id}
+            tabId={activeTab.id}
+            projectKey={activeTab.projectKey}
+            initialView={activeTab.creativeMaterialsView ?? 'materials'}
+            initialEntryId={activeTab.filePath}
+            initialContent={activeTab.content ?? ''}
+          />
+        )}
+        {activeTab?.type === 'locations' && activeTab.projectKey === currentProject.path && (
+          <LocationManagementEditor
+            key={activeTab.id}
+            tabId={activeTab.id}
+            projectKey={activeTab.projectKey}
+            initialContent={activeTab.content ?? ''}
+          />
+        )}
         {activeTab?.type === 'config' && activeTab.projectKey && (
           <NovelConfigEditor key={activeTab.id} projectKey={activeTab.projectKey} />
         )}

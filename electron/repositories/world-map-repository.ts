@@ -440,57 +440,68 @@ export class WorldMapRepository {
     if (!node.id || !node.name?.trim() || !node.type) {
       throw new Error('地点参数无效：必须包含 id, name, type')
     }
-    if (!isSafeWorldMapId(node.mapId)) throw new Error('地点必须绑定一张有效地图')
-    requireMap(db, node.mapId)
-    assertNodeParentWithinMap(db, node.id, node.parentId || null, node.mapId)
+    if (node.mapId) {
+      if (!isSafeWorldMapId(node.mapId)) throw new Error('地点地图标识无效')
+      requireMap(db, node.mapId)
+      assertNodeParentWithinMap(db, node.id, node.parentId || null, node.mapId)
+    } else if (node.parentId) {
+      throw new Error('未关联地图的地点暂不能设置地图内层级')
+    }
     if (node.markerIcon != null && !isWorldMapMarkerIcon(node.markerIcon)) {
       throw new Error('地图标识图标无效')
     }
-    // 旧调用方仅更新坐标等字段时保留作者已选图标；显式 null 才恢复默认。
-    const existing = db.prepare('SELECT marker_icon FROM world_map_nodes WHERE id = ?')
-      .get(node.id) as { marker_icon: string | null } | undefined
-    const markerIcon = node.markerIcon === undefined
-      ? (isWorldMapMarkerIcon(existing?.marker_icon) ? existing.marker_icon : null)
-      : node.markerIcon
+    return db.transaction(() => {
+      // 旧调用方仅更新坐标等字段时保留作者已选图标；显式 null 才恢复默认。
+      const existing = db.prepare('SELECT marker_icon, updated_at FROM world_map_nodes WHERE id = ?')
+        .get(node.id) as { marker_icon: string | null; updated_at: string } | undefined
+      if (node.expectedUpdatedAt !== undefined) {
+        if (node.expectedUpdatedAt === null ? !!existing : existing?.updated_at !== node.expectedUpdatedAt) {
+          throw new Error('地点已在其他位置更新，请重新读取后再保存')
+        }
+      }
+      const markerIcon = node.markerIcon === undefined
+        ? (isWorldMapMarkerIcon(existing?.marker_icon) ? existing.marker_icon : null)
+        : node.markerIcon
 
-    const sourceRefsJson = JSON.stringify(node.sourceRefs || [])
-    const now = new Date().toISOString()
+      const sourceRefsJson = JSON.stringify(node.sourceRefs || [])
+      const now = new Date().toISOString()
 
-    db.prepare(`
-      INSERT INTO world_map_nodes (id, name, type, marker_icon, description, parent_id, map_id, x, y, source_refs, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        name = excluded.name,
-        type = excluded.type,
-        marker_icon = excluded.marker_icon,
-        description = excluded.description,
-        parent_id = excluded.parent_id,
-        map_id = excluded.map_id,
-        x = excluded.x,
-        y = excluded.y,
-        source_refs = excluded.source_refs,
-        updated_at = excluded.updated_at
-    `).run(
-      node.id,
-      node.name.trim(),
-      node.type,
-      markerIcon,
-      node.description || '',
-      node.parentId || null,
-      node.mapId,
-      node.x ?? 0,
-      node.y ?? 0,
-      sourceRefsJson,
-      node.createdAt || now,
-      now,
-    )
+      db.prepare(`
+        INSERT INTO world_map_nodes (id, name, type, marker_icon, description, parent_id, map_id, x, y, source_refs, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          name = excluded.name,
+          type = excluded.type,
+          marker_icon = excluded.marker_icon,
+          description = excluded.description,
+          parent_id = excluded.parent_id,
+          map_id = excluded.map_id,
+          x = excluded.x,
+          y = excluded.y,
+          source_refs = excluded.source_refs,
+          updated_at = excluded.updated_at
+      `).run(
+        node.id,
+        node.name.trim(),
+        node.type,
+        markerIcon,
+        node.description || '',
+        node.parentId || null,
+        node.mapId,
+        node.x ?? 0,
+        node.y ?? 0,
+        sourceRefsJson,
+        node.createdAt || now,
+        now,
+      )
 
-    return {
-      ...node,
-      markerIcon,
-      updatedAt: now,
-      createdAt: node.createdAt || now,
-    }
+      return {
+        ...node,
+        markerIcon,
+        updatedAt: now,
+        createdAt: node.createdAt || now,
+      }
+    })()
   }
 
   /** 删除地点前的影响预览：世界资料引用、同图连线与子地点。 */

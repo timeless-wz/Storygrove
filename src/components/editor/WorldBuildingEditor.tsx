@@ -11,7 +11,12 @@ import ArchitectureConfirmDialog from '../dialogs/ArchitectureConfirmDialog'
 import { Button } from '../ui/Button'
 import { EmptyState } from '../ui/EmptyState'
 import { ipc } from '../../services/ipc-client'
-import { openBuiltinEditor } from '../panels/sidebar/sidebar-file-openers'
+import {
+  openBuiltinEditor,
+  openCreativeMaterialsView,
+  openCultivationSettings,
+  openLocationsEditor,
+} from '../panels/sidebar/sidebar-file-openers'
 import { getCharacterRosterRepairPresentation } from './character-roster-repair-state'
 
 import { launchCreativeWorkflow } from '../../services/workflows/creative-workflow-launcher'
@@ -53,13 +58,21 @@ const ARCH_FILES: Array<{
     { key: 'synopsis', fileName: 'synopsis.md', labelZh: '全书总纲', labelEn: 'Book outline', iconName: 'map', descZh: '故事主线、总体转折、高潮结局与各卷任务', descEn: 'Main story, major turns, ending, and each volume’s role' },
   ]
 
-/** The overview links to five existing sources; it never creates a second editable copy. */
+/** The overview links to authoritative business pages; it never stores a second copy. */
 const OVERVIEW_ENTRIES = [
-  { key: 'config', labelZh: '创作方向', labelEn: 'Creative direction', iconName: 'book-open' },
+  { key: 'creative-direction', labelZh: '创作方向', labelEn: 'Creative direction', iconName: 'book-open' },
+  { key: 'writing-rules', labelZh: '写作规范', labelEn: 'Writing rules', iconName: 'file-text' },
   { key: 'premise', labelZh: '故事前提', labelEn: 'Story premise', iconName: 'target' },
-  { key: 'characters', labelZh: '角色档案', labelEn: 'Character profiles', iconName: 'users' },
-  { key: 'worldbuilding', labelZh: '世界观总纲', labelEn: 'Worldbuilding overview', iconName: 'globe' },
-  { key: 'synopsis', labelZh: '全书总纲', labelEn: 'Book outline', iconName: 'map' },
+  { key: 'worldbuilding', labelZh: '世界设定', labelEn: 'World setting', iconName: 'globe' },
+  { key: 'power-system', labelZh: '力量体系', labelEn: 'Power system', iconName: 'sparkles' },
+  { key: 'locations', labelZh: '地点与区域', labelEn: 'Locations and regions', iconName: 'map-pin' },
+  { key: 'characters', labelZh: '人物与关系', labelEn: 'Characters and relationships', iconName: 'users' },
+  { key: 'plot-planning', labelZh: '剧情规划', labelEn: 'Plot planning', iconName: 'map' },
+  { key: 'information-reveal', labelZh: '信息与揭露', labelEn: 'Information and reveals', iconName: 'eye' },
+  { key: 'materials', labelZh: '素材与候选', labelEn: 'Materials and candidates', iconName: 'lightbulb' },
+  { key: 'retired', labelZh: '废案', labelEn: 'Retired ideas', iconName: 'archive' },
+  { key: 'issues', labelZh: '未解决问题', labelEn: 'Open issues', iconName: 'alert-triangle' },
+  { key: 'legacy', labelZh: '待整理旧内容', labelEn: 'Unorganized legacy content', iconName: 'history' },
 ] as const
 
 /** 续批按钮默认的每批章数上限（可在弹窗内调整，避免一次请求剩余全部章节）。 */
@@ -97,6 +110,7 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
   const [archStatus, setArchStatus] = useState<Record<string, boolean>>({})
   const [wordCounts, setWordCounts] = useState<Record<string, number>>({})
   const [documentHasContent, setDocumentHasContent] = useState<Record<string, boolean>>({})
+  const [failedEntries, setFailedEntries] = useState<Record<string, boolean>>({})
   const [synopsisIncomplete, setSynopsisIncomplete] = useState(false)
   const [synopsisRecoveryFailed, setSynopsisRecoveryFailed] = useState(false)
   const [synopsisCoveredTo, setSynopsisCoveredTo] = useState<number>(0)
@@ -125,6 +139,7 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
       setArchStatus({})
       setWordCounts({})
       setDocumentHasContent({})
+      setFailedEntries({})
       setSynopsisIncomplete(false)
       setSynopsisRecoveryFailed(false)
       setSynopsisCoveredTo(0)
@@ -142,6 +157,19 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
       'db:project-core-get',
       projectPath,
     )
+    const settled = <T,>(promise: Promise<T>) => promise.then(
+      value => ({ value, failed: false }),
+      () => ({ value: null as T | null, failed: true }),
+    )
+    const [powerResult, locationsResult, informationResult, materialsResult, retiredResult, issuesResult, legacyResult] = await Promise.all([
+      settled(ipc.invokeWithProjectSession(projectSession, 'db:cultivation-read', projectPath)),
+      settled(ipc.invokeWithProjectSession(projectSession, 'db:map-get-all', projectPath)),
+      settled(ipc.invokeWithProjectSession(projectSession, 'db:info-entry-list', undefined, projectPath)),
+      settled(ipc.invokeWithProjectSession(projectSession, 'db:creative-material-list', { entryKind: 'material' }, projectPath)),
+      settled(ipc.invokeWithProjectSession(projectSession, 'db:creative-material-list', { entryKind: 'retired' }, projectPath)),
+      settled(ipc.invokeWithProjectSession(projectSession, 'db:creative-material-list', { entryKind: 'issue' }, projectPath)),
+      settled(ipc.invokeWithProjectSession(projectSession, 'db:creative-legacy-list', projectPath)),
+    ])
     // 情节大纲状态：中断可断点续写；或部分覆盖可分批续写（covered_to < total）
     let interrupted = false
     let recoveryFailed = false
@@ -205,9 +233,28 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
       synopsis: synopsis.length,
     }
     const contentPresence = {
+      'creative-direction': Boolean(core?.creativeDirectionMarkdown?.trim()
+        || core?.genre?.trim() || core?.targetAudience?.trim() || core?.referenceWorks?.trim()),
+      'writing-rules': Boolean(core?.writingRulesMarkdown?.trim()),
       premise: premise.trim().length > 0,
       worldbuilding: worldbuilding.trim().length > 0,
-      synopsis: synopsis.trim().length > 0,
+      'power-system': Boolean(powerResult.value?.markdown?.trim() || powerResult.value?.realms?.length),
+      locations: Boolean(locationsResult.value?.nodes?.length),
+      'plot-planning': synopsis.trim().length > 0,
+      'information-reveal': Boolean(informationResult.value?.length),
+      materials: Boolean(materialsResult.value?.length),
+      retired: Boolean(retiredResult.value?.length),
+      issues: Boolean(issuesResult.value?.length),
+      legacy: Boolean(legacyResult.value?.some(source => source.disposition === 'pending')),
+    }
+    const failedPresence = {
+      'power-system': powerResult.failed,
+      locations: locationsResult.failed,
+      'information-reveal': informationResult.failed,
+      materials: materialsResult.failed,
+      retired: retiredResult.failed,
+      issues: issuesResult.failed,
+      legacy: legacyResult.failed,
     }
     if (
       !archStatusRequestGate.current.isLatest(requestId)
@@ -216,6 +263,7 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
     setArchStatus(status)
     setWordCounts(counts)
     setDocumentHasContent(contentPresence)
+    setFailedEntries(failedPresence)
     setSynopsisIncomplete(interrupted && Boolean(status.synopsis))
     setSynopsisRecoveryFailed(recoveryFailed && Boolean(status.synopsis))
     setSynopsisCoveredTo(coveredTo)
@@ -450,12 +498,43 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
   ].filter((value): value is string => typeof value === 'string' && value.length > 0)
 
   const openOverviewEntry = (key: typeof OVERVIEW_ENTRIES[number]['key']) => {
-    if (key === 'config') {
+    if (key === 'creative-direction' || key === 'writing-rules') {
       openBuiltinEditor('config', text('创作方向', 'Creative direction'), 'config')
+      const sectionId = key === 'writing-rules' ? 'novel-config-writing' : 'novel-config-ideas'
+      window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+        document.getElementById(sectionId)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+      }))
       return
     }
     if (key === 'characters') {
       useLayoutStore.getState().openCharacterProfile('edit')
+      return
+    }
+    if (key === 'power-system') {
+      openCultivationSettings(text('力量体系', 'Power system'))
+      return
+    }
+    if (key === 'locations') {
+      openLocationsEditor(text('地点与区域', 'Locations and regions'))
+      return
+    }
+    if (key === 'information-reveal') {
+      openBuiltinEditor('knowledge-gap', text('信息与揭露', 'Information and reveals'), 'knowledge-gap')
+      return
+    }
+    if (key === 'plot-planning') {
+      openBuiltinEditor('chapter-card-editor', text('章节蓝图', 'Chapter blueprints'), 'chapter-card', undefined, undefined, undefined, { kind: 'book' })
+      return
+    }
+    if (key === 'materials' || key === 'retired' || key === 'issues' || key === 'legacy') {
+      const view = key === 'retired' ? 'retired' : key === 'issues' ? 'issues' : key === 'legacy' ? 'legacy' : 'materials'
+      const labels = {
+        materials: text('素材与候选', 'Materials and candidates'),
+        retired: text('废案', 'Retired ideas'),
+        issues: text('未解决问题', 'Open issues'),
+        legacy: text('待整理旧内容', 'Unorganized legacy content'),
+      }
+      openCreativeMaterialsView(view, labels[key])
       return
     }
     const file = ARCH_FILES.find(candidate => candidate.key === key)
@@ -481,8 +560,8 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
             </h1>
             <p className="world-building-overview__description">
               {text(
-                '维护创作方向、故事前提、人物、世界与全书剧情；全书总纲在章节蓝图中与卷纲、章纲共同维护。',
-                'Maintain creative direction, premise, characters, world, and plot. The book outline lives with volume and chapter plans in Chapter Blueprints.',
+                '这里汇总各类正式资料、候选与待整理状态，并跳转到各自的业务页面编辑；全书、分卷和逐章大纲在章节蓝图中维护。',
+                'Review formal sources, candidates, and organization status here, then edit them in their dedicated pages. Book, volume, and chapter outlines live in Chapter Blueprints.',
               )}
             </p>
           </div>
@@ -551,28 +630,44 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
         )}
         <section className="world-building-overview__grid" aria-label={text('基础设定内容入口', 'Basic settings content entries')}>
           {OVERVIEW_ENTRIES.map(entry => {
-            const documentKey = entry.key === 'premise' || entry.key === 'worldbuilding' || entry.key === 'synopsis'
-              ? entry.key
-              : null
+            const documentKey = entry.key === 'characters' ? null : entry.key
             const hasContent = documentKey ? Boolean(documentHasContent[documentKey]) : false
             const characterEntry = entry.key === 'characters'
             const worldBuildingEntry = entry.key === 'worldbuilding'
-            const synopsisEntry = entry.key === 'synopsis'
+            const synopsisEntry = entry.key === 'plot-planning'
             const isWorldBuildingCandidate = worldBuildingEntry && Boolean(worldBuildingCandidate)
             const synopsisNeedsRecovery = synopsisEntry && synopsisRecoveryFailed
             const title = text(entry.labelZh, entry.labelEn)
-            const purpose = entry.key === 'config'
-              ? text('作品参数、核心构想与持续写作要求。', 'Project parameters, core ideas, and ongoing writing guidance.')
+            const purpose = entry.key === 'creative-direction'
+              ? text('作品定位、目标读者、阅读体验、创作原则、参考边界与写作参数。', 'Positioning, audience, reading experience, creative principles, references, and writing parameters.')
+              : entry.key === 'writing-rules'
+                ? text('在正文层面维护视角、文风、对话、描写、节奏、禁忌与自检规则。', 'Maintain POV, style, dialogue, description, pacing, restrictions, and prose checks.')
               : entry.key === 'premise'
                 ? text('维护核心故事、主要冲突与故事钩子。', 'Maintain the central story, its main conflict, and its hook.')
                 : entry.key === 'characters'
-                  ? text('维护具体人物资料；角色图谱只从角色档案投影。', 'Maintain character profiles; the graph is a read-only projection of these records.')
+                  ? text('身份、目標、背景、个人能力和关系只在人物档案维护。', 'Maintain identity, goals, background, personal abilities, and relationships in character profiles.')
                   : worldBuildingEntry
                   ? text('维护世界之间的总体设定与全书共同规则。', 'Maintain the overall setting across worlds and the rules they share.')
-                    : text('维护全书剧情发展与章节安排。', 'Maintain the full plot and its chapter structure.')
+                    : entry.key === 'power-system'
+                      ? text('维护多人共用的力量来源、成长规则、限制与代价。', 'Maintain shared power sources, growth rules, limits, and costs.')
+                      : entry.key === 'locations'
+                        ? text('逐条维护世界、区域、地点、资源、危险和空间关系；地图可选。', 'Maintain worlds, regions, places, resources, dangers, and spatial relations; maps are optional.')
+                        : entry.key === 'plot-planning'
+                          ? text('全书总纲、分卷大纲和逐章细纲统一在章节蓝图中维护。', 'Maintain the book, volume, and chapter outlines in Chapter Blueprints.')
+                          : entry.key === 'information-reveal'
+                            ? text('维护作者真相、确定状态、人物与读者知情以及揭露计划。', 'Track author truth, certainty, character and reader knowledge, and reveal plans.')
+                            : entry.key === 'materials'
+                              ? text('保存尚未采用或正在评估的素材；候选不会自动注入正文生成。', 'Save unadopted or in-review ideas; candidates are not injected as facts.')
+                              : entry.key === 'retired'
+                                ? text('记录废止方案和原因，供 AI 避免重新采用。', 'Record retired ideas and reasons so AI can avoid reusing them.')
+                                : entry.key === 'issues'
+                                  ? text('记录未解决漏洞、风险和处理状态，供审查引用。', 'Track unresolved gaps, risks, and resolution status for review.')
+                                  : text('查看并整理旧配置原文；确认归位前只作参考。', 'Review legacy configuration; it remains reference-only until organized.')
             const statusLabel = loading && documentKey
               ? text('正在读取', 'Loading')
-              : entry.key === 'config'
+              : failedEntries[entry.key]
+                ? text('读取失败', 'Could not read')
+              : entry.key === 'creative-direction' || entry.key === 'writing-rules'
                 ? text('查看与编辑', 'View and edit')
                 : characterEntry
                   ? roleStatus
@@ -628,7 +723,7 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
                     {characterEntry && characterCountLabel && (
                       <span className="world-building-overview__count">{characterCountLabel}</span>
                     )}
-                    {entry.key === 'config' && creativeDirectionSummary.length > 0 && (
+                    {entry.key === 'creative-direction' && creativeDirectionSummary.length > 0 && (
                       <span className="world-building-overview__summary">
                         {creativeDirectionSummary.map((item, index) => (
                           <span key={`${index}-${item}`} className="world-building-overview__summary-item">{item}</span>

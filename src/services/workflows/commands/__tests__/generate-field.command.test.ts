@@ -5,6 +5,7 @@ import { useLLMStore } from '../../../../stores/llm-store'
 import type { StepCallbacks, WorkflowContext } from '../../../../stores/workflow-store'
 import { GenerateFieldCommand as RuntimeGenerateFieldCommand } from '../generate-field.command'
 import { workflowRuntimeDependencies } from './workflow-generation-runtime.fixture'
+import { withWorkflowCreativeContextIpcDefaults } from '../../../../../test/workflow-creative-context-ipc'
 
 class GenerateFieldCommand extends RuntimeGenerateFieldCommand {
   constructor(...args: ConstructorParameters<typeof RuntimeGenerateFieldCommand>) {
@@ -48,11 +49,11 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.stubGlobal('window', {
     velaAPI: {
-      invoke: vi.fn(async (channel: string) => {
+      invoke: withWorkflowCreativeContextIpcDefaults(vi.fn(async (channel: string) => {
         if (channel === 'prompt:load-global') return { templates: [], diagnostics: [] }
         if (channel === 'fs:check-exists') return false
         return { success: true }
-      }),
+      })),
     },
   })
   useProjectStore.setState({
@@ -103,7 +104,7 @@ describe('GenerateFieldCommand project identity', () => {
       .toBe(`${authorText}\n\n${addition}`)
   })
 
-  it('sends a complete English configuration without Chinese model instructions', async () => {
+  it('keeps an unrelated legacy outline out of writing-style generation context', async () => {
     const longOutline = `A detective follows a forged flight manifest. ${'The clue remains authoritative. '.repeat(24)}`
     useProjectStore.setState({
       currentProject: {
@@ -132,8 +133,7 @@ describe('GenerateFieldCommand project identity', () => {
     const [prompt, systemPrompt] = callLlm.mock.calls[0]!
     expect(callLlm.mock.calls[0]?.[3]).toMatchObject({ writingSkillStage: 'planning' })
     expect(`${systemPrompt}\n${prompt}`).not.toMatch(/[\u3400-\u9fff]/u)
-    expect(prompt).toContain(longOutline)
-    expect(String(prompt)).toContain(longOutline.slice(500))
+    expect(prompt).not.toContain(longOutline)
   })
 
   it('keeps single-field global guidance compact instead of requesting a chapter outline', async () => {

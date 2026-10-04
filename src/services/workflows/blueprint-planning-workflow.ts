@@ -25,6 +25,8 @@ export interface StartBlueprintPlanningWorkflowParams {
   readonly kind: BlueprintPlanningCommandInput['kind']
   readonly scope: BlueprintPlanningSelection
   readonly guidance?: string
+  /** Author-selected material IDs; only book-outline brainstorming accepts them. */
+  readonly selectedCreativeMaterialIds?: readonly string[]
   readonly mode?: 'generate' | 'improve'
   readonly plannedChapterCount?: number
   readonly totalChapters?: number
@@ -87,6 +89,9 @@ export function createBlueprintPlanningWorkflow(
 ): WorkflowDefinition {
   assertCurrentSession(params.projectSession)
   const locale = params.uiLocale ?? useLocaleStore.getState().locale
+  if (params.selectedCreativeMaterialIds?.length && params.kind !== 'book-outline') {
+    throw new Error(text(locale, '所选素材目前只用于全书总纲发想。', 'Selected materials are currently supported for book-outline brainstorming only.'))
+  }
   const modelId = params.generationModelId.trim()
   if (!modelId) throw new Error(text(locale, '请先选择 AI 生成模型。', 'Choose a generation model first.'))
 
@@ -100,6 +105,7 @@ export function createBlueprintPlanningWorkflow(
     kind: params.kind,
     scope,
     ...(params.guidance?.trim() ? { guidance: params.guidance.trim() } : {}),
+    ...(params.selectedCreativeMaterialIds?.length ? { selectedCreativeMaterialIds: [...new Set(params.selectedCreativeMaterialIds)] } : {}),
     ...(params.mode ? { mode: params.mode } : {}),
     ...(params.plannedChapterCount !== undefined ? { plannedChapterCount: params.plannedChapterCount } : {}),
     ...(params.totalChapters !== undefined ? { totalChapters: params.totalChapters } : {}),

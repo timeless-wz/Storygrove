@@ -111,10 +111,21 @@ function currentNovelConfigSummary(writingLanguage: WritingLanguage): string {
     writingLanguage, '（配置概要不可用）', '(configuration summary unavailable)',
   )
   const none = promptLanguageText(writingLanguage, '（无）', '(none)')
+  const directionZh = config.creativeDirectionMarkdown?.trim() || [
+    config.genre && `题材：${config.genre}${config.subGenre ? ` / ${config.subGenre}` : ''}`,
+    config.targetAudience && `目标读者：${config.targetAudience}`,
+    config.referenceWorks && `参考作品与借鉴边界：\n${config.referenceWorks}`,
+  ].filter(Boolean).join('\n')
+  const directionEn = config.creativeDirectionMarkdown?.trim() || [
+    config.genre && `Genre: ${config.genre}${config.subGenre ? ` / ${config.subGenre}` : ''}`,
+    config.targetAudience && `Target readers: ${config.targetAudience}`,
+    config.referenceWorks && `Reference works and boundaries:\n${config.referenceWorks}`,
+  ].filter(Boolean).join('\n')
+  const writingRules = config.writingRulesMarkdown?.trim() || none
   return promptLanguageText(
     writingLanguage,
-    `类型: ${config.genre || none}\n大纲: ${config.coreOutline || none}\n世界观: ${config.worldSetting || none}\n主角: ${config.protagonistProfile || none}`,
-    `Genre: ${config.genre || none}\nOutline: ${config.coreOutline || none}\nWorld: ${config.worldSetting || none}\nProtagonist: ${config.protagonistProfile || none}`,
+    `创作方向：\n${directionZh || none}\n\n写作规范：\n${writingRules}`,
+    `Creative direction:\n${directionEn || none}\n\nWriting rules:\n${writingRules}`,
   )
 }
 

@@ -82,6 +82,14 @@ import type {
 } from './knowledge-check'
 import type { ThreadMarkerLink, ThreadMarkerLinkInput } from './thread-marker-link'
 import type {
+  CreativeLegacyOrganizationInput,
+  CreativeMaterialEntry,
+  CreativeMaterialKind,
+  CreativeMaterialSaveInput,
+  CreativeMaterialStatus,
+  LegacyCreativeSource,
+} from './creative-content'
+import type {
   OutlineSyncAffected,
   OutlineSyncCandidate,
   OutlineSyncCandidateStatus,
@@ -757,6 +765,10 @@ export interface NovelConfig {
   globalGuidance: string
   writingStyle?: string
   referenceWorks?: string
+  /** Formal, author-maintained creative direction Markdown. */
+  creativeDirectionMarkdown?: string
+  /** Formal, author-maintained prose execution rules Markdown. */
+  writingRulesMarkdown?: string
 }
 
 export interface FileNode {
@@ -1024,6 +1036,22 @@ export interface DatabaseChannels {
   'db:project-core-get': {
     args: [expectedProjectPath: string]
     return: ProjectCoreData | null
+  }
+  'db:creative-legacy-list': {
+    args: [expectedProjectPath: string]
+    return: LegacyCreativeSource[]
+  }
+  'db:creative-legacy-organize': {
+    args: [input: CreativeLegacyOrganizationInput, expectedProjectPath: string]
+    return: { success: boolean; error?: string }
+  }
+  'db:creative-material-list': {
+    args: [filter: { entryKind?: CreativeMaterialKind; status?: CreativeMaterialStatus } | undefined, expectedProjectPath: string]
+    return: CreativeMaterialEntry[]
+  }
+  'db:creative-material-save': {
+    args: [input: CreativeMaterialSaveInput, expectedProjectPath: string]
+    return: { success: boolean; entry?: CreativeMaterialEntry; error?: string }
   }
   'db:project-core-update': {
     args: [data: Partial<ProjectCoreData> & { expectedSynopsisHash?: string }, expectedProjectPath: string]

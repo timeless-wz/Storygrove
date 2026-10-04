@@ -60,7 +60,7 @@ export function getWorldMapMarkerIcon(node: Pick<WorldMapNode, 'type' | 'markerI
     : WORLD_MAP_DEFAULT_MARKER_ICONS[node.type] || 'temple'
 }
 
-/** 属于某一张地图的地点。mapId 是不可变归属，一个地点只属于一张地图。 */
+/** 地点资料可以独立于地图存在；mapId 为空字符串表示尚未关联地图。 */
 export interface WorldMapNode {
   id: string
   name: string
@@ -69,8 +69,10 @@ export interface WorldMapNode {
   markerIcon?: WorldMapMarkerIcon | null
   description: string
   parentId: string | null
-  /** 唯一归属地图。由仓库层在写入时校验，必须指向一张存在的地图。 */
+  /** 可选地图归属。非空时由仓库层验证地图存在；地点只属于一张地图。 */
   mapId: string
+  /** Optional optimistic concurrency token used by the standalone location editor. */
+  expectedUpdatedAt?: string | null
   x: number
   y: number
   sourceRefs: string[]

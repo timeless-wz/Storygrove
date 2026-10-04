@@ -27,7 +27,7 @@ export const STYLE_PRESETS: StylePreset[] = [
       subGenre: '东方玄幻',
       targetAudience: '男性读者',
       wordsPerChapter: 3000,
-      globalGuidance: `【写作风格指导】
+      writingRulesMarkdown: `【写作规范】
 - 节奏明快，每章至少一个爽点或反转
 - 战斗场面要热血震撼，不吝笔墨描写
 - 对话干脆利落，主角金句频出
@@ -47,7 +47,7 @@ export const STYLE_PRESETS: StylePreset[] = [
       subGenre: '现代言情',
       targetAudience: '女性读者',
       wordsPerChapter: 2500,
-      globalGuidance: `【写作风格指导】
+      writingRulesMarkdown: `【写作规范】
 - 感情线为主线，事业线为辅
 - 男女主互动要有化学反应，暧昧甜蜜
 - 心理描写细腻丰富，内心独白有代入感
@@ -67,7 +67,7 @@ export const STYLE_PRESETS: StylePreset[] = [
       subGenre: '修真文明',
       targetAudience: '通用读者',
       wordsPerChapter: 3000,
-      globalGuidance: `【写作风格指导】
+      writingRulesMarkdown: `【写作规范】
 - 文风古朴典雅，适当使用文言句式
 - 场景描写要有水墨画意境
 - 修仙体系严谨，功法/丹药/法器要有逻辑
@@ -87,7 +87,7 @@ export const STYLE_PRESETS: StylePreset[] = [
       subGenre: '都市生活',
       targetAudience: '通用读者',
       wordsPerChapter: 2500,
-      globalGuidance: `【写作风格指导】
+      writingRulesMarkdown: `【写作规范】
 - 现代都市背景，注重生活质感和细节真实
 - 人物性格鲜明，对话富有生活气息
 - 职场/商战场景要专业可信
@@ -107,7 +107,7 @@ export const STYLE_PRESETS: StylePreset[] = [
       subGenre: '星际文明',
       targetAudience: '科幻爱好者',
       wordsPerChapter: 3500,
-      globalGuidance: `【写作风格指导】
+      writingRulesMarkdown: `【写作规范】
 - 科技设定要有合理基础，不要魔法式科幻
 - 太空/星际场景的物理细节要准确
 - 人物面对未知时的心理描写要深刻
@@ -127,7 +127,7 @@ export const STYLE_PRESETS: StylePreset[] = [
       subGenre: '推理悬疑',
       targetAudience: '通用读者',
       wordsPerChapter: 2500,
-      globalGuidance: `【写作风格指导】
+      writingRulesMarkdown: `【写作规范】
 - 每章制造至少一个悬念或线索
 - 伏笔埋设要隐蔽自然，回收要令人恍然大悟
 - 推理过程逻辑严密，不要出现逻辑硬伤
@@ -144,13 +144,13 @@ export function getPresets(): StylePreset[] {
   return STYLE_PRESETS
 }
 
-/** 应用预设到当前配置（只注入 globalGuidance，不覆盖其他元数据） */
+/** 应用预设到当前配置（只更新写作规范，不覆盖其他元数据） */
 export function applyPreset(presetId: string, config: NovelConfig): NovelConfig {
   const preset = STYLE_PRESETS.find((p) => p.id === presetId)
   if (!preset) return config
   return {
     ...config,
-    globalGuidance: preset.overrides.globalGuidance ?? config.globalGuidance,
+    writingRulesMarkdown: preset.overrides.writingRulesMarkdown ?? config.writingRulesMarkdown,
   }
 }
 

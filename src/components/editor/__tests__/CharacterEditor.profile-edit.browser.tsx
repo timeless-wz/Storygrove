@@ -213,21 +213,29 @@ describe('character profile edit mode', () => {
     expect(container?.querySelector<HTMLInputElement>('input[aria-label="性别"]')?.value).toBe('男')
     expect(container?.querySelector<HTMLInputElement>('input[aria-label="年龄"]')?.value).toBe('二十三')
     expect(container?.querySelector<HTMLSelectElement>('select[aria-label="定位"]')?.value).toBe('unassigned')
-    // 动机/性格/背景/能力/外貌/弧光/备注与当前状态都保留在表单里。
+    // 普通字段仍可编辑；长 Markdown 资料使用可读回的 Vditor 编辑器。
     for (const [label, value] of [
       ['核心动机', '为父复仇'],
       ['性格特征', '沉稳多疑'],
-      ['背景故事', '南渡遗孤'],
-      ['能力/技能', '御水术'],
       ['外貌描写', '一袭青衫'],
       ['成长轨迹', '从复仇到放下'],
-      ['备注', '作者备注'],
       ['当前位置/阵营', '青云城'],
     ] as const) {
       expect(
         container?.querySelector<HTMLTextAreaElement>(`textarea[aria-label="${label}"]`)?.value,
         label,
       ).toBe(value)
+    }
+    for (const [editorId, value] of [
+      ['character-profile-background', '南渡遗孤'],
+      ['character-profile-abilities', '御水术'],
+      ['character-profile-notes', '作者备注'],
+    ] as const) {
+      await vi.waitFor(() => {
+        const host = container?.querySelector<HTMLElement>(`#${editorId} [data-vditor-prose-editor="true"]`)
+        expect(host?.getAttribute('data-vditor-ready')).toBe('true')
+        expect(host?.querySelector('.vditor-ir pre.vditor-reset')?.textContent).toContain(value)
+      })
     }
     // 概览不会同时出现：这是可编辑表单，不是只读视图。
     expect(container?.querySelector('[data-testid="character-summary"]')).toBeNull()

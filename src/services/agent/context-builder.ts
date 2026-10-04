@@ -145,18 +145,11 @@ function buildL0ProjectContext(
   if (modelFacts.narrativePOV) {
     parts.push(`${label('叙事视角', 'Point of view')}: ${modelFacts.narrativePOV}`)
   }
-  if (cfg.coreOutline) {
-    // 截取前 300 字符，避免 Token 爆炸
-    const outline = cfg.coreOutline.length > 300
-      ? cfg.coreOutline.slice(0, 300) + label('…', '...')
-      : cfg.coreOutline
-    parts.push(`${label('核心大纲', 'Core outline')}: ${outline}`)
+  if (cfg.creativeDirectionMarkdown?.trim()) {
+    parts.push(`${label('正式创作方向 · project_core.creative_direction_markdown', 'Formal creative direction · project_core.creative_direction_markdown')}\n${cfg.creativeDirectionMarkdown.trim()}`)
   }
-  if (cfg.writingStyle) {
-    const style = cfg.writingStyle.length > 150
-      ? cfg.writingStyle.slice(0, 150) + label('…', '...')
-      : cfg.writingStyle
-    parts.push(`${label('写作风格', 'Writing style')}: ${style}`)
+  if (cfg.writingRulesMarkdown?.trim()) {
+    parts.push(`${label('正式写作规范 · project_core.writing_rules_markdown', 'Formal writing rules · project_core.writing_rules_markdown')}\n${cfg.writingRulesMarkdown.trim()}`)
   }
 
   return parts.join('\n')

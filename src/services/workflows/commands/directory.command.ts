@@ -350,6 +350,7 @@ export class GenerateDirectoryCommand extends BaseWorkflowCommand<ChapterBluepri
     const projectSession = requireWorkflowProjectSession(context)
     const writingLanguage = workflowWritingLanguage(context)
     const architecture = context.data.architecture as string
+    const creativeDirectionContext = String(context.data.creativeDirectionContext ?? '')
     const existingBlueprints = (context.data.existingBlueprints || []) as DirectoryBlueprintSummary[]
     const { expectedProjectPath, novelConfig } = this.projectSnapshot
     const modelFacts = localizeNovelConfigFacts(novelConfig, writingLanguage)
@@ -410,7 +411,7 @@ export class GenerateDirectoryCommand extends BaseWorkflowCommand<ChapterBluepri
         totalChapters,
         wordsPerChapter,
         genre: modelFacts.genre,
-        globalGuidance: novelConfig.globalGuidance || '',
+        globalGuidance: creativeDirectionContext,
         pacingGuidance: (context.data.pacingGuidance as string) || '',
         systemRole: template.systemRole || promptLanguageText(writingLanguage, '你是一位经验丰富的小说架构师。', 'You are an experienced fiction architect.'),
         writingLanguage,
@@ -447,7 +448,7 @@ export class GenerateDirectoryCommand extends BaseWorkflowCommand<ChapterBluepri
           .withNumberOfChapters(totalChapters)
           .withN(batchStart)
           .withM(batchEnd)
-          .withGlobalGuidance(novelConfig.globalGuidance || '')
+          .withGlobalGuidance(creativeDirectionContext)
           .withGenre(modelFacts.genre)
           .withPacingGuidance((context.data.pacingGuidance as string) || '')
           .build()

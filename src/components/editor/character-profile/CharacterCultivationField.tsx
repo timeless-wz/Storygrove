@@ -33,7 +33,8 @@ export default function CharacterCultivationField({ card, onChange }: { card: Ch
   const realms = ready ? store.system!.realms : []
   const levels = cultivationLevels(realms)
   const level = levels.find(entry => entry.id === card.cultivationLevelId)
-  useEffect(() => { setNumber(level ? String(level.number) : ''); setRealmChoice(level?.realmId ?? ''); setMessage('') }, [card.name, level?.id, level?.number])
+  useEffect(() => { setNumber(level ? String(level.number) : ''); setRealmChoice(level?.realmId ?? '') }, [card.name, level?.id, level?.number])
+  useEffect(() => { setMessage('') }, [card.name])
   const draftLedgers = useEditorStore(state => state.draftLedgers)
   const draft = session ? getProjectEditorDraft(parseProjectEditorDraftLedger(draftLedgers[CHARACTER_DRAFT_TAB.id]), session.projectPath) : undefined
   const lockedByDraft = !onChange && !!draft

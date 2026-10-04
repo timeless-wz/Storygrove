@@ -168,6 +168,40 @@ export function openBuiltinEditor(
   })
 }
 
+/** Open a purpose-filtered materials/issues view while keeping each stable tab project-scoped. */
+export function openCreativeMaterialsView(
+  view: 'materials' | 'retired' | 'issues' | 'legacy',
+  name: string,
+): void {
+  const projectKey = useProjectStore.getState().currentProject?.path
+  if (!projectKey) return
+  useEditorStore.getState().openFile({
+    id: `creative-materials-${view}`,
+    name,
+    type: 'creative-materials',
+    creativeMaterialsView: view,
+    projectKey,
+  })
+}
+
+/** Open the authoritative location records backed by the existing map-node table. */
+export function openLocationsEditor(name: string): void {
+  const projectKey = useProjectStore.getState().currentProject?.path
+  if (!projectKey) return
+  useEditorStore.getState().openFile({
+    id: 'locations-editor', name, type: 'locations', projectKey,
+  })
+}
+
+/** Open the shared power-system entry, including its optional level table. */
+export function openCultivationSettings(name: string): void {
+  const projectKey = useProjectStore.getState().currentProject?.path
+  if (!projectKey) return
+  useEditorStore.getState().openFile({
+    id: 'cultivation-settings', name, type: 'cultivation', projectKey,
+  })
+}
+
 /**
  * 打开一份项目自由 Markdown 文档。
  *

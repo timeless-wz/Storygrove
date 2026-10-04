@@ -59,6 +59,9 @@ import {
   formatBlueprintVolumeWritingMaterial,
   loadBlueprintVolumeWritingMaterial,
 } from './blueprint-volume-writing'
+import { buildCreativeContextBundle } from '../../../shared/creative-content'
+import type { CreativeContextBundle } from '../../../shared/creative-content'
+import { buildCreativeCorePromptSources, loadLegacyCreativeSources } from '../../creative-context'
 
 export { countDraftUnits } from '../../../shared/draft-units'
 export { previousChapterEnding } from '../chapter-materials'
@@ -149,20 +152,6 @@ export function synopsisForDraftChapter(synopsis: string, chapterNumber: number)
     ) projected.push(line)
   }
   return projected.join('\n').trim()
-}
-
-function exactParagraphs(values: readonly string[]): ReadonlySet<string> {
-  return new Set(values.flatMap(value => (
-    value.split(/\r?\n\s*\r?\n/u).map(paragraph => paragraph.trim()).filter(Boolean)
-  )))
-}
-
-function withoutExactParagraphDuplicates(content: string, duplicates: ReadonlySet<string>): string {
-  return content
-    .split(/\r?\n\s*\r?\n/u)
-    .map(paragraph => paragraph.trim())
-    .filter(paragraph => paragraph && !duplicates.has(paragraph))
-    .join('\n\n')
 }
 
 export function sanitizeDraftText(text: string): string {
@@ -448,24 +437,18 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
       'Building chapter context...',
     ))
 
-    const { coreOutline, worldSetting, goldenFinger, protagonistProfile } = novelConfig
-    const authoredConfigFacts = [coreOutline, worldSetting, goldenFinger, protagonistProfile]
-      .filter((value): value is string => typeof value === 'string' && Boolean(value.trim()))
-    const architecture = await this.readArchitecture(
+    const creativeContext = await this.readArchitecture(
       expectedProjectPath,
       projectSession,
       this.chapterInfo.chapterNumber,
-      authoredConfigFacts,
+      writingLanguage,
     )
     const projectPrompts = await this.readProjectPrompts(
       expectedProjectPath,
       projectSession,
       writingLanguage,
     )
-    const mergedGuidance = [
-      novelConfig.globalGuidance?.trim() || '',
-      projectPrompts,
-    ].filter(Boolean).join('\n\n')
+    const mergedGuidance = projectPrompts
 
     const characterProfiles = await this.readCharacterProfiles(
       expectedProjectPath,
@@ -492,7 +475,9 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
           `Chapter ${b.chapterNumber}: ${boundedFutureBlueprintText(b.title, FUTURE_BLUEPRINT_TITLE_MAX_CHARS)} — ${boundedFutureBlueprintText(b.keyEvents, FUTURE_BLUEPRINT_EVENTS_MAX_CHARS)}`,
         )).join('\n')
       }
-    } catch { /* 忽略 */ }
+    } catch (error) {
+      throw new Error(`读取后续章节计划失败：${String(error)}`)
+    }
 
     const isFirstChapter = this.chapterInfo.chapterNumber === 1
     const templateKey = isFirstChapter ? 'first_chapter_draft' : 'next_chapter_draft'
@@ -506,18 +491,16 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
     // Prompt 构建——按「稳定前缀 → 可变后缀」排列
     // 以最大化 LLM 上下文缓存命中率
     // ==========================================
-    const writingStyle = novelConfig.writingStyle?.trim() || ''
-    const promptOnlyConfigKeys = new Set([
-      'globalGuidance',
-      'writingStyle',
-      'coreOutline',
-      'worldSetting',
-      'goldenFinger',
-      'protagonistProfile',
-    ])
-    const novelConfigFacts = Object.fromEntries(
-      Object.entries(novelConfig).filter(([key]) => !promptOnlyConfigKeys.has(key)),
-    )
+    const writingStyle = ''
+    const novelConfigFacts = {
+      genre: novelConfig.genre,
+      subGenre: novelConfig.subGenre,
+      targetAudience: novelConfig.targetAudience,
+      totalChapters: novelConfig.totalChapters,
+      wordsPerChapter: novelConfig.wordsPerChapter,
+      writingLanguage: novelConfig.writingLanguage,
+      narrativePOV: novelConfig.narrativePOV,
+    }
     const novelConfigFactsJson = JSON.stringify(novelConfigFacts, null, 2)
     let knowledgeReferences: ChapterMaterialReference[] = []
     try {
@@ -615,7 +598,7 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
     const upperTargetChars = Math.round(targetChars * 1.2)
     const promptBuilder = new ChapterPromptBuilder(template, writingLanguage)
       // ---- 缓存命中区（跨章稳定，前缀对齐）----
-      .withArchitecture(architecture)
+      .withArchitecture(creativeContext.promptText)
       .withGlobalGuidance(mergedGuidance)
       .withWritingStyle(writingStyle)
       .withNovelConfig(novelConfigFactsJson)
@@ -704,16 +687,17 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
         `The required finalized source for Chapter ${previousChapterNumber} could not be fixed, so generation stopped. Repair or re-finalize that chapter and try again.`,
       ))
     }
+    const contextReferences: ChapterMaterialReference[] = [
+      ...(activeThreadContext ? [{ text: activeThreadContext, rendered: activeThreadContext }] : []),
+      ...(knowledgeGapContext ? [{ text: knowledgeGapContext, rendered: knowledgeGapContext }] : []),
+      ...knowledgeReferences,
+    ]
     const chapterMaterials = assembleChapterMaterials({
       writingLanguage,
-      authorProjectFacts: authoredConfigFacts,
-      characterProfiles,
+      authorProjectFacts: [],
+      characterProfiles: characterProfiles.promptText,
       futurePlans: futureBlueprintsStr,
-      references: [
-        ...(activeThreadContext ? [{ text: activeThreadContext, rendered: activeThreadContext }] : []),
-        ...(knowledgeGapContext ? [{ text: knowledgeGapContext, rendered: knowledgeGapContext }] : []),
-        ...knowledgeReferences,
-      ],
+      references: contextReferences,
       finalized: finalizedSources,
       candidates: selectedCandidateDrafts,
       relevanceTerms: [
@@ -745,7 +729,57 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
           `[Current-chapter execution card (author text repeated verbatim)]\nThe non-empty items below are current-chapter actions and end states, not new facts. Before output, check that each item is realized through manuscript action or outcome. Each later action must continue from the item ownership, character knowledge, and plan-completion state actually established in the prose.\n${executionItems.flatMap(item => item.value?.trim() ? [`- ${item.enUS}: ${item.value}`] : []).join('\n')}`,
         )
       : ''
+    const sourceStatusLabel = (status: CreativeContextBundle['sources'][number]['status']) => promptLanguageText(
+      writingLanguage,
+      ({
+        formal: '正式资料',
+        'legacy-pending': '待整理参考',
+        undecided: '作者尚未确定，不得补全',
+        plan: '计划，非已发生事实',
+        candidate: '候选，非事实',
+        retired: '废案，仅禁用约束',
+        issue: '未解决问题',
+      } as const)[status],
+      ({
+        formal: 'formal source',
+        'legacy-pending': 'pending legacy reference',
+        undecided: 'author-undecided; do not fill in',
+        plan: 'plan, not an occurred fact',
+        candidate: 'candidate, not a fact',
+        retired: 'retired; prohibition context only',
+        issue: 'unresolved issue',
+      } as const)[status],
+    )
+    const usedSources = [
+      ...creativeContext.sources.map(source => `- ${source.label} · ${source.id}（${sourceStatusLabel(source.status)}）`),
+      ...characterProfiles.sources.map(source => `- ${source.label} · ${source.id}（${sourceStatusLabel(source.status)}）`),
+      ...(activeThreadContext ? ['- 当前章相关章节脉络计划 · narrative_threads'] : []),
+      ...(knowledgeGapContext ? ['- 本章适用的信息与揭露记录 · info_entries / knowledge_records'] : []),
+      ...contextReferences
+        .filter(reference => chapterMaterials.text.includes(reference.rendered))
+        .map(reference => `- ${reference.rendered.split('\n', 1)[0]}`),
+      ...(futureBlueprintsStr.startsWith('（无') || futureBlueprintsStr.startsWith('(no ')
+        ? [] : ['- 后续五章章纲摘要 · blueprints (plan only)']),
+      ...(blueprintVolumeMaterial?.outline ? ['- 当前卷纲与同卷章纲摘要 · blueprint_volume_outlines (plan only)'] : []),
+      ...(blueprintV2Block && blueprintV2Detail
+        ? [`- 当前章 Blueprint v2 revision ${blueprintV2Detail.revision} / ${blueprintV2Detail.contentHash}`]
+        : ['- 当前章绑定蓝图摘要 · chapter blueprint']),
+      ...chapterMaterials.consumedFinalizedSources
+        .filter(source => chapterMaterials.text.includes(`draft ${source.draftId}`))
+        .map(source => `- 第${source.chapterNumber}章定稿原文片段 · draft ${source.draftId}`),
+      ...selectedCandidateDrafts
+        .filter(candidate => chapterMaterials.text.includes(`draft ${candidate.draftId}`))
+        .map(candidate => `- 第${candidate.chapterNumber}章未确认候选 · draft ${candidate.draftId}（候选，不是定稿）`),
+      ...(projectPrompts ? ['- 项目专属指导 · .vela/prompts/*.md'] : []),
+      ...(this.chapterInfo.userGuidance?.trim() ? ['- 当前章作者指导 · chapter blueprint userGuidance'] : []),
+    ]
+    const usedSourcesBlock = promptLanguageText(
+      writingLanguage,
+      `【本次使用资料】\n${usedSources.join('\n') || '（无补充资料；本章任务仍按当前蓝图执行。）'}`,
+      `[Sources used for this request]\n${usedSources.join('\n') || '(no supplemental sources; follow the current chapter plan)'}`,
+    )
     const prompt = [
+      usedSourcesBlock,
       chapterMaterials.text,
       promptBuilder.build(),
       blueprintVolumeText,
@@ -847,6 +881,8 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
             globalGuidance: mergedGuidance,
             writingStyle,
             novelConfigFacts: novelConfigFactsJson,
+            creativeMaterials: creativeContext.promptText,
+            sourcesUsed: usedSourcesBlock,
             chapterMaterials: chapterMaterials.text,
             blueprintV2Text: blueprintV2Block?.text ?? '',
             writingLanguage,
@@ -1128,6 +1164,8 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
     globalGuidance: string
     writingStyle: string
     novelConfigFacts: string
+    creativeMaterials: string
+    sourcesUsed: string
     chapterMaterials: string
     /** 本章 v2 细纲注入块（含固定脚手架）；空串表示走 v1 路径。 */
     blueprintV2Text: string
@@ -1196,6 +1234,9 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
 - 避免重复已写正文中的整句、整段、动作链和意象。
 - 不提前写后续章节，只完成本章蓝图允许的内容。
 
+${params.sourcesUsed}
+${params.creativeMaterials}
+
 【本章蓝图】
 ${JSON.stringify(params.chapterInfo, null, 2)}
 ${blueprintV2Section}
@@ -1225,6 +1266,9 @@ ${visibleTail}`,
 - Do not output a title, explanation, summary, Markdown, reasoning, or an interface continuation prompt.
 - Avoid repeating complete sentences, paragraphs, action sequences, or imagery from the existing manuscript.
 - Complete only the current chapter blueprint; do not advance later chapters.
+
+${params.sourcesUsed}
+${params.creativeMaterials}
 
 [Current chapter blueprint]
 ${JSON.stringify(params.chapterInfo, null, 2)}
@@ -1369,20 +1413,26 @@ ${visibleTail}`,
     projectPath: string,
     projectSession: ProjectSessionContext,
     chapterNumber: number,
-    authoredConfigFacts: readonly string[],
-  ): Promise<string> {
+    writingLanguage: WritingLanguage,
+  ): Promise<CreativeContextBundle> {
     const core = await ipc.invokeWithProjectSession(projectSession, 'db:project-core-get', projectPath)
-    const duplicates = exactParagraphs(authoredConfigFacts)
-    const parts: string[] = []
-    if (core?.premise) parts.push(withoutExactParagraphDuplicates(core.premise, duplicates))
-    if (core?.worldbuilding) parts.push(withoutExactParagraphDuplicates(core.worldbuilding, duplicates))
-    if (core?.synopsis) {
-      parts.push(withoutExactParagraphDuplicates(
-        synopsisForDraftChapter(core.synopsis, chapterNumber),
-        duplicates,
-      ))
+    if (!core) throw new Error('读取创作资料失败：项目正式设定不存在。')
+    const legacy = await loadLegacyCreativeSources(projectSession, projectPath)
+    const sources = buildCreativeCorePromptSources(core, legacy, [
+      'creative-direction', 'premise', 'world-setting',
+    ], writingLanguage)
+    const relevantSynopsis = synopsisForDraftChapter(core.synopsis ?? '', chapterNumber)
+    if (relevantSynopsis.trim()) {
+      sources.push({
+        id: 'project_core.synopsis',
+        label: '当前章相关的全书总纲计划',
+        category: 'plot-planning',
+        content: relevantSynopsis,
+        status: 'plan',
+      })
     }
-    return parts.filter(Boolean).join('\n\n---\n\n')
+    sources.push(...buildCreativeCorePromptSources(core, legacy, ['writing-rules'], writingLanguage))
+    return buildCreativeContextBundle(sources, writingLanguage, { includeSourceList: false })
   }
 
   private async readProjectPrompts(
@@ -1390,28 +1440,32 @@ ${visibleTail}`,
     projectSession: ProjectSessionContext,
     writingLanguage: WritingLanguage,
   ): Promise<string> {
+    let files: Array<{ isDir: boolean; name: string; path: string }>
     try {
-      const files = await ipc.invokeWithProjectSession(
+      files = await ipc.invokeWithProjectSession(
         projectSession,
         'fs:list-dir',
         `${projectPath}/${DIR_PROMPTS}`,
         projectPath,
       )
-      const mdFiles = files.filter((f: { isDir: boolean; name: string }) => !f.isDir && f.name.endsWith('.md'))
-      if (mdFiles.length === 0) return ''
-      const parts: string[] = []
-      for (const f of mdFiles) {
-        const result = await ipc.invokeWithProjectSession(projectSession, 'fs:read-file', f.path, projectPath)
-        if (result.success && result.content.trim()) {
-          parts.push(promptLanguageText(
-            writingLanguage,
-            `## 项目专属指导（${f.name.replace(/\.md$/, '')}）\n${result.content.trim()}`,
-            `## Project-specific guidance (${f.name.replace(/\.md$/, '')})\n${result.content.trim()}`,
-          ))
-        }
+    } catch {
+      return ''
+    }
+    const mdFiles = files.filter(file => !file.isDir && file.name.endsWith('.md'))
+    if (mdFiles.length === 0) return ''
+    const parts: string[] = []
+    for (const file of mdFiles) {
+      const result = await ipc.invokeWithProjectSession(projectSession, 'fs:read-file', file.path, projectPath)
+      if (!result.success) throw new Error(`读取项目专属指导失败（${file.name}）：${result.error || '未知错误'}`)
+      if (result.content.trim()) {
+        parts.push(promptLanguageText(
+          writingLanguage,
+          `## 项目专属指导（${file.name.replace(/\.md$/, '')}）\n${result.content.trim()}`,
+          `## Project-specific guidance (${file.name.replace(/\.md$/, '')})\n${result.content.trim()}`,
+        ))
       }
-      return parts.join('\n\n')
-    } catch { return '' }
+    }
+    return parts.join('\n\n')
   }
 
   private async readCharacterProfiles(
@@ -1419,15 +1473,11 @@ ${visibleTail}`,
     projectSession: ProjectSessionContext,
     writingLanguage: WritingLanguage,
     relevantCharacterNames: readonly string[],
-  ): Promise<string> {
+  ): Promise<CreativeContextBundle> {
     try {
       const roster = await ipc.invokeWithProjectSession(projectSession, 'db:character-roster-read', projectPath)
       if (roster.status !== 'ready' && roster.status !== 'empty') {
-        return promptLanguageText(
-          writingLanguage,
-          '（角色资料来源未知或待修复；未作为作者事实注入）',
-          '(character-profile provenance is unknown or needs repair; it was not injected as author fact)',
-        )
+        throw new Error(`角色资料来源为 ${roster.status}，需先修复角色档案后再生成。`)
       }
       const cultivation = roster.entries.some(card => card.cultivationLevelId)
         ? await ipc.invokeWithProjectSession(projectSession, 'db:cultivation-read', projectPath) : null
@@ -1470,13 +1520,29 @@ ${visibleTail}`,
         }
         profiles.push(`${card.name} (${card.role || 'unknown'})${facts.length ? ` | ${facts.join(' | ')}` : ''}`)
       }
-      return profiles.length > 0 ? profiles.join('\n') : ''
-    } catch {
-      return promptLanguageText(
-        writingLanguage,
-        '（角色资料读取失败；未把旧 currentState 或 characters_arch 当作作者事实）',
-        '(character profiles unavailable; legacy currentState and characters_arch were not treated as author facts)',
-      )
+      if (profiles.length > 0) {
+        return buildCreativeContextBundle([{
+          id: `character_roster.revision.${roster.revision}`,
+          label: promptLanguageText(writingLanguage, '本章相关人物档案', 'Relevant character profiles'),
+          category: 'characters',
+          content: profiles.join('\n'),
+          status: 'formal',
+          note: promptLanguageText(
+            writingLanguage,
+            `仅包含本章指定人物：${relevantCharacterNames.join('、')}`,
+            `Only includes characters named for this chapter: ${relevantCharacterNames.join(', ')}`,
+          ),
+        }], writingLanguage)
+      }
+
+      if (relevantCharacterNames.length === 0) return buildCreativeContextBundle([], writingLanguage)
+      const core = await ipc.invokeWithProjectSession(projectSession, 'db:project-core-get', projectPath)
+      if (!core) throw new Error('读取旧人物参考失败：项目核心资料不存在。')
+      const legacy = await loadLegacyCreativeSources(projectSession, projectPath)
+      const fallbackSources = buildCreativeCorePromptSources(core, legacy, ['characters'], writingLanguage)
+      return buildCreativeContextBundle(fallbackSources, writingLanguage)
+    } catch (error) {
+      throw new Error(`读取本章相关人物资料失败：${String(error)}`)
     }
   }
 

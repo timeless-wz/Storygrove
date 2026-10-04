@@ -33,6 +33,10 @@ export default defineConfig({
           const backend = await context.project.vite.ssrLoadModule('/test/cultivation-browser-backend.ts')
           return backend.cultivationTestIpc(channel, ...args)
         },
+        async creativeIpc(context, channel: string, ...args: unknown[]) {
+          const backend = await context.project.vite.ssrLoadModule('/test/creative-content-browser-backend.ts')
+          return backend.creativeContentTestIpc(channel, ...args)
+        },
       },
       // 63315 is frequently reserved by Windows/HNS. Keep this overridable
       // for CI, but use an unreserved default for local browser regressions.

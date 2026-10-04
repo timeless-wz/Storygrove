@@ -1,27 +1,15 @@
 import { cloneElement, isValidElement, useEffect, useId, useRef, useState } from 'react'
-import { ArrowUpRight, ChevronDown, Save, Sparkles, Info, Loader2, RotateCcw } from 'lucide-react'
+import { ChevronDown, Save, Sparkles, Info } from 'lucide-react'
 import { useProjectStore } from '../../stores/project-store'
-import { registerEditorExitSaveHandler, useEditorStore } from '../../stores/editor-store'
-import { CONFIG_DRAFT_TAB, getProjectEditorDraft, parseProjectEditorDraftLedger } from '../../stores/project-editor-draft-ledger'
-import { useLayoutStore } from '../../stores/layout-store'
+import { registerEditorExitSaveHandler } from '../../stores/editor-store'
 import { useLLMStore } from '../../stores/llm-store'
 import { useWorkflowStore, workflowResourceKey } from '../../stores/workflow-store'
 import type { NovelConfig } from '../../shared/ipc-channels'
 import { sameProjectSessionContext } from '../../shared/project-session-context'
 import {
-  DEFAULT_NARRATIVE_THREAD_DORMANT_THRESHOLD,
-  MAX_NARRATIVE_THREAD_DORMANT_THRESHOLD,
-  MIN_NARRATIVE_THREAD_DORMANT_THRESHOLD,
-  resolveNarrativeThreadDormantThreshold,
-} from '../../shared/narrative-thread'
-import {
   resolveWritingLanguage,
   type WritingLanguage,
 } from '../../shared/writing-language'
-import {
-  GENERATABLE_FIELD_LABELS,
-  type GeneratableField,
-} from '../../services/workflows/novel-config-field-labels'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
 import { Textarea } from '../ui/Textarea'
@@ -34,7 +22,8 @@ import {
   isProjectSessionPath,
 } from '../project-session-gate'
 import { AUDIENCE_EN, GENRE_EN } from './novel-config-labels'
-import { openArchFile } from '../panels/sidebar/sidebar-file-openers'
+import { openCreativeMaterialsView } from '../panels/sidebar/sidebar-file-openers'
+import VditorProseEditor from './VditorProseEditor'
 import './novel-config-editor.css'
 
 /** 小说配置编辑器 — Tab 内的可视化配置面板 */
@@ -62,36 +51,20 @@ function NovelConfigEditorSession({ projectKey }: { projectKey: string }) {
   const addLog = useWorkflowStore.getState().addLog
   const [saving, setSaving] = useState(false)
   const [showGenerateConfig, setShowGenerateConfig] = useState(false)
-  const [navigationPending, setNavigationPending] = useState(false)
   const text = useLocaleStore(s => s.text)
   const [generateSession, setGenerateSession] = useState<ReturnType<typeof captureProjectSession>>(null)
 
-  // 各区块的独立生成状态
-  const [generatingField, setGeneratingField] = useState<GeneratableField | null>(null)
-  const generatingFieldRef = useRef(false)
-  const mountedRef = useRef(false)
   const activeConfigWorkflow = useWorkflowStore(s => s.activeRuns.find(run => (
     currentProjectSession != null
     && sameProjectSessionContext(currentProjectSession, run.projectSession)
     && run.resourceKeys?.includes(workflowResourceKey('novel-config')) === true
   )) ?? null)
-  const activeWorkflowStepName = activeConfigWorkflow?.steps[activeConfigWorkflow.currentStepIndex]?.name
-  const activeWorkflowField = activeConfigWorkflow
-    ? (Object.entries(GENERATABLE_FIELD_LABELS).find(([, labels]) => (
-      labels.some(label => label === activeWorkflowStepName)
-    ))?.[0] as GeneratableField | undefined) ?? null
-    : null
-  const visibleGeneratingField = generatingField ?? activeWorkflowField
   const configWorkflowRunning = activeConfigWorkflow != null
 
   // 直接从 Store 读取配置 — 单一数据源，无需 local state 镜像
   const projectMatches = currentProject?.path === projectKey
   const config = projectMatches ? currentProject.novelConfig : null
   const exitSaveRef = useRef<() => Promise<void>>(async () => undefined)
-  useEffect(() => {
-    mountedRef.current = true
-    return () => { mountedRef.current = false }
-  }, [])
   useEffect(() => {
     registerEditorExitSaveHandler({
       type: 'config',
@@ -155,86 +128,7 @@ function NovelConfigEditorSession({ projectKey }: { projectKey: string }) {
     setShowGenerateConfig(true)
   }
 
-  /** 单字段 AI 生成 */
-  const handleFieldGenerate = async (fieldKey: GeneratableField) => {
-    if (generatingFieldRef.current || activeConfigWorkflow) return
-    const project = useProjectStore.getState().currentProject
-    const projectSession = captureProjectSession(project)
-    if (!project || !projectSession || !isProjectSessionPath(projectSession, projectKey)) return
-    const generationModelId = useLLMStore.getState().defaultModelId?.trim()
-    if (!generationModelId) {
-      addLog('error', text('请先在设置中配置 AI 模型', 'Configure an AI model in Settings first.'))
-      return
-    }
-
-    generatingFieldRef.current = true
-    setGeneratingField(fieldKey)
-    try {
-      if (!isProjectSessionCurrent(projectSession)) return
-      const configSnapshot = Object.freeze({ ...project.novelConfig })
-      const uiLocale = useLocaleStore.getState().locale
-      const { createNovelConfigFieldWorkflow } = await import('../../services/workflows/novel-config-field-workflow')
-      if (!isProjectSessionCurrent(projectSession)) return
-      const definition = createNovelConfigFieldWorkflow({
-        fieldKey,
-        projectPath: project.path,
-        projectSession,
-        novelConfigSnapshot: configSnapshot,
-        generationModelId,
-        uiLocale,
-      })
-      const runId = await useWorkflowStore.getState().startWorkflow(definition)
-      if (!isProjectSessionCurrent(projectSession)) return
-      const terminalRun = useWorkflowStore.getState().history.find(run => run.id === runId)
-      if (terminalRun?.status !== 'completed') return
-      // The command has already used the single project-store update/save path;
-      // re-read its authoritative value instead of applying a second local write.
-      const refreshedProject = useProjectStore.getState().currentProject
-      if (!sameProjectSessionContext(projectSession, captureProjectSession(refreshedProject))) return
-    } catch (e) {
-      if (!mountedRef.current || !isProjectSessionCurrent(projectSession)) return
-      addLog('error', text(`生成失败：${e}`, `Generation failed: ${e}`))
-    } finally {
-      generatingFieldRef.current = false
-      if (mountedRef.current && isProjectSessionCurrent(projectSession)) setGeneratingField(null)
-    }
-  }
-
   const genres = ['玄幻', '仙侠', '都市', '科幻', '历史', '军事', '游戏', '末世', '悬疑', '灵异', '言情', '古言', '现言', '奇幻', '武侠', '轻小说', '同人', '职场']
-  const dormantThreshold = resolveNarrativeThreadDormantThreshold(
-    config.narrativeThreadDormantChapterThreshold,
-  )
-
-  const hasUnsavedConfig = () => {
-    const ledger = parseProjectEditorDraftLedger<NovelConfig>(
-      useEditorStore.getState().draftLedgers[CONFIG_DRAFT_TAB.id],
-    )
-    return getProjectEditorDraft(ledger, projectKey) != null
-  }
-
-  const navigateAfterConfigSave = async (navigate: () => void | Promise<void>) => {
-    if (saving || navigationPending) return
-    const navigationSession = captureProjectSession(currentProject)
-    if (!navigationSession || !isProjectSessionPath(navigationSession, projectKey)) return
-    setNavigationPending(true)
-    try {
-      if (hasUnsavedConfig()) {
-        const saved = await handleSave()
-        if (!saved || !isProjectSessionCurrent(navigationSession)) return
-        if (hasUnsavedConfig()) {
-          addLog('error', text(
-            '保存期间仍有新的配置修改，请保存后再打开关联页面。',
-            'New configuration edits were made while saving. Save again before opening the linked page.',
-          ))
-          return
-        }
-      }
-      if (!isProjectSessionCurrent(navigationSession)) return
-      await navigate()
-    } finally {
-      if (isProjectSessionCurrent(navigationSession)) setNavigationPending(false)
-    }
-  }
 
   return (
     <div className="novel-config-page h-full overflow-y-auto">
@@ -246,16 +140,16 @@ function NovelConfigEditorSession({ projectKey }: { projectKey: string }) {
             </h2>
             <p className="text-xs mt-1 leading-5" style={{ color: 'var(--color-text-muted)' }}>
               {text(
-                '核心构想中的故事、背景、主角优势和主角构想仍会用于 AI 生成与正文写作。修改不会自动同步故事前提、世界观总纲或角色档案；设定改变后，请检查相关内容是否一致。',
-                'The story, background, protagonist advantage, and protagonist concept in Core ideas continue to inform AI generation and prose writing. Changes do not automatically sync the story premise, worldbuilding overview, or character profiles; review related content for consistency after changing a setting.',
+                '这里维护作品定位、目标读者、阅读体验、创作原则和写作参数。故事事实、人物档案、世界规则与剧情计划分别在对应入口维护。旧配置原文可在“待整理旧内容”查看。',
+                'Maintain positioning, audience, reading experience, creative principles, and writing parameters here. Story facts, characters, world rules, and plot plans live in their dedicated pages. Legacy configuration remains available under Unorganized legacy content.',
               )}
             </p>
           </div>
           <div className="novel-config-page__header-actions">
-            <Button type="button" variant="ai" onClick={handleAIGenerate} disabled={navigationPending || configWorkflowRunning}>
-              <Sparkles size={13} /> {text('AI 填充配置', 'Fill with AI')}
+            <Button type="button" variant="ai" onClick={handleAIGenerate} disabled={configWorkflowRunning}>
+              <Sparkles size={13} /> {text('生成初始构想', 'Generate initial ideas')}
             </Button>
-            <Button type="button" variant="outline" onClick={() => void handleSave()} disabled={saving || navigationPending}>
+            <Button type="button" variant="outline" onClick={() => void handleSave()} disabled={saving}>
               <Save size={13} /> {saving ? text('保存中...', 'Saving...') : text('保存', 'Save')}
             </Button>
           </div>
@@ -263,22 +157,23 @@ function NovelConfigEditorSession({ projectKey }: { projectKey: string }) {
 
         <nav className="novel-config-page__section-nav" aria-label={text('创作方向分区', 'Creative direction sections')}>
           <a className="novel-config-page__section-link" href="#novel-config-basic">
-            {text('基础信息', 'Basic information')}
+            {text('定位与参数', 'Positioning and parameters')}
           </a>
           <a className="novel-config-page__section-link" href="#novel-config-ideas">
-            {text('核心构想', 'Core ideas')}
+            {text('创作原则', 'Creative principles')}
           </a>
           <a className="novel-config-page__section-link" href="#novel-config-writing">
-            {text('写作要求', 'Writing requirements')}
+            {text('写作规范', 'Writing rules')}
           </a>
+          <a className="novel-config-page__section-link" href="#novel-config-legacy">{text('待整理旧内容', 'Legacy content')}</a>
         </nav>
 
         {/* 配置表单 */}
-        <fieldset className="novel-config-page__fields" disabled={navigationPending}>
+        <fieldset className="novel-config-page__fields">
           <legend className="sr-only">{text('创作方向配置字段', 'Creative direction configuration fields')}</legend>
           <div className="novel-config-page__form space-y-6">
           {/* 基本信息 */}
-          <Section id="novel-config-basic" title={text('基础信息', 'Basic information')}>
+          <Section id="novel-config-basic" title={text('作品定位与写作参数', 'Positioning and writing parameters')}>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 items-end">
               <Field label={text('写作语言', 'Writing language')} htmlFor="project-writing-language">
                 <NativeSelect
@@ -323,24 +218,6 @@ function NovelConfigEditorSession({ projectKey }: { projectKey: string }) {
               </Field>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
-              <Field label={text('叙事视角', 'Point of view')} tipItems={[
-                '第一人称："我"视角叙事，代入感最强，信息受限',
-                '第三人称有限视角：跟随主角视角，兼顾代入感和灵活性，最常用',
-                '第三人称全知视角：可自由切换角色内心，适合群像叙事',
-                '多视角轮换：多名角色交替叙事，适合复杂群像故事',
-              ].map((item, index) => text(item, [
-                'First person: immersive and intentionally limited information',
-                'Third-person limited: follows one viewpoint with flexibility',
-                'Third-person omniscient: can enter any character’s perspective',
-                'Multiple POV: alternates between several viewpoint characters',
-              ][index]))}>
-                <NativeSelect value={config.narrativePOV || 'third_limited'} onChange={(e) => update('narrativePOV', e.target.value as NovelConfig['narrativePOV'])}>
-                  <option value="first_person">{text('第一人称', 'First person')}</option>
-                  <option value="third_limited">{text('第三人称有限视角', 'Third-person limited')}</option>
-                  <option value="third_omniscient">{text('第三人称全知视角', 'Third-person omniscient')}</option>
-                  <option value="multi_pov">{text('多视角轮换', 'Multiple POV')}</option>
-                </NativeSelect>
-              </Field>
               <Field label={text('总章数', 'Total chapters')}>
                 <Input
                   type="number"
@@ -378,140 +255,69 @@ function NovelConfigEditorSession({ projectKey }: { projectKey: string }) {
 
 
 
-          {/* 核心构想 */}
+          {/* 创作方向：阅读体验与原则 */}
           <section id="novel-config-ideas" className="novel-config-page__group space-y-4" aria-labelledby="novel-config-ideas-heading">
             <div className="novel-config-page__group-heading">
-              <h3 id="novel-config-ideas-heading">{text('核心构想', 'Core ideas')}</h3>
-              <p>{text(
-                '故事构想、背景构想、主角优势与主角构想分别保存在这里。',
-                'Story, background, protagonist-advantage, and protagonist concepts are stored here as separate fields.',
-              )}</p>
+              <h3 id="novel-config-ideas-heading">{text('创作方向', 'Creative direction')}</h3>
+              <p>{text('上方维护类型、细分类型与目标读者；这里说明核心阅读体验和创作原则。不要在这里展开剧情、世界规则或人物档案。', 'The fields above capture genre and audience. Describe the intended reading experience and creative principles here, keeping plot, world rules, and character profiles in their dedicated pages.')}</p>
             </div>
-          <Section
-            title={text('故事构想', 'Story concept')}
-            desc={text('故事构想是简要方向；故事前提负责展开核心故事。', 'The story concept sets a brief direction; the story premise develops the central story.')}
-            aiFieldKey="coreOutline"
-            generatingField={visibleGeneratingField}
-            workflowRunning={configWorkflowRunning}
-            onAIGenerate={handleFieldGenerate}
-          >
-            <Textarea value={config.coreOutline} onChange={(e) => update('coreOutline', e.target.value)} placeholder={text('简要写下故事方向，可由 AI 仅补充当前字段...', 'Capture the story direction; AI can expand this field only...')} rows={4} />
-          </Section>
-
-          {/* 背景构想 */}
-          <Section
-            title={text('背景构想', 'Background concept')}
-            desc={text('背景构想记录简要想法；世界观总纲维护详细的共同规则。', 'The background concept captures brief ideas; the worldbuilding overview maintains the detailed shared rules.')}
-            aiFieldKey="worldSetting"
-            generatingField={visibleGeneratingField}
-            workflowRunning={configWorkflowRunning}
-            onAIGenerate={handleFieldGenerate}
-            action={(
-              <button
-                type="button"
-                className="novel-config-page__related-link"
-                disabled={saving || navigationPending || configWorkflowRunning}
-                title={configWorkflowRunning ? text('等待当前 AI 生成完成后再打开', 'Wait for the current AI generation to finish before opening') : undefined}
-                onClick={() => void navigateAfterConfigSave(() => {
-                  return openArchFile('vela://core/worldbuilding', text('世界观总纲', 'Worldbuilding overview'))
-                })}
-              >
-                <ArrowUpRight size={13} aria-hidden="true" />
-                {text('打开世界观总纲', 'Open worldbuilding overview')}
-              </button>
-            )}
-          >
-            <Textarea value={config.worldSetting} onChange={(e) => update('worldSetting', e.target.value)} placeholder={text('描述故事发生的背景、时代、力量体系、社会结构...', 'Describe the setting, era, power system, and social structure...')} rows={4} />
-          </Section>
-
-          {/* 金手指 */}
-          <Section
-            title={text('主角优势 / 核心卖点', 'Protagonist advantage / core hook')}
-            desc={text('记录主角优势或核心卖点的简要方向；具体人物资料仍在角色档案维护。', 'Capture the brief direction for the protagonist’s advantage or core hook; maintain the detailed character profile in the character archive.')}
-            aiFieldKey="goldenFinger"
-            generatingField={visibleGeneratingField}
-            workflowRunning={configWorkflowRunning}
-            onAIGenerate={handleFieldGenerate}
-          >
-            <Textarea value={config.goldenFinger} onChange={(e) => update('goldenFinger', e.target.value)} placeholder={text('主角的独特优势或故事核心卖点...', 'Describe the protagonist’s unique advantage or the story’s core hook...')} rows={3} />
-          </Section>
-
-          {/* 主角构想 */}
-          <Section
-            title={text('主角构想', 'Protagonist concept')}
-            desc={text('主角构想说明总体要求；具体人物资料、动机和关系由角色档案维护。', 'The protagonist concept captures overall requirements; the character archive maintains the detailed profile, motives, and relationships.')}
-            aiFieldKey="protagonistProfile"
-            generatingField={visibleGeneratingField}
-            workflowRunning={configWorkflowRunning}
-            onAIGenerate={handleFieldGenerate}
-            action={(
-              <button
-                type="button"
-                className="novel-config-page__related-link"
-                disabled={saving || navigationPending || configWorkflowRunning}
-                title={configWorkflowRunning ? text('等待当前 AI 生成完成后再打开', 'Wait for the current AI generation to finish before opening') : undefined}
-                onClick={() => void navigateAfterConfigSave(() => {
-                  useLayoutStore.getState().openCharacterProfile('edit')
-                })}
-              >
-                <ArrowUpRight size={13} aria-hidden="true" />
-                {text('打开角色档案', 'Open character profile')}
-              </button>
-            )}
-          >
-            <Textarea value={config.protagonistProfile} onChange={(e) => update('protagonistProfile', e.target.value)} placeholder={text('主角的性格特征、背景故事、核心目标...', 'Personality traits, backstory, and central goal...')} rows={4} />
-          </Section>
-
+            <Section title={text('核心阅读体验与创作原则', 'Reading experience and creative principles')} desc={text('回答希望读者获得什么体验、作品追求什么，以及具体的参考边界。', 'Explain what readers should experience, what the work values, and where references stop.')}>
+              <div className="h-[360px] min-h-[280px] rounded-lg border border-[var(--color-border)] overflow-hidden">
+                <VditorProseEditor content={config.creativeDirectionMarkdown ?? ''} onChange={markdown => update('creativeDirectionMarkdown', markdown)} placeholder={text('粘贴或编写 Markdown 创作方向；支持标题、列表、引用和表格。', 'Write or paste Markdown for the creative direction, including headings, lists, quotes, and tables.')} />
+              </div>
+            </Section>
+            <Section title={text('参考作品与借鉴边界', 'Reference works and borrowing boundaries')} desc={text('说明参考作品、借鉴的具体方面，以及明确不采用的部分。', 'Name references, the elements you draw from, and what you will not reuse.')}>
+              <div className="h-[240px] min-h-[200px] rounded-lg border border-[var(--color-border)] overflow-hidden">
+                <VditorProseEditor content={config.referenceWorks ?? ''} onChange={markdown => update('referenceWorks', markdown)} placeholder={text('参考哪些作品？借鉴哪些方面？哪些元素不采用？', 'Which works inform this project, which aspects, and what is out of scope?')} />
+              </div>
+            </Section>
           </section>
 
-          {/* 全局写作要求 */}
+          {/* 正文表达规范 */}
           <section id="novel-config-writing" className="novel-config-page__group space-y-4" aria-labelledby="novel-config-writing-heading">
             <div className="novel-config-page__group-heading">
-              <h3 id="novel-config-writing-heading">{text('写作要求', 'Writing requirements')}</h3>
-              <p>{text(
-                '全局写作要求、文风与参考作品分别保存，供后续创作流程使用。',
-                'Global guidance, writing style, and reference works are saved separately for later creative workflows.',
-              )}</p>
+              <h3 id="novel-config-writing-heading">{text('写作规范', 'Writing rules')}</h3>
+              <p>{text('规定正文如何表达：叙述视角、文风、语言、对话与描写、节奏、禁忌和自检要求。故事事实请维护在正式设定入口。', 'Specify how prose is written: viewpoint, style, language, dialogue, description, pacing, restrictions, and self-checks. Keep story facts in formal settings.')}</p>
             </div>
-          <Section
-            title={text('全局写作要求', 'Global writing guidance')}
-            desc={text('写作风格、禁忌事项、节奏控制等全局规则（AI 填充配置时会自动生成）', 'Global rules for style, pacing, and content restrictions.')}
-            aiFieldKey="globalGuidance"
-            generatingField={visibleGeneratingField}
-            workflowRunning={configWorkflowRunning}
-            onAIGenerate={handleFieldGenerate}
-          >
-            <Textarea
-              value={config.globalGuidance}
-              onChange={(e) => update('globalGuidance', e.target.value)}
-              placeholder={text('全局的写作风格要求、禁忌事项、特殊规则...', 'Global style requirements, restrictions, and special rules...')}
-              rows={6}
-            />
-          </Section>
-
-          {/* 文风配置 */}
-          <Section
-            title={text('文风配置', 'Writing style')}
-            desc={text('AI 写稿/修稿时会严格遵循这里的风格要求。可手动填写或由 AI 自动生成。', 'AI follows these style requirements when drafting and revising. Enter them manually or generate with AI.')}
-            aiFieldKey="writingStyle"
-            generatingField={visibleGeneratingField}
-            workflowRunning={configWorkflowRunning}
-            onAIGenerate={handleFieldGenerate}
-          >
-            <Textarea
-              value={config.writingStyle || ''}
-              onChange={(e) => update('writingStyle', e.target.value)}
-              placeholder={text('尚未配置。点击右上角「AI 生成」或手动填写…', 'Not configured. Generate with AI or enter a style manually...')}
-              rows={6}
-            />
-          </Section>
-
-          {/* 参考作品 */}
-          <Section title={text('参考作品', 'Reference works')} desc={text('参考作品的风格、体系或机制，如：“参考《证道》的修炼体系”', 'Reference the style, setting, or mechanics of other works.')}>
-            <Textarea value={config.referenceWorks || ''} onChange={(e) => update('referenceWorks', e.target.value)} placeholder={text('参考哪些作品的风格、设定或机制？（AI 架构生成时会参考）', 'Which works should inform the style, setting, or mechanics?')} rows={2} />
-          </Section>
+            <Field label={text('叙述视角', 'Narrative viewpoint')} tipItems={[
+              '第一人称：“我”视角叙事，代入感强，信息受限',
+              '第三人称有限视角：跟随角色视角，兼顾代入感和灵活性',
+              '第三人称全知视角：可进入不同角色内心',
+              '多视角轮换：由多名角色交替叙事',
+            ].map((item, index) => text(item, [
+              'First person: immersive with intentionally limited information',
+              'Third-person limited: follows a character viewpoint',
+              'Third-person omniscient: can enter different characters’ minds',
+              'Multiple POV: alternates among characters',
+            ][index]))}>
+              <NativeSelect value={config.narrativePOV || 'third_limited'} onChange={event => update('narrativePOV', event.target.value as NovelConfig['narrativePOV'])}>
+                <option value="first_person">{text('第一人称', 'First person')}</option>
+                <option value="third_limited">{text('第三人称有限视角', 'Third-person limited')}</option>
+                <option value="third_omniscient">{text('第三人称全知视角', 'Third-person omniscient')}</option>
+                <option value="multi_pov">{text('多视角轮换', 'Multiple POV')}</option>
+              </NativeSelect>
+            </Field>
+            <Section title={text('正文执行规则', 'Prose rules')} desc={text('这里是正式写作规范；保存后由正文生成、续写与修稿工作流读取。', 'These are the authoritative rules read by drafting, continuation, and revision workflows.')}>
+              <div className="h-[380px] min-h-[300px] rounded-lg border border-[var(--color-border)] overflow-hidden">
+                <VditorProseEditor content={config.writingRulesMarkdown ?? ''} onChange={markdown => update('writingRulesMarkdown', markdown)} placeholder={text('填写文风、语言表达、对话和描写要求、节奏、禁忌及自检规则。', 'Describe style, language, dialogue, description, pacing, restrictions, and self-checks.')} />
+              </div>
+            </Section>
           </section>
 
+          <details id="novel-config-legacy" className="novel-config-page__advanced">
+            <summary>
+              <ChevronDown size={16} aria-hidden="true" />
+              <span>
+                <strong>{text('初始构想与待整理旧内容', 'Initial ideas and legacy content')}</strong>
+                <span>{text('旧字段保留用于追溯；正式内容建立后，先整理并确认再退出 AI 参考。', 'Legacy fields remain available for provenance; organize and confirm them after creating formal sources.')}</span>
+              </span>
+            </summary>
+            <div className="novel-config-page__advanced-content space-y-3">
+              <p className="text-xs leading-5 text-[var(--color-text-secondary)]">{text('旧故事构想、背景构想、主角优势、主角构想、全局要求与文风配置不会自动搬入正式内容。请按语义拆分归位并在目标页保存、回读，再到“待整理旧内容”确认。待整理副本会清楚标记为参考；正式资料建立后以正式资料为准。', 'Old story concepts, background, protagonist advantage/profile, global guidance, and style are not moved automatically. Organize them by meaning, save and reload the destinations, then confirm in Unorganized legacy content. Pending legacy text is reference-only; formal sources take precedence.')}</p>
+              <Button type="button" variant="outline" onClick={() => openCreativeMaterialsView('legacy', text('待整理旧内容', 'Unorganized legacy content'))}>{text('查看待整理旧内容', 'Review unorganized legacy content')}</Button>
+              <p className="text-xs text-[var(--color-text-secondary)]">{text('旧字段原文继续保留在项目配置中；本页不再用它们承担长期正式资料维护。', 'The original legacy fields remain in project configuration; this page no longer treats them as long-term authoritative content.')}</p>
+            </div>
+          </details>
           <details className="novel-config-page__advanced">
             <summary>
               <ChevronDown size={16} aria-hidden="true" />
@@ -557,51 +363,6 @@ function NovelConfigEditorSession({ projectKey }: { projectKey: string }) {
             </Field>
           </Section>
 
-          <Section
-            title={text('质量与连续性', 'Quality and continuity')}
-            desc={text(
-              '控制叙事线索多久未推进后显示沉寂提醒；逾期状态仍按目标章节即时计算。',
-              'Controls when an unadvanced narrative thread shows a dormant reminder. Overdue state is still computed from its target chapters.',
-            )}
-          >
-            <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-4 items-end">
-              <Field label={text('沉寂提醒阈值（章）', 'Dormant reminder threshold (chapters)')} htmlFor="narrative-thread-dormant-threshold">
-                <Input
-                  id="narrative-thread-dormant-threshold"
-                  type="number"
-                  min={MIN_NARRATIVE_THREAD_DORMANT_THRESHOLD}
-                  max={MAX_NARRATIVE_THREAD_DORMANT_THRESHOLD}
-                  value={dormantThreshold}
-                  onChange={event => update(
-                    'narrativeThreadDormantChapterThreshold',
-                    resolveNarrativeThreadDormantThreshold(Number(event.target.value)),
-                  )}
-                />
-              </Field>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => update(
-                  'narrativeThreadDormantChapterThreshold',
-                  DEFAULT_NARRATIVE_THREAD_DORMANT_THRESHOLD,
-                )}
-              >
-                <RotateCcw size={13} />{text('恢复默认值', 'Restore default')}
-              </Button>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-              <span>{text('作用范围：当前项目', 'Scope: this project')}</span>
-              <span>{text(
-                `产品默认值：${DEFAULT_NARRATIVE_THREAD_DORMANT_THRESHOLD} 章`,
-                `Product default: ${DEFAULT_NARRATIVE_THREAD_DORMANT_THRESHOLD} chapters`,
-              )}</span>
-              <span>{text(
-                `当前生效值：${dormantThreshold} 章`,
-                `Effective now: ${dormantThreshold} chapters`,
-              )}</span>
-            </div>
-          </Section>
-
             </div>
           </details>
           </div>
@@ -626,36 +387,20 @@ function NovelConfigEditorSession({ projectKey }: { projectKey: string }) {
   )
 }
 
-/** 表单分组 — 支持右上角 AI 生成按钮 */
+/** 表单分组 */
 function Section({
   id,
   title,
   desc,
   children,
   action,
-  aiFieldKey,
-  generatingField,
-  workflowRunning,
-  onAIGenerate,
 }: {
   id?: string
   title: string
   desc?: string
   children: React.ReactNode
   action?: React.ReactNode
-  /** 对应 NovelConfig 中的字段 key，传入则显示 AI 生成按钮 */
-  aiFieldKey?: GeneratableField
-  /** 当前正在生成的字段（全局共享状态，防止并发） */
-  generatingField?: GeneratableField | null
-  /** 由工作流 store 报告的真实配置工作流生命周期，包括取消收尾阶段。 */
-  workflowRunning?: boolean
-  /** AI 生成回调 */
-  onAIGenerate?: (fieldKey: GeneratableField) => void
 }) {
-  const text = useLocaleStore(s => s.text)
-  const isGenerating = aiFieldKey != null && generatingField === aiFieldKey
-  const isAnyGenerating = generatingField != null || workflowRunning === true
-  const showAIButton = aiFieldKey != null && onAIGenerate != null
   const labelledChildren = isValidElement(children) && children.type === Textarea
     ? cloneElement(children as React.ReactElement<{ 'aria-label'?: string }>, { 'aria-label': title })
     : children
@@ -667,27 +412,7 @@ function Section({
           <h3 className="text-sm font-semibold text-[var(--color-text)]">{title}</h3>
           {desc && <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>{desc}</p>}
         </div>
-        {(action || showAIButton) && (
-          <div className="novel-config-section__actions">
-            {action}
-            {showAIButton && (
-              <Button
-                type="button"
-                variant="ai"
-                size="sm"
-                onClick={() => onAIGenerate(aiFieldKey)}
-                disabled={isAnyGenerating}
-                title={isGenerating ? text('正在生成...', 'Generating...') : text(`AI 生成「${title}」`, `Generate “${title}” with AI`)}
-              >
-                {isGenerating
-                  ? <Loader2 size={11} className="animate-spin" />
-                  : <Sparkles size={11} />
-                }
-                {isGenerating ? text('生成中...', 'Generating...') : text('AI 生成', 'Generate with AI')}
-              </Button>
-            )}
-          </div>
-        )}
+        {action && <div className="novel-config-section__actions">{action}</div>}
       </div>
       {labelledChildren}
     </section>

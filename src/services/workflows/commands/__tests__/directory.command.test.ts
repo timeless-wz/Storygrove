@@ -17,6 +17,7 @@ import {
   retryDirectoryCharacterSync,
 } from '../directory.command'
 import { listPendingDirectoryCharacterSyncs } from '../../directory-character-sync-recovery'
+import { withWorkflowCreativeContextIpcDefaults } from '../../../../../test/workflow-creative-context-ipc'
 
 type Blueprint = {
   chapterNumber: number
@@ -190,7 +191,7 @@ function stubIpcInvoke(handler: (channel: string, ...args: unknown[]) => unknown
   ))
   vi.stubGlobal('window', {
     velaAPI: {
-      invoke,
+      invoke: withWorkflowCreativeContextIpcDefaults(invoke),
       on: vi.fn(),
       once: vi.fn(),
       send: vi.fn(),
@@ -952,14 +953,16 @@ describe('GenerateDirectoryCommand', () => {
       { mode: 'full', count: 2 },
       {
         ...projectSnapshot,
-        novelConfig: { ...projectSnapshot.novelConfig, globalGuidance: authorGuidance },
+        novelConfig: { ...projectSnapshot.novelConfig, creativeDirectionMarkdown: authorGuidance },
       },
       { createRuntime },
     )
 
+    const context = workflowContext()
+    context.data.creativeDirectionContext = authorGuidance
     const result = await command.execute({
       step: {},
-      context: workflowContext(),
+      context,
       callbacks: stepCallbacks(),
     })
 

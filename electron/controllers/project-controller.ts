@@ -505,6 +505,8 @@ export function registerProjectController() {
             protagonistProfile: updatedCoreData.protagonistProfile,
             globalGuidance: updatedCoreData.globalGuidance,
             writingStyle: updatedCoreData.writingStyle,
+            creativeDirectionMarkdown: updatedCoreData.creativeDirectionMarkdown,
+            writingRulesMarkdown: updatedCoreData.writingRulesMarkdown,
             referenceWorks: updatedCoreData.referenceWorks,
           },
           characterStates: updatedCoreData.characterStates,
@@ -622,6 +624,12 @@ export function registerProjectController() {
           worldSetting: data.novelConfig.worldSetting,
           protagonistProfile: data.novelConfig.protagonistProfile,
           writingStyle: data.novelConfig.writingStyle ?? '',
+          ...(data.novelConfig.creativeDirectionMarkdown !== undefined
+            ? { creativeDirectionMarkdown: data.novelConfig.creativeDirectionMarkdown }
+            : {}),
+          ...(data.novelConfig.writingRulesMarkdown !== undefined
+            ? { writingRulesMarkdown: data.novelConfig.writingRulesMarkdown }
+            : {}),
           referenceWorks: data.novelConfig.referenceWorks ?? '',
         })
       }
@@ -690,6 +698,12 @@ export function registerProjectController() {
           worldSetting: data.novelConfig.worldSetting,
           protagonistProfile: data.novelConfig.protagonistProfile,
           writingStyle: data.novelConfig.writingStyle ?? '',
+          ...(data.novelConfig.creativeDirectionMarkdown !== undefined
+            ? { creativeDirectionMarkdown: data.novelConfig.creativeDirectionMarkdown }
+            : {}),
+          ...(data.novelConfig.writingRulesMarkdown !== undefined
+            ? { writingRulesMarkdown: data.novelConfig.writingRulesMarkdown }
+            : {}),
           referenceWorks: data.novelConfig.referenceWorks ?? '',
         })
       }

@@ -8,12 +8,14 @@ export interface CultivationRealm {
   levelId: string
   stages: CultivationStage[]
 }
-export interface CultivationSystem { revision: number; realms: CultivationRealm[] }
+export interface CultivationSystem { revision: number; realms: CultivationRealm[]; markdown?: string }
 export interface CultivationLevel { id: string; realmId: string; stageId: string | null; name: string; number: number }
 export interface CultivationSaveRequest {
   expectedRevision: number
   expectedRosterRevision: number
   realms: CultivationRealm[]
+  /** Shared power rules and limits in Markdown; optional for old clients. */
+  markdown?: string
   /** Missing means unresolved, null means an explicit author-approved unbinding. */
   resolutions: Record<string, string | null>
 }

@@ -35,10 +35,19 @@ import { promptLanguageText } from '../../prompt-language'
 import { ipc } from '../../ipc-client'
 import { composePromptSystemRole, renderPrompt, resolvePromptTemplate, type PromptTemplate } from '../../prompt-templates'
 import type { WritingLanguage } from '../../../shared/writing-language'
+import { buildCreativeContextBundle, type CreativeContentCategory, type CreativePromptSource } from '../../../shared/creative-content'
 import { assertNoLossOnSerialize } from '../../../shared/blueprint-v2-markdown'
 import { BaseWorkflowCommand, type CommandExecuteParams, type WorkflowGenerationRuntimeDependencies } from './base-command'
 import { parseTextBlueprintsStrict } from '../directory-workflow'
 import { randomUUID } from '../../../utils/id'
+import {
+  buildCreativeCorePromptSources,
+  loadCharacterProfilePromptSource,
+  loadCreativeDomainPromptSources,
+  loadInformationRevealPromptSources,
+  loadLegacyCreativeSources,
+  loadSelectedCreativeMaterialPromptSources,
+} from '../../creative-context'
 
 const PLANNING_SCHEMA_VERSION = 1
 const MAX_PLAN_VOLUMES = 30
@@ -46,11 +55,35 @@ const MAX_PLAN_CHAPTERS = 100
 const MAX_MARKDOWN_CHARS = 400_000
 const MAX_CHECK_SUGGESTIONS = 30
 
+async function planningContext(
+  core: ProjectCoreData,
+  context: WorkflowContext,
+  categories: readonly CreativeContentCategory[],
+  additional: CreativePromptSource[] = [],
+  chapterNumbers?: readonly number[],
+): Promise<{ promptText: string; sourceContents: Array<Pick<CreativePromptSource, 'id' | 'status' | 'content'>> }> {
+  const [legacy, informationSources] = await Promise.all([
+    loadLegacyCreativeSources(context.projectSession, context.projectPath),
+    loadInformationRevealPromptSources(context.projectSession, context.projectPath, chapterNumbers),
+  ])
+  const sources = [
+    ...buildCreativeCorePromptSources(core, legacy, categories, context.writingLanguage),
+    ...informationSources,
+    ...additional,
+  ]
+  const bundle = buildCreativeContextBundle(sources, context.writingLanguage)
+  return {
+    promptText: bundle.promptText,
+    sourceContents: sources.map(({ id, status, content }) => ({ id, status, content })),
+  }
+}
+
 export interface BlueprintPlanningCommandInput {
   operationId: string
   kind: BlueprintPlanningCandidateKind
   scope: BlueprintPlanningSelection
   guidance?: string
+  selectedCreativeMaterialIds?: readonly string[]
   mode?: 'generate' | 'improve'
   plannedChapterCount?: number
   totalChapters?: number
@@ -479,16 +512,27 @@ export class BlueprintPlanningCommand extends BaseWorkflowCommand<string> {
     const guide = totalChapters > 0
       ? getPlotStructureGuide(String(novelConfig.plotStructure || 'three_act'), totalChapters, writingLanguage)
       : ''
+    const selectedMaterials = await loadSelectedCreativeMaterialPromptSources(
+      context.projectSession,
+      context.projectPath,
+      this.input.selectedCreativeMaterialIds ?? [],
+    )
+    const creativeContext = await planningContext(
+      core,
+      context,
+      ['creative-direction', 'premise', 'world-setting', 'characters', 'plot-planning'],
+      selectedMaterials,
+    )
     const templateContent = renderTemplateContent(template, {
-      premise: core.premise,
-      character_dynamics: core.charactersArch,
-      world_building: core.worldbuilding,
+      premise: '',
+      character_dynamics: '',
+      world_building: '',
       genre: String(novelConfig.genre ?? ''),
       number_of_chapters: String(totalChapters),
       word_number: String(novelConfig.wordsPerChapter ?? ''),
       plot_structure_guide: guide,
       narrative_pov: getNarrativePOVLabel(String(novelConfig.narrativePOV || 'third_limited'), writingLanguage),
-      global_guidance: String(novelConfig.globalGuidance ?? ''),
+      global_guidance: '',
       step_guidance: this.input.guidance ?? '',
     }, writingLanguage)
     const prompt = [
@@ -498,11 +542,10 @@ export class BlueprintPlanningCommand extends BaseWorkflowCommand<string> {
         `【任务】${this.input.mode === 'improve' || (this.input.mode !== 'generate' && synopsis.trim()) ? '基于现有全书总纲生成一份可比较的改进候选' : '为全书生成一份总纲候选'}。输出完整 Markdown 正文，不要写入数据库，不要拆成分卷或章节细纲。请保留作者已有事实与明确设定；若现有总纲非空，不得假设它已过时。`,
         `[Task] ${this.input.mode === 'improve' || (this.input.mode !== 'generate' && synopsis.trim()) ? 'Create a comparable improvement candidate from the current book outline' : 'Create a whole-book outline candidate'}. Output the complete Markdown body. Do not write to the database or turn it into volume or chapter outlines. Preserve explicit author facts and settings; do not assume a non-empty current outline is obsolete.`,
       ),
-      promptLanguageText(writingLanguage, `【当前全书总纲原文】\n${synopsis || '（空）'}`, `[Current whole-book outline]\n${synopsis || '(empty)'}`),
-      promptLanguageText(writingLanguage, `【故事前提】\n${core.premise || '（未填写）'}`, `[Premise]\n${core.premise || '(not provided)'}`),
-      promptLanguageText(writingLanguage, `【角色架构】\n${core.charactersArch || '（未填写）'}`, `[Character architecture]\n${core.charactersArch || '(not provided)'}`),
-      promptLanguageText(writingLanguage, `【世界观】\n${core.worldbuilding || '（未填写）'}`, `[Worldbuilding]\n${core.worldbuilding || '(not provided)'}`),
-      promptLanguageText(writingLanguage, `【项目配置】\n${JSON.stringify(novelConfig, null, 2)}`, `[Project configuration]\n${JSON.stringify(novelConfig, null, 2)}`),
+      creativeContext.promptText,
+      promptLanguageText(writingLanguage,
+        `【篇幅与结构参数】题材：${String(novelConfig.genre ?? '未指定')}；总章数：${totalChapters || '未指定'}；默认每章字数：${String(novelConfig.wordsPerChapter ?? '未指定')}；叙述视角：${getNarrativePOVLabel(String(novelConfig.narrativePOV || 'third_limited'), writingLanguage)}。`,
+        `[Length and structure parameters] Genre: ${String(novelConfig.genre ?? 'unspecified')}; total chapters: ${totalChapters || 'unspecified'}; default chapter length: ${String(novelConfig.wordsPerChapter ?? 'unspecified')}; narrative POV: ${getNarrativePOVLabel(String(novelConfig.narrativePOV || 'third_limited'), writingLanguage)}.`),
       ...(guide ? [guide] : []),
       promptLanguageText(writingLanguage, `【作者指导】\n${htmlSafeGuidance(this.input.guidance, writingLanguage)}`, `[Author guidance]\n${htmlSafeGuidance(this.input.guidance, writingLanguage)}`),
       promptLanguageText(writingLanguage, '只返回完整 Markdown，不要添加解释或代码围栏。', 'Return only the complete Markdown body, with no explanation or code fence.'),
@@ -527,6 +570,7 @@ export class BlueprintPlanningCommand extends BaseWorkflowCommand<string> {
       worldbuilding: core.worldbuilding,
       novelConfig,
       guidance: this.input.guidance ?? '',
+      creativeSources: creativeContext.sourceContents,
       mode: this.input.mode ?? 'auto',
       language: writingLanguage,
     }, template, 'book-outline')
@@ -557,15 +601,27 @@ export class BlueprintPlanningCommand extends BaseWorkflowCommand<string> {
       outline: outlineByVolume.get(volume.id)?.summary ?? '',
       actualChapterCount: capture.chapterSummaries.filter(chapter => chapter.volumeId === volume.id).length,
     }))
+    const creativeContext = await planningContext(
+      capture.core,
+      context,
+      ['creative-direction', 'premise', 'world-setting', 'characters', 'plot-planning'],
+      [{
+        id: 'blueprint.volume-index',
+        label: '现有卷目录与有界卷纲摘要',
+        category: 'plot-planning',
+        content: JSON.stringify(currentVolumes, null, 2),
+        status: 'plan',
+      }],
+    )
     const prompt = [
       renderTemplateContent(template, {
-        premise: capture.core.premise,
-        character_dynamics: capture.core.charactersArch,
-        world_building: capture.core.worldbuilding,
+        premise: '',
+        character_dynamics: '',
+        world_building: '',
         genre: String(novelConfig.genre ?? ''),
         number_of_chapters: String(novelConfig.totalChapters ?? ''),
         word_number: String(novelConfig.wordsPerChapter ?? ''),
-        global_guidance: String(novelConfig.globalGuidance ?? ''),
+        global_guidance: '',
         step_guidance: this.input.guidance ?? '',
       }, writingLanguage),
       promptLanguageText(
@@ -573,8 +629,7 @@ export class BlueprintPlanningCommand extends BaseWorkflowCommand<string> {
         '基于冻结的全书总纲规划分卷。请只返回 JSON：{"volumes":[{"existingVolumeId":null,"name":"卷名","sortOrder":1,"plannedChapterCount":20,"markdown":"卷纲 Markdown"}]}。existingVolumeId 只有在明确要更新某一现有卷时才可填写，必须逐字使用给定 ID；不得按卷名匹配或合并。新卷由程序分配稳定 ID。plannedChapterCount 是计划值，绝不是实际章数或自动归属范围。',
         'Plan volumes from the frozen whole-book outline. Return only JSON: {"volumes":[{"existingVolumeId":null,"name":"Volume name","sortOrder":1,"plannedChapterCount":20,"markdown":"volume outline Markdown"}]}. Set existingVolumeId only when explicitly updating one listed existing volume, using its exact ID; never match or merge by name. The app assigns stable IDs to new volumes. plannedChapterCount is a plan, never an actual count or automatic chapter assignment range.',
       ),
-      promptLanguageText(writingLanguage, `【全书总纲】\n${synopsis}`, `[Whole-book outline]\n${synopsis}`),
-      promptLanguageText(writingLanguage, `【现有卷目录与有界卷纲摘要】\n${JSON.stringify(currentVolumes, null, 2)}`, `[Existing volumes and bounded outline summaries]\n${JSON.stringify(currentVolumes, null, 2)}`),
+      creativeContext.promptText,
       promptLanguageText(writingLanguage, `【篇幅偏好】总章数约 ${Number(this.input.totalChapters ?? novelConfig.totalChapters) || '未指定'}；计划分卷数/章数偏好：${this.input.plannedChapterCount ?? '由作者选择'}。`, `[Length preference] About ${Number(this.input.totalChapters ?? novelConfig.totalChapters) || 'unspecified'} total chapters; volume/count preference: ${this.input.plannedChapterCount ?? 'author selects'}.`),
       promptLanguageText(writingLanguage, `【作者指导】\n${htmlSafeGuidance(this.input.guidance, writingLanguage)}`, `[Author guidance]\n${htmlSafeGuidance(this.input.guidance, writingLanguage)}`),
     ].filter(Boolean).join('\n\n')
@@ -644,6 +699,7 @@ export class BlueprintPlanningCommand extends BaseWorkflowCommand<string> {
       guidance: this.input.guidance ?? '',
       plannedChapterCount: this.input.plannedChapterCount ?? null,
       totalChapters: this.input.totalChapters ?? null,
+      creativeSources: creativeContext.sourceContents,
     }, template, 'volume-plan')
     sourceRefs.push(...promptSources)
     const sourceSnapshot = await this.createSnapshot({
@@ -686,15 +742,28 @@ export class BlueprintPlanningCommand extends BaseWorkflowCommand<string> {
       .filter(item => neighbors.some(neighbor => neighbor.id === item.volumeId) && item.volumeId !== volumeId)
       .map(item => ({ volumeId: item.volumeId, revision: item.revision, summary: item.summary }))
     const synopsis = capture.core.synopsis ?? ''
+    const chapterSummaryContext = formatChapterSummaries(siblingChapters, writingLanguage, volumeId)
+    const creativeContext = await planningContext(
+      capture.core,
+      context,
+      ['creative-direction', 'premise', 'world-setting', 'characters'],
+      [
+        { id: 'project_core.synopsis', label: '全书总纲', category: 'plot-planning', content: synopsis, status: 'formal' },
+        { id: `blueprint.volume.${volumeId}`, label: `目标卷纲：${volume.name}`, category: 'plot-planning', content: outline?.markdown ?? '', status: 'plan' },
+        { id: 'blueprint.adjacent-volumes', label: '相邻卷纲摘要', category: 'plot-planning', content: JSON.stringify(adjacentOutlines, null, 2), status: 'plan' },
+        { id: `blueprint.chapters.volume.${volumeId}`, label: '本卷已有章纲摘要', category: 'plot-planning', content: chapterSummaryContext, status: 'plan' },
+      ],
+      allSiblingChapters.map(chapter => chapter.chapterNumber),
+    )
     const prompt = [
       renderTemplateContent(template, {
-        premise: capture.core.premise,
-        character_dynamics: capture.core.charactersArch,
-        world_building: capture.core.worldbuilding,
+        premise: '',
+        character_dynamics: '',
+        world_building: '',
         genre: String(novelConfig.genre ?? ''),
         number_of_chapters: String(novelConfig.totalChapters ?? ''),
         planned_chapter_count: String(this.input.plannedChapterCount ?? ''),
-        global_guidance: String(novelConfig.globalGuidance ?? ''),
+        global_guidance: '',
         step_guidance: this.input.guidance ?? '',
       }, writingLanguage),
       promptLanguageText(
@@ -702,10 +771,7 @@ export class BlueprintPlanningCommand extends BaseWorkflowCommand<string> {
         '请为指定卷生成独立卷纲候选，输出完整 Markdown 正文，不要写入数据库。卷纲按需包含：卷定位与阶段目标、核心矛盾、主线推进、角色弧光、关键转折与高潮、伏笔承接与回收、卷末状态、与前后卷衔接、预计章节数量。允许空节与自定义节，不要把预计章节数当成实际章归属。',
         'Create an independent volume-outline candidate for the specified volume. Return the complete Markdown body without writing to the database. Sections may cover volume position and stage goal, central conflict, main-plot movement, character arcs, turns and climax, setup and payoff, ending state, adjacent-volume handoffs, and estimated chapter count. Empty and custom sections are valid. Do not treat an estimated chapter count as actual chapter ownership.',
       ),
-      promptLanguageText(writingLanguage, `【目标卷】${volume.name}（稳定 volumeId=${volumeId}）\n【现有卷纲】\n${outline?.markdown ?? '（尚无卷纲）'}`, `[Target volume] ${volume.name} (stable volumeId=${volumeId})\n[Current volume outline]\n${outline?.markdown ?? '(no outline yet)'}`),
-      promptLanguageText(writingLanguage, `【全书总纲原文】\n${synopsis}`, `[Whole-book outline]\n${synopsis}`),
-      promptLanguageText(writingLanguage, `【相邻卷有界摘要】\n${JSON.stringify(adjacentOutlines, null, 2)}`, `[Bounded adjacent-volume summaries]\n${JSON.stringify(adjacentOutlines, null, 2)}`),
-      promptLanguageText(writingLanguage, `【本卷已有章纲摘要】\n${formatChapterSummaries(siblingChapters, writingLanguage, volumeId)}`, `[Existing chapter summaries in this volume]\n${formatChapterSummaries(siblingChapters, writingLanguage, volumeId)}`),
+      creativeContext.promptText,
       promptLanguageText(writingLanguage, `【作者指导】\n${htmlSafeGuidance(this.input.guidance, writingLanguage)}`, `[Author guidance]\n${htmlSafeGuidance(this.input.guidance, writingLanguage)}`),
       ...(this.input.plannedChapterCount !== undefined
         ? [promptLanguageText(
@@ -737,7 +803,7 @@ export class BlueprintPlanningCommand extends BaseWorkflowCommand<string> {
       ...neighbors
         .filter(item => item.id !== volumeId)
         .map(item => volumeOutlineSourceReference(item.id, capture.outlineSummaries.find(summary => summary.volumeId === item.id) ?? null, item.name)),
-      ...await this.hashInputAndTemplate({ synopsis, volume, outlineRevision: outline?.revision ?? 0, outlineHash: outline?.contentHash ?? blueprintPlanningTextHash(''), adjacentOutlines, siblingChapters, plannedChapterCount: this.input.plannedChapterCount ?? null, guidance: this.input.guidance ?? '', novelConfig }, template, 'volume-outline'),
+      ...await this.hashInputAndTemplate({ synopsis, volume, outlineRevision: outline?.revision ?? 0, outlineHash: outline?.contentHash ?? blueprintPlanningTextHash(''), adjacentOutlines, siblingChapters, plannedChapterCount: this.input.plannedChapterCount ?? null, guidance: this.input.guidance ?? '', novelConfig, creativeSources: creativeContext.sourceContents }, template, 'volume-outline'),
     ]
     const sourceSnapshot = await this.createSnapshot({
       targetKind: 'volume', targetId: volumeId, targetRevision: outline?.revision ?? 0, targetHash: outline?.contentHash ?? blueprintPlanningTextHash(''),
@@ -765,15 +831,26 @@ export class BlueprintPlanningCommand extends BaseWorkflowCommand<string> {
     const siblingChapters = allSiblingChapters.slice(0, 80)
     const synopsis = capture.core.synopsis ?? ''
     const chapterList = formatChapterSummaries(siblingChapters, writingLanguage, volumeId)
+    const creativeContext = await planningContext(
+      capture.core,
+      context,
+      ['creative-direction', 'premise', 'world-setting', 'characters'],
+      [
+        { id: 'project_core.synopsis', label: '全书总纲', category: 'plot-planning', content: synopsis, status: 'formal' },
+        { id: `blueprint.volume.${volumeId}`, label: `目标卷纲：${volume.name}`, category: 'plot-planning', content: outline?.markdown ?? '', status: 'plan' },
+        { id: `blueprint.chapters.volume.${volumeId}`, label: '本卷已有章纲摘要', category: 'plot-planning', content: chapterList, status: 'plan' },
+      ],
+      Array.from({ length: to - from + 1 }, (_, index) => from + index),
+    )
     const prompt = [
       renderTemplateContent(template, {
-        novel_architecture: synopsis,
-        chapter_list: formatChapterSummaries(siblingChapters, writingLanguage, volumeId),
+        novel_architecture: '',
+        chapter_list: '',
         number_of_chapters: String(novelConfig.totalChapters ?? ''),
         n: String(this.input.chapterRange?.from ?? ''),
         m: String(this.input.chapterRange?.to ?? ''),
         genre: String(novelConfig.genre ?? ''),
-        global_guidance: String(novelConfig.globalGuidance ?? ''),
+        global_guidance: '',
         pacing_guidance: this.input.guidance ?? '',
       }, writingLanguage),
       promptLanguageText(
@@ -781,10 +858,10 @@ export class BlueprintPlanningCommand extends BaseWorkflowCommand<string> {
         `请只为指定卷规划章节简纲，输出与既有章节蓝图合同兼容的 JSON。每个 blueprints 项还必须包含 planning 对象，字段为 volumeTask、handoff、expectedEndChange（均为字符串，可留空）；这些是后续展开细纲要沿用的确认规划。唯一允许的 chapterNumber 范围为 ${from}–${to}，每个章号恰好出现一次，禁止重用全书其他章节号；候选只是章节安排，不是完整 v2 分镜细纲。只新增，不覆盖已有人工/导入章节。不要修改正文卷、草稿绑定、人物、notes 或 userGuidance。`,
         `Plan simple chapter outlines only for this exact volume. Return JSON compatible with the existing chapter-blueprint contract. Every blueprints item must also include a planning object with string fields volumeTask, handoff, and expectedEndChange (empty strings are allowed); these are confirmed plans that the later detailed-outline expansion must carry forward. Use every chapterNumber from ${from} through ${to} exactly once; do not reuse any other global chapter number. These are chapter arrangements, not full v2 scene storyboards. Add only and never replace existing manual/imported chapter rows. Do not modify prose volumes, draft bindings, characters, notes, or userGuidance.`,
       ),
-      promptLanguageText(writingLanguage, `【目标卷】${volume.name}（volumeId=${volumeId}）\n【卷纲】\n${outline?.markdown ?? '（尚无卷纲）'}`, `[Target volume] ${volume.name} (volumeId=${volumeId})\n[Volume outline]\n${outline?.markdown ?? '(no volume outline yet)'}`),
-      promptLanguageText(writingLanguage, `【全书总纲】\n${synopsis}`, `[Whole-book outline]\n${synopsis}`),
-      promptLanguageText(writingLanguage, `【本卷已有章纲摘要】\n${chapterList}`, `[Existing chapter summaries in this volume]\n${chapterList}`),
-      promptLanguageText(writingLanguage, `【小说配置】\n${JSON.stringify(novelConfig, null, 2)}`, `[Novel configuration]\n${JSON.stringify(novelConfig, null, 2)}`),
+      creativeContext.promptText,
+      promptLanguageText(writingLanguage,
+        `【篇幅参数】总章数：${String(novelConfig.totalChapters ?? '未指定')}；默认每章字数：${String(novelConfig.wordsPerChapter ?? '未指定')}；题材：${String(novelConfig.genre ?? '未指定')}。`,
+        `[Length parameters] Total chapters: ${String(novelConfig.totalChapters ?? 'unspecified')}; default chapter length: ${String(novelConfig.wordsPerChapter ?? 'unspecified')}; genre: ${String(novelConfig.genre ?? 'unspecified')}.`),
       promptLanguageText(writingLanguage, `【作者指导】\n${htmlSafeGuidance(this.input.guidance, writingLanguage)}`, `[Author guidance]\n${htmlSafeGuidance(this.input.guidance, writingLanguage)}`),
       promptLanguageText(writingLanguage, `必须完整返回 ${to - from + 1} 个章节。`, `Return exactly ${to - from + 1} complete chapter outline(s).`),
     ].join('\n\n')
@@ -830,7 +907,7 @@ export class BlueprintPlanningCommand extends BaseWorkflowCommand<string> {
       chapterIndexSourceReference(allSiblingChapters, volumeId),
       ...await Promise.all(allSiblingChapters.map(chapterSourceReference)),
       ...Array.from({ length: to - from + 1 }, (_, offset) => expectedMissingChapterReference(from + offset)),
-      ...await this.hashInputAndTemplate({ synopsis, volume, outlineRevision: outline?.revision ?? 0, outlineHash: outline?.contentHash ?? blueprintPlanningTextHash(''), siblingChapters, chapterRange: this.input.chapterRange, guidance: this.input.guidance ?? '', novelConfig }, template, 'chapter-plan'),
+      ...await this.hashInputAndTemplate({ synopsis, volume, outlineRevision: outline?.revision ?? 0, outlineHash: outline?.contentHash ?? blueprintPlanningTextHash(''), siblingChapters, chapterRange: this.input.chapterRange, guidance: this.input.guidance ?? '', novelConfig, creativeSources: creativeContext.sourceContents }, template, 'chapter-plan'),
     ]
     const sourceSnapshot = await this.createSnapshot({
       targetKind: 'volume', targetId: volumeId, targetRevision: outline?.revision ?? 0, targetHash: outline?.contentHash ?? blueprintPlanningTextHash(''),
@@ -872,24 +949,52 @@ export class BlueprintPlanningCommand extends BaseWorkflowCommand<string> {
       : null
     const plannedCandidate = confirmedChapterPlan?.candidate
     const confirmedPlan = confirmedChapterPlan?.planning
+    const [domainSources, characterSource] = await Promise.all([
+      loadCreativeDomainPromptSources(context.projectSession, context.projectPath, {
+        powerSystem: true,
+        locations: true,
+        relevanceText: `${blueprint.title} ${blueprint.purpose} ${blueprint.keyEvents}`,
+      }),
+      loadCharacterProfilePromptSource(context.projectSession, context.projectPath, blueprint.characters),
+    ])
+    const chapterOutlineMarkdown = JSON.stringify({
+      title: blueprint.title,
+      role: blueprint.role,
+      purpose: blueprint.purpose,
+      keyEvents: blueprint.keyEvents,
+      characters: blueprint.characters,
+      suspenseHook: blueprint.suspenseHook,
+    }, null, 2)
+    const creativeContext = await planningContext(
+      capture.core,
+      context,
+      ['creative-direction', 'premise', 'world-setting'],
+      [
+        ...domainSources,
+        ...(characterSource ? [characterSource] : []),
+        { id: `blueprint.chapter.${chapterNumber}`, label: `第${chapterNumber}章现有简纲`, category: 'plot-planning', content: chapterOutlineMarkdown, status: 'plan' },
+        ...(volumeOutline ? [{ id: `blueprint.volume.${volumeId}`, label: `本卷卷纲：${volumeId}`, category: 'plot-planning' as const, content: volumeOutline.markdown, status: 'plan' as const }] : []),
+        ...(confirmedPlan ? [{ id: `blueprint.confirmed-chapter-plan.${chapterNumber}`, label: `第${chapterNumber}章已确认规划`, category: 'plot-planning' as const, content: JSON.stringify(confirmedPlan, null, 2), status: 'plan' as const }] : []),
+      ],
+      [chapterNumber],
+    )
     const prompt = [
       renderTemplateContent(template, {
-        premise: capture.core.premise,
-        character_dynamics: capture.core.charactersArch,
-        world_building: capture.core.worldbuilding,
-        chapter_list: JSON.stringify({ title: blueprint.title, role: blueprint.role, purpose: blueprint.purpose, keyEvents: blueprint.keyEvents }, null, 2),
+        premise: '',
+        character_dynamics: '',
+        world_building: '',
+        chapter_list: '',
       }, writingLanguage),
       promptLanguageText(
         writingLanguage,
         '请将以下人工/导入章节简纲展开为完整 v2 Markdown 细纲候选，并以 JSON 输出：{"markdown":"...完整 Markdown...","planning":{"volumeTask":"...","handoff":"...","expectedEndChange":"..."}}。Markdown 至少包含本章定位、核心矛盾、逐场分镜、规则、章末目标、伏笔检查与写作禁忌；严格只根据既有简纲和卷纲，不把规划写成已发生事实。确认前不得保存。',
         'Expand the following chapter outline into a complete v2 Markdown candidate. Return JSON: {"markdown":"...complete Markdown...","planning":{"volumeTask":"...","handoff":"...","expectedEndChange":"..."}}. Include positioning, core conflict, scene storyboard, rules, chapter ending, foreshadowing checks, and writing taboos. Use only the supplied chapter and volume plans; do not present plans as established events. Do not save before confirmation.',
       ),
-      promptLanguageText(writingLanguage, `【第${chapterNumber}章现有简纲】\n${JSON.stringify({ title: blueprint.title, role: blueprint.role, purpose: blueprint.purpose, keyEvents: blueprint.keyEvents, characters: blueprint.characters, suspenseHook: blueprint.suspenseHook }, null, 2)}`, `[Existing simple outline for Chapter ${chapterNumber}]\n${JSON.stringify({ title: blueprint.title, role: blueprint.role, purpose: blueprint.purpose, keyEvents: blueprint.keyEvents, characters: blueprint.characters, suspenseHook: blueprint.suspenseHook }, null, 2)}`),
-      ...(volumeOutline ? [promptLanguageText(writingLanguage, `【本卷卷纲计划｜${volumeId}】\n${volumeOutline.markdown}`, `[Current volume outline plan | ${volumeId}]\n${volumeOutline.markdown}`)] : []),
+      creativeContext.promptText,
       ...(confirmedPlan ? [promptLanguageText(
         writingLanguage,
-        `【已确认的章节规划｜仅为计划，不代表已发生事实】\n${JSON.stringify(confirmedPlan, null, 2)}\n请在返回的 planning 字段中保留这三项原意，不要将其改写成已发生事实。`,
-        `[Confirmed chapter plan | plans only, not established events]\n${JSON.stringify(confirmedPlan, null, 2)}\nPreserve these three fields in the returned planning object; do not rewrite them as events that already happened.`,
+        '请在返回的 planning 字段中保留已确认规划的三项原意，不要将其改写成已发生事实。',
+        'Preserve the confirmed plan in the returned planning fields; do not rewrite it as events that already happened.',
       )] : []),
       promptLanguageText(writingLanguage, `【作者指导】\n${htmlSafeGuidance(this.input.guidance, writingLanguage)}`, `[Author guidance]\n${htmlSafeGuidance(this.input.guidance, writingLanguage)}`),
     ].join('\n\n')
@@ -946,10 +1051,11 @@ export class BlueprintPlanningCommand extends BaseWorkflowCommand<string> {
           volumeId,
         },
         volumeOutline: volumeOutline ? { revision: volumeOutline.revision, contentHash: volumeOutline.contentHash } : null,
-      confirmedPlan: confirmedPlan ?? null,
-      planCandidate: plannedCandidate ? { operationId: plannedCandidate.operationId, payloadHash: plannedCandidate.payloadHash } : null,
+        confirmedPlan: confirmedPlan ?? null,
+        planCandidate: plannedCandidate ? { operationId: plannedCandidate.operationId, payloadHash: plannedCandidate.payloadHash } : null,
         guidance: this.input.guidance ?? '',
         language: writingLanguage,
+        creativeSources: creativeContext.sourceContents,
       }, template, 'chapter-expand'),
     ]
     const sourceSnapshot = await this.createSnapshot({

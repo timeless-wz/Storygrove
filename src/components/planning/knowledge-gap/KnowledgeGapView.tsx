@@ -18,7 +18,7 @@ import { usePlanningBackPath } from '../planning-navigation'
 import { Button } from '../../ui/Button'
 import { Input } from '../../ui/Input'
 import { NativeSelect } from '../../ui/NativeSelect'
-import { Textarea } from '../../ui/Textarea'
+import VditorProseEditor from '../../editor/VditorProseEditor'
 import { EmptyState as BaseEmptyState } from '../../ui/EmptyState'
 import { confirm } from '../../ui/Confirm'
 import { toast } from '../../ui/Toast'
@@ -433,7 +433,9 @@ export default function KnowledgeGapView({ projectKey, initialChapterFilter }: K
             <div className="rounded-md border p-3 flex flex-col gap-2 text-xs" style={{ borderColor: 'var(--color-border)' }}>
               <Input value={formTitle} onChange={e => setFormTitle(e.target.value)} placeholder={text('名称', 'Title')} className="h-8 text-xs" data-testid="info-entry-title" />
               <Input value={formSummary} onChange={e => setFormSummary(e.target.value)} placeholder={text('主题说明', 'Summary')} className="h-8 text-xs" />
-              <Textarea value={formTruth} onChange={e => setFormTruth(e.target.value)} rows={3} placeholder={text('实际真相（未决定时留空，不虚构）', 'Actual truth (leave empty if undecided; do not invent)')} className="text-xs" data-testid="info-entry-truth" />
+              <div className="h-[320px] min-h-[240px] rounded-lg border border-[var(--color-border)] overflow-hidden" data-testid="info-entry-truth">
+                <VditorProseEditor content={formTruth} onChange={setFormTruth} placeholder={text('实际真相（未决定时留空，不虚构）。可粘贴完整 Markdown。', 'Actual truth (leave empty if undecided; do not invent). Full Markdown is supported.')} />
+              </div>
               <div className="flex flex-wrap gap-2 items-center">
                 <NativeSelect value={formStatus} onChange={e => setFormStatus(e.target.value as InfoTruthStatus)} className="h-8 text-xs" data-testid="info-entry-status">
                   {(Object.keys(INFO_TRUTH_STATUS_LABEL) as InfoTruthStatus[]).map(status => (
@@ -481,9 +483,9 @@ export default function KnowledgeGapView({ projectKey, initialChapterFilter }: K
                   )}
                   {!editing ? (
                     <>
-                      <div className="whitespace-pre-wrap leading-5 text-[var(--color-text)]" data-testid="info-entry-truth-view">
-                        {selectedEntry.truth.trim() || text('（作者尚未确定真相——不要虚构）', '(The author has not decided the truth — do not invent it)')}
-                      </div>
+                      {selectedEntry.truth.trim()
+                        ? <div className="h-auto min-h-[150px] max-h-[60vh] rounded-lg border border-[var(--color-border)] overflow-auto" data-testid="info-entry-truth-view"><VditorProseEditor content={selectedEntry.truth} editable={false} /></div>
+                        : <div className="leading-5 text-[var(--color-text-secondary)]" data-testid="info-entry-truth-view">{text('（作者尚未确定真相——不要虚构）', '(The author has not decided the truth — do not invent it)')}</div>}
                       {selectedEntry.sourceRefs.length > 0 && (
                         <div className="flex flex-wrap gap-1.5">
                           {selectedEntry.sourceRefs.map((ref, index) => (
@@ -515,7 +517,9 @@ export default function KnowledgeGapView({ projectKey, initialChapterFilter }: K
                     <div className="flex flex-col gap-2">
                       <Input value={formTitle} onChange={e => setFormTitle(e.target.value)} placeholder={text('名称', 'Title')} className="h-8 text-xs" />
                       <Input value={formSummary} onChange={e => setFormSummary(e.target.value)} placeholder={text('主题说明', 'Summary')} className="h-8 text-xs" />
-                      <Textarea value={formTruth} onChange={e => setFormTruth(e.target.value)} rows={3} className="text-xs" placeholder={text('实际真相', 'Actual truth')} />
+                      <div className="h-[320px] min-h-[240px] rounded-lg border border-[var(--color-border)] overflow-hidden" data-testid="info-entry-truth-edit">
+                        <VditorProseEditor content={formTruth} onChange={setFormTruth} placeholder={text('实际真相（未决定时留空）。可粘贴完整 Markdown。', 'Actual truth (leave empty if undecided). Full Markdown is supported.')} />
+                      </div>
                       <div className="flex flex-wrap gap-2 items-center">
                         <NativeSelect value={formStatus} onChange={e => setFormStatus(e.target.value as InfoTruthStatus)} className="h-8 text-xs">
                           {(Object.keys(INFO_TRUTH_STATUS_LABEL) as InfoTruthStatus[]).map(status => (
