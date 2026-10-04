@@ -41,7 +41,7 @@ function RightBarButton({
 
 /**
  * 右侧工具窗口栏（RightToolWindowBar）
- * 紧凑图标栏：上下文检视器 / AI Agent / AI 输出，激活态为 2px 内嵌竖线。
+ * 紧凑图标栏：上下文检视器 / AI Agent / AI 工作流，激活态为 2px 内嵌竖线。
  */
 export default function RightToolWindowBar() {
   const text = useLocaleStore(s => s.text)
@@ -53,7 +53,7 @@ export default function RightToolWindowBar() {
   const toggleReferencePanel = useLayoutStore(s => s.toggleReferencePanel)
   const currentRun = useWorkflowStore((s) => s.currentRun)
 
-  /** 工作流活跃时给 AI 输出按钮显示脉冲 */
+  /** 工作流活跃时给 AI 工作流按钮显示脉冲 */
   const showPulse = currentRun && (currentRun.status === 'running' || currentRun.status === 'waiting')
 
   /** 点击按钮逻辑：
@@ -101,7 +101,7 @@ export default function RightToolWindowBar() {
       />
       <RightBarButton
         icon={Sparkles}
-        label={text('AI 输出', 'AI output')}
+        label={text('AI 工作流', 'AI workflow')}
         active={outputActive}
         onClick={() => handleClick('ai-output')}
         showDot={!!showPulse}

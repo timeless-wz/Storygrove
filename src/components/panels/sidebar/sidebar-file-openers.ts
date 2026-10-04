@@ -4,6 +4,7 @@ import type {
   ProjectSessionContext,
 } from '../../../shared/ipc-channels'
 import type { DraftStatus } from '../../../shared/draft-status'
+import type { BlueprintPlanningSelection } from '../../../shared/blueprint-planning'
 import { ipc } from '../../../services/ipc-client'
 import { useEditorStore } from '../../../stores/editor-store'
 import { useLayoutStore } from '../../../stores/layout-store'
@@ -58,6 +59,11 @@ function isLegacyCharacterGraphPath(filePath: string): boolean {
   return filePath === 'vela://core/characters' || /(^|[/\\])characters\.md$/i.test(filePath)
 }
 
+/** The old synopsis document is now the book-outline selection in the blueprint workspace. */
+function isLegacySynopsisPath(filePath: string): boolean {
+  return filePath === 'vela://core/synopsis' || /(^|[/\\])synopsis\.md$/i.test(filePath)
+}
+
 function redirectToCharacterProfileGraph(): void {
   useLayoutStore.getState().openCharacterProfile('graph')
 }
@@ -66,6 +72,18 @@ function redirectToCharacterProfileGraph(): void {
 export async function openArchFile(filePath: string, name: string): Promise<void> {
   if (isLegacyCharacterGraphPath(filePath)) {
     redirectToCharacterProfileGraph()
+    return
+  }
+  if (isLegacySynopsisPath(filePath)) {
+    openBuiltinEditor(
+      'chapter-card-editor',
+      useLocaleStore.getState().text('章节蓝图', 'Chapter blueprints'),
+      'chapter-card',
+      undefined,
+      undefined,
+      undefined,
+      { kind: 'book' },
+    )
     return
   }
   const projectSession = captureProjectSession(useProjectStore.getState().currentProject)
@@ -127,6 +145,7 @@ export function openBuiltinEditor(
   narrativeThreadView?: 'plot-tree' | 'canvas' | 'plans',
   chapterNumber?: number,
   chapterView?: 'blueprint' | 'canvas',
+  blueprintPlanningSelection?: BlueprintPlanningSelection,
 ): void {
   const projectKey = useProjectStore.getState().currentProject?.path
   useEditorStore.getState().openFile({
@@ -138,6 +157,9 @@ export function openBuiltinEditor(
       : {}),
     ...(type === 'chapter-card' && chapterNumber !== undefined ? { chapterNumber } : {}),
     ...(type === 'chapter-card' && chapterView !== undefined ? { chapterView } : {}),
+    ...(type === 'chapter-card' && blueprintPlanningSelection !== undefined
+      ? { blueprintPlanningSelection }
+      : {}),
     ...(projectKey ? { projectKey } : {}),
   })
 }

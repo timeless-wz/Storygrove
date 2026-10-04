@@ -55,7 +55,7 @@ export default function CharacterCultivationField({ card, onChange }: { card: Ch
   return <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-editor-bg)] p-3 space-y-2" aria-label={text('修炼等级', 'Cultivation level')}>
     <div className="flex flex-wrap items-center justify-between gap-2">
       <h4 className="text-sm font-semibold">{text('修炼等级', 'Cultivation level')}</h4>
-      <Button variant="ghost" onClick={() => session && openCultivationSettings(session.projectPath, text('修炼等级设置', 'Cultivation settings'))}>{text('管理修炼等级', 'Manage cultivation levels')}</Button>
+      <Button variant="ghost" onClick={() => session && openCultivationSettings(session.projectPath, text('修炼体系', 'Cultivation system'))}>{text('管理修炼体系', 'Manage cultivation system')}</Button>
     </div>
     {!ready ? <p role="status" className="text-xs">{store.error ?? text('正在读取修炼体系…', 'Loading cultivation system…')}</p>
       : !levels.length ? <p className="text-xs">{text('尚未设置修炼体系', 'No cultivation system configured')}</p>

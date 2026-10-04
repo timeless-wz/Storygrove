@@ -723,6 +723,7 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
             projectKey={activeTab.projectKey}
             initialChapterNumber={activeTab.chapterNumber}
             initialChapterView={activeTab.chapterView}
+            initialPlanningSelection={activeTab.blueprintPlanningSelection}
             chapterViewRequest={activeTab.chapterViewRequest}
           />
         )}

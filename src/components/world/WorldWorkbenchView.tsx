@@ -8,13 +8,15 @@
  * 事实源是 SQLite（`.vela/vela.db`）：所有写入都通过 `db:world-*` 会话通道
  * 落到主进程仓库；界面只保留表单草稿与当前选中项，绝不并存第二份事实。
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   DoorOpen, Globe2, Link2, MapIcon, Pencil, Plus, ScrollText, ShieldAlert, Trash2,
 } from 'lucide-react'
 
 import type { WorldMap } from '../../shared/world-map'
 import type { WorldDeletePlan } from '../../shared/world-workbench'
+import { WORLD_PORTAL_STATUS_LABELS } from '../../shared/world-workbench'
+import { useStoryTimelineStore } from '../../stores/story-timeline-store'
 import { useLocaleStore } from '../../stores/locale-store'
 import {
   factionsOfWorld,
@@ -23,14 +25,17 @@ import {
   portalsOfWorld,
   relicsOfWorld,
   rulesOfWorld,
+  trailsOfWorld,
   useWorldWorkbenchStore,
   type WorldSectionKey,
 } from '../../stores/world-workbench-store'
 import { useWorldMapStore } from '../../stores/world-map-store'
+import { usePlanningBackPath } from '../planning/planning-navigation'
 import {
-  PlanningEmptyState, PlanningListRow, PlanningPageShell, PlanningPane, PlanningSearch,
+  PlanningEmptyState, PlanningPageShell, PlanningSearch,
 } from '../planning/PlanningPageShell'
 import { Button } from '../ui/Button'
+import { confirm } from '../ui/Confirm'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '../ui/Dialog'
 import { EntityFormDialog, withUnset, type FormFieldOption, type FormValues } from './world-forms'
 import {
@@ -43,120 +48,251 @@ import {
 import { openCharacterEditor, openMapAt } from './world-navigation'
 import WorldPeopleSection from './WorldPeopleSection'
 import WorldEventsSection from './WorldEventsSection'
+import WorldIntroduction from './WorldIntroduction'
+import WorldNavigationPanel from './WorldNavigationPanel'
+import WorldConnectionsSection from './WorldConnectionsSection'
+import type { WorldOverviewConnection, WorldOverviewSummary } from './world-management-contract'
+import './world-workbench-layout.css'
 
 export default function WorldWorkbenchView({ projectKey }: { projectKey: string }) {
   const text = useLocaleStore(s => s.text)
+  const backPath = usePlanningBackPath()
   const data = useWorldWorkbenchStore(s => s.data)
   const loading = useWorldWorkbenchStore(s => s.loading)
+  const loadedProjectKey = useWorldWorkbenchStore(s => s.loadedProjectKey)
+  const lastError = useWorldWorkbenchStore(s => s.lastError)
   const selectedWorldId = useWorldWorkbenchStore(s => s.selectedWorldId)
   const section = useWorldWorkbenchStore(s => s.section)
   const loadAll = useWorldWorkbenchStore(s => s.loadAll)
   const setSelectedWorldId = useWorldWorkbenchStore(s => s.setSelectedWorldId)
   const setSection = useWorldWorkbenchStore(s => s.setSection)
+  const saveWorld = useWorldWorkbenchStore(s => s.saveWorld)
+  const timelineEvents = useStoryTimelineStore(s => s.events)
+  const loadTimeline = useStoryTimelineStore(s => s.loadAll)
 
   const maps = useWorldMapStore(s => s.maps)
   const mapNodes = useWorldMapStore(s => s.nodes)
   const loadMaps = useWorldMapStore(s => s.loadAll)
 
-  const [worldSearch, setWorldSearch] = useState('')
+  const [editRequestToken, setEditRequestToken] = useState(0)
+  const [editingIntroduction, setEditingIntroduction] = useState(false)
+  const [openFormSection, setOpenFormSection] = useState<WorldSectionKey | null>(null)
+  const [savingIntroduction, setSavingIntroduction] = useState(false)
+  const [createRequest, setCreateRequest] = useState<{ section: 'factions' | 'relics'; token: number } | null>(null)
+  const createRequestToken = useRef(0)
+
+  const onFormOpenChange = useCallback((formSection: WorldSectionKey, isOpen: boolean) => {
+    setOpenFormSection(current => isOpen ? formSection : current === formSection ? null : current)
+  }, [])
+
+  const onCreateRequestHandled = useCallback((formSection: 'factions' | 'relics', token: number) => {
+    setCreateRequest(current => current?.section === formSection && current.token === token ? null : current)
+  }, [])
+
+  const onIntroductionEditingChange = useCallback((editing: boolean) => {
+    setEditingIntroduction(editing)
+    if (editing) setEditRequestToken(0)
+  }, [])
 
   useEffect(() => {
     void loadAll(projectKey)
     // 世界页按世界展示地图与地点：读的是同一份地图事实，不是副本。
     void loadMaps(projectKey)
-  }, [projectKey, loadAll, loadMaps])
+    void loadTimeline(projectKey)
+  }, [projectKey, loadAll, loadMaps, loadTimeline])
 
   const selectedWorld = data.worlds.find(world => world.id === selectedWorldId) ?? null
-  const filteredWorlds = useMemo(() => {
-    const keyword = worldSearch.trim().toLocaleLowerCase('zh-CN')
-    if (!keyword) return data.worlds
-    return data.worlds.filter(world => (
-      world.name.toLocaleLowerCase('zh-CN').includes(keyword)
-      || world.summary.toLocaleLowerCase('zh-CN').includes(keyword)
-    ))
-  }, [data.worlds, worldSearch])
+  const loadError = !loading && loadedProjectKey !== projectKey ? lastError : null
+  const linkedMapIds = selectedWorld ? [...new Set(mapsOfWorld(data, selectedWorld.id))] : []
+  const worldFactions = selectedWorld ? factionsOfWorld(data, selectedWorld.id) : []
+  const worldRelics = selectedWorld ? relicsOfWorld(data, selectedWorld.id) : []
+  const worldRules = selectedWorld ? rulesOfWorld(data, selectedWorld.id) : []
+  const worldMembers = selectedWorld ? membersOfWorld(data, selectedWorld.id) : []
+  const worldPortals = selectedWorld ? portalsOfWorld(data, selectedWorld.id) : []
+  const worldEventIds = selectedWorld
+    ? [...new Set(data.eventWorlds.filter(row => row.worldId === selectedWorld.id).map(row => row.eventId))]
+    : []
+  const worldTrails = selectedWorld ? trailsOfWorld(data, selectedWorld.id) : []
+  const overviewSummaries: WorldOverviewSummary[] = selectedWorld ? [
+    {
+      section: 'factions', label: text('势力', 'Factions'), count: worldFactions.length,
+      preview: worldFactions.slice(0, 3).map(faction => faction.name),
+    },
+    {
+      section: 'relics', label: text('秘境', 'Relics'), count: worldRelics.length,
+      preview: worldRelics.slice(0, 3).map(relic => relic.name),
+    },
+    {
+      section: 'maps', label: text('地图与地点', 'Maps & places'), count: linkedMapIds.length,
+      preview: linkedMapIds.slice(0, 3).map(mapId => {
+        const map = maps.find(item => item.id === mapId)
+        if (!map) return text('地图引用缺失', 'Missing map reference')
+        const places = mapNodes.filter(node => node.mapId === mapId).length
+        return text(`${map.name} · ${places} 处地点`, `${map.name} · ${places} places`)
+      }),
+    },
+    {
+      section: 'rules', label: text('本地规则', 'Local rules'), count: worldRules.length,
+      preview: worldRules.slice(0, 3).map(rule => rule.name),
+    },
+    {
+      section: 'characters', label: text('相关人物', 'Related characters'), count: worldMembers.length,
+      preview: worldMembers.slice(0, 3).map(member => (
+        data.characterRefs.find(ref => ref.id === member.characterId)?.name
+          ?? text('人物引用缺失', 'Missing character reference')
+      )),
+    },
+    {
+      section: 'events', label: text('历史事件', 'Historical events'), count: worldEventIds.length,
+      preview: worldEventIds.slice(0, 3).map(eventId => (
+        timelineEvents.find(event => event.id === eventId)?.title
+          ?? text('事件引用缺失', 'Missing event reference')
+      )),
+    },
+    {
+      section: 'portals', label: text('跨世界联系', 'Cross-world links'), count: worldPortals.length,
+      preview: worldPortals.slice(0, 3).map(portal => portal.name),
+    },
+    {
+      section: 'trails', label: text('人物行踪', 'Character trails'), count: worldTrails.length,
+      preview: worldTrails.slice(0, 3).map(trail => trail.arrivedLabel || text('未命名行踪', 'Untitled trail')),
+    },
+  ] : []
+
+  const overviewConnections: WorldOverviewConnection[] = worldPortals.map(portal => ({
+    id: portal.id,
+    name: portal.name,
+    fromWorldId: portal.fromWorldId,
+    fromWorldName: data.worlds.find(world => world.id === portal.fromWorldId)?.name ?? null,
+    toWorldId: portal.toWorldId,
+    toWorldName: data.worlds.find(world => world.id === portal.toWorldId)?.name ?? null,
+    bidirectional: portal.bidirectional,
+    condition: portal.condition,
+    statusLabel: portal.status === 'custom'
+      ? portal.customStatusLabel.trim() || text('状态未填写', 'Status missing')
+      : text(WORLD_PORTAL_STATUS_LABELS[portal.status].zh, WORLD_PORTAL_STATUS_LABELS[portal.status].en),
+  }))
 
   const sections: Array<{ key: WorldSectionKey; label: string; count: number }> = selectedWorld
     ? [
-        { key: 'overview', label: text('概览', 'Overview'), count: 0 },
+        { key: 'overview', label: text('世界介绍', 'Introduction'), count: 0 },
         { key: 'maps', label: text('地图与地点', 'Maps & places'), count: mapsOfWorld(data, selectedWorld.id).length },
         { key: 'factions', label: text('势力', 'Factions'), count: factionsOfWorld(data, selectedWorld.id).length },
         { key: 'relics', label: text('秘境', 'Relics'), count: relicsOfWorld(data, selectedWorld.id).length },
         { key: 'characters', label: text('人物', 'Characters'), count: membersOfWorld(data, selectedWorld.id).length },
-        { key: 'portals', label: text('通道', 'Portals'), count: portalsOfWorld(data, selectedWorld.id).length },
-        { key: 'rules', label: text('规则', 'Rules'), count: rulesOfWorld(data, selectedWorld.id).length },
-        { key: 'events', label: text('历史事件', 'History'), count: data.eventWorlds.filter(row => row.worldId === selectedWorld.id).length },
+        { key: 'portals', label: text('跨世界联系', 'Cross-world links'), count: portalsOfWorld(data, selectedWorld.id).length },
+        { key: 'rules', label: text('本地规则', 'Local rules'), count: rulesOfWorld(data, selectedWorld.id).length },
+        { key: 'events', label: text('历史事件', 'History'), count: worldEventIds.length },
         { key: 'trails', label: text('人物行踪', 'Trails'), count: data.trails.filter(trail => trail.worldId === selectedWorld.id).length },
       ]
     : []
 
+  const confirmDraftExit = async (): Promise<boolean> => {
+    if (!editingIntroduction && !openFormSection) return true
+    const draftName = editingIntroduction
+      ? text('世界介绍', 'World introduction')
+      : sections.find(item => item.key === openFormSection)?.label ?? text('当前分区', 'Current section')
+    return confirm(
+      text(`「${draftName}」还有未保存内容。离开会丢弃这些输入。`, `“${draftName}” has unsaved input. Leaving will discard it.`),
+      {
+        title: text('确认放弃未保存内容', 'Discard unsaved changes?'),
+        confirmText: text('放弃并离开', 'Discard and leave'),
+        danger: true,
+      },
+    )
+  }
+
+  const navigateSection = async (nextSection: WorldSectionKey): Promise<boolean> => {
+    if (nextSection === section) return true
+    if (!await confirmDraftExit()) return false
+    setOpenFormSection(null)
+    setEditingIntroduction(false)
+    setSection(nextSection)
+    return true
+  }
+
+  const selectWorld = async (worldId: string): Promise<void> => {
+    if (worldId === selectedWorldId || !await confirmDraftExit()) return
+    setOpenFormSection(null)
+    setEditingIntroduction(false)
+    setCreateRequest(null)
+    setSelectedWorldId(worldId)
+    setSection('overview')
+  }
+
+  const editIntroduction = async (): Promise<void> => {
+    if (await navigateSection('overview')) setEditRequestToken(token => token + 1)
+  }
+
+  const createInWorld = (target: 'factions' | 'relics'): void => {
+    const token = ++createRequestToken.current
+    setCreateRequest({ section: target, token })
+    setSection(target)
+  }
+
   return (
     <PlanningPageShell
-      breadcrumb={[{ label: text('世界', 'Worlds') }]}
+      breadcrumb={[
+        { label: backPath.overviewLabel, onClick: backPath.openOverview },
+        { label: backPath.storySetupLabel, onClick: backPath.revealStorySetup },
+        { label: backPath.worldSetupLabel, onClick: backPath.revealWorldSetup },
+        { label: text('世界管理', 'World Management') },
+        ...(selectedWorld ? [{ label: selectedWorld.name }] : []),
+      ]}
       icon={<Globe2 size={15} />}
-      title={text('世界', 'Worlds')}
+      title={text('世界管理', 'World Management')}
       description={text(
-        '一本小说可以有多个世界：每个世界分别管理介绍与背景、区域与地点、势力、秘境、人物关联、出生地与目前所在地、关联地图、世界之间的通道、世界规则、重要历史事件与人物行踪。资料保存在项目数据库里，可以相互关联与跳转。',
-        'A novel can hold many worlds. Each world manages its introduction, places, factions, relics, character links, birth and current locations, maps, cross-world portals, rules, historical events, and character trails. All records live in the project database and can be linked and jumped between.',
+        '为每个世界维护介绍、组成与跨世界联系。',
+        'Maintain each world’s introduction, contents, and cross-world links.',
       )}
       meta={text(`${data.worlds.length} 个世界`, `${data.worlds.length} worlds`)}
-      actions={<WorldCreateButton projectKey={projectKey} />}
+      actions={<WorldCreateButton projectKey={projectKey} onCreated={() => setSection('overview')} />}
     >
-      <PlanningPane
-        title={text('世界列表', 'World list')}
-        icon={<Globe2 size={13} />}
-        filters={<PlanningSearch value={worldSearch} onChange={setWorldSearch} placeholder={text('搜索世界', 'Search worlds')} />}
-      >
-        {loading && data.worlds.length === 0 && (
-          <p className="px-1 py-2 text-xs text-[var(--color-text-muted)]">{text('载入中…', 'Loading…')}</p>
-        )}
-        {!loading && data.worlds.length === 0 && (
-          <p className="px-1 py-2 text-xs text-[var(--color-text-muted)]">
-            {text('还没有世界。用右上角「新建世界」创建第一个。', 'No worlds yet. Use “New world” above to create the first one.')}
-          </p>
-        )}
-        {data.worlds.length > 0 && filteredWorlds.length === 0 && (
-          <p className="px-1 py-2 text-xs text-[var(--color-text-muted)]">{text('没有匹配的世界。', 'No matching worlds.')}</p>
-        )}
-        {filteredWorlds.map(world => (
-          <PlanningListRow
-            key={world.id}
-            selected={world.id === selectedWorldId}
-            onSelect={() => setSelectedWorldId(world.id)}
-            icon={<Globe2 size={13} />}
-            title={world.name}
-            subtitle={world.summary || text('暂无简介', 'No summary')}
-            trailing={<span className="planning-tag">{factionsOfWorld(data, world.id).length}</span>}
-            testId={`world-list-row-${world.id}`}
-          />
-        ))}
-      </PlanningPane>
+      <div className="world-workbench-layout">
+        <WorldNavigationPanel
+          worlds={data.worlds}
+          selectedWorldId={selectedWorldId}
+          loading={loading}
+          loadError={loadError}
+          onSelect={selectWorld}
+          onRetry={() => void loadAll(projectKey)}
+        />
 
-      <main className="planning-page__main">
+        <main className="planning-page__main">
         {!selectedWorld && (
           <div className="planning-page__scroll">
             <PlanningEmptyState
               variant="card"
               icon={<Globe2 size={22} />}
-              title={data.worlds.length === 0
+              title={loading && data.worlds.length === 0
+                ? text('正在载入世界管理', 'Loading world management')
+                : loadError
+                  ? text('无法载入世界管理', 'World management could not be loaded')
+                  : data.worlds.length === 0
                 ? text('还没有任何世界', 'No worlds yet')
                 : text('未选择世界', 'No world selected')}
-              description={text(
-                '世界是小说设定实体：它可以没有地图，也可以有多张地图。势力、秘境、规则与历史事件都挂在具体的世界上。',
-                'A world is a setting entity: it may have no maps or many. Factions, relics, rules, and historical events belong to a specific world.',
+              description={loadError ?? text(
+                '世界可以没有地图，也可以有多张地图；势力、秘境、规则与历史事件都关联到具体世界。',
+                'A world may have no maps or many. Factions, relics, rules, and historical events belong to a specific world.',
               )}
               steps={[
-                text('创建世界并填写名称与背景', 'Create a world with a name and background'),
+                text('创建世界，再按需填写介绍', 'Create a world and add its introduction when ready'),
                 text('按需关联地图，地图里的地点会自动归属这个世界', 'Link maps; their places then belong to this world'),
                 text('在各自分区录入势力、秘境、通道、规则与历史事件', 'Fill in factions, relics, portals, rules, and events per section'),
               ]}
-              actions={<WorldCreateButton projectKey={projectKey} />}
+              actions={loadError ? <Button size="sm" variant="outline" onClick={() => void loadAll(projectKey)}>{text('重试', 'Retry')}</Button> : undefined}
             />
           </div>
         )}
 
         {selectedWorld && (
           <>
+            <WorldHeaderCard
+              projectKey={projectKey}
+              worldId={selectedWorld.id}
+              worldName={selectedWorld.name}
+              onEditIntroduction={() => void editIntroduction()}
+            />
             <div className="flex h-9 flex-shrink-0 items-center gap-1 overflow-x-auto border-b border-[var(--color-border)] bg-[var(--color-panel)] px-2">
               {sections.map(item => (
                 <button
@@ -164,7 +300,7 @@ export default function WorldWorkbenchView({ projectKey }: { projectKey: string 
                   type="button"
                   className={`planning-chip${item.key === section ? ' is-active' : ''}`}
                   aria-pressed={item.key === section}
-                  onClick={() => setSection(item.key)}
+                  onClick={() => void navigateSection(item.key)}
                   data-testid={`world-section-${item.key}`}
                 >
                   {item.label}
@@ -174,16 +310,53 @@ export default function WorldWorkbenchView({ projectKey }: { projectKey: string 
             </div>
             <div className="planning-page__scroll">
               <div className="space-y-4 p-4">
-                <WorldHeaderCard projectKey={projectKey} worldId={selectedWorld.id} />
-                <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
-                  {sections.find(item => item.key === section)?.label}
-                </h2>
-                {section === 'overview' && <WorldOverviewSection worldId={selectedWorld.id} maps={maps} />}
+                {section !== 'overview' && (
+                  <h2 className="text-xs font-semibold text-[var(--color-text-muted)]">
+                    {sections.find(item => item.key === section)?.label}
+                  </h2>
+                )}
+                {section === 'overview' && (
+                  <WorldIntroduction
+                    world={selectedWorld}
+                    summaries={overviewSummaries}
+                    connections={overviewConnections}
+                    editRequestToken={editRequestToken}
+                    saving={savingIntroduction}
+                    saveError={lastError}
+                    onSave={async updates => {
+                      setSavingIntroduction(true)
+                      try {
+                        return await saveWorld({ ...selectedWorld, ...updates }, projectKey)
+                      } finally {
+                        setSavingIntroduction(false)
+                      }
+                    }}
+                    onNavigate={next => { void navigateSection(next) }}
+                    onCreate={createInWorld}
+                    onEditingChange={onIntroductionEditingChange}
+                  />
+                )}
                 {section === 'maps' && <WorldMapsSection projectKey={projectKey} worldId={selectedWorld.id} maps={maps} mapNodes={mapNodes} />}
-                {section === 'factions' && <FactionSection projectKey={projectKey} worldId={selectedWorld.id} />}
-                {section === 'relics' && <RelicSection projectKey={projectKey} worldId={selectedWorld.id} />}
-                {section === 'portals' && <PortalSection projectKey={projectKey} worldId={selectedWorld.id} />}
-                {section === 'rules' && <RuleSection projectKey={projectKey} worldId={selectedWorld.id} />}
+                {section === 'factions' && (
+                  <FactionSection
+                    projectKey={projectKey}
+                    worldId={selectedWorld.id}
+                    createRequestToken={createRequest?.section === 'factions' ? createRequest.token : null}
+                    onCreateRequestHandled={onCreateRequestHandled}
+                    onFormOpenChange={onFormOpenChange}
+                  />
+                )}
+                {section === 'relics' && (
+                  <RelicSection
+                    projectKey={projectKey}
+                    worldId={selectedWorld.id}
+                    createRequestToken={createRequest?.section === 'relics' ? createRequest.token : null}
+                    onCreateRequestHandled={onCreateRequestHandled}
+                    onFormOpenChange={onFormOpenChange}
+                  />
+                )}
+                {section === 'portals' && <PortalSection projectKey={projectKey} worldId={selectedWorld.id} onFormOpenChange={onFormOpenChange} />}
+                {section === 'rules' && <RuleSection projectKey={projectKey} worldId={selectedWorld.id} onFormOpenChange={onFormOpenChange} />}
                 {section === 'characters' && <WorldPeopleSection projectKey={projectKey} worldId={selectedWorld.id} />}
                 {section === 'events' && <WorldEventsSection projectKey={projectKey} worldId={selectedWorld.id} />}
                 {section === 'trails' && <WorldPeopleSection projectKey={projectKey} worldId={selectedWorld.id} trailsOnly />}
@@ -191,7 +364,8 @@ export default function WorldWorkbenchView({ projectKey }: { projectKey: string 
             </div>
           </>
         )}
-      </main>
+        </main>
+      </div>
     </PlanningPageShell>
   )
 }
@@ -285,7 +459,7 @@ export function DeletePlanDialog({
   )
 }
 
-function WorldCreateButton({ projectKey }: { projectKey: string }) {
+function WorldCreateButton({ projectKey, onCreated }: { projectKey: string; onCreated: () => void }) {
   const text = useLocaleStore(s => s.text)
   const saveWorld = useWorldWorkbenchStore(s => s.saveWorld)
   const [open, setOpen] = useState(false)
@@ -302,7 +476,11 @@ function WorldCreateButton({ projectKey }: { projectKey: string }) {
       notes: String(submitted.notes ?? ''),
     }, projectKey)
     setSaving(false)
-    if (saved) { setValues({ name: '', summary: '', background: '', notes: '' }); setOpen(false) }
+    if (saved) {
+      setValues({ name: '', summary: '', background: '', notes: '' })
+      setOpen(false)
+      onCreated()
+    }
   }
 
   return (
@@ -329,219 +507,41 @@ function WorldCreateButton({ projectKey }: { projectKey: string }) {
   )
 }
 
-function WorldHeaderCard({ projectKey, worldId }: { projectKey: string; worldId: string }) {
-  const text = useLocaleStore(s => s.text)
-  const data = useWorldWorkbenchStore(s => s.data)
-  const saveWorld = useWorldWorkbenchStore(s => s.saveWorld)
-  const deleteWorld = useWorldWorkbenchStore(s => s.deleteWorld)
-  const planWorldDelete = useWorldWorkbenchStore(s => s.planWorldDelete)
-  const world = data.worlds.find(item => item.id === worldId)
-  const [editing, setEditing] = useState(false)
-  const [plan, setPlan] = useState<WorldDeletePlan | null>(null)
-
-  if (!world) {
-    return (
-      <div className="rounded border border-[var(--color-border)] bg-[var(--color-panel)] p-3">
-        <PlanningEmptyState
-          variant="card"
-          icon={<ShieldAlert size={20} />}
-          title={text('这个世界不存在', 'This world no longer exists')}
-          description={text('它可能已在别处被删除。请从左侧重新选择世界。', 'It may have been deleted elsewhere. Pick another world on the left.')}
-        />
-      </div>
-    )
-  }
-
-  return (
-    <div className="rounded border border-[var(--color-border)] bg-[var(--color-panel)] p-3">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <h1 className="truncate text-sm font-semibold text-[var(--color-text)]" data-testid="world-title">{world.name}</h1>
-          {world.summary && <p className="mt-1 text-xs text-[var(--color-text-secondary)]">{world.summary}</p>}
-        </div>
-        <div className="flex flex-shrink-0 gap-1">
-          <Button size="sm" variant="outline" onClick={() => setEditing(value => !value)} title={text('编辑世界资料', 'Edit world')}>
-            <Pencil size={13} />{text('编辑', 'Edit')}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => void planWorldDelete(worldId, projectKey).then(setPlan)}
-            title={text('查看删除影响', 'Delete impact')}
-          >
-            <Trash2 size={13} />{text('删除', 'Delete')}
-          </Button>
-        </div>
-      </div>
-
-      {editing && (
-        <WorldEditForm
-          projectKey={projectKey}
-          worldId={worldId}
-          onDone={() => setEditing(false)}
-          onSave={payload => void saveWorld(payload, projectKey).then(saved => { if (saved) setEditing(false) })}
-        />
-      )}
-
-      <DeletePlanDialog plan={plan} onClose={() => setPlan(null)} onConfirm={() => void deleteWorld(worldId, projectKey)} />
-    </div>
-  )
-}
-
-function WorldEditForm({
-  worldId, projectKey, onSave, onDone,
+function WorldHeaderCard({
+  projectKey, worldId, worldName, onEditIntroduction,
 }: {
-  worldId: string
   projectKey: string
-  onSave: (payload: { id: string; name: string; summary: string; background: string; notes: string }) => void
-  onDone: () => void
+  worldId: string
+  worldName: string
+  onEditIntroduction: () => void
 }) {
   const text = useLocaleStore(s => s.text)
-  const data = useWorldWorkbenchStore(s => s.data)
-  const world = data.worlds.find(item => item.id === worldId)
-  const [values, setValues] = useState<FormValues>({
-    name: world?.name ?? '', summary: world?.summary ?? '', background: world?.background ?? '', notes: world?.notes ?? '',
-  })
-
-  useEffect(() => {
-    setValues({
-      name: world?.name ?? '', summary: world?.summary ?? '', background: world?.background ?? '', notes: world?.notes ?? '',
-    })
-  }, [world])
-
-  useEffect(() => { void projectKey }, [projectKey])
+  const deleteWorld = useWorldWorkbenchStore(s => s.deleteWorld)
+  const planWorldDelete = useWorldWorkbenchStore(s => s.planWorldDelete)
+  const [plan, setPlan] = useState<WorldDeletePlan | null>(null)
 
   return (
-    <div className="mt-3 space-y-2">
-      {([
-        ['name', text('名称', 'Name')],
-        ['summary', text('简介', 'Summary')],
-        ['background', text('详细背景', 'Background')],
-        ['notes', text('备注', 'Notes')],
-      ] as const).map(([key, label]) => (
-        <div key={key}>
-          <label className="block text-[11px] text-[var(--color-text-secondary)]" htmlFor={`world-edit-${key}`}>{label}</label>
-          {key === 'name' || key === 'summary' ? (
-            <input
-              id={`world-edit-${key}`}
-              className="w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs text-[var(--color-text)]"
-              value={String(values[key] ?? '')}
-              onChange={event => setValues(previous => ({ ...previous, [key]: event.target.value }))}
-            />
-          ) : (
-            <textarea
-              id={`world-edit-${key}`}
-              rows={3}
-              className="w-full rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs text-[var(--color-text)]"
-              value={String(values[key] ?? '')}
-              onChange={event => setValues(previous => ({ ...previous, [key]: event.target.value }))}
-            />
-          )}
-        </div>
-      ))}
-      <div className="flex gap-2">
+    <header className="flex min-h-12 flex-shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-panel)] px-3 py-2">
+      <h2 className="min-w-0 truncate text-sm font-semibold text-[var(--color-text)]" data-testid="world-title" title={worldName}>
+        {worldName}
+      </h2>
+      <div className="flex flex-shrink-0 items-center gap-1">
+        <Button size="sm" variant="outline" onClick={onEditIntroduction} title={text('编辑世界介绍', 'Edit world introduction')}>
+          <Pencil size={13} />{text('编辑世界介绍', 'Edit introduction')}
+        </Button>
         <Button
           size="sm"
-          disabled={!String(values.name ?? '').trim()}
-          onClick={() => onSave({
-            id: worldId,
-            name: String(values.name ?? ''),
-            summary: String(values.summary ?? ''),
-            background: String(values.background ?? ''),
-            notes: String(values.notes ?? ''),
-          })}
+          variant="ghost"
+          onClick={() => void planWorldDelete(worldId, projectKey).then(setPlan)}
+          title={text('查看删除影响', 'Delete impact')}
         >
-          {text('保存', 'Save')}
+          <Trash2 size={13} />{text('删除世界', 'Delete world')}
         </Button>
-        <Button size="sm" variant="ghost" onClick={onDone}>{text('取消', 'Cancel')}</Button>
       </div>
-    </div>
+      <DeletePlanDialog plan={plan} onClose={() => setPlan(null)} onConfirm={() => void deleteWorld(worldId, projectKey)} />
+    </header>
   )
 }
-
-// ============================================================
-// 概览
-// ============================================================
-
-function WorldOverviewSection({ worldId, maps }: { worldId: string; maps: WorldMap[] }) {
-  const text = useLocaleStore(s => s.text)
-  const data = useWorldWorkbenchStore(s => s.data)
-  const world = data.worlds.find(item => item.id === worldId)
-  if (!world) return null
-  const linkedMapIds = mapsOfWorld(data, worldId)
-  const linkedMaps = linkedMapIds.map(mapId => maps.find(map => map.id === mapId)).filter(Boolean) as WorldMap[]
-
-  return (
-    <div className="space-y-3">
-      <SectionShell
-        icon={<Globe2 size={13} />}
-        title={text('世界资料', 'World record')}
-        description={text('作者手写的介绍与背景。', 'Author-written summary and background.')}
-        testId="world-overview-record"
-      >
-        {world.summary || world.background || world.notes ? (
-          <div className="space-y-2 text-xs text-[var(--color-text)]">
-            {world.summary && <p><span className="text-[var(--color-text-muted)]">{text('简介：', 'Summary: ')}</span>{world.summary}</p>}
-            {world.background && <p className="whitespace-pre-wrap"><span className="text-[var(--color-text-muted)]">{text('背景：', 'Background: ')}</span>{world.background}</p>}
-            {world.notes && <p className="whitespace-pre-wrap"><span className="text-[var(--color-text-muted)]">{text('备注：', 'Notes: ')}</span>{world.notes}</p>}
-          </div>
-        ) : (
-          <EmptyHint>{text('还没有填写介绍。用上方的「编辑」补充。', 'No introduction yet. Use “Edit” above.')}</EmptyHint>
-        )}
-      </SectionShell>
-
-      <SectionShell
-        icon={<MapIcon size={13} />}
-        title={text('关联地图', 'Linked maps')}
-        description={text('一个世界可以有多张地图；地图里的地点由地图归属决定世界。', 'A world can have several maps; each map’s places belong to that world.')}
-      >
-        {linkedMaps.length === 0 ? (
-          <EmptyHint>{text('还没有关联地图。到「地图与地点」分区把地图关联到这个世界。', 'No maps linked yet. Link one in “Maps & places”.')}</EmptyHint>
-        ) : (
-          <ul className="flex flex-wrap gap-1">
-            {linkedMaps.map(map => (
-              <li key={map.id}>
-                <button
-                  type="button"
-                  className="planning-tag is-accent"
-                  onClick={() => openMapAt(map.id, null)}
-                  title={text('在地图册中打开这张地图', 'Open this map in the atlas')}
-                >
-                  <MapIcon size={11} /> {map.name}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </SectionShell>
-
-      <SectionShell
-        icon={<ShieldAlert size={13} />}
-        title={text('资料规模', 'Record counts')}
-        description={text('各分区当前属于这个世界的资料数量。', 'How many records belong to this world per section.')}
-      >
-        <ul className="flex flex-wrap gap-2 text-xs">
-          {([
-            [text('地图', 'Maps'), linkedMapIds.length],
-            [text('势力', 'Factions'), factionsOfWorld(data, worldId).length],
-            [text('秘境', 'Relics'), relicsOfWorld(data, worldId).length],
-            [text('人物', 'Characters'), membersOfWorld(data, worldId).length],
-            [text('通道', 'Portals'), portalsOfWorld(data, worldId).length],
-            [text('规则', 'Rules'), rulesOfWorld(data, worldId).length],
-            [text('历史事件', 'Events'), data.eventWorlds.filter(row => row.worldId === worldId).length],
-            [text('行踪', 'Trails'), data.trails.filter(trail => trail.worldId === worldId).length],
-          ] as const).map(([label, count]) => (
-            <li key={label} className="rounded border border-[var(--color-border)] px-2 py-1">
-              {label}：<strong>{count}</strong>
-            </li>
-          ))}
-        </ul>
-      </SectionShell>
-    </div>
-  )
-}
-
-// ============================================================
 // 地图与地点
 // ============================================================
 
@@ -749,7 +749,15 @@ function MapAssignmentDialog({
 // 势力
 // ============================================================
 
-function FactionSection({ projectKey, worldId }: { projectKey: string; worldId: string }) {
+function FactionSection({
+  projectKey, worldId, createRequestToken, onCreateRequestHandled, onFormOpenChange,
+}: {
+  projectKey: string
+  worldId: string
+  createRequestToken: number | null
+  onCreateRequestHandled: (section: 'factions', token: number) => void
+  onFormOpenChange: (section: WorldSectionKey, isOpen: boolean) => void
+}) {
   const text = useLocaleStore(s => s.text)
   const data = useWorldWorkbenchStore(s => s.data)
   const saveFaction = useWorldWorkbenchStore(s => s.saveFaction)
@@ -761,6 +769,17 @@ function FactionSection({ projectKey, worldId }: { projectKey: string; worldId: 
   const [saving, setSaving] = useState(false)
   const [plan, setPlan] = useState<WorldDeletePlan | null>(null)
   const [detachEvents, setDetachEvents] = useState(false)
+  const currentWorldName = data.worlds.find(world => world.id === worldId)?.name
+
+  useEffect(() => {
+    onFormOpenChange('factions', editing !== null)
+  }, [editing, onFormOpenChange])
+
+  useEffect(() => {
+    if (createRequestToken === null) return
+    setEditing('new')
+    onCreateRequestHandled('factions', createRequestToken)
+  }, [createRequestToken, onCreateRequestHandled])
 
   const nodeOptions = useNodeOptions(worldId, data.mapWorldLinks)
   const characterOptions = data.characterRefs.map(ref => ({ value: ref.id, label: ref.name }))
@@ -817,7 +836,6 @@ function FactionSection({ projectKey, worldId }: { projectKey: string; worldId: 
                   projectKey={projectKey}
                   worldId={worldId}
                   factionId={faction.id}
-                  factions={factions}
                   nodeOptions={nodeOptions}
                   characterOptions={characterOptions}
                 />
@@ -830,6 +848,10 @@ function FactionSection({ projectKey, worldId }: { projectKey: string; worldId: 
       <EntityFormDialog
         open={editing !== null}
         title={current ? text('编辑势力', 'Edit faction') : text('新建势力', 'New faction')}
+        description={text(
+          `所属世界：${currentWorldName ?? '世界引用缺失'}`,
+          `Belongs to: ${currentWorldName ?? 'Missing world reference'}`,
+        )}
         fields={factionFields(text, nodeOptions, characterOptions)}
         initialValues={factionDefaults(current)}
         saving={saving}
@@ -861,12 +883,11 @@ function FactionSection({ projectKey, worldId }: { projectKey: string; worldId: 
 
 /** 势力详情：驻地地点、人物身份、势力关系与掌控的秘境。 */
 function FactionRelations({
-  projectKey, worldId, factionId, factions, nodeOptions, characterOptions,
+  projectKey, worldId, factionId, nodeOptions, characterOptions,
 }: {
   projectKey: string
   worldId: string
   factionId: string
-  factions: ReturnType<typeof factionsOfWorld>
   nodeOptions: FormFieldOption[]
   characterOptions: FormFieldOption[]
 }) {
@@ -884,8 +905,22 @@ function FactionRelations({
   const relics = data.relicFactions.filter(link => link.factionId === factionId)
   const nodeName = (id: string) => nodes.find(node => node.id === id)?.name ?? id
   const characterName = (id: string) => data.characterRefs.find(ref => ref.id === id)?.name ?? id
-  const factionName = (id: string) => data.factions.find(item => item.id === id)?.name ?? id
-  const otherFactions = factions.filter(item => item.id !== factionId).map(item => ({ value: item.id, label: item.name }))
+  const factionName = (id: string) => {
+    const relatedFaction = data.factions.find(item => item.id === id)
+    if (!relatedFaction) return text(`势力引用缺失（${id}）`, `Missing faction reference (${id})`)
+    if (relatedFaction.worldId === worldId) return relatedFaction.name
+    const owner = data.worlds.find(item => item.id === relatedFaction.worldId)
+    return owner
+      ? `${relatedFaction.name}（${owner.name}）`
+      : `${relatedFaction.name}（${text('世界引用缺失', 'Missing world reference')}）`
+  }
+  const otherFactions = data.factions.filter(item => item.id !== factionId).map(item => {
+    const owner = data.worlds.find(world => world.id === item.worldId)
+    const label = item.worldId === worldId
+      ? item.name
+      : `${item.name}（${owner?.name ?? text('世界引用缺失', 'Missing world reference')}）`
+    return { value: item.id, label }
+  })
 
   const [placeNode, setPlaceNode] = useState('')
   const [memberCharacter, setMemberCharacter] = useState('')
@@ -1037,7 +1072,15 @@ function openCharacterEditorFor(): void {
 // 秘境
 // ============================================================
 
-function RelicSection({ projectKey, worldId }: { projectKey: string; worldId: string }) {
+function RelicSection({
+  projectKey, worldId, createRequestToken, onCreateRequestHandled, onFormOpenChange,
+}: {
+  projectKey: string
+  worldId: string
+  createRequestToken: number | null
+  onCreateRequestHandled: (section: 'relics', token: number) => void
+  onFormOpenChange: (section: WorldSectionKey, isOpen: boolean) => void
+}) {
   const text = useLocaleStore(s => s.text)
   const data = useWorldWorkbenchStore(s => s.data)
   const saveRelic = useWorldWorkbenchStore(s => s.saveRelic)
@@ -1048,6 +1091,17 @@ function RelicSection({ projectKey, worldId }: { projectKey: string; worldId: st
   const [editing, setEditing] = useState<string | null | 'new'>(null)
   const [saving, setSaving] = useState(false)
   const [plan, setPlan] = useState<WorldDeletePlan | null>(null)
+  const currentWorldName = data.worlds.find(world => world.id === worldId)?.name
+
+  useEffect(() => {
+    onFormOpenChange('relics', editing !== null)
+  }, [editing, onFormOpenChange])
+
+  useEffect(() => {
+    if (createRequestToken === null) return
+    setEditing('new')
+    onCreateRequestHandled('relics', createRequestToken)
+  }, [createRequestToken, onCreateRequestHandled])
   const nodeOptions = useNodeOptions(worldId, data.mapWorldLinks)
   const current = typeof editing === 'string' && editing !== 'new' ? data.relics.find(item => item.id === editing) ?? null : null
 
@@ -1129,6 +1183,10 @@ function RelicSection({ projectKey, worldId }: { projectKey: string; worldId: st
       <EntityFormDialog
         open={editing !== null}
         title={current ? text('编辑秘境', 'Edit relic') : text('新建秘境', 'New relic')}
+        description={text(
+          `所属世界：${currentWorldName ?? '世界引用缺失'}`,
+          `Belongs to: ${currentWorldName ?? 'Missing world reference'}`,
+        )}
         fields={relicFields(text, nodeOptions)}
         initialValues={relicDefaults(current)}
         saving={saving}
@@ -1235,96 +1293,88 @@ function RelicLinks({
 // 通道
 // ============================================================
 
-function PortalSection({ projectKey, worldId }: { projectKey: string; worldId: string }) {
+function PortalSection({ projectKey, worldId, onFormOpenChange }: {
+  projectKey: string
+  worldId: string
+  onFormOpenChange: (section: WorldSectionKey, isOpen: boolean) => void
+}) {
   const text = useLocaleStore(s => s.text)
   const data = useWorldWorkbenchStore(s => s.data)
   const savePortal = useWorldWorkbenchStore(s => s.savePortal)
   const deletePortal = useWorldWorkbenchStore(s => s.deletePortal)
   const planDeleteFor = useWorldWorkbenchStore(s => s.planDeleteFor)
   const portals = portalsOfWorld(data, worldId)
+  const nodes = useWorldMapStore(s => s.nodes)
   const [editing, setEditing] = useState<string | null | 'new'>(null)
   const [saving, setSaving] = useState(false)
   const [plan, setPlan] = useState<WorldDeletePlan | null>(null)
   const worldOptions = data.worlds.map(world => ({ value: world.id, label: world.name }))
+  const currentWorldName = data.worlds.find(world => world.id === worldId)?.name
   const current = typeof editing === 'string' && editing !== 'new' ? data.portals.find(item => item.id === editing) ?? null : null
   const nodesForWorld = (worldIdValue: string) => data.mapWorldLinks
     .filter(link => link.worldId === worldIdValue)
-    .flatMap(link => useWorldMapStore.getState().nodes.filter(node => node.mapId === link.mapId)
+    .flatMap(link => nodes.filter(node => node.mapId === link.mapId)
       .map(node => ({ value: node.id, label: node.name })))
+
+  useEffect(() => {
+    onFormOpenChange('portals', editing !== null)
+  }, [editing, onFormOpenChange])
 
   return (
     <div className="space-y-3">
       <SectionShell
         icon={<DoorOpen size={13} />}
-        title={text('世界之间的通道', 'Portals between worlds')}
-        description={text('通道是独立资料，不是地图连线；两端世界都能看到同一条通道，方向明确显示。', 'A portal is its own record, not a map edge. Both worlds see the same portal, and its direction is explicit.')}
+        title={text('跨世界联系', 'Cross-world links')}
+        description={text('通道是独立资料，不是地图连线；来源世界与目标世界都能看到同一条通道，方向和入口、出口明确显示。', 'Portals are separate records, not map edges. Both endpoint worlds see the same connection with direction, entry, and exit.')}
         actions={<Button size="sm" onClick={() => setEditing('new')}><Plus size={13} />{text('新建通道', 'New portal')}</Button>}
         testId="world-portals"
       >
-        {portals.length === 0 ? (
-          <EmptyHint>{text('还没有世界通道。', 'No portals yet.')}</EmptyHint>
-        ) : (
-          <ul className="space-y-1 text-xs">
-            {portals.map(portal => {
-              const fromName = data.worlds.find(world => world.id === portal.fromWorldId)?.name ?? portal.fromWorldId
-              const toName = data.worlds.find(world => world.id === portal.toWorldId)?.name ?? portal.toWorldId
-              const guardianLinks = data.portalCharacters.filter(link => link.portalId === portal.id)
-              const endpointNode = (id: string | null) => (id ? useWorldMapStore.getState().nodes.find(node => node.id === id) ?? null : null)
-              const fromNode = endpointNode(portal.fromNodeId)
-              const toNode = endpointNode(portal.toNodeId)
-              return (
-                <li key={portal.id} className="rounded border border-[var(--color-border)] px-2 py-1" data-testid={`world-portal-${portal.id}`}>
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="min-w-0 font-medium text-[var(--color-text)]">
-                      {portal.name}
-                      <span className="ml-2 text-[11px] text-[var(--color-text-muted)]">
-                        {portal.bidirectional
-                          ? text(`${fromName} ↔ ${toName}（双向通行）`, `${fromName} ↔ ${toName} (both ways)`)
-                          : text(`${fromName} → ${toName}（单向通行，反向不可走）`, `${fromName} → ${toName} (one way only; the reverse is not passable)`)}
-                      </span>
-                    </p>
-                    <span className="flex flex-shrink-0 gap-1">
-                      <Button size="sm" variant="ghost" onClick={() => setEditing(portal.id)} title={text('编辑通道', 'Edit portal')}><Pencil size={12} /></Button>
-                      <Button size="sm" variant="ghost" onClick={() => void planDeleteFor('portal', portal.id).then(setPlan)} title={text('删除通道', 'Delete portal')}><Trash2 size={12} /></Button>
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-[var(--color-text-muted)]">
-                    {text('端点：', 'Endpoints: ')}
-                    {fromNode
-                      ? <button type="button" className="text-[var(--color-accent)]" onClick={() => openMapAt(fromNode.mapId, fromNode.id)}>{fromNode.name}</button>
-                      : text('入口地点未设定', 'entry place not set')}
-                    {' → '}
-                    {toNode
-                      ? <button type="button" className="text-[var(--color-accent)]" onClick={() => openMapAt(toNode.mapId, toNode.id)}>{toNode.name}</button>
-                      : text('出口地点未设定', 'exit place not set')}
-                  </p>
-                  {portal.condition && <p className="text-[11px] text-[var(--color-text-muted)]">{text('通行条件：', 'Condition: ')}{portal.condition}</p>}
-                  <PortalLinks
-                    projectKey={projectKey}
-                    worldId={worldId}
-                    portalId={portal.id}
-                    controlling={data.portalFactions.filter(link => link.portalId === portal.id).map(link => ({
-                      id: link.id,
-                      name: data.factions.find(faction => faction.id === link.factionId)?.name ?? link.factionId,
-                      relation: relationLabel(link.relation, link.customLabel, RELATION_LABEL_MAPS.portalFaction, text),
-                    }))}
-                    guardians={guardianLinks.map(link => ({
-                      id: link.id,
-                      characterId: link.characterId,
-                      name: data.characterRefs.find(ref => ref.id === link.characterId)?.name ?? link.characterId,
-                      relation: relationLabel(link.relation, link.customLabel, RELATION_LABEL_MAPS.portalCharacter, text),
-                    }))}
-                  />
-                </li>
-              )
-            })}
-          </ul>
-        )}
+        <WorldConnectionsSection
+          worldId={worldId}
+          worlds={data.worlds}
+          portals={portals}
+          nodes={nodes}
+          onEdit={portalId => setEditing(portalId)}
+          onDelete={portalId => { void planDeleteFor('portal', portalId).then(setPlan) }}
+          onOpenMapAt={openMapAt}
+          renderRelations={portal => {
+            const guardianLinks = data.portalCharacters.filter(link => link.portalId === portal.id)
+            return (
+              <PortalLinks
+                projectKey={projectKey}
+                worldId={worldId}
+                portalId={portal.id}
+                controlling={data.portalFactions.filter(link => link.portalId === portal.id).map(link => ({
+                  id: link.id,
+                  name: (() => {
+                    const faction = data.factions.find(item => item.id === link.factionId)
+                    if (!faction) return text(`势力引用缺失（${link.factionId}）`, `Missing faction reference (${link.factionId})`)
+                    if (faction.worldId === worldId) return faction.name
+                    const owner = data.worlds.find(world => world.id === faction.worldId)
+                    return `${faction.name}（${owner?.name ?? text('世界引用缺失', 'Missing world reference')}）`
+                  })(),
+                  relation: relationLabel(link.relation, link.customLabel, RELATION_LABEL_MAPS.portalFaction, text),
+                }))}
+                guardians={guardianLinks.map(link => ({
+                  id: link.id,
+                  characterId: link.characterId,
+                  name: data.characterRefs.find(ref => ref.id === link.characterId)?.name
+                    ?? text(`人物引用缺失（${link.characterId}）`, `Missing character reference (${link.characterId})`),
+                  relation: relationLabel(link.relation, link.customLabel, RELATION_LABEL_MAPS.portalCharacter, text),
+                }))}
+              />
+            )
+          }}
+        />
       </SectionShell>
 
       <EntityFormDialog
         open={editing !== null}
         title={current ? text('编辑通道', 'Edit portal') : text('新建通道', 'New portal')}
+        description={text(
+          `正在维护「${currentWorldName ?? '世界引用缺失'}」相关联系。请检查来源世界与目标世界。`,
+          `Managing connections for “${currentWorldName ?? 'Missing world reference'}”. Check both endpoint worlds before saving.`,
+        )}
         fields={portalFields(text, worldOptions, nodesForWorld)}
         initialValues={portalDefaults(current, worldId)}
         saving={saving}
@@ -1364,7 +1414,7 @@ function PortalLinks({
   const savePortalFaction = useWorldWorkbenchStore(s => s.savePortalFaction)
   const savePortalCharacter = useWorldWorkbenchStore(s => s.savePortalCharacter)
   const deleteRelation = useWorldWorkbenchStore(s => s.deleteRelation)
-  const factions = factionsOfWorld(data, worldId)
+  const factions = data.factions
   const [factionId, setFactionId] = useState('')
   const [characterId, setCharacterId] = useState('')
 
@@ -1386,7 +1436,13 @@ function PortalLinks({
           aria-label={text('选择控制势力', 'Choose a controlling faction')}
         >
           <option value="">{text('添加势力…', 'Add faction…')}</option>
-          {factions.map(faction => <option key={faction.id} value={faction.id}>{faction.name}</option>)}
+          {factions.map(faction => {
+            const owner = data.worlds.find(world => world.id === faction.worldId)
+            const label = faction.worldId === worldId
+              ? faction.name
+              : `${faction.name}（${owner?.name ?? text('世界引用缺失', 'Missing world reference')}）`
+            return <option key={faction.id} value={faction.id}>{label}</option>
+          })}
         </select>
         {factionId && (
           <button
@@ -1435,7 +1491,11 @@ function PortalLinks({
 // 规则
 // ============================================================
 
-function RuleSection({ projectKey, worldId }: { projectKey: string; worldId: string }) {
+function RuleSection({ projectKey, worldId, onFormOpenChange }: {
+  projectKey: string
+  worldId: string
+  onFormOpenChange: (section: WorldSectionKey, isOpen: boolean) => void
+}) {
   const text = useLocaleStore(s => s.text)
   const data = useWorldWorkbenchStore(s => s.data)
   const saveRule = useWorldWorkbenchStore(s => s.saveRule)
@@ -1450,6 +1510,11 @@ function RuleSection({ projectKey, worldId }: { projectKey: string; worldId: str
   const current = typeof editing === 'string' && editing !== 'new' ? data.rules.find(item => item.id === editing) ?? null : null
   const nodeOptions = useNodeOptions(worldId, data.mapWorldLinks)
   const relicOptions = relicsOfWorld(data, worldId).map(relic => ({ value: relic.id, label: relic.name }))
+  const currentWorldName = data.worlds.find(world => world.id === worldId)?.name
+
+  useEffect(() => {
+    onFormOpenChange('rules', editing !== null)
+  }, [editing, onFormOpenChange])
 
   const [targetRuleId, setTargetRuleId] = useState('')
   const [targetKind, setTargetKind] = useState<'node' | 'relic'>('node')
@@ -1460,8 +1525,8 @@ function RuleSection({ projectKey, worldId }: { projectKey: string; worldId: str
     <div className="space-y-3">
       <SectionShell
         icon={<ScrollText size={13} />}
-        title={text('世界规则', 'World rules')}
-        description={text('默认适用整个世界，也可以指定适用地点或秘境，并单独记录例外。这里只做设定管理，不干预正文。', 'Rules apply to the whole world by default, can target places or relics, and can carry explicit exceptions. This is setting management only; it never rewrites prose.')}
+        title={text('本地规则', 'Local rules')}
+        description={text('本世界规则说明：默认适用整个世界，也可以指定适用地点或秘境，并单独记录例外。不会自动继承或覆盖总世界观规则。', 'Rules for this world apply globally by default, or can target places or relics and record exceptions. They do not automatically inherit from or overwrite the project overview.')}
         actions={<Button size="sm" onClick={() => setEditing('new')}><Plus size={13} />{text('新建规则', 'New rule')}</Button>}
         testId="world-rules"
       >
@@ -1572,7 +1637,11 @@ function RuleSection({ projectKey, worldId }: { projectKey: string; worldId: str
 
       <EntityFormDialog
         open={editing !== null}
-        title={current ? text('编辑规则', 'Edit rule') : text('新建规则', 'New rule')}
+        title={current ? text('编辑本地规则', 'Edit local rule') : text('新建本地规则', 'New local rule')}
+        description={text(
+          `所属世界：${currentWorldName ?? '世界引用缺失'}`,
+          `Belongs to: ${currentWorldName ?? 'Missing world reference'}`,
+        )}
         fields={ruleFields(text, nodeOptions)}
         initialValues={ruleDefaults(current)}
         saving={saving}

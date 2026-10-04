@@ -8,7 +8,7 @@ import { useCharacterStore } from './character-store'
 import { useEditorStore } from './editor-store'
 import { parseProjectEditorDraftLedger, recordProjectEditorEdit, rebaseProjectEditorDraft, persistProjectEditorDraftLedger, settleProjectEditorSave } from './project-editor-draft-ledger'
 
-const TAB = { id: 'cultivation-settings', type: 'cultivation' as const, name: '修炼等级设置' }
+const TAB = { id: 'cultivation-settings', type: 'cultivation' as const, name: '修炼体系' }
 let loadSequence = 0
 function ledger() { return parseProjectEditorDraftLedger<CultivationRealm[]>(useEditorStore.getState().draftLedgers[TAB.id]) }
 function persist(value: ReturnType<typeof ledger>) { persistProjectEditorDraftLedger(useEditorStore.getState(), TAB, value) }

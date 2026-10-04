@@ -146,7 +146,7 @@ describe('architecture workflow project context', () => {
       description: 'Refine the story premise and its core appeal',
     })
     expect(workflow.onComplete?.message).toBe(
-      'Story architecture is ready. Open Story Architecture from the sidebar.',
+      'Story setup is ready. Open the Basic settings overview to review and edit it.',
     )
   })
 

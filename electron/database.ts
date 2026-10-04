@@ -361,6 +361,59 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+    -- 三层蓝图规划的新增数据表。旧 synopsis、卷目录与章归属不在此迁移中回写。
+    CREATE TABLE IF NOT EXISTS blueprint_volume_outlines (
+      volume_id TEXT PRIMARY KEY,
+      schema_version INTEGER NOT NULL DEFAULT 1,
+      markdown TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      content_hash TEXT NOT NULL,
+      origin TEXT NOT NULL,
+      source_snapshot_id TEXT DEFAULT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS blueprint_planning_candidates (
+      operation_id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      scope_json TEXT NOT NULL,
+      state TEXT NOT NULL,
+      schema_version INTEGER NOT NULL,
+      payload_hash TEXT NOT NULL,
+      candidate_json TEXT NOT NULL,
+      source_snapshot_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      committed_at TEXT DEFAULT NULL,
+      commit_receipt_json TEXT DEFAULT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_blueprint_planning_candidates_state_updated
+      ON blueprint_planning_candidates(state, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS blueprint_planning_sources (
+      snapshot_id TEXT PRIMARY KEY,
+      operation_id TEXT DEFAULT NULL,
+      target_kind TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      target_revision INTEGER DEFAULT NULL,
+      target_hash TEXT NOT NULL,
+      sources_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_blueprint_planning_sources_operation
+      ON blueprint_planning_sources(operation_id);
+    CREATE TABLE IF NOT EXISTS blueprint_planning_checks (
+      check_id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      target_kind TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      target_revision INTEGER DEFAULT NULL,
+      target_hash TEXT NOT NULL,
+      source_snapshot_json TEXT NOT NULL,
+      report_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_blueprint_planning_checks_target_created
+      ON blueprint_planning_checks(target_kind, target_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_blueprint_volumes_order
       ON blueprint_volumes(sort_order, created_at);
 

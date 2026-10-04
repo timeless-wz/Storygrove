@@ -4,6 +4,7 @@ import { renderIcon } from '../panels/sidebar/sidebar-icons'
 
 import { registerEditorExitSaveHandler, useEditorStore } from '../../stores/editor-store'
 import ArchitectureConfirmDialog from '../dialogs/ArchitectureConfirmDialog'
+import type { ArchStepKey } from '../../services/architecture-step-selection'
 import { Button } from '../ui/Button'
 import { ipc } from '../../services/ipc-client'
 import { requireIpcSuccess } from '../../services/ipc-result'
@@ -40,15 +41,14 @@ import {
   isProjectSessionCurrent,
   isProjectSessionPath,
 } from '../project-session-gate'
-
-type ArchStepKey = 'premise' | 'characters' | 'worldbuilding' | 'synopsis'
+import { blueprintPlanningTextHash } from '../../shared/blueprint-planning'
 
 /** 与 Sidebar / WorldBuildingEditor 保持一致的架构文件元信息 */
 const ARCH_META: Record<ArchStepKey, { iconName: string; label: string; labelEn: string; desc: string; descEn: string }> = {
-  premise: { iconName: 'target', label: '故事前提', labelEn: 'Premise', desc: 'Logline、核心冲突、金手指定位', descEn: 'Logline, central conflict, and story hook' },
+  premise: { iconName: 'target', label: '故事前提', labelEn: 'Story premise', desc: 'Logline、核心冲突、金手指定位', descEn: 'Logline, central conflict, and story hook' },
   characters: { iconName: 'users', label: '角色图谱', labelEn: 'Character graph', desc: '角色弧光、关系网、矛盾交织', descEn: 'Character arcs, relationships, and conflicts' },
-  worldbuilding: { iconName: 'globe', label: '世界观', labelEn: 'Worldbuilding', desc: '核心规则、阶层断层、深层危机', descEn: 'Core rules, social divides, and deeper crises' },
-  synopsis: { iconName: 'map', label: '情节大纲', labelEn: 'Synopsis', desc: '三幕式情节骨架', descEn: 'Three-act story structure' },
+  worldbuilding: { iconName: 'globe', label: '世界观总纲', labelEn: 'Worldbuilding overview', desc: '核心规则、阶层断层、深层危机', descEn: 'Core rules, social divides, and deeper crises' },
+  synopsis: { iconName: 'map', label: '全书总纲', labelEn: 'Book outline', desc: '全书主线及各卷承担任务', descEn: 'The main story and each volume’s role' },
 }
 
 /** 从文件路径推断出 ArchStepKey */
@@ -194,10 +194,16 @@ function ArchFileViewerSession({
       if (filePath.startsWith('vela://core/')) {
         const dbField = parseCoreField(filePath)
         if (!dbField) return
+        const update = {
+          [dbField]: md,
+          ...(dbField === 'synopsis'
+            ? { expectedSynopsisHash: blueprintPlanningTextHash(savedContentRef.current) }
+            : {}),
+        }
         requireIpcSuccess(await ipc.invokeWithProjectSession(
           projectSession,
           'db:project-core-update',
-          { [dbField]: md },
+          update,
           projectSession.projectPath,
         ), '保存架构文件')
       } else {
@@ -619,8 +625,8 @@ function ArchFileViewerSession({
         <ArchitectureConfirmDialog
           isOpen={showDialog}
           onClose={() => setShowDialog(false)}
+          launchMode={{ kind: 'single', step: stepKey }}
           archStatus={fullArchStatus}
-          initialSelectedSteps={[stepKey]}
           onConfirm={handleConfirm}
         />
       )}

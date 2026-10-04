@@ -4,10 +4,12 @@ import type { StoryTimelineEvent, StoryTimelinePrecision } from '../../../shared
 import { parseStoryTimelineMentions } from '../../../shared/story-timeline'
 import {
   buildStoryTimelineLayout,
+  estimateTimelineLabelHeight,
   estimateTimelineLabelWidth,
   formatTimelineEventTime,
   sortTimelineEvents,
   TIMELINE_LABEL_AXIS_GAP,
+  TIMELINE_LABEL_MAX_HEIGHT,
   TIMELINE_LABEL_MAX_WIDTH,
   TIMELINE_LABEL_MIN_WIDTH,
   TIMELINE_PIXELS_PER_ORDER,
@@ -148,24 +150,26 @@ describe('story timeline layout', () => {
     expect(layout.events[0].timeText).toBe('大荒历 317 年冬 — 大荒历 318 年春')
   })
 
-  it('exposes only the custom time and the title on an axis label', () => {
+  it('exposes the custom time, title, two-line description and meta on an axis label', () => {
     const layout = buildStoryTimelineLayout([makeEvent('only', 1, {
       title: '标题',
       timeLabel: '时间',
-      description: '描述不应出现在时间轴上',
+      description: '描述会以两行截断的形式出现在节点上，完整内容留在浮窗里',
       chapterNumbers: [3, 4],
       characterNames: ['许渡'],
       locationNodeIds: ['loc-1'],
       status: 'finalized',
     })])
 
-    // 时间轴标注字段不包含大段描述与关联元数据，但包含分支与层级状态
+    // 节点字段包含画布直接渲染的描述与元信息，但角色/地点只留在浮窗。
     expect(Object.keys(layout.events[0]).sort()).toEqual([
       'branchId',
       'childBranchCount',
+      'description',
       'height',
       'id',
       'isExpanded',
+      'metaText',
       'parentEventId',
       'side',
       'staggerLevel',
@@ -179,6 +183,26 @@ describe('story timeline layout', () => {
     expect(layout.events[0].title).toBe('标题')
     expect(layout.events[0].timeText).toBe('时间')
     expect(layout.events[0].status).toBe('finalized')
+    expect(layout.events[0].description).toContain('两行截断')
+    expect(layout.events[0].metaText).toBe('第3、4章')
+    // 角色/地点从不进入布局节点
+    expect(layout.events[0].metaText).not.toContain('许渡')
+  })
+
+  it('estimates node heights from content lines and clamps to a sane maximum', () => {
+    const bare = makeEvent('bare', 1, { title: '短标题', timeLabel: '时间' })
+    const bareHeight = estimateTimelineLabelHeight(bare)
+    expect(bareHeight).toBeGreaterThan(40)
+    expect(bareHeight).toBeLessThanOrEqual(TIMELINE_LABEL_MAX_HEIGHT)
+
+    const rich = makeEvent('rich', 2, {
+      title: '一个特别特别特别长的事件标题一定会折行',
+      timeLabel: '大荒历 317 年冬',
+      description: '描述有整整两行内容，用来验证高度估算把换行计入在内，否则节点会互相重叠。'.repeat(2),
+      chapterNumbers: [1, 2],
+    })
+    expect(estimateTimelineLabelHeight(rich)).toBeGreaterThan(bareHeight)
+    expect(estimateTimelineLabelHeight(rich)).toBeLessThanOrEqual(TIMELINE_LABEL_MAX_HEIGHT)
   })
 
   it('clamps estimated label width between the configured bounds', () => {
@@ -186,6 +210,37 @@ describe('story timeline layout', () => {
       .toBe(TIMELINE_LABEL_MIN_WIDTH)
     expect(estimateTimelineLabelWidth(makeEvent('huge', 1, { title: 'x'.repeat(120) })))
       .toBe(TIMELINE_LABEL_MAX_WIDTH)
+  })
+
+  it('emits an axis dot per main event aligned with its label centre', () => {
+    const layout = buildStoryTimelineLayout([1, 2, 3].map(order => makeEvent(`e${order}`, order)))
+
+    expect(layout.axisDots.map(dot => dot.eventId)).toEqual(['e1', 'e2', 'e3'])
+    for (const event of layout.events) {
+      const dot = layout.axisDots.find(item => item.eventId === event.id)!
+      expect(dot.x).toBe(event.x + event.width / 2)
+    }
+  })
+
+  it('places a branch label beside its branch lane when the branch is expanded', () => {
+    const mainEvent = makeEvent('m1', 10, { title: '主线事件' })
+    const branchEvent = makeEvent('b1', 20, { title: '支线事件', branchId: 'side' })
+    const layout = buildStoryTimelineLayout(
+      [mainEvent, branchEvent],
+      [
+        { id: 'main', name: '主时间轴', sourceEventId: null, sortOrder: 0 },
+        { id: 'side', name: '暗线分支', sourceEventId: 'm1', sortOrder: 1 },
+      ],
+      ['main', 'side'],
+    )
+
+    expect(layout.branchLabels).toHaveLength(1)
+    const [label] = layout.branchLabels
+    expect(label.branchId).toBe('side')
+    expect(label.name).toBe('暗线分支')
+    const first = layout.events.find(event => event.id === 'b1')!
+    // 标签贴着支线首事件（上方泳道在首事件上方）
+    expect(label.y).toBeLessThan(first.y)
   })
 
   it('maintains a trunk width of at least 1000px for empty timeline with start and end anchors', () => {
@@ -289,6 +344,8 @@ describe('story timeline layout', () => {
     expect(branchEdge?.source).toBe('m1')
     expect(branchEdge?.target).toBe('b1')
     expect(branchEdge?.color).toBe('#10b981')
+    // 分叉曲线走向由源/目标相对位置决定，供渲染层选择控制点方向
+    expect(branchEdge?.direction === 'up' || branchEdge?.direction === 'down').toBe(true)
 
     const seqEdge = layout.edges.find(e => e.id === 'branch-seq-b1-b2')
     expect(seqEdge).toBeDefined()
@@ -395,6 +452,233 @@ describe('story timeline layout', () => {
     expect(overPlaced.x).toBeLessThanOrEqual(layout.endAnchor.x)
     expect(normalPlaced.x).toBeGreaterThan(underPlaced.x)
     expect(overPlaced.x).toBeGreaterThan(normalPlaced.x)
+  })
+})
+
+describe('story timeline layout acceptance scenarios', () => {
+  /** 每个验收场景都必须给出有限坐标，绝不出现 NaN/Infinity。 */
+  function expectFiniteLayout(layout: ReturnType<typeof buildStoryTimelineLayout>) {
+    const points: Array<[string, number]> = [
+      ['axis.x', layout.axis.x],
+      ['axis.y', layout.axis.y],
+      ['axis.width', layout.axis.width],
+      ['startAnchor.x', layout.startAnchor.x],
+      ['startAnchor.y', layout.startAnchor.y],
+      ['endAnchor.x', layout.endAnchor.x],
+      ['endAnchor.y', layout.endAnchor.y],
+      ['canvasWidth', layout.canvasWidth],
+      ['canvasHeight', layout.canvasHeight],
+    ]
+    layout.events.forEach((event) => {
+      points.push([`event ${event.id} x`, event.x], [`event ${event.id} y`, event.y], [`event ${event.id} width`, event.width], [`event ${event.id} height`, event.height])
+    })
+    layout.branchLabels.forEach(label => points.push([`label ${label.branchId} x`, label.x], [`label ${label.branchId} y`, label.y]))
+    for (const [name, value] of points) {
+      expect(Number.isFinite(value), `${name} must be finite`).toBe(true)
+    }
+  }
+
+  /** 同一支线泳道内（或主轴线上）任意两个节点矩形不得相交。 */
+  function expectNoOverlap(events: Array<{ id: string; x: number; y: number; width: number; height: number }>) {
+    for (let i = 0; i < events.length; i++) {
+      for (let j = i + 1; j < events.length; j++) {
+        const a = events[i]
+        const b = events[j]
+        const separated = a.x + a.width <= b.x
+          || b.x + b.width <= a.x
+          || a.y + a.height <= b.y
+          || b.y + b.height <= a.y
+        expect(separated, `nodes ${a.id} and ${b.id} must not overlap`).toBe(true)
+      }
+    }
+  }
+
+  function branch(id: string, name: string, sourceEventId: string | null, sortOrder: number) {
+    return { id, name, sourceEventId, sortOrder }
+  }
+
+  it('empty timeline: finite geometry with anchors only', () => {
+    const layout = buildStoryTimelineLayout([])
+    expect(layout.events).toEqual([])
+    expectFiniteLayout(layout)
+  })
+
+  it('single event: finite geometry, readable label, no overlaps possible', () => {
+    const layout = buildStoryTimelineLayout([makeEvent('solo', 3, { title: '唯一事件' })])
+    expectFiniteLayout(layout)
+    expect(layout.events).toHaveLength(1)
+    expect(layout.axisDots).toHaveLength(1)
+  })
+
+  it('six main events plus one branch: finite, branch right of source, labels emitted', () => {
+    const mainEvents = [1, 2, 3, 4, 5, 6].map(order => makeEvent(`m${order}`, order * 2, {
+      title: `主线事件 ${order}`,
+      description: order % 2 === 0 ? '带一句描述验证两行截断不会撑爆布局。' : '',
+    }))
+    const branchEvents = [makeEvent('b1', 5, { title: '支线首事件', branchId: 'br1' })]
+    const layout = buildStoryTimelineLayout(
+      [...mainEvents, ...branchEvents],
+      [
+        branch('main', '主时间轴', null, 0),
+        branch('br1', '暗河支线', 'm3', 1),
+      ],
+      ['main', 'br1'],
+    )
+    expectFiniteLayout(layout)
+    expect(layout.events).toHaveLength(7)
+    expect(layout.branchLabels.map(label => label.branchId)).toEqual(['br1'])
+    const m3 = layout.events.find(event => event.id === 'm3')!
+    const b1 = layout.events.find(event => event.id === 'b1')!
+    expect(b1.x).toBeGreaterThan(m3.x)
+    expectNoOverlap(layout.events)
+  })
+
+  it('eight events on the same tick: symmetric stagger with zero overlap', () => {
+    const sameTick = Array.from({ length: 8 }, (_, index) => makeEvent(`t${index}`, 7, {
+      title: `同刻度事件${index}`,
+      description: index % 2 === 0 ? '同刻度事件的描述文本，验证避让。' : '',
+    }))
+    const layout = buildStoryTimelineLayout(sameTick)
+    expectFiniteLayout(layout)
+    // 同刻度共享同一水平基准列
+    const xs = new Set(layout.events.map(event => event.x))
+    expect(xs.size).toBe(1)
+    // 上下对称交错并逐层外推，任意两个节点都不相交
+    expectNoOverlap(layout.events)
+    // 同侧最多逐层下探，不会无限横向挤压
+    const levels = layout.events.map(event => event.staggerLevel)
+    expect(Math.max(...levels)).toBeLessThanOrEqual(4)
+  })
+
+  it('three branches from one source: distinct stable lanes, no overlap', () => {
+    const mainEvent = makeEvent('m1', 10, { title: '分叉源' })
+    const branches = [
+      branch('main', '主时间轴', null, 0),
+      branch('ba', '支线甲', 'm1', 1),
+      branch('bb', '支线乙', 'm1', 2),
+      branch('bc', '支线丙', 'm1', 3),
+    ]
+    const branchEvents = [
+      makeEvent('ba-1', 12, { title: '甲线事件', branchId: 'ba' }),
+      makeEvent('bb-1', 13, { title: '乙线事件', branchId: 'bb' }),
+      makeEvent('bc-1', 14, { title: '丙线事件', branchId: 'bc' }),
+    ]
+    const layout = buildStoryTimelineLayout([mainEvent, ...branchEvents], branches, ['main', 'ba', 'bb', 'bc'])
+    expectFiniteLayout(layout)
+    expect(layout.branchLabels).toHaveLength(3)
+    // 三条支线占据互不相同的泳道高度
+    const lanes = new Set(layout.events.filter(event => event.branchId !== 'main').map(event => event.y))
+    expect(lanes.size).toBe(3)
+    expectNoOverlap(layout.events)
+  })
+
+  it('three-level nesting: chains extend rightwards with finite stable geometry', () => {
+    const mainEvent = makeEvent('m1', 10, { title: '根事件' })
+    const branches = [
+      branch('main', '主时间轴', null, 0),
+      branch('L1', '一级支线', 'm1', 1),
+      branch('L2', '二级支线', 'n1', 2),
+      branch('L3', '三级支线', 'n2', 3),
+    ]
+    const nested = [
+      makeEvent('n1', 12, { title: '一级支线事件', branchId: 'L1' }),
+      makeEvent('n2', 14, { title: '二级支线事件', branchId: 'L2' }),
+      makeEvent('n3', 16, { title: '三级支线事件', branchId: 'L3' }),
+    ]
+    const layout = buildStoryTimelineLayout([mainEvent, ...nested], branches, ['main', 'L1', 'L2', 'L3'])
+    expectFiniteLayout(layout)
+    expect(layout.events).toHaveLength(4)
+    // 每一层都严格向右发展
+    const order = ['m1', 'n1', 'n2', 'n3'].map(id => layout.events.find(event => event.id === id)!)
+    for (let i = 1; i < order.length; i++) {
+      expect(order[i].x).toBeGreaterThan(order[i - 1].x)
+    }
+    expectNoOverlap(layout.events)
+  })
+
+  it('long titles clamp width, grow height, and still avoid overlap', () => {
+    const longTitle = '这是一个特别特别特别长的事件标题用来验证换行与避让'
+    const layout = buildStoryTimelineLayout(
+      [10, 11, 12].map((order, index) => makeEvent(`long-${index}`, order, {
+        title: longTitle + (index > 0 ? '再加一段' : ''),
+        description: '同样很长的描述也参与高度估算，保证相邻节点不重叠。',
+      })),
+    )
+    expectFiniteLayout(layout)
+    for (const event of layout.events) {
+      expect(event.width).toBeLessThanOrEqual(TIMELINE_LABEL_MAX_WIDTH)
+      expect(event.height).toBeLessThanOrEqual(TIMELINE_LABEL_MAX_HEIGHT)
+    }
+    expectNoOverlap(layout.events)
+  })
+
+  it('100+ events: monotonic order, finite geometry, main line without overlap', () => {
+    const many = Array.from({ length: 120 }, (_, index) => makeEvent(`mass-${index}`, index + 1, {
+      title: `批量事件 ${index + 1}`,
+      description: index % 5 === 0 ? '每五个事件带一条描述。' : '',
+    }))
+    const layout = buildStoryTimelineLayout(many)
+    expectFiniteLayout(layout)
+    expect(layout.events).toHaveLength(120)
+    // 按 sortOrder 从左到右单调
+    for (let i = 1; i < layout.events.length; i++) {
+      expect(layout.events[i].x).toBeGreaterThanOrEqual(layout.events[i - 1].x)
+    }
+    expectNoOverlap(layout.events)
+  })
+
+  it('collapsing one branch never moves unrelated nodes (stable lanes and axis baseline)', () => {
+    const mainEvents = [1, 2, 3].map(order => makeEvent(`m${order}`, order * 3, { title: `主线 ${order}` }))
+    const branches = [
+      branch('main', '主时间轴', null, 0),
+      branch('alpha', '甲支线', 'm1', 1),
+      branch('beta', '乙支线', 'm2', 2),
+      branch('gamma', '丙支线', 'm3', 3),
+    ]
+    const allEvents = [
+      ...mainEvents,
+      makeEvent('alpha-1', 4, { title: '甲事件', branchId: 'alpha' }),
+      makeEvent('beta-1', 7, { title: '乙事件', branchId: 'beta' }),
+      makeEvent('gamma-1', 10, { title: '丙事件', branchId: 'gamma' }),
+    ]
+
+    const expandedAll = buildStoryTimelineLayout(allEvents, branches, ['main', 'alpha', 'beta', 'gamma'])
+    // 折叠 gamma（例如其父事件所在支线被收起）后，其余节点必须原地不动
+    const collapsedGamma = buildStoryTimelineLayout(allEvents, branches, ['main', 'alpha', 'beta'])
+
+    const positionKey = (event: { id: string; x: number; y: number; width: number; height: number }) =>
+      `${event.x}:${event.y}:${event.width}:${event.height}`
+    const before = new Map(expandedAll.events.map(event => [event.id, positionKey(event)]))
+    const after = new Map(collapsedGamma.events.map(event => [event.id, positionKey(event)]))
+
+    // 主轴与甲、乙支线的事件完全不动
+    for (const event of collapsedGamma.events) {
+      expect(after.get(event.id), `node ${event.id} must keep its position`).toBe(before.get(event.id))
+    }
+    // 被折叠支线的事件从布局中消失
+    expect(before.has('gamma-1')).toBe(true)
+    expect(after.has('gamma-1')).toBe(false)
+    // 轴基线与两端锚点不动
+    expect(collapsedGamma.axis.y).toBe(expandedAll.axis.y)
+    expect(collapsedGamma.startAnchor.y).toBe(expandedAll.startAnchor.y)
+    expect(collapsedGamma.endAnchor.y).toBe(expandedAll.endAnchor.y)
+  })
+
+  it('layout is a pure function: identical input yields identical output and never writes to events', () => {
+    const events = [
+      makeEvent('p1', 2, { title: '纯函数', branchId: 'pb' }),
+      makeEvent('p0', 1, { title: '主线上' }),
+    ]
+    const branches = [branch('main', '主时间轴', null, 0), branch('pb', '支线', 'p0', 1)]
+    const first = buildStoryTimelineLayout(events, branches, ['main', 'pb'])
+    const second = buildStoryTimelineLayout(events, branches, ['main', 'pb'])
+    expect(second).toEqual(first)
+    for (const event of events) {
+      expect(Object.keys(event)).not.toContain('x')
+      expect(Object.keys(event)).not.toContain('y')
+      expect(Object.keys(event)).not.toContain('side')
+      expect(Object.keys(event)).not.toContain('position')
+    }
   })
 })
 

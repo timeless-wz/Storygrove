@@ -127,7 +127,7 @@ function WorldCharacterPanel({ projectKey, worldId }: { projectKey: string; worl
       )}
 
       {members.length === 0 ? (
-        <p className="mt-2"><EmptyHint>{text('这个世界还没有关联人物。', 'No characters linked to this world yet.')}</EmptyHint></p>
+        <div className="mt-2"><EmptyHint>{text('这个世界还没有关联人物。', 'No characters linked to this world yet.')}</EmptyHint></div>
       ) : (
         <ul className="mt-2 space-y-1 text-xs">
           {visible.map(member => {

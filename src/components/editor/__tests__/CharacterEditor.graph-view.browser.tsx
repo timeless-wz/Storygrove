@@ -153,8 +153,8 @@ describe('character profile as the only character entry', () => {
 
   it('shows the relationship graph inside the profile as a read-only projection', async () => {
     await act(async () => root.render(<CharacterEditor projectKey={PROJECT_PATH} />))
-    // 先确认默认是人物概览，再通过显式请求切到关系图谱。
-    expect(container.textContent).toContain('人物概览')
+    // 先确认默认是编辑档案，再通过显式请求切到关系图谱。
+    expect(container.querySelector('[data-testid="character-profile-form"]')).not.toBeNull()
     expect(container.textContent).toContain('编辑档案')
 
     await act(async () => {
@@ -195,8 +195,8 @@ describe('character profile as the only character entry', () => {
 
     expect(useCharacterStore.getState().selectedName).toBe('林晚')
     // 图谱点击只是选中/打开人物卡：焦点回到该角色的档案视图。
-    expect(container.querySelector('[data-testid="character-summary"]')?.textContent).toContain('林晚')
-    expect(container.textContent).toContain('人物概览')
+    expect(container.querySelector<HTMLInputElement>('input')?.value).toBe('林晚')
+    expect(container.querySelector('[data-testid="character-profile-form"]')).not.toBeNull()
   })
 
   it('lets the author switch back to the profile from the graph', async () => {
@@ -214,7 +214,7 @@ describe('character profile as the only character entry', () => {
       backButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })
 
-    expect(container.textContent).toContain('人物概览')
+    expect(container.querySelector('[data-testid="character-profile-form"]')).not.toBeNull()
     expect(container.textContent).toContain('编辑档案')
   })
 })

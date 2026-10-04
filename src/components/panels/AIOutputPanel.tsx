@@ -194,7 +194,13 @@ export default function AIOutputPanel() {
           className="text-xs font-medium uppercase tracking-widest"
           style={{ color: 'var(--color-text-muted)' }}
         >
-          {runText(visibleLocale, 'AI 输出', 'AI output')}
+          {runText(visibleLocale, 'AI 工作流', 'AI workflow')}
+          <span
+            className="ml-2 text-[10px] font-normal normal-case tracking-normal"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            {runText(visibleLocale, '查看 AI 任务进度与输出', 'View AI task progress and output')}
+          </span>
         </span>
         <button
           onClick={() => useLayoutStore.getState().setRightView('agent')}
@@ -690,7 +696,7 @@ function WorkflowFailureNotice({
     ) return
     useEditorStore.getState().openFile({
       id: 'config',
-      name: locale === 'zh-CN' ? '小说配置' : 'Novel configuration',
+      name: locale === 'zh-CN' ? '创作方向' : 'Creative direction',
       type: 'config',
       projectKey: projectPath,
     })
@@ -735,8 +741,8 @@ function WorkflowFailureNotice({
         {presentation.action === 'open-novel-config' && !matchesCurrentProject && (
           <p className="m-0 mt-1" style={{ color: 'var(--color-text-muted)' }}>
             {locale === 'zh-CN'
-              ? '此结果属于另一项目会话。请切回该项目后再打开小说配置。'
-              : 'This result belongs to another project session. Switch back to that project before opening Novel configuration.'}
+              ? '此结果属于另一项目会话。请切回该项目后再打开创作方向。'
+              : 'This result belongs to another project session. Switch back to that project before opening Creative direction.'}
           </p>
         )}
 
@@ -761,7 +767,7 @@ function WorkflowFailureNotice({
                 : <Sparkles size={12} aria-hidden="true" />}
               {resumingSynopsis
                 ? runText(locale, '正在从断点续写...', 'Resuming from the break point...')
-                : runText(locale, '继续生成情节大纲（断点续写）', 'Continue plot outline (resume)')}
+                : runText(locale, '兼容模式：继续生成旧总纲（断点续写）', 'Legacy mode: continue the old book outline (resume)')}
             </button>
             <p className="m-0 mt-1.5" style={{ color: 'var(--color-text-muted)' }}>
               {runText(

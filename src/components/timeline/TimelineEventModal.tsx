@@ -1,68 +1,43 @@
+/**
+ * TimelineEventModal — 新建主轴事件 / 添加后续事件 / 创建支线的全屏表单弹窗。
+ *
+ * 事件编辑已移入画布浮窗（TimelineEventFloat），这里只保留创建入口。
+ * onSave 统一返回 TimelineUiResult：失败时弹窗保留输入并显示错误，
+ * 绝不静默关闭；创建支线由页面通过 store 的原子操作一次事务提交。
+ */
+
 import { useEffect, useState } from 'react'
-import {
-  Check,
-  GitBranch,
-  Link2,
-  Trash2,
-  User,
-  X,
-} from 'lucide-react'
-import type {
-  StoryTimelineEvent,
-  StoryTimelineEventStatus,
-  StoryTimelineMention,
-  StoryTimelinePrecision,
-} from '../../shared/story-timeline'
-import {
-  parseStoryTimelineMentions,
-  STORY_TIMELINE_MAIN_BRANCH_ID,
-  STORY_TIMELINE_PRECISION_LABELS,
-  STORY_TIMELINE_STATUS_LABELS,
-} from '../../shared/story-timeline'
+import { Check, GitBranch, X } from 'lucide-react'
+import type { StoryTimelineEvent } from '../../shared/story-timeline'
 import { useLocaleStore } from '../../stores/locale-store'
-import { useWorldMapStore } from '../../stores/world-map-store'
-import { toast } from '../ui/Toast'
+import type { TimelineUiResult } from './timeline-ui-contract'
+import {
+  buildTimelineEventSubmission,
+  createTimelineEventFormValues,
+  localizeTimelineFormError,
+  TimelineEventForm,
+  type TimelineEventFormMode,
+  type TimelineEventFormStoryRange,
+  type TimelineEventFormValues,
+} from './TimelineEventForm'
 import { Button } from '../ui/Button'
-import { Input } from '../ui/Input'
-import { Textarea } from '../ui/Textarea'
 import '../ui/feedback-surface.css'
 
 export interface TimelineEventModalProps {
   open: boolean
-  mode: 'create-main' | 'create-next' | 'create-branch' | 'edit'
-  initialEvent?: StoryTimelineEvent | null
+  mode: Exclude<TimelineEventFormMode, 'edit'>
   sourceEvent?: StoryTimelineEvent | null
   currentBranchName?: string
   nextSortOrder?: number
   initialSortOrder?: number
-  storyRange?: { startOrder: number; endOrder: number }
+  storyRange?: TimelineEventFormStoryRange
   onClose: () => void
-  onSave: (data: {
-    event: StoryTimelineEvent
-    newBranchName?: string
-  }) => Promise<void>
-  onDelete?: (eventId: string) => Promise<void>
-  onNavigateMention?: (mention: StoryTimelineMention) => void
-}
-
-function parseCommaList(value: string): string[] {
-  return [...new Set(value.split(/[，,]/).map(item => item.trim()).filter(Boolean))]
-}
-
-function parseChapterNumbers(value: string): number[] {
-  return parseCommaList(value)
-    .map(item => Number(item.replace(/^第\s*|\s*章$/g, '')))
-    .filter(item => Number.isInteger(item) && item > 0)
-}
-
-function createEventId(): string {
-  return globalThis.crypto?.randomUUID?.() ?? `timeline-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  onSave: (data: { event: StoryTimelineEvent; newBranchName?: string }) => Promise<TimelineUiResult>
 }
 
 export function TimelineEventModal({
   open,
   mode,
-  initialEvent,
   sourceEvent,
   currentBranchName,
   nextSortOrder = 1,
@@ -70,95 +45,30 @@ export function TimelineEventModal({
   storyRange,
   onClose,
   onSave,
-  onDelete,
-  onNavigateMention,
 }: TimelineEventModalProps) {
   const text = useLocaleStore(s => s.text)
-  const nodes = useWorldMapStore(s => s.nodes)
 
-  const [id, setId] = useState('')
-  const [branchId, setBranchId] = useState(STORY_TIMELINE_MAIN_BRANCH_ID)
-  const [newBranchName, setNewBranchName] = useState('')
-  const [title, setTitle] = useState('')
-  const [timeLabel, setTimeLabel] = useState('')
-  const [sortOrder, setSortOrder] = useState('1')
-  const [precision, setPrecision] = useState<StoryTimelinePrecision>('exact')
-  const [rangeEndLabel, setRangeEndLabel] = useState('')
-  const [description, setDescription] = useState('')
-  const [chapterNumbers, setChapterNumbers] = useState('')
-  const [characterNames, setCharacterNames] = useState('')
-  const [locationNodeIds, setLocationNodeIds] = useState<string[]>([])
-  const [status, setStatus] = useState<StoryTimelineEventStatus>('planned')
+  const [values, setValues] = useState<TimelineEventFormValues>(
+    () => createTimelineEventFormValues(mode, { sourceEvent, nextSortOrder, initialSortOrder }),
+  )
+  const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [orderError, setOrderError] = useState<string | null>(null)
 
-  // 当弹窗打开时初始化表单状态
-  useEffect(() => {
-    if (!open) return
-    setOrderError(null)
-
-    if (mode === 'edit' && initialEvent) {
-      setId(initialEvent.id)
-      setBranchId(initialEvent.branchId || STORY_TIMELINE_MAIN_BRANCH_ID)
-      setNewBranchName('')
-      setTitle(initialEvent.title)
-      setTimeLabel(initialEvent.timeLabel)
-      setSortOrder(String(initialEvent.sortOrder))
-      setPrecision(initialEvent.precision)
-      setRangeEndLabel(initialEvent.rangeEndLabel ?? '')
-      setDescription(initialEvent.description)
-      setChapterNumbers(initialEvent.chapterNumbers.join(', '))
-      setCharacterNames(initialEvent.characterNames.join(', '))
-      setLocationNodeIds(initialEvent.locationNodeIds)
-      setStatus(initialEvent.status)
-    } else if (mode === 'create-branch' && sourceEvent) {
-      setId(createEventId())
-      setBranchId(`branch-${Date.now()}`)
-      setNewBranchName(`${sourceEvent.title} · 支线`)
-      setTitle('')
-      setTimeLabel(sourceEvent.timeLabel)
-      setSortOrder(String(Number(sourceEvent.sortOrder) + 1))
-      setPrecision('exact')
-      setRangeEndLabel('')
-      setDescription('')
-      setChapterNumbers('')
-      setCharacterNames('')
-      setLocationNodeIds([])
-      setStatus('planned')
-    } else if (mode === 'create-next' && sourceEvent) {
-      setId(createEventId())
-      setBranchId(sourceEvent.branchId || STORY_TIMELINE_MAIN_BRANCH_ID)
-      setNewBranchName('')
-      setTitle('')
-      setTimeLabel(sourceEvent.timeLabel)
-      setSortOrder(String(Number(sourceEvent.sortOrder) + 1))
-      setPrecision('exact')
-      setRangeEndLabel('')
-      setDescription('')
-      setChapterNumbers('')
-      setCharacterNames('')
-      setLocationNodeIds([])
-      setStatus('planned')
-    } else {
-      // create-main
-      setId(createEventId())
-      setBranchId(STORY_TIMELINE_MAIN_BRANCH_ID)
-      setNewBranchName('')
-      setTitle('')
-      setTimeLabel('')
-      const defaultOrder = initialSortOrder !== undefined
-        ? initialSortOrder
-        : nextSortOrder
-      setSortOrder(String(defaultOrder))
-      setPrecision('exact')
-      setRangeEndLabel('')
-      setDescription('')
-      setChapterNumbers('')
-      setCharacterNames('')
-      setLocationNodeIds([])
-      setStatus('planned')
-    }
-  }, [open, mode, initialEvent, sourceEvent, nextSortOrder, initialSortOrder])
+  // 每次打开（或目标变化）都重置表单：用「渲染期调整状态」模式替代 effect，
+  // 避免多一轮级联渲染，也保证关闭期间不会残留上一次的输入。
+  const [renderedKey, setRenderedKey] = useState<string | null>(null)
+  const formKey = open
+    ? `${mode}:${sourceEvent?.id ?? ''}:${initialSortOrder ?? ''}:${nextSortOrder}`
+    : null
+  if (formKey === null) {
+    // 关闭时清掉已渲染标记，保证同样的表单再次打开时也会重置。
+    if (renderedKey !== null) setRenderedKey(null)
+  } else if (renderedKey !== formKey) {
+    setRenderedKey(formKey)
+    setValues(createTimelineEventFormValues(mode, { sourceEvent, nextSortOrder, initialSortOrder }))
+    setError(null)
+    setSaving(false)
+  }
 
   // 监听 Esc 键关闭
   useEffect(() => {
@@ -174,71 +84,43 @@ export function TimelineEventModal({
 
   if (!open) return null
 
-  const mentions = parseStoryTimelineMentions(description)
-
-  const handleMentionClick = (mention: StoryTimelineMention) => {
-    if (onNavigateMention) {
-      onNavigateMention(mention)
-    } else {
-      toast.info(text(`已定位角色引用：${mention.name}（导航意图）`, `Character mention target: ${mention.name}`))
-    }
-  }
-
-  const handleSubmit = async () => {
-    const orderNum = Number(sortOrder)
-    if (!title.trim() || !timeLabel.trim() || !Number.isFinite(orderNum)) {
-      toast.error(text('请填写完整的事件标题、时间与排序刻度', 'Please fill in title, custom time and ruler position'))
-      return
-    }
-
-    if (storyRange) {
-      if (orderNum < storyRange.startOrder || orderNum > storyRange.endOrder) {
-        const msg = text('请先编辑故事开端或故事结束', 'Please edit Story Start or Story End first')
-        setOrderError(msg)
-        toast.error(msg)
-        return
-      }
-    }
-
-    setSaving(true)
-    try {
-      const event: StoryTimelineEvent = {
-        id,
-        branchId: mode === 'create-branch' ? branchId : (initialEvent?.branchId || branchId),
-        parentEventId: mode === 'create-branch' ? (sourceEvent?.id ?? null) : (initialEvent?.parentEventId ?? null),
-        title: title.trim(),
-        timeLabel: timeLabel.trim(),
-        sortOrder: orderNum,
-        precision,
-        rangeEndLabel: precision === 'range' ? rangeEndLabel.trim() : undefined,
-        description: description.trim(),
-        chapterNumbers: parseChapterNumbers(chapterNumbers),
-        characterNames: parseCommaList(characterNames),
-        locationNodeIds,
-        status,
-        createdAt: initialEvent?.createdAt,
-      }
-
-      await onSave({
-        event,
-        newBranchName: mode === 'create-branch' ? (newBranchName.trim() || '支线') : undefined,
-      })
-      onClose()
-    } finally {
-      setSaving(false)
-    }
-  }
-
   const getModalTitle = () => {
     switch (mode) {
       case 'create-branch':
         return text('创建新支线事件', 'Create branch event')
       case 'create-next':
         return text('添加后续事件', 'Add next event')
-      case 'edit':
-        return text('编辑事件', 'Edit event')
       default:
         return text('新建主线事件', 'New main timeline event')
+    }
+  }
+
+  const handleSubmit = async () => {
+    if (saving) return
+    const submission = buildTimelineEventSubmission(values, mode, {
+      sourceEvent,
+      storyRange: storyRange ?? null,
+    })
+    if (!submission.ok) {
+      setError(localizeTimelineFormError(submission.error, text))
+      return
+    }
+
+    setSaving(true)
+    setError(null)
+    try {
+      // 支线名称必填：为空时共享校验已在此前拦截，这里绝不静默兜底成“支线”。
+      const result = await onSave({
+        event: submission.event,
+        newBranchName: mode === 'create-branch' ? values.newBranchName.trim() : undefined,
+      })
+      if (!result.success) {
+        setError(localizeTimelineFormError(result.error, text))
+        return
+      }
+      onClose()
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -288,199 +170,40 @@ export function TimelineEventModal({
 
         {/* Body */}
         <div className="writer-timeline-modal-body">
-          {mode === 'create-branch' && (
-            <label className="writer-timeline-field">
-              <span>{text('支线名称', 'Branch name')} *</span>
-              <Input
-                value={newBranchName}
-                placeholder={text('例如：西征秘辛、雾港暗线', 'e.g. Western Expedition')}
-                onChange={e => setNewBranchName(e.target.value)}
-                autoFocus
-              />
-            </label>
-          )}
+          <TimelineEventForm
+            mode={mode}
+            values={values}
+            onChange={(next) => {
+              setValues(next)
+              setError(null)
+            }}
+            sourceEvent={sourceEvent}
+            currentBranchName={mode === 'create-next' ? currentBranchName : undefined}
+            storyRange={storyRange ?? null}
+          />
 
-          <label className="writer-timeline-field">
-            <span>{text('事件标题', 'Event title')} *</span>
-            <Input
-              value={title}
-              placeholder={text('例如：许渡抵达雾港', 'e.g. Arrival at the port')}
-              onChange={e => setTitle(e.target.value)}
-              autoFocus={mode !== 'create-branch'}
-            />
-          </label>
-
-          <div className="writer-timeline-field-grid">
-            <label className="writer-timeline-field">
-              <span>{text('自定义时间', 'Custom time')} *</span>
-              <Input
-                value={timeLabel}
-                placeholder={text('例如：大荒历 317 年冬', 'e.g. Winter, 317')}
-                onChange={e => setTimeLabel(e.target.value)}
-              />
-            </label>
-            <label className="writer-timeline-field">
-              <span>{text('排序刻度', 'Ruler position')} *</span>
-              <Input
-                type="number"
-                step="0.1"
-                value={sortOrder}
-                onChange={e => {
-                  setSortOrder(e.target.value)
-                  setOrderError(null)
-                }}
-              />
-              {orderError && (
-                <div className="writer-timeline-field-error text-xs text-[var(--color-error-text)] mt-1" role="alert">
-                  {orderError}
-                </div>
-              )}
-            </label>
-          </div>
-
-          <div className="writer-timeline-field-grid">
-            <label className="writer-timeline-field">
-              <span>{text('时间精度', 'Time precision')}</span>
-              <select
-                value={precision}
-                onChange={e => setPrecision(e.target.value as StoryTimelinePrecision)}
-                className="writer-timeline-select"
-              >
-                {Object.entries(STORY_TIMELINE_PRECISION_LABELS).map(([val, lbl]) => (
-                  <option key={val} value={val}>{text(lbl.zh, lbl.en)}</option>
-                ))}
-              </select>
-            </label>
-            <label className="writer-timeline-field">
-              <span>{text('状态', 'Status')}</span>
-              <select
-                value={status}
-                onChange={e => setStatus(e.target.value as StoryTimelineEventStatus)}
-                className="writer-timeline-select"
-              >
-                {Object.entries(STORY_TIMELINE_STATUS_LABELS).map(([val, lbl]) => (
-                  <option key={val} value={val}>{text(lbl.zh, lbl.en)}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          {precision === 'range' && (
-            <label className="writer-timeline-field">
-              <span>{text('结束时间', 'End time')}</span>
-              <Input
-                value={rangeEndLabel}
-                placeholder={text('范围结束的自定义时间', 'Custom end time')}
-                onChange={e => setRangeEndLabel(e.target.value)}
-              />
-            </label>
-          )}
-
-          <label className="writer-timeline-field">
-            <div className="flex items-center justify-between">
-              <span>{text('事件描述', 'Description')}</span>
-              <small className="text-xs text-[var(--color-text-muted)]">
-                {text('支持 @人物 或 [[人物]] 语法', 'Supports @character or [[character]]')}
-              </small>
-            </div>
-            <Textarea
-              rows={3}
-              value={description}
-              placeholder={text('写下事件详情，例如：@许渡 潜入暗河，寻找 [[沈砚]] 的线索。', 'Describe the event...')}
-              onChange={e => setDescription(e.target.value)}
-            />
-          </label>
-
-          {/* 提及展示 Chip 栏 */}
-          {mentions.length > 0 && (
-            <div className="writer-timeline-mentions-bar" data-testid="timeline-mentions-bar">
-              <span className="text-xs text-[var(--color-text-muted)] flex items-center gap-1">
-                <User size={12} /> {text('检测到实体提及：', 'Mentions:')}
-              </span>
-              <div className="flex flex-wrap gap-1.5 mt-1">
-                {mentions.map((m, idx) => (
-                  <button
-                    key={`${m.raw}-${idx}`}
-                    type="button"
-                    className="writer-timeline-mention-tag"
-                    data-testid="timeline-mention-tag"
-                    data-mention-name={m.name}
-                    onClick={() => handleMentionClick(m)}
-                    title={text(`点击触发导航意图：${m.name}`, `Click to navigate: ${m.name}`)}
-                  >
-                    <Link2 size={10} />
-                    <span>{m.raw}</span>
-                  </button>
-                ))}
-              </div>
+          {error && (
+            <div className="writer-timeline-field-error text-xs text-[var(--color-error-text)]" role="alert">
+              {error}
             </div>
           )}
-
-          <div className="writer-timeline-field-grid">
-            <label className="writer-timeline-field">
-              <span>{text('关联章节', 'Linked chapters')}</span>
-              <Input
-                value={chapterNumbers}
-                placeholder={text('例如：3, 4', 'e.g. 3, 4')}
-                onChange={e => setChapterNumbers(e.target.value)}
-              />
-            </label>
-            <label className="writer-timeline-field">
-              <span>{text('涉及角色', 'Characters')}</span>
-              <Input
-                value={characterNames}
-                placeholder={text('逗号分隔角色名', 'Comma-separated names')}
-                onChange={e => setCharacterNames(e.target.value)}
-              />
-            </label>
-          </div>
-
-          <label className="writer-timeline-field">
-            <span>{text('关联地点', 'Linked locations')}</span>
-            <select
-              multiple
-              value={locationNodeIds}
-              onChange={e => setLocationNodeIds(Array.from(e.currentTarget.selectedOptions, opt => opt.value))}
-              className="writer-timeline-location-select"
-            >
-              {nodes.length === 0 ? (
-                <option disabled>{text('地图册中尚无地点', 'No map locations yet')}</option>
-              ) : (
-                nodes.map(node => (
-                  <option key={node.id} value={node.id}>{node.name}</option>
-                ))
-              )}
-            </select>
-            <small className="text-xs text-[var(--color-text-muted)]">
-              {text('按 Ctrl/⌘ 可多选', 'Ctrl/⌘ to select multiple')}
-            </small>
-          </label>
         </div>
 
         {/* Footer */}
         <div className="writer-timeline-modal-footer">
-          {mode === 'edit' && onDelete && initialEvent && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-[var(--color-error-text)] mr-auto"
-              onClick={async () => {
-                await onDelete(initialEvent.id)
-                onClose()
-              }}
-            >
-              <Trash2 size={13} />
-              <span>{text('删除', 'Delete')}</span>
-            </Button>
-          )}
-
           <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>
             {text('取消', 'Cancel')}
           </Button>
 
           <Button
             size="sm"
-            disabled={saving || !title.trim() || !timeLabel.trim() || !Number.isFinite(Number(sortOrder))}
+            disabled={
+              saving
+              || !values.title.trim()
+              || !values.timeLabel.trim()
+              || !Number.isFinite(Number(values.sortOrder))
+              || (mode === 'create-branch' && !values.newBranchName.trim())
+            }
             onClick={() => void handleSubmit()}
           >
             <Check size={13} />

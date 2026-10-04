@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   projectCoreUpdate: vi.fn(),
   projectCoreCommitSynopsis: vi.fn(),
   projectClearGeneratedData: vi.fn(() => ({ cleared: [] })),
+  blueprintPlanningDeleteVolumeOutline: vi.fn(() => ({ success: true, deleted: true })),
+  blueprintPlanningGetSourceStatuses: vi.fn((snapshotIds: string[]) => snapshotIds.map(snapshotId => ({ snapshotId, state: 'current' }))),
+  blueprintPlanningGetTargetSourceStatuses: vi.fn((targets: Array<{ targetKind: string; targetId: string }>) => targets.map(target => ({ ...target, snapshotId: null, operationId: null, state: 'unlinked' }))),
   blueprintGetAll: vi.fn(() => []),
   blueprintUpsert: vi.fn(),
   blueprintUpsertMany: vi.fn(),
@@ -145,6 +148,14 @@ vi.mock('../../repositories/blueprint-repository', () => ({
     completeCharacterSyncOperation: mocks.blueprintCompleteCharacterSync,
     delete: mocks.blueprintDelete,
     clearAll: mocks.blueprintClearAll,
+  },
+}))
+
+vi.mock('../../repositories/blueprint-planning-repository', () => ({
+  BlueprintPlanningRepository: {
+    deleteVolumeOutline: mocks.blueprintPlanningDeleteVolumeOutline,
+    getSourceStatuses: mocks.blueprintPlanningGetSourceStatuses,
+    getTargetSourceStatuses: mocks.blueprintPlanningGetTargetSourceStatuses,
   },
 }))
 
@@ -307,6 +318,36 @@ beforeEach(() => {
 })
 
 describe('database controller project context guard', () => {
+  it('routes volume outline deletion through the active project context and repository CAS', async () => {
+    const request = { volumeId: 'volume-2', expectedRevision: 3 }
+    await expect(handler('db:blueprint-volume-outline-delete')({}, request, 'C:/projects/A'))
+      .resolves.toEqual({ success: true, deleted: true })
+    expect(mocks.blueprintPlanningDeleteVolumeOutline).toHaveBeenCalledWith(request)
+
+    mocks.blueprintPlanningDeleteVolumeOutline.mockClear()
+    await expect(handler('db:blueprint-volume-outline-delete')({}, request, 'C:/projects/B'))
+      .resolves.toMatchObject({ success: false })
+    expect(mocks.blueprintPlanningDeleteVolumeOutline).not.toHaveBeenCalled()
+  })
+
+  it('routes live planning source status queries through the active project context', async () => {
+    const snapshotIds = ['snapshot-a', 'snapshot-b']
+    await expect(handler('db:blueprint-planning-source-status')({}, snapshotIds, 'C:/projects/A'))
+      .resolves.toEqual(snapshotIds.map(snapshotId => ({ snapshotId, state: 'current' })))
+    expect(mocks.blueprintPlanningGetSourceStatuses).toHaveBeenCalledWith(snapshotIds)
+
+    mocks.blueprintPlanningGetSourceStatuses.mockClear()
+    await expect(handler('db:blueprint-planning-source-status')({}, snapshotIds, 'C:/projects/B')).rejects.toThrow()
+    expect(mocks.blueprintPlanningGetSourceStatuses).not.toHaveBeenCalled()
+  })
+
+  it('routes committed planning target status queries through the active project context', async () => {
+    const targets = [{ targetKind: 'chapter' as const, targetId: '12' }]
+    await expect(handler('db:blueprint-planning-target-source-status')({}, targets, 'C:/projects/A'))
+      .resolves.toEqual([{ ...targets[0], snapshotId: null, operationId: null, state: 'unlinked' }])
+    expect(mocks.blueprintPlanningGetTargetSourceStatuses).toHaveBeenCalledWith(targets)
+  })
+
   it('routes cultivation through path and session checks, including same-path expired leases', async () => {
     await expect(handler('db:cultivation-read')({}, 'C:/projects/A')).resolves.toEqual({ revision: 0, realms: [] })
     await expect(handler('db:cultivation-read')({}, 'C:/projects/B')).rejects.toThrow()

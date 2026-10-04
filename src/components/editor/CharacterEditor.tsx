@@ -31,7 +31,7 @@ import { useCharacterRosterRepair } from './use-character-roster-repair'
 /**
  * 角色档案 — 唯一的角色入口。
  *
- * 默认是概览（摘要 + 优先字段 + 折叠细节），完整字段留在显式的“编辑档案”里；
+ * 默认直接显示完整编辑档案，保存与完成后均保留当前编辑上下文；
  * 关系图谱只是角色名单的只读投影，不持有任何角色事实。
  */
 export default function CharacterEditor({ projectKey }: { projectKey: string }) {
@@ -53,7 +53,7 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
   const characterIdentities = useCharacterStore(s => s.characterIdentities)
   const sharedRelationships = useCharacterStore(s => s.relationships)
   const loadRelationshipsAndPositions = useCharacterStore(s => s.loadRelationshipsAndPositions)
-  const [localViewMode, setLocalViewMode] = useState<CharacterProfileView>('overview')
+  const [localViewMode, setLocalViewMode] = useState<CharacterProfileView>('edit')
   const text = useLocaleStore(s => s.text)
   const projectMatches = currentProject?.path === projectKey
   const dataReady = Boolean(
@@ -157,7 +157,7 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
     return ledger.projects.some(p => p.projectKey === projectKey)
   })
 
-  const handleSave = async ({ returnToOverview = false }: { returnToOverview?: boolean } = {}) => {
+  const handleSave = async () => {
     const projectSession = captureProjectSession(currentProject)
     if (!projectMatches || !projectSession || !isProjectSessionPath(projectSession, projectKey)) return
     try {
@@ -165,9 +165,7 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
       if (!isProjectSessionCurrent(projectSession)) return
       toast.success(text(`已保存 ${characters.length} 个角色卡`, `Saved ${characters.length} character cards`))
       addLog('info', text(`已保存 ${characters.length} 个角色卡`, `Saved ${characters.length} character cards`))
-      // “保存”保持编辑上下文；“完成”则在保存成功后才回到概览。
-      // 这样不会发生点了完成却丢掉本次编辑的情况。
-      if (returnToOverview) setViewMode('overview')
+      // 保存与完成均保留当前角色、表单和滚动位置。
     } catch (error) {
       if (!isProjectSessionCurrent(projectSession)) return
       const errorMsg = String(error)
@@ -255,7 +253,7 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
   /** 关系行与图谱节点都只是“选中并打开”某张已有角色卡的入口。 */
   const openCharacterCard = (name: string) => {
     setSelectedName(name)
-    setViewMode('overview')
+    setViewMode('edit')
   }
 
   // ===== 渲染 =====
@@ -313,7 +311,7 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
               >
                 <Trash2 size={12} /> {text('删除全部角色与关系', 'Delete all characters and relationships')}
               </Button>
-              <Button variant="outline" size="sm" onClick={() => setViewMode('overview')} title={text('返回人物档案', 'Back to the character profile')}>
+              <Button variant="outline" size="sm" onClick={() => setViewMode('edit')} title={text('返回人物档案', 'Back to the character profile')}>
                 <Users size={12} /> {text('返回档案', 'Back to profile')}
               </Button>
             </>
@@ -355,9 +353,9 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
                 <Button
                   variant="default"
                   size="sm"
-                  onClick={() => { void handleSave({ returnToOverview: true }) }}
+                  onClick={() => { void handleSave() }}
                   disabled={identityBusy || !dataReady}
-                  title={text('保存并返回人物概览', 'Save and return to the character overview')}
+                  title={text('保存并留在当前档案', 'Save and stay on this profile')}
                 >
                   <Check size={12} /> {text('完成', 'Done')}
                 </Button>

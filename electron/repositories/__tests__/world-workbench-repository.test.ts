@@ -233,6 +233,104 @@ describe('世界实体与归属', () => {
     expect(links.find(link => link.mapId === ROOT_MAP_ID)?.worldId).toBe(mortalWorld.id)
   })
 
+  it('moves a consistent map subtree but blocks assignments that split it from a bound parent or child', () => {
+    const { mortalWorld, immortalWorld } = seedBase()
+    const thirdWorld = makeWorld('第三界')
+    const childMapId = 'map-44444444-4444-4444-8444-444444444444'
+    const leafMapId = 'map-55555555-5555-4555-8555-555555555555'
+    const foreignChildMapId = 'map-66666666-6666-4666-8666-666666666666'
+
+    WorldMapRepository.upsertMap({
+      id: childMapId, name: '子地图', parentMapId: ROOT_MAP_ID, sortOrder: 2, image: null,
+    })
+    WorldWorkbenchRepository.applyMapWorldAssignment(childMapId, mortalWorld.id)
+
+    const movePlan = WorldWorkbenchRepository.planMapWorldAssignment(ROOT_MAP_ID, immortalWorld.id)
+    expect(movePlan.descendantMapIds).toContain(childMapId)
+    expect(movePlan.blockers).toEqual([])
+    WorldWorkbenchRepository.applyMapWorldAssignment(ROOT_MAP_ID, immortalWorld.id)
+    expect(WorldWorkbenchRepository.getAll().mapWorldLinks
+      .filter(link => [ROOT_MAP_ID, childMapId].includes(link.mapId))
+      .every(link => link.worldId === immortalWorld.id)).toBe(true)
+
+    WorldMapRepository.upsertMap({
+      id: leafMapId, name: '叶子地图', parentMapId: childMapId, sortOrder: 3, image: null,
+    })
+    const parentPlan = WorldWorkbenchRepository.planMapWorldAssignment(leafMapId, mortalWorld.id)
+    expect(parentPlan.blockers.some(blocker => blocker.kind === 'parent-map')).toBe(true)
+    expect(() => WorldWorkbenchRepository.applyMapWorldAssignment(leafMapId, mortalWorld.id)).toThrow(/不一致/)
+
+    WorldMapRepository.upsertMap({
+      id: foreignChildMapId, name: '旧的异界子图', parentMapId: childMapId, sortOrder: 4, image: null,
+    })
+    // 模拟升级前留下的父子世界归属不一致记录。
+    db().prepare('UPDATE world_maps SET world_id = ? WHERE id = ?').run(mortalWorld.id, foreignChildMapId)
+    const childPlan = WorldWorkbenchRepository.planMapWorldAssignment(childMapId, thirdWorld.id)
+    expect(childPlan.blockers.some(blocker => blocker.kind === 'child-map' && blocker.ids.includes(foreignChildMapId))).toBe(true)
+    expect(childPlan.blockers.some(blocker => blocker.kind === 'parent-map' && blocker.ids.includes(ROOT_MAP_ID))).toBe(true)
+  })
+
+  it('allows explicitly unassigning an unreferenced world map', () => {
+    const { mortalWorld } = seedBase()
+    const plan = WorldWorkbenchRepository.planMapWorldAssignment(ROOT_MAP_ID, null)
+    expect(plan.blockers).toEqual([])
+
+    WorldWorkbenchRepository.applyMapWorldAssignment(ROOT_MAP_ID, null)
+    expect(WorldWorkbenchRepository.getAll().mapWorldLinks.some(link => link.mapId === ROOT_MAP_ID)).toBe(false)
+    expect(WorldWorkbenchRepository.getAll().worlds.some(world => world.id === mortalWorld.id)).toBe(true)
+  })
+
+  it('includes historical event links to a map node in assignment and deletion impact plans', () => {
+    const { mortalWorld, immortalWorld, nodeA } = seedBase()
+    const event = StoryTimelineRepository.upsertEvent({
+      id: 'evt-node-map-impact', title: '青石村之战', timeLabel: '第一年', sortOrder: 1, precision: 'exact',
+      description: '', chapterNumbers: [], characterNames: [], locationNodeIds: [], status: 'planned',
+    })
+    WorldWorkbenchRepository.saveEventLinks(event.id, [mortalWorld.id], [
+      { id: '', eventId: event.id, targetKind: 'node', targetId: nodeA, worldId: null, relation: '主战场', note: '' },
+    ])
+
+    const assignmentPlan = WorldWorkbenchRepository.planMapWorldAssignment(ROOT_MAP_ID, immortalWorld.id)
+    expect(assignmentPlan.blockers.some(blocker => blocker.kind === 'event-node')).toBe(true)
+    expect(() => WorldWorkbenchRepository.applyMapWorldAssignment(ROOT_MAP_ID, immortalWorld.id)).toThrow(/不一致/)
+
+    const nodePlan = WorldMapRepository.planNodeDelete(nodeA)
+    expect(nodePlan.worldReferences.some(reference => reference.kind === 'event-node')).toBe(true)
+    expect(() => WorldMapRepository.deleteNode(nodeA)).toThrow(/世界资料引用/)
+
+    const mapPlan = WorldMapRepository.planMapDelete(ROOT_MAP_ID, 'promote-children')
+    expect(mapPlan.worldReferences.some(reference => reference.kind === 'event-node')).toBe(true)
+    expect(() => WorldMapRepository.deleteMap(ROOT_MAP_ID, 'promote-children')).toThrow(/世界资料引用/)
+
+    const snapshot = WorldWorkbenchRepository.getAll()
+    expect(snapshot.mapWorldLinks.find(link => link.mapId === ROOT_MAP_ID)?.worldId).toBe(mortalWorld.id)
+    expect(snapshot.eventLinks.find(link => link.eventId === event.id)?.targetId).toBe(nodeA)
+    expect(StoryTimelineRepository.getAll().events.some(row => row.id === event.id)).toBe(true)
+  })
+
+  it('keeps mixed scoped and unscoped node references blocking map unassignment', () => {
+    const { mortalWorld, nodeA } = seedBase()
+    const childMapId = 'map-77777777-7777-4777-8777-777777777777'
+    WorldMapRepository.upsertMap({
+      id: childMapId, name: '未关联子图', parentMapId: ROOT_MAP_ID, sortOrder: 2, image: null,
+    })
+    makeNode('node-unassigned-child-map', '旧地点', childMapId)
+    const event = StoryTimelineRepository.upsertEvent({
+      id: 'evt-mixed-map-worlds', title: '跨图事件', timeLabel: '第二年', sortOrder: 2, precision: 'exact',
+      description: '', chapterNumbers: [], characterNames: [], locationNodeIds: [], status: 'planned',
+    })
+    WorldWorkbenchRepository.saveEventLinks(event.id, [mortalWorld.id], [
+      { id: '', eventId: event.id, targetKind: 'node', targetId: nodeA, worldId: null, relation: '主战场', note: '' },
+      { id: '', eventId: event.id, targetKind: 'node', targetId: 'node-unassigned-child-map', worldId: null, relation: '旧地图位置', note: '' },
+    ])
+
+    const plan = WorldWorkbenchRepository.planMapWorldAssignment(ROOT_MAP_ID, null)
+    expect(plan.blockers.some(blocker => blocker.kind === 'event-node')).toBe(true)
+    expect(() => WorldWorkbenchRepository.applyMapWorldAssignment(ROOT_MAP_ID, null)).toThrow(/不一致/)
+    expect(WorldWorkbenchRepository.getAll().mapWorldLinks.find(link => link.mapId === ROOT_MAP_ID)?.worldId)
+      .toBe(mortalWorld.id)
+  })
+
   it('blocks deleting a world that still has references, and deletes an empty one', () => {
     const { mortalWorld, immortalWorld } = seedBase()
     WorldWorkbenchRepository.upsertFaction(baseFaction(mortalWorld.id, '青云门'))
@@ -835,6 +933,27 @@ describe('历史事件', () => {
     expect(() => WorldWorkbenchRepository.saveEventLinks(event.id, [mortalWorld.id], [
       { id: '', eventId: event.id, targetKind: 'relic', targetId: 'wrelic-00000000-0000-4000-8000-000000000000', worldId: null, relation: '', note: '' },
     ])).toThrow(/不存在或已删除/)
+  })
+})
+
+describe('世界删除影响', () => {
+  it('previews event links whose character target is scoped to the world', () => {
+    const world = makeWorld('远行者故乡')
+    const characterId = makeCharacter('远行者')
+    const event = StoryTimelineRepository.upsertEvent({
+      id: 'evt-world-character-link', title: '离乡', timeLabel: '第三年', sortOrder: 3, precision: 'exact',
+      description: '', chapterNumbers: [], characterNames: ['远行者'], locationNodeIds: [], status: 'planned',
+    })
+    WorldWorkbenchRepository.saveEventLinks(event.id, [], [
+      { id: '', eventId: event.id, targetKind: 'character', targetId: characterId, worldId: world.id, relation: '离开', note: '' },
+    ])
+
+    const plan = WorldWorkbenchRepository.planDelete('world', world.id)
+    expect(plan.blockers.some(blocker => blocker.label === '历史事件关联' && blocker.count === 1)).toBe(true)
+    expect(() => WorldWorkbenchRepository.deleteEntity('world', world.id)).toThrow(/引用/)
+    expect(WorldWorkbenchRepository.getAll().worlds.some(item => item.id === world.id)).toBe(true)
+    expect(StoryTimelineRepository.getAll().events.some(item => item.id === event.id)).toBe(true)
+    expect(CharacterRepository.getByName('远行者')).not.toBeNull()
   })
 })
 

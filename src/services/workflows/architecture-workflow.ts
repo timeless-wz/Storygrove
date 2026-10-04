@@ -97,6 +97,10 @@ export function createArchitectureWorkflow(
     expectedProjectPath,
     novelConfig: Object.freeze({ ...project.novelConfig }),
   })
+  const bookOutlineCandidateMode = sel.includes('synopsis')
+    && !resumingSynopsis
+    && params.synopsisRange == null
+  const bookOutlineOperationId = bookOutlineCandidateMode ? randomUUID() : undefined
   const stepDesc = (key: string, zhCNDesc: string, enUSDesc: string) => sel.includes(key as never)
     ? text(zhCNDesc, enUSDesc)
     : text('（跳过，保留已有内容）', '(Skipped; existing content is retained)')
@@ -139,13 +143,25 @@ export function createArchitectureWorkflow(
       },
     },
     {
-      name: text('情节大纲', 'Plot outline'),
+      name: bookOutlineCandidateMode ? text('全书总纲候选', 'Book outline candidate') : text('情节大纲', 'Plot outline'),
       key: 'synopsis',
       description: resumingSynopsis
         ? text('从上次中断点继续生成情节大纲', 'Resume the plot outline from the interrupted point')
-        : stepDesc('synopsis', '整合所有碎片，按选定结构模式生成情节大纲', 'Integrate all inputs into a plot outline using the selected structure'),
+        : bookOutlineCandidateMode
+          ? text('生成待预览、编辑和明确确认的全书总纲候选', 'Generate a whole-book outline candidate for preview, editing, and explicit confirmation')
+          : stepDesc('synopsis', '整合所有碎片，按选定结构模式生成情节大纲', 'Integrate all inputs into a plot outline using the selected structure'),
       executor: async (step: unknown, context: WorkflowContext, callbacks: StepCallbacks) => {
         context.data.stepGuidance = guidance
+        if (bookOutlineCandidateMode && bookOutlineOperationId) {
+          const { BlueprintPlanningCommand } = await import('./commands/blueprint-planning.command')
+          return new BlueprintPlanningCommand({
+            operationId: bookOutlineOperationId,
+            kind: 'book-outline',
+            scope: { kind: 'book' },
+            guidance: guidance.synopsis,
+            novelConfigSnapshot: projectSnapshot.novelConfig,
+          }).execute({ step, context, callbacks })
+        }
         const { GeneratePlotArchitectureCommand } = await import('./commands/architecture.command')
         return new GeneratePlotArchitectureCommand(sel, projectSnapshot, undefined, {
           resumeSynopsis: params.resumeSynopsis,
@@ -170,10 +186,11 @@ export function createArchitectureWorkflow(
     resourceKeys: [
       workflowResourceKey('architecture'),
       ...(sel.includes('characters') ? [workflowResourceKey('character-roster')] : []),
+      ...(bookOutlineCandidateMode ? ['blueprint-planning:book'] : []),
     ],
     readResourceKeys: [workflowResourceKey('novel-config')],
     steps: finalSteps,
-    onComplete: { mode: 'silent', message: text('故事架构已生成完成！前往侧边栏「故事架构」查看', 'Story architecture is ready. Open Story Architecture from the sidebar.') },
+    onComplete: { mode: 'silent', message: text('故事设定已生成完成！前往「基础设定总览」查看并编辑', 'Story setup is ready. Open the Basic settings overview to review and edit it.') },
   }
 }
 

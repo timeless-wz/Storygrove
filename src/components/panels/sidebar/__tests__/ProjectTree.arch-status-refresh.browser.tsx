@@ -122,8 +122,12 @@ describe('ProjectTree architecture status refresh', () => {
     await act(async () => {
       await vi.waitFor(() => expect(coreReadCount()).toBeGreaterThanOrEqual(2))
     })
-    // 架构完成度只统计故事前提、世界观、情节大纲三项（角色图谱已回归角色档案）。
-    expect(container.textContent).toContain('Story architecture2/3')
+    // 文档状态只描述是否有内容，不声称内容已确认或已完成。
+    const worldSetup = container.querySelector('[data-group-level="2"][data-group-id="worldSetup"]')!
+    await act(async () => worldSetup.querySelector<HTMLButtonElement>('button[aria-expanded]')!.click())
+    expect(container.querySelector('[data-arch-file-key="premise"]')?.textContent).toContain('Has content')
+    expect(container.querySelector('[data-arch-file-key="worldbuilding"]')?.textContent).toContain('Has content')
+    expect(container.querySelector('[data-arch-file-key="synopsis"]')?.textContent).toContain('Needs content')
     const readsBeforeCommit = coreReadCount()
 
     synopsis = 'S'.repeat(60)
@@ -137,7 +141,8 @@ describe('ProjectTree architecture status refresh', () => {
     await act(async () => {
       await vi.waitFor(() => expect(coreReadCount()).toBeGreaterThan(readsBeforeCommit))
     })
-    expect(container.textContent).toContain('Story architecture3/3')
+    expect(container.querySelector('[data-arch-file-key="synopsis"]')?.textContent).toContain('Has content')
+    expect(container.querySelector('[data-arch-file-key="synopsis"]')?.textContent).not.toContain('Needs content')
   })
 
   it('reflects committed blueprint count when the blueprint resource event arrives', async () => {

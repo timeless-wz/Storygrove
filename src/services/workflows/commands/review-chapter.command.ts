@@ -28,6 +28,11 @@ import {
   buildChapterBlueprintReviewPrompt,
   normalizeChapterBlueprintReview,
 } from '../../../shared/chapter-blueprint-review'
+import {
+  formatBlueprintVolumeWritingMaterial,
+  loadBlueprintVolumeWritingMaterial,
+  type BlueprintVolumeWritingMaterial,
+} from './blueprint-volume-writing'
 
 
 export interface ReviewChapterParams {
@@ -262,7 +267,8 @@ export class ReviewChapterCommand extends BaseWorkflowCommand<string> {
       status: storedDraft.status as ExpectedDraftSource['status'],
       content: draft,
     }
-    const boundBlueprintChapterNumber = storedDraft.blueprintChapterNumber
+    const boundBlueprintChapterNumber = storedDraft.blueprintChapterNumber ?? undefined
+    let volumeWritingMaterial: BlueprintVolumeWritingMaterial | null = null
 
     let boundBlueprint: ChapterBlueprint | null = null
     let blueprintV2Detail: ChapterBlueprintV2Detail | null = null
@@ -340,16 +346,24 @@ export class ReviewChapterCommand extends BaseWorkflowCommand<string> {
         frozenGoals = freezeChapterGoals(boundBlueprintChapterNumber, boundBlueprint.keyEvents)
       }
       try {
-        const { loadDirectoryBlueprintSummaries } = await import('../directory-workflow')
-        const blueprints = (await loadDirectoryBlueprintSummaries(context.projectPath, projectSession))
-          .filter(blueprint => (
-            blueprint.chapterNumber >= boundBlueprintChapterNumber
-            && blueprint.chapterNumber <= boundBlueprintChapterNumber + 5
-          ))
-        const futureBlueprints = blueprintV2Detail
-          ? blueprints.filter(blueprint => blueprint.chapterNumber !== boundBlueprintChapterNumber)
-          : blueprints
-        planningMaterial = formatReviewPlanningMaterial(futureBlueprints, writingLanguage)
+        volumeWritingMaterial = await loadBlueprintVolumeWritingMaterial(
+          projectSession,
+          boundBlueprintChapterNumber,
+        )
+        if (volumeWritingMaterial?.outline) {
+          planningMaterial = formatBlueprintVolumeWritingMaterial(volumeWritingMaterial, writingLanguage)
+        } else {
+          const { loadDirectoryBlueprintSummaries } = await import('../directory-workflow')
+          const blueprints = (await loadDirectoryBlueprintSummaries(context.projectPath, projectSession))
+            .filter(blueprint => (
+              blueprint.chapterNumber >= boundBlueprintChapterNumber
+              && blueprint.chapterNumber <= boundBlueprintChapterNumber + 5
+            ))
+          const futureBlueprints = blueprintV2Detail
+            ? blueprints.filter(blueprint => blueprint.chapterNumber !== boundBlueprintChapterNumber)
+            : blueprints
+          planningMaterial = formatReviewPlanningMaterial(futureBlueprints, writingLanguage)
+        }
       } catch {
         planningMaterial = promptLanguageText(
           writingLanguage,
@@ -521,6 +535,31 @@ export class ReviewChapterCommand extends BaseWorkflowCommand<string> {
     }
 
     this.assertNotCancelled(context)
+    const latestSourceDraft = await ipc.invokeWithProjectSession(
+      projectSession,
+      'db:draft-get-full',
+      sourceSnapshot.id,
+      context.projectPath,
+    )
+    if (
+      !latestSourceDraft
+      || latestSourceDraft.id !== sourceSnapshot.id
+      || latestSourceDraft.chapterNumber !== sourceSnapshot.chapterNumber
+      || latestSourceDraft.version !== sourceSnapshot.version
+      || latestSourceDraft.status !== sourceSnapshot.status
+      || latestSourceDraft.content !== sourceSnapshot.content
+      || (latestSourceDraft.blueprintChapterNumber ?? undefined) !== boundBlueprintChapterNumber
+    ) throw new Error(text(
+      '审稿期间草稿内容或蓝图绑定已变化，未保存审稿报告。',
+      'The draft content or blueprint binding changed during review, so the report was not saved.',
+    ))
+    const latestVolumeMaterial = boundBlueprintChapterNumber === undefined
+      ? null
+      : await loadBlueprintVolumeWritingMaterial(projectSession, boundBlueprintChapterNumber)
+    if (JSON.stringify(latestVolumeMaterial) !== JSON.stringify(volumeWritingMaterial)) throw new Error(text(
+      '审稿期间本章归卷或卷纲版本已变化，未保存审稿报告。',
+      'The chapter assignment or volume-outline version changed during review, so the report was not saved.',
+    ))
     const createResult = await ipc.invokeWithProjectSession(projectSession, 'db:review-create', {
       baseDraftId: sourceSnapshot.id,
       content: JSON.stringify(parsedResult, null, 2),

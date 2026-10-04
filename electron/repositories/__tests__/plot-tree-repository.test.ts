@@ -8,7 +8,7 @@ import type { PlotTreeSnapshot } from '../../../src/shared/plot-tree'
 import { FinalizedDraftImportRepository } from '../finalized-draft-import-repository'
 import { NarrativeThreadRepository } from '../narrative-thread-repository'
 import { PlotTreeRepository } from '../plot-tree-repository'
-import { ProjectCoreRepository } from '../project-core-repository'
+import { hashProjectSynopsis, ProjectCoreRepository } from '../project-core-repository'
 import { SummaryRepository } from '../summary-repository'
 
 let projectRoot = ''
@@ -39,7 +39,7 @@ afterEach(() => {
 
 function seedFacts() {
   const db = getProjectDb()!
-  ProjectCoreRepository.update({ synopsis: 'A courier discovers that the city map is being rewritten.' })
+  updateSynopsis('A courier discovers that the city map is being rewritten.')
   db.prepare(`
     INSERT INTO blueprints (
       chapter_number, title, purpose, key_events, notes, notes_updated_at
@@ -87,6 +87,12 @@ function seedFacts() {
     reason: 'The finalized chapter plants the central mystery.',
   })
   return { draftId, planId: plan.id, eventId: event.id }
+}
+
+function updateSynopsis(synopsis: string): void {
+  const current = ProjectCoreRepository.get()
+  if (!current) throw new Error('Project core is missing in plot-tree test')
+  ProjectCoreRepository.update({ synopsis, expectedSynopsisHash: hashProjectSynopsis(current.synopsis) })
 }
 
 describe('PlotTreeRepository', () => {
@@ -335,7 +341,7 @@ describe('PlotTreeRepository', () => {
 
   it('rejects changed source content when SQLite timestamps stay in the same second', () => {
     const db = getProjectDb()!
-    ProjectCoreRepository.update({ synopsis: 'A courier follows the original map.' })
+    updateSynopsis('A courier follows the original map.')
     db.prepare(`
       INSERT INTO blueprints (chapter_number, title, purpose, key_events)
       VALUES (1, 'The original map', 'Start the investigation', 'Mara follows the old route.')
@@ -420,7 +426,7 @@ describe('PlotTreeRepository', () => {
         }],
       }],
     }
-    ProjectCoreRepository.update({ synopsis: 'The source changed while generation was running.' })
+    updateSynopsis('The source changed while generation was running.')
     getProjectDb()!.prepare(
       "UPDATE project_core SET updated_at = '2031-01-01 00:00:00' WHERE id = 'main'",
     ).run()

@@ -21,7 +21,7 @@ import { setActiveProjectSessionContext } from '../../../shared/project-session-
 import { recordLastCreationLocation, readLastCreationLocation } from '../../../services/last-creation-location'
 import { useCharacterStore } from '../../../stores/character-store'
 import { useDraftStore } from '../../../stores/draft-store'
-import { useEditorStore } from '../../../stores/editor-store'
+import { createProjectScopedEditorTabId, useEditorStore } from '../../../stores/editor-store'
 import { useLocaleStore } from '../../../stores/locale-store'
 import { useProjectStore } from '../../../stores/project-store'
 import { useStoryTimelineStore } from '../../../stores/story-timeline-store'
@@ -320,4 +320,61 @@ describe('回到上次创作位置（真实路径）', () => {
     await vi.waitFor(() => expect(container.textContent).toContain('继续写正文'))
     expect(container.querySelector('[data-testid="overview-resume-location"]')).toBeNull()
   })
+})
+
+it('aligns roadmap actions at the bottom and makes the whole card clickable without swallowing secondary links', async () => {
+  Object.defineProperty(window, 'velaAPI', { configurable: true, value: { invoke: vi.fn(async () => []), on: () => () => {} } })
+  seedOverviewStores()
+  await page.viewport(1440, 1000)
+  await act(async () => root.render(<ProjectOverviewPage />))
+  const cards = Array.from(container.querySelectorAll<HTMLElement>('.literary-step-card'))
+  expect(cards).toHaveLength(4)
+  cards[0].scrollIntoView({ block: 'center' })
+  const buttons = cards.map(card => card.querySelector<HTMLButtonElement>('.literary-step-action > button')!)
+  const bottoms = buttons.map(button => button.getBoundingClientRect().bottom)
+  expect(Math.max(...bottoms) - Math.min(...bottoms)).toBeLessThan(2)
+  for (const [index, card] of cards.entries()) {
+    const clicked = vi.fn()
+    buttons[index].addEventListener('click', clicked)
+    await act(async () => { await page.elementLocator(card).click({ position: { x: 12, y: 12 } }) })
+    expect(clicked).toHaveBeenCalledTimes(1)
+    const secondary = card.querySelector<HTMLButtonElement>('.literary-step-action > div button')
+    if (secondary) {
+      await act(async () => { await page.elementLocator(secondary).click() })
+      expect(clicked).toHaveBeenCalledTimes(1)
+    }
+  }
+})
+
+it('reuses restored map and story-setup tabs when project overview opens the renamed entries', async () => {
+  Object.defineProperty(window, 'velaAPI', { configurable: true, value: { invoke: vi.fn(async () => []), on: () => () => {} } })
+  seedOverviewStores()
+  await page.viewport(1440, 1000)
+  const existingStorySetupId = createProjectScopedEditorTabId('world-building-editor', 'world-building', PROJECT_PATH)
+  const existingMapId = createProjectScopedEditorTabId('world-map', 'world-map', PROJECT_PATH)
+  useEditorStore.setState({
+    tabs: [
+      { id: existingStorySetupId, name: '旧故事架构名称', type: 'world-building', projectKey: PROJECT_PATH },
+      { id: existingMapId, name: '旧地图册名称', type: 'world-map', projectKey: PROJECT_PATH },
+    ],
+    activeTabId: existingStorySetupId,
+    draftLedgers: {},
+  })
+  await act(async () => root.render(<ProjectOverviewPage />))
+
+  const storySetupCard = container.querySelector<HTMLElement>('[aria-label="打开基础设定总览"]')
+  expect(storySetupCard).not.toBeNull()
+  await act(async () => storySetupCard?.click())
+  expect(useEditorStore.getState().tabs.filter(tab => tab.type === 'world-building')).toEqual([
+    expect.objectContaining({ id: existingStorySetupId, name: '基础设定总览', projectKey: PROJECT_PATH }),
+  ])
+  expect(useEditorStore.getState().activeTabId).toBe(existingStorySetupId)
+
+  const mapCard = container.querySelector<HTMLElement>('[aria-label="打开地图册"]')
+  expect(mapCard).not.toBeNull()
+  await act(async () => mapCard?.click())
+  expect(useEditorStore.getState().tabs.filter(tab => tab.type === 'world-map')).toEqual([
+    expect.objectContaining({ id: existingMapId, name: '地图册', projectKey: PROJECT_PATH }),
+  ])
+  expect(useEditorStore.getState().activeTabId).toBe(existingMapId)
 })

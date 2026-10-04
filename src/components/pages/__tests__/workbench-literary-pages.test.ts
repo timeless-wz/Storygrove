@@ -96,9 +96,9 @@ describe('AI Novel Writer 首页、项目总览与新项目创作路径规范', 
       expect(overviewSource).toContain('正文执笔与质量审核')
 
       // 各工作区卡片
-      expect(overviewSource).toContain('多地图地图册')
+      expect(overviewSource).toContain("text('地图册', 'Map atlas')")
       expect(overviewSource).toContain('故事时间线')
-      expect(overviewSource).toContain('世界观与规则设定')
+      expect(overviewSource).toContain("text('基础设定总览', 'Basic settings overview')")
       expect(overviewSource).toContain('章节蓝图细纲')
       expect(overviewSource).toContain('章节脉络')
       expect(overviewSource).toContain('正文直接写作')

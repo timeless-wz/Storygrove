@@ -27,13 +27,22 @@ export interface CharacterViewRequest {
   requestId: number
 }
 
+const PROJECT_TREE_GROUP_OPEN_DEFAULTS: Record<string, boolean> = {
+  plan: true,
+  setting: true,
+  worldSetup: false,
+  library: false,
+  management: false,
+  manuscript: true,
+}
+
 interface LayoutState {
   // ===== 侧边栏 =====
   sidebarOpen: boolean
   sidebarView: SidebarView
   sidebarWidth: number
   activeRailItem: LeftRailItem
-  /** 项目树各一级分组折叠状态（本次应用运行期间保持） */
+  /** 项目树分组折叠状态（包括一级组与嵌套的世界设定组；应用运行期间保持） */
   projectTreeGroupOpen: Record<string, boolean>
   setProjectTreeGroupOpen: (groupId: string, open: boolean) => void
   toggleProjectTreeGroup: (groupId: string) => void
@@ -129,13 +138,7 @@ export const useLayoutStore = create<LayoutState>()((set) => ({
   sidebarView: 'project',
   sidebarWidth: 260,
   activeRailItem: 'project',
-  projectTreeGroupOpen: {
-    plan: true,
-    setting: true,
-    library: true,
-    management: true,
-    manuscript: true,
-  },
+  projectTreeGroupOpen: { ...PROJECT_TREE_GROUP_OPEN_DEFAULTS },
 
   // 参考栏与 AI 对话默认均收起，按需由右下角状态栏或创作入口打开。
   aiPanelOpen: false,
@@ -183,7 +186,7 @@ export const useLayoutStore = create<LayoutState>()((set) => ({
     set((s) => ({
       projectTreeGroupOpen: {
         ...s.projectTreeGroupOpen,
-        [groupId]: !(s.projectTreeGroupOpen[groupId] ?? true),
+        [groupId]: !(s.projectTreeGroupOpen[groupId] ?? PROJECT_TREE_GROUP_OPEN_DEFAULTS[groupId] ?? true),
       },
     })),
 
@@ -231,7 +234,7 @@ export const useLayoutStore = create<LayoutState>()((set) => ({
   closeImportNovel: () => set({ importNovelOpen: false }),
   openChapterCreation: (prefill = null) => set({ chapterCreationOpen: true, chapterCreationPrefill: prefill }),
   closeChapterCreation: () => set({ chapterCreationOpen: false, chapterCreationPrefill: null }),
-  openCharacterProfile: (view = 'overview') =>
+  openCharacterProfile: (view = 'edit') =>
     set((s) => ({
       sidebarView: 'characters',
       activeRailItem: 'characters',

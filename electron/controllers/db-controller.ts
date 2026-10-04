@@ -16,6 +16,7 @@ import {
   ProjectCoreData,
   type ProjectCoreSynopsisCommitRequest,
 } from '../repositories/project-core-repository'
+import { BlueprintPlanningRepository } from '../repositories/blueprint-planning-repository'
 import { ProjectClearRepository, ProjectClearOptions } from '../repositories/project-clear-repository'
 import {
   BlueprintRepository,
@@ -79,6 +80,17 @@ import type { PlotCanvasNodeUpsertPayload, PlotCanvasEdgeUpsertPayload, PlotCanv
 import { ChapterCanvasRepository } from '../repositories/chapter-canvas-repository'
 import type { ChapterCanvasNodeUpsertPayload, ChapterCanvasEdgeUpsertPayload } from '../../src/shared/chapter-canvas'
 import type { ChapterBlueprintV2SaveInput } from '../../src/shared/blueprint-v2'
+import type {
+  BlueprintPlanningCandidateListScope,
+  BlueprintPlanningCandidateSaveInput,
+  BlueprintPlanningCandidateUpdateInput,
+  BlueprintPlanningCheckListScope,
+  BlueprintPlanningCheckReport,
+  BlueprintPlanningConfirmInput,
+  BlueprintPlanningTargetSourceReference,
+  BlueprintVolumeOutlineDeleteInput,
+  BlueprintVolumeOutlineSaveInput,
+} from '../../src/shared/blueprint-planning'
 import { StoryTimelineRepository } from '../repositories/story-timeline-repository'
 import { WorldWorkbenchRepository } from '../repositories/world-workbench-repository'
 import type {
@@ -145,6 +157,15 @@ const MUTATING_DATABASE_CHANNELS = new Set([
   'db:blueprint-v2-delete',
   'db:blueprint-v2-review-notices-clear',
   'db:blueprint-volume-upsert',
+  'db:blueprint-volume-outline-save',
+  'db:blueprint-volume-outline-delete',
+  'db:blueprint-planning-candidate-save',
+  'db:blueprint-planning-candidate-update',
+  'db:blueprint-planning-candidate-get',
+  'db:blueprint-planning-candidate-list',
+  'db:blueprint-planning-candidate-cancel',
+  'db:blueprint-planning-confirm',
+  'db:blueprint-planning-check-save',
   'db:cultivation-save',
   'db:character-roster-commit',
   'db:character-identities-ensure',
@@ -201,6 +222,9 @@ const MUTATING_DATABASE_CHANNELS = new Set([
   'db:timeline-events-reorder',
   'db:timeline-branch-upsert',
   'db:timeline-branch-delete',
+  'db:timeline-branch-create-with-event',
+  'db:timeline-event-delete-confirmed',
+  'db:timeline-branch-delete-confirmed',
   'db:world-upsert',
   'db:world-delete',
   'db:world-map-assignment-apply',
@@ -292,8 +316,7 @@ export function registerDatabaseController() {
   ) => {
     try {
       assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
-      ProjectCoreRepository.update(data)
-      return { success: true }
+      return ProjectCoreRepository.update(data)
     } catch (err) {
       console.error('[db:project-core-update] 失败:', err)
       return { success: false, error: String(err) }
@@ -641,6 +664,125 @@ export function registerDatabaseController() {
     } catch (err) {
       return { success: false, error: String(err) }
     }
+  })
+
+  ipcMain.handle('db:blueprint-volume-outline-get', async (_event, volumeId: string, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return BlueprintPlanningRepository.getVolumeOutline(volumeId)
+  })
+
+  ipcMain.handle('db:blueprint-volume-outline-list-summaries', async (_event, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return BlueprintPlanningRepository.listVolumeOutlineSummaries()
+  })
+
+  ipcMain.handle('db:blueprint-volume-outline-save', async (
+    _event,
+    input: BlueprintVolumeOutlineSaveInput,
+    expectedProjectPath: string,
+  ) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return BlueprintPlanningRepository.saveVolumeOutline(input)
+  })
+
+  ipcMain.handle('db:blueprint-volume-outline-delete', async (
+    _event,
+    input: BlueprintVolumeOutlineDeleteInput,
+    expectedProjectPath: string,
+  ) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return BlueprintPlanningRepository.deleteVolumeOutline(input)
+  })
+
+  ipcMain.handle('db:blueprint-planning-candidate-save', async (
+    _event,
+    input: BlueprintPlanningCandidateSaveInput,
+    expectedProjectPath: string,
+  ) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return BlueprintPlanningRepository.saveCandidate(input)
+  })
+
+  ipcMain.handle('db:blueprint-planning-candidate-update', async (
+    _event,
+    input: BlueprintPlanningCandidateUpdateInput,
+    expectedProjectPath: string,
+  ) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return BlueprintPlanningRepository.updateCandidate(input)
+  })
+
+  ipcMain.handle('db:blueprint-planning-candidate-get', async (_event, operationId: string, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return BlueprintPlanningRepository.getCandidate(operationId)
+  })
+
+  ipcMain.handle('db:blueprint-planning-candidate-list', async (
+    _event,
+    scope: BlueprintPlanningCandidateListScope,
+    expectedProjectPath: string,
+  ) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return BlueprintPlanningRepository.listCandidates(scope)
+  })
+
+  ipcMain.handle('db:blueprint-planning-candidate-cancel', async (_event, operationId: string, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return BlueprintPlanningRepository.cancelCandidate(operationId)
+  })
+
+  ipcMain.handle('db:blueprint-planning-confirm', async (
+    _event,
+    input: BlueprintPlanningConfirmInput,
+    expectedProjectPath: string,
+  ) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return BlueprintPlanningRepository.confirm(input)
+  })
+
+  ipcMain.handle('db:blueprint-planning-source-status', async (
+    _event,
+    snapshotIds: string[],
+    expectedProjectPath: string,
+  ) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return BlueprintPlanningRepository.getSourceStatuses(snapshotIds)
+  })
+
+  ipcMain.handle('db:blueprint-planning-target-source-status', async (
+    _event,
+    targets: BlueprintPlanningTargetSourceReference[],
+    expectedProjectPath: string,
+  ) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return BlueprintPlanningRepository.getTargetSourceStatuses(targets)
+  })
+
+  ipcMain.handle('db:blueprint-planning-check-save', async (
+    _event,
+    report: BlueprintPlanningCheckReport,
+    expectedProjectPath: string,
+  ) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    try {
+      return { success: true as const, report: BlueprintPlanningRepository.saveCheck(report) }
+    } catch (error) {
+      return { success: false as const, code: 'INVALID_CONTENT' as const, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('db:blueprint-planning-check-list', async (
+    _event,
+    scope: BlueprintPlanningCheckListScope,
+    expectedProjectPath: string,
+  ) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return BlueprintPlanningRepository.listChecks(scope)
+  })
+
+  ipcMain.handle('db:blueprint-planning-export', async (_event, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return BlueprintPlanningRepository.exportPlanningPackage()
   })
 
   ipcMain.handle('db:blueprint-get', async (_event, chapterNumber: number, expectedProjectPath: string) => {
@@ -1903,6 +2045,63 @@ export function registerDatabaseController() {
       return { success: false, error: String(error) }
     }
   })
+
+  ipcMain.handle(
+    'db:timeline-branch-create-with-event',
+    async (_event, branch: StoryTimelineBranch, event: StoryTimelineEvent, expectedProjectPath: string) => {
+      try {
+        assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+        const committed = StoryTimelineRepository.createBranchWithEvent(branch, event)
+        return { success: true, branch: committed.branch, event: committed.event }
+      } catch (error) {
+        return { success: false, error: String(error) }
+      }
+    },
+  )
+
+  // 删除影响预览与确认删除：预览是只读的级联收集；确认删除回传预览指纹，
+  // 主进程在同一事务内重算并比对，不一致时拒绝执行而不是静默扩大范围。
+  ipcMain.handle('db:timeline-event-delete-preview', async (_event, eventId: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, preview: StoryTimelineRepository.previewEventDelete(eventId) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle('db:timeline-branch-delete-preview', async (_event, branchId: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, preview: StoryTimelineRepository.previewBranchDelete(branchId) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  ipcMain.handle(
+    'db:timeline-event-delete-confirmed',
+    async (_event, eventId: string, fingerprint: string, expectedProjectPath: string) => {
+      try {
+        assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+        return StoryTimelineRepository.deleteEventConfirmed(eventId, fingerprint)
+      } catch (error) {
+        return { success: false, error: String(error) }
+      }
+    },
+  )
+
+  ipcMain.handle(
+    'db:timeline-branch-delete-confirmed',
+    async (_event, branchId: string, fingerprint: string, expectedProjectPath: string) => {
+      try {
+        assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+        return StoryTimelineRepository.deleteBranchConfirmed(branchId, fingerprint)
+      } catch (error) {
+        return { success: false, error: String(error) }
+      }
+    },
+  )
 
   // ============================================================
   // world — 多世界资料（世界 / 势力 / 秘境 / 通道 / 规则 / 人物关联与行踪）

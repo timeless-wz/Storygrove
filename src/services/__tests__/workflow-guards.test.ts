@@ -60,7 +60,7 @@ describe('architecture workflow guard locale', () => {
 
     expect(result).toMatchObject({
       ok: false,
-      message: expect.stringContaining('Fill in the core outline or protagonist profile'),
+      message: expect.stringContaining('Add a core outline or protagonist profile in Creative direction and save it'),
     })
     expect(result.message).not.toMatch(/[\u4e00-\u9fff]/u)
   })
@@ -99,7 +99,7 @@ describe('directory workflow guard', () => {
     {
       label: 'story premise',
       core: null,
-      expected: 'The story premise has not been generated',
+      expected: 'The story premise is missing or incomplete',
     },
     {
       label: 'character roster',
@@ -126,6 +126,32 @@ describe('directory workflow guard', () => {
 
     expect(result).toMatchObject({ ok: false, message: expect.stringContaining(expected) })
     expect(result.message).not.toMatch(/[\u4e00-\u9fff]/u)
+  })
+
+  it('accepts an authored premise as usable input and keeps other gaps warning-only', async () => {
+    useLocaleStore.setState({ locale: 'en-US' })
+    vi.mocked(ipc.invokeWithProjectSession).mockImplementation((async (
+      _session: ProjectSessionContext,
+      channel: string,
+    ) => {
+      if (channel === 'db:project-core-get') {
+        return {
+          premise: 'A complete premise written and saved by the author, with enough context to satisfy the existing workflow check.',
+          charactersArch: '',
+          worldbuilding: '',
+          synopsis: '',
+        }
+      }
+      if (channel === 'db:character-get-all') return [{ id: 'character-1', name: 'Mira' }]
+      throw new Error(`Unexpected channel: ${channel}`)
+    }) as never)
+
+    const result = await guardDirectoryGeneration(projectPath, projectSession)
+
+    expect(result.ok).toBe(true)
+    expect(result.message).toContain('missing or incomplete')
+    expect(result.message).toContain('continue with the available context')
+    expect(result.message).not.toContain('has not been generated')
   })
 })
 

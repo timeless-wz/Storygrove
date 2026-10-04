@@ -4,6 +4,7 @@ import path from 'node:path'
 import { getCurrentProjectPath, getProjectDb } from '../database'
 import { ensureCharacterRosterSchema } from './character-roster-schema'
 import { clearBlueprintFactsWithinTransaction } from './blueprint-repository'
+import { hashProjectSynopsis } from './project-core-repository'
 
 export type ProjectClearScope = 'creativeFields' | 'blueprints' | 'generatedText'
 
@@ -11,6 +12,7 @@ export interface ProjectClearOptions {
     creativeFields?: boolean
     blueprints?: boolean
     generatedText?: boolean
+    expectedSynopsisHash?: string
 }
 
 export interface ProjectClearResult {
@@ -82,6 +84,23 @@ export class ProjectClearRepository {
         const db = getProjectDb()
         if (!db) throw new Error('项目数据库未打开')
 
+        const assertExpectedSynopsis = () => {
+            if (!options.creativeFields) return
+            const row = db.prepare("SELECT synopsis FROM project_core WHERE id = 'main'")
+                .get() as { synopsis: string } | undefined
+            const expectedHash = options.expectedSynopsisHash
+            if (!row || typeof expectedHash !== 'string'
+                || !/^[a-f0-9]{64}$/u.test(expectedHash)
+                || hashProjectSynopsis(row.synopsis ?? '') !== expectedHash) {
+                throw new Error('全书总纲已变化或缺少来源版本，已拒绝清空创作资料')
+            }
+        }
+
+        // Fail before moving any generated files, then recheck under the same
+        // transaction as all database clears to close the race between the
+        // preflight and the write.
+        assertExpectedSynopsis()
+
         const projectPath = getCurrentProjectPath()
         if (options.generatedText && !projectPath) throw new Error('项目路径未初始化')
 
@@ -92,6 +111,8 @@ export class ProjectClearRepository {
 
         try {
             const tx = db.transaction(() => {
+                assertExpectedSynopsis()
+
                 if (options.generatedText) {
                     db.prepare('DELETE FROM finalized_draft_import_operations').run()
                     db.prepare('DELETE FROM post_process_steps').run()

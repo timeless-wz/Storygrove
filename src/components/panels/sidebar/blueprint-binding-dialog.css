@@ -1,0 +1,232 @@
+.vela-dialog-content.blueprint-binding {
+  max-width: 600px;
+  display: flex;
+  flex-direction: column;
+}
+
+.blueprint-binding .vela-dialog-header,
+.blueprint-binding__footer {
+  flex-shrink: 0;
+}
+
+.blueprint-binding__body {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.blueprint-binding__context {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.blueprint-binding__context strong {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.blueprint-binding__current {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.blueprint-binding__current button {
+  flex-shrink: 0;
+}
+
+.blueprint-binding__search {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.blueprint-binding__filters {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.blueprint-binding__volume-filter {
+  position: relative;
+  width: 140px;
+  flex-shrink: 0;
+}
+
+.blueprint-binding__volume-filter select {
+  height: 40px;
+  padding-right: 28px;
+  text-overflow: ellipsis;
+}
+
+.blueprint-binding__volume-filter > svg {
+  position: absolute;
+  right: 10px;
+  top: 13px;
+  pointer-events: none;
+  color: var(--color-text-secondary);
+}
+
+.blueprint-binding__volume-name {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.blueprint-binding__search > svg {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+.blueprint-binding__search input {
+  height: 40px;
+  padding-inline: 36px;
+}
+
+.blueprint-binding__search button {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+}
+
+.blueprint-binding__count {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.blueprint-binding__list {
+  height: 320px;
+  min-height: 120px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  border-block: 1px solid var(--color-border);
+  padding-block: 4px;
+}
+
+.blueprint-binding__row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+.blueprint-binding__row:hover,
+.blueprint-binding__search button:hover {
+  background: var(--color-bg);
+}
+
+.blueprint-binding__row[data-selected='true'] {
+  background: color-mix(in srgb, var(--color-accent) 12%, var(--color-panel));
+}
+
+.blueprint-binding__row:focus-within,
+.blueprint-binding__search button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.blueprint-binding__row input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.blueprint-binding__row:has(input:disabled) {
+  cursor: default;
+  opacity: 0.65;
+}
+
+.blueprint-binding__number {
+  min-width: 64px;
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.blueprint-binding__title {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.blueprint-binding__badge {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.blueprint-binding__check {
+  flex-shrink: 0;
+  visibility: hidden;
+  color: var(--color-accent);
+}
+
+.blueprint-binding__row[data-selected='true'] .blueprint-binding__check {
+  visibility: visible;
+}
+
+.blueprint-binding__empty {
+  display: flex;
+  min-height: 160px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 20px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.blueprint-binding__footer {
+  flex-wrap: wrap;
+}
+
+.blueprint-binding__pending {
+  flex: 1 1 180px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.blueprint-binding__buttons {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+@media (max-width: 480px) {
+  .blueprint-binding__filters { flex-direction: column; }
+  .blueprint-binding__volume-filter { width: 100%; }
+  .blueprint-binding .vela-dialog-header { padding-left: 20px; }
+  .blueprint-binding__body,
+  .blueprint-binding__footer { padding: 16px 20px; }
+}

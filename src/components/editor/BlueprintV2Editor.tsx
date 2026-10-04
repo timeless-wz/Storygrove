@@ -22,6 +22,7 @@ import {
   type BlueprintV2Section,
   type BlueprintV2SectionItem,
   type BlueprintV2SectionId,
+  type BlueprintChapterPlanning,
   type ChapterBlueprintV2Content,
 } from '../../shared/blueprint-v2'
 import { useLocaleStore } from '../../stores/locale-store'
@@ -179,8 +180,35 @@ export default function BlueprintV2Editor({ content, onChange }: BlueprintV2Edit
     })
   }
 
+  const patchPlanning = (key: keyof BlueprintChapterPlanning, value: string) => {
+    const planning = { ...(content.planning ?? {}) }
+    if (value.trim()) planning[key] = value
+    else delete planning[key]
+    onChange({ ...content, planning: Object.keys(planning).length > 0 ? planning : undefined })
+  }
+
   return (
     <div className="blueprint-v2" data-testid="blueprint-v2-editor">
+      <section className="blueprint-v2__planning" data-testid="blueprint-v2-planning">
+        <header>
+          <div>
+            <strong>{text('本章承担的卷内规划任务', 'Chapter task within the volume plan')}</strong>
+            <span>{text('仅表示计划，不会写入角色事实或正文。', 'Planning only; this does not update character facts or prose.')}</span>
+          </div>
+        </header>
+        <label>
+          {text('本章承担的卷内任务', 'Task this chapter carries within the volume')}
+          <Textarea value={content.planning?.volumeTask ?? ''} rows={2} onChange={event => patchPlanning('volumeTask', event.target.value)} />
+        </label>
+        <label>
+          {text('承接内容', 'Handoff from prior material')}
+          <Textarea value={content.planning?.handoff ?? ''} rows={2} onChange={event => patchPlanning('handoff', event.target.value)} />
+        </label>
+        <label>
+          {text('预期结束变化', 'Expected change by the end')}
+          <Textarea value={content.planning?.expectedEndChange ?? ''} rows={2} onChange={event => patchPlanning('expectedEndChange', event.target.value)} />
+        </label>
+      </section>
       {content.sections.map((section, sectionIndex) => {
         if (section.kind === 'custom') {
           return (
@@ -323,7 +351,7 @@ export default function BlueprintV2Editor({ content, onChange }: BlueprintV2Edit
                 }
                 if (item.kind === 'field') {
                   return (
-                    <div key={item.id} className="blueprint-v2__item" data-testid="blueprint-v2-field-item">
+                    <div key={item.id} className={cn('blueprint-v2__item', (item.markdown.length > 240 || item.markdown.split('\n').length > 5) && 'blueprint-v2__item--wide')} data-testid="blueprint-v2-field-item">
                       <div className="blueprint-v2__item-header">
                         <Label className="blueprint-v2__item-label">
                           <SquarePen size={11} />
@@ -343,7 +371,7 @@ export default function BlueprintV2Editor({ content, onChange }: BlueprintV2Edit
                 }
                 if (item.kind === 'bullet') {
                   return (
-                    <div key={item.id} className="blueprint-v2__item" data-testid="blueprint-v2-bullet-item">
+                    <div key={item.id} className={cn('blueprint-v2__item', (item.markdown.length > 240 || item.markdown.split('\n').length > 5) && 'blueprint-v2__item--wide')} data-testid="blueprint-v2-bullet-item">
                       <div className="blueprint-v2__item-header">
                         <Label className="blueprint-v2__item-label">
                           <ListPlus size={11} />
@@ -362,7 +390,7 @@ export default function BlueprintV2Editor({ content, onChange }: BlueprintV2Edit
                   )
                 }
                 return (
-                  <div key={item.id} className="blueprint-v2__item" data-testid="blueprint-v2-block-item">
+                  <div key={item.id} className="blueprint-v2__item blueprint-v2__item--wide" data-testid="blueprint-v2-block-item">
                     <div className="blueprint-v2__item-header">
                       <Label className="blueprint-v2__item-label">{text('自由块（引用/表格/段落）', 'Free block (quote / table / paragraph)')}</Label>
                     </div>

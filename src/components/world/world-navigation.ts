@@ -8,13 +8,14 @@
 import { useEditorStore } from '../../stores/editor-store'
 import { useProjectStore } from '../../stores/project-store'
 import { useWorldMapStore } from '../../stores/world-map-store'
+import { useLocaleStore } from '../../stores/locale-store'
 import { openBuiltinEditor } from '../panels/sidebar/sidebar-file-openers'
 
 function projectKey(): string | undefined {
   return useProjectStore.getState().currentProject?.path
 }
 
-/** 打开多地图地图册，并选中指定地图；mapId 为 null 时只打开地图册。 */
+/** 打开地图册，并选中指定地图；mapId 为 null 时只打开地图册。 */
 export function openMapAt(mapId: string | null, nodeId: string | null = null): void {
   if (mapId) {
     // 先切地图再选地点：切换地图会清空地点选择，顺序反过来会丢掉目标地点。
@@ -22,7 +23,7 @@ export function openMapAt(mapId: string | null, nodeId: string | null = null): v
     useWorldMapStore.setState({ selectedNodeId: nodeId })
     useWorldMapStore.setState({ focusNodeRequest: nodeId ? { nodeId, mapId, token: Date.now() } : null })
   }
-  openBuiltinEditor('world-map-editor', '多地图地图册', 'world-map')
+  openBuiltinEditor('world-map-editor', useLocaleStore.getState().text('地图册', 'Map atlas'), 'world-map')
 }
 
 /** 打开角色管理；角色资料始终只有一份项目角色事实。 */

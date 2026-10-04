@@ -306,7 +306,7 @@ export default function ProjectReferencePanel() {
     if (!currentProject) return
     useEditorStore.getState().openFile({
       id: 'config',
-      name: text('小说配置', 'Novel configuration'),
+      name: text('创作方向', 'Creative direction'),
       type: 'config',
       projectKey: currentProject.path,
     })
@@ -317,7 +317,7 @@ export default function ProjectReferencePanel() {
   }
   const showWorld = () => {
     setSidebarView('project')
-    openBuiltinEditor('world-building-editor', text('故事架构', 'Story architecture'), 'world-building')
+    openBuiltinEditor('world-building-editor', text('基础设定总览', 'Basic settings overview'), 'world-building')
   }
   const showPlot = () => {
     setSidebarView('project')
@@ -326,7 +326,7 @@ export default function ProjectReferencePanel() {
 
   // 打开地图册
   const openWorldMap = () => {
-    openBuiltinEditor('world-map-editor', text('多地图地图册', 'Map atlas'), 'world-map')
+    openBuiltinEditor('world-map-editor', text('地图册', 'Map atlas'), 'world-map')
   }
 
   return (
@@ -626,7 +626,7 @@ export default function ProjectReferencePanel() {
             <div className="flex items-center justify-between gap-2">
               <span className="writer-context-block-title">
                 <Compass size={13} />
-                {text('地图节点检查器', 'World map inspector')}
+                {text('地图册节点检查器', 'Map atlas inspector')}
               </span>
               <span className="text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
                 {worldMapNodes.length} {text('处地点', 'locations')}
@@ -669,14 +669,14 @@ export default function ProjectReferencePanel() {
           <ReferenceGroup icon={BookMarked} title={text('项目设定', 'Project setup')}>
             <ReferenceLink
               icon={BookOpen}
-              label={text('小说配置', 'Novel configuration')}
-              detail={text('题材、篇幅与写作要求', 'Genre, length, and writing guidance')}
+              label={text('创作方向', 'Creative direction')}
+              detail={text('题材、篇幅与创作输入', 'Genre, length, and creative inputs')}
               onClick={showConfiguration}
             />
             <ReferenceLink
               icon={Globe2}
-              label={text('故事架构与世界观', 'Story architecture & world')}
-              detail={text('前提、世界规则与地点', 'Premise, rules, and locations')}
+              label={text('基础设定总览', 'Basic settings overview')}
+              detail={text('查看并维护五类基础设定，可按需使用 AI 辅助生成', 'Review and maintain five basic setting areas, with optional AI assistance')}
               onClick={showWorld}
             />
           </ReferenceGroup>

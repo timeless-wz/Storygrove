@@ -71,11 +71,11 @@ afterEach(async () => {
 
 describe('ArchFileViewer locale', () => {
   it.each([
-    ['premise', '故事前提'],
-    ['characters', '角色图谱'],
-    ['worldbuilding', '世界观'],
-    ['synopsis', '情节大纲'],
-  ])('recognizes the actual core protocol %s and restores generation controls', async (key, label) => {
+    ['premise', '故事前提', 'Story premise'],
+    ['characters', '角色图谱', 'Character graph'],
+    ['worldbuilding', '世界观总纲', 'Worldbuilding overview'],
+    ['synopsis', '全书总纲', 'Book outline'],
+  ])('recognizes the actual core protocol %s and restores generation controls', async (key, label, labelEn) => {
     useLocaleStore.setState({ locale: 'zh-CN' })
     await act(async () => root.render(
       <ArchFileViewer tabId={`arch-${key}`} filePath={`vela://core/${key}`}
@@ -94,6 +94,9 @@ describe('ArchFileViewer locale', () => {
         expect(container.querySelector('.vditor-ir pre.vditor-reset')?.getAttribute('contenteditable')).toBe('true')
       })
     }
+    await act(async () => useLocaleStore.getState().setLocale('en-US'))
+    expect(container.textContent).toContain(labelEn)
+    expect(container.querySelector(`[title="AI Generate “${labelEn}”"]`)).not.toBeNull()
   })
 
   it('reports a rejected save without clearing the draft and rejects exit-save', async () => {
@@ -154,7 +157,7 @@ describe('ArchFileViewer locale', () => {
     expect(container.textContent).toContain('AI Regenerate')
     expect(container.querySelector('[title="Unsaved changes"]')).not.toBeNull()
     expect(container.querySelector('[title="Save (Cmd+S)"]')).not.toBeNull()
-    expect(container.querySelector('[title="AI Regenerate “Premise”"]')).not.toBeNull()
+    expect(container.querySelector('[title="AI Regenerate “Story premise”"]')).not.toBeNull()
     expect(container.textContent).not.toMatch(/字|保存|重新生成/)
 
     let finishSave: ((value: { success: true }) => void) | undefined
@@ -177,7 +180,7 @@ describe('ArchFileViewer locale', () => {
     ))
 
     await vi.waitFor(() => expect(container.textContent).toContain('AI Generate'))
-    expect(container.querySelector('[title="AI Generate “Premise”"]')).not.toBeNull()
+    expect(container.querySelector('[title="AI Generate “Story premise”"]')).not.toBeNull()
     expect(
       container.querySelector('.vditor-ir pre.vditor-reset')?.getAttribute('placeholder'),
     ).toBe('No content yet. Click “AI Generate” in the top-right or start editing here...')

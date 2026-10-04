@@ -3,13 +3,72 @@
  * 只使用全局设计令牌（--color-*），与 planning-page 体系保持一致。
  */
 
+.blueprint-v2-view {
+  width: 100%;
+  min-width: 0;
+  padding: 16px 20px;
+}
+
+.blueprint-v2-view__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px 20px;
+  margin-bottom: 12px;
+}
+
+.blueprint-v2-view__heading {
+  flex: 1 1 280px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.blueprint-v2-view__actions {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
 .blueprint-v2 {
+  container: blueprint-editor / inline-size;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
+  min-width: 0;
+}
+
+.blueprint-v2__planning {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 28%, var(--color-border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-accent) 4%, var(--color-panel));
+  padding: 10px;
+}
+
+.blueprint-v2__planning > header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.blueprint-v2__planning > header div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.blueprint-v2__planning > header strong { color: var(--color-text); font-size: 11px; }
+.blueprint-v2__planning > header span { color: var(--color-text-muted); font-size: 9px; }
+.blueprint-v2__planning label { display: flex; flex-direction: column; gap: 5px; min-width: 0; color: var(--color-text-secondary); font-size: 10px; font-weight: 600; }
+.blueprint-v2__planning textarea { min-width: 0; resize: vertical; font-size: 10px; font-weight: 400; }
+
+@media (max-width: 760px) {
+  .blueprint-v2__planning { grid-template-columns: minmax(0, 1fr); }
 }
 
 .blueprint-v2__section {
+  min-width: 0;
   border: 1px solid var(--color-border);
   border-radius: 10px;
   background: var(--color-panel);
@@ -23,6 +82,7 @@
 .blueprint-v2__section-header {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 10px;
 }
@@ -68,9 +128,31 @@
 }
 
 .blueprint-v2__items {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.blueprint-v2__items > * {
+  min-width: 0;
+}
+
+.blueprint-v2__item--wide,
+.blueprint-v2__scene,
+.blueprint-v2__empty {
+  grid-column: 1 / -1;
+}
+
+/* Respond to the editor pane, including split views and sidebar resizing. */
+@container blueprint-editor (min-width: 760px) {
+  .blueprint-v2__items {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .blueprint-v2__item:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
 }
 
 .blueprint-v2__empty {
@@ -91,6 +173,7 @@
 
 .blueprint-v2__scene-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
@@ -129,7 +212,8 @@
 }
 
 .blueprint-v2__scene-title {
-  flex: 1;
+  flex: 1 1 200px;
+  min-width: 0;
   font-weight: 600;
 }
 
@@ -161,10 +245,6 @@
 }
 
 .blueprint-v2__item {
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: var(--color-bg);
-  padding: 8px 12px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -172,6 +252,7 @@
 
 .blueprint-v2__item-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }

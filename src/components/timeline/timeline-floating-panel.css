@@ -1,0 +1,173 @@
+/*
+ * timeline-floating-panel.css — 画布内浮窗与关联选择器的局部样式（任务 B）。
+ *
+ * 只承载 TimelineAssociationPicker 与浮窗新增部分；既有
+ * .writer-timeline-float-* 样式仍留在 src/index.css（覆盖顺序依赖），
+ * 不要把那里的规则搬过来。颜色全部走主题 token，深浅主题都可读。
+ */
+
+.writer-timeline-assoc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.writer-timeline-assoc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 4px 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.4;
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 26%, transparent);
+  color: var(--color-accent);
+}
+
+.writer-timeline-assoc-chip[data-missing] {
+  background: color-mix(in srgb, var(--color-error) 9%, transparent);
+  border-color: color-mix(in srgb, var(--color-error) 28%, transparent);
+  color: var(--color-error-text);
+}
+
+.writer-timeline-assoc-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.writer-timeline-assoc-chip-missing {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.writer-timeline-assoc-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.writer-timeline-assoc-chip-remove:hover {
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.writer-timeline-assoc-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 108px) minmax(0, 1fr);
+  gap: 6px;
+}
+
+.writer-timeline-assoc-volume select,
+.writer-timeline-assoc-volume .native-select {
+  height: 28px;
+  font-size: 11.5px;
+}
+
+.writer-timeline-assoc-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.writer-timeline-assoc-search > svg {
+  position: absolute;
+  left: 8px;
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+.writer-timeline-assoc-search input {
+  padding-left: 26px;
+  height: 28px;
+  font-size: 12px;
+}
+
+.writer-timeline-assoc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 132px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-panel);
+  padding: 3px;
+}
+
+.writer-timeline-assoc-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 6px;
+  border-radius: calc(var(--radius-md) - 2px);
+  font-size: 12px;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.writer-timeline-assoc-row:hover {
+  background: var(--color-hover);
+}
+
+.writer-timeline-assoc-row input[type='checkbox'] {
+  flex-shrink: 0;
+  accent-color: var(--color-accent);
+}
+
+.writer-timeline-assoc-row-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.writer-timeline-assoc-row-volume {
+  flex-shrink: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+}
+
+.writer-timeline-assoc-empty {
+  margin: 0;
+  padding: 8px 6px;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+.writer-timeline-assoc-retry {
+  margin-top: 4px;
+  padding: 2px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.writer-timeline-assoc-retry:hover {
+  background: var(--color-hover);
+}
+
+.writer-timeline-assoc-hint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}

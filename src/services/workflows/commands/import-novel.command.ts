@@ -43,6 +43,7 @@ import {
   parseImportInferenceJsonObject,
 } from './import-inference-contract'
 import { StructuredContractDiagnostic } from '../../../shared/structured-contract-diagnostic'
+import { blueprintPlanningTextHash } from '../../../shared/blueprint-planning'
 import type {
   ImportGlobalFactsReceipt,
   ImportGlobalFactsRequest,
@@ -374,6 +375,16 @@ export class InferGlobalSettingsCommand extends BaseWorkflowCommand<void> {
       projectSessionContextFromProject(project),
     )) throw new Error(text('当前项目已切换，导入推演已停止', 'The project changed, so import inference stopped.'))
     const projectSnapshot = Object.freeze({ ...project, novelConfig: Object.freeze({ ...project.novelConfig }) })
+    const initialProjectCore = await ipc.invokeWithProjectSession(
+      projectSession,
+      'db:project-core-get',
+      context.projectPath,
+    )
+    if (!initialProjectCore) throw new Error(text(
+      '无法读取导入开始时的全书总纲版本；未开始写入',
+      'Could not read the book-outline version at import start; no import writes were made.',
+    ))
+    const expectedSynopsisHash = blueprintPlanningTextHash(initialProjectCore.synopsis ?? '')
 
     const chapters = context.data.chapters as ImportedChapter[]
     if (!chapters || chapters.length === 0) throw new Error(text('无章节数据', 'No chapter data is available.'))
@@ -566,6 +577,7 @@ export class InferGlobalSettingsCommand extends BaseWorkflowCommand<void> {
     const commitRequest: ImportGlobalFactsRequest = {
         operationId,
         expectedRosterRevision: roster.revision,
+        expectedSynopsisHash,
         core: {
           genre: novelConfig.genre,
           subGenre: novelConfig.subGenre,

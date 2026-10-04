@@ -113,7 +113,14 @@ export function assembleBlueprintV2WritingBlock(
   const cliffhanger = canonicalSectionBody(content, 'cliffhanger')
   const conflict = canonicalSectionBody(content, 'conflict')
   const checks = checkEntries(content, writingLanguage)
-  if (scenes.length === 0 && !rules && !cliffhanger && !conflict && !checks) return null
+  const planning = content.planning ?? {}
+  const planningFields = [
+    ['volumeTask', planning.volumeTask, '本章在本卷中的任务', 'Chapter role in the volume'],
+    ['handoff', planning.handoff, '承接与交接计划', 'Planned handoff'],
+    ['expectedEndChange', planning.expectedEndChange, '预期章末变化', 'Intended end-of-chapter change'],
+  ] as const
+  const populatedPlanning = planningFields.filter(([, value]) => typeof value === 'string' && value.trim())
+  if (scenes.length === 0 && !rules && !cliffhanger && !conflict && !checks && populatedPlanning.length === 0) return null
 
   const chapterHeader = content.chapterTitle
     ? promptLanguageText(writingLanguage, content.chapterTitle, content.chapterTitle)
@@ -127,6 +134,16 @@ export function assembleBlueprintV2WritingBlock(
     ),
     BLUEPRINT_V2_CONSTRAINT_SCAFFOLD[writingLanguage === 'en-US' ? 'enUS' : 'zhCN'],
   ]
+
+  if (populatedPlanning.length > 0) {
+    parts.push(promptLanguageText(
+      writingLanguage,
+      '【章节规划意图（作者确认的计划，不代表已发生事实）】',
+      '[Chapter planning intent (author-confirmed plans, not established events)]',
+    ), ...populatedPlanning.map(([, value, zhLabel, enLabel]) =>
+      `${promptLanguageText(writingLanguage, zhLabel, enLabel)}${writingLanguage === 'en-US' ? ': ' : '：'}${value}`,
+    ))
+  }
 
   if (scenes.length > 0) {
     parts.push(promptLanguageText(writingLanguage, '【逐场分镜（按序落实）】', '[Scene storyboard (realize in order)]'))

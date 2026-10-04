@@ -1,0 +1,278 @@
+/*
+ * StoryTimelineScene 样式（任务 A）——全部作用域限定在画布宿主
+ * `.writer-timeline-flow`（Scene 的挂载容器契约，由页面 D 提供：
+ * 一个 position:relative 的弹性填充盒）之内，不向全局泄漏。
+ *
+ * 视觉语言（作者认可的方向）：暖纸色画布、墨绿主轴、灰绿支线、
+ * 衬线标题文字块、暖金选中；深色主题以 token 覆盖保持可读。
+ * 色板 token 定义在宿主上，页面级的浮窗/菜单可按需引用同一组 token。
+ *
+ * 本文件只承载画布：节点、连线、锚点、支线标签、缩放控件。
+ * 侧栏、浮窗、菜单、模态等页面级样式归各自负责方。
+ */
+
+/* ── 画布宿主与色板 token ─────────────────────────────────────── */
+.writer-timeline-flow {
+  --tl-font-serif: 'Noto Serif SC', 'LXGW WenKai', 'Songti SC', serif;
+  --tl-paper: #F5F3EA;
+  --tl-paper-edge: #E3DFD0;
+  --tl-ink: #33534A;
+  --tl-ink-soft: #5C7268;
+  --tl-on-ink: #F7F5EC;
+  --tl-sage: #8A9B8C;
+  --tl-sage-strong: #66786D;
+  --tl-gold: #B8862D;
+  --tl-branch-1: #7E9384;
+  --tl-branch-2: #8C9A7E;
+  --tl-branch-3: #7E8F99;
+  --tl-branch-4: #99907E;
+  --tl-branch-5: #8F7E99;
+  --tl-branch-6: #7E998F;
+  background: var(--tl-paper);
+}
+/* 深色主题：夜晚的松烟纸面，保持主轴/支线可读 */
+.dark .writer-timeline-flow,
+.galaxy .writer-timeline-flow {
+  --tl-paper: #242926;
+  --tl-paper-edge: #3A423D;
+  --tl-ink: #9DB8A9;
+  --tl-ink-soft: #7E9384;
+  --tl-on-ink: #1C2420;
+  --tl-sage: #75877A;
+  --tl-sage-strong: #A3B5A6;
+  --tl-gold: #C9A76C;
+}
+
+.writer-timeline-flow .writer-timeline-flow-surface { position: absolute; inset: 0; }
+.writer-timeline-flow .writer-timeline-reactflow { background: transparent; }
+.writer-timeline-flow .react-flow__pane { cursor: grab; }
+.writer-timeline-flow .react-flow__pane.dragging { cursor: grabbing; }
+.writer-timeline-flow .react-flow__controls {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: none;
+  margin: 12px;
+}
+.writer-timeline-flow .react-flow__controls-button {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--tl-paper-edge);
+  border-radius: 8px;
+  background: var(--color-panel);
+  color: var(--color-text-secondary);
+  box-shadow: 0 1px 3px rgba(15, 23, 20, 0.08);
+}
+.writer-timeline-flow .react-flow__controls-button:hover { background: var(--color-hover); color: var(--color-text); }
+.writer-timeline-flow .react-flow__controls-button svg { fill: currentColor; }
+
+/* ── 主轴：2px 墨绿连续线 + 事件圆点 ─────────────────────────── */
+.writer-timeline-flow .writer-timeline-axis { position: relative; width: 100%; height: 100%; }
+.writer-timeline-flow .writer-timeline-axis-line {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--tl-ink);
+}
+.writer-timeline-flow .writer-timeline-axis-dot {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--tl-ink);
+  border: 2px solid var(--tl-paper);
+  transform: translate(-50%, -50%);
+  box-sizing: border-box;
+  transition: box-shadow .15s ease, background .15s ease;
+}
+.writer-timeline-flow .writer-timeline-axis-dot.is-selected {
+  background: var(--tl-gold);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tl-gold) 25%, transparent);
+}
+.writer-timeline-flow .writer-timeline-axis-handle {
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  background: transparent;
+}
+
+/* ── 事件节点：轻量文字块，不是带阴影的白卡片 ────────────────── */
+.writer-timeline-flow .writer-timeline-label {
+  padding: 4px 10px 6px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  position: relative;
+  transition: background .14s ease, border-color .14s ease;
+  outline: none;
+}
+.writer-timeline-flow .writer-timeline-label:hover { background: color-mix(in srgb, var(--tl-sage) 9%, transparent); }
+.writer-timeline-flow .writer-timeline-label:focus-visible { border-color: color-mix(in srgb, var(--tl-sage) 55%, transparent); }
+.writer-timeline-flow .writer-timeline-label.is-selected {
+  background: color-mix(in srgb, var(--tl-sage) 16%, transparent);
+  border-color: color-mix(in srgb, var(--tl-sage) 40%, transparent);
+}
+.writer-timeline-flow .writer-timeline-label-time-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 1px;
+}
+.writer-timeline-flow .writer-timeline-label-time {
+  display: block;
+  color: var(--tl-sage-strong);
+  font-size: 12.5px;
+  font-weight: 550;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.writer-timeline-flow .writer-timeline-label-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-family: var(--tl-font-serif);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+  overflow-wrap: anywhere;
+}
+.writer-timeline-flow .writer-timeline-label-meta {
+  display: block;
+  margin-top: 1px;
+  color: var(--color-text-muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.writer-timeline-flow .writer-timeline-label-desc {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin: 4px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.writer-timeline-flow .writer-timeline-label-handle {
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  background: transparent;
+}
+
+/* ── 故事范围两端锚点：轻量端点 + 名称 ───────────────────────── */
+.writer-timeline-flow .writer-timeline-anchor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  cursor: pointer;
+  user-select: none;
+  z-index: 10;
+  outline: none;
+}
+.writer-timeline-flow .writer-timeline-anchor-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  background: var(--tl-ink);
+  border: 2px solid var(--tl-paper);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--tl-ink) 55%, transparent);
+  flex-shrink: 0;
+}
+.writer-timeline-flow .writer-timeline-anchor.is-end .writer-timeline-anchor-dot {
+  background: var(--tl-paper);
+  border-color: var(--tl-ink);
+}
+.writer-timeline-flow .writer-timeline-anchor:hover .writer-timeline-anchor-title,
+.writer-timeline-flow .writer-timeline-anchor:focus-visible .writer-timeline-anchor-title { color: var(--tl-gold); }
+.writer-timeline-flow .writer-timeline-anchor-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+}
+.writer-timeline-flow .writer-timeline-anchor-title {
+  font-family: var(--tl-font-serif, serif);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+.writer-timeline-flow .writer-timeline-anchor-time {
+  color: var(--color-text-muted);
+  font-size: 10.5px;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ── 支线名标签：贴着所属路径，两侧短线示意这是一条线 ────────── */
+.writer-timeline-flow .writer-timeline-branch-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--tl-font-serif, serif);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0.9;
+  pointer-events: none;
+}
+.writer-timeline-flow .writer-timeline-branch-label::before,
+.writer-timeline-flow .writer-timeline-branch-label::after {
+  content: '';
+  width: 16px;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.55;
+}
+.writer-timeline-flow .writer-timeline-branch-label::after { flex: 1; min-width: 24px; }
+
+/* ── 支线折叠/展开徽标 ───────────────────────────────────────── */
+.writer-timeline-flow .writer-timeline-branch-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 6px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--tl-sage) 14%, transparent);
+  color: var(--tl-sage-strong);
+  border: 1px solid color-mix(in srgb, var(--tl-sage) 34%, transparent);
+  cursor: pointer;
+  transition: background .14s ease;
+}
+.writer-timeline-flow .writer-timeline-branch-badge:hover { background: color-mix(in srgb, var(--tl-sage) 26%, transparent); }
+
+/* ── 连接线：主轴短茎 / 支线内顺延 / 支线分叉曲线，全部连续实线 ─ */
+.writer-timeline-flow .writer-timeline-connector {
+  stroke: color-mix(in srgb, var(--tl-ink) 38%, transparent);
+  stroke-width: 1;
+}
+.writer-timeline-flow .writer-timeline-trunk-edge { stroke-width: 1.5; }
+.writer-timeline-flow .writer-timeline-branch-edge { stroke-width: 1.5; }

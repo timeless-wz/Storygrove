@@ -125,7 +125,7 @@ export default function WorldNodeReferences({ nodeId }: { nodeId: string }) {
                 // 跳到那个世界的对应分区：目标视图与来源视图读同一份关系。
                 if (reference.worldId) setSelectedWorldId(reference.worldId)
                 setSection(reference.section)
-                openBuiltinEditor('world-workbench', text('世界', 'Worlds'), 'world')
+                openBuiltinEditor('world-workbench', text('世界管理', 'World management'), 'world')
               }}
             >
               {text('查看', 'Open')}

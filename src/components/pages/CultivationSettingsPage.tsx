@@ -60,7 +60,7 @@ export default function CultivationSettingsPage({ projectKey }: { projectKey: st
       const ids = new Set(levels.map(level => level.id))
       const affected = roster.entries.filter(entry => entry.cultivationLevelId && !ids.has(entry.cultivationLevelId)).map(entry => ({ name: entry.name, levelId: entry.cultivationLevelId! }))
       if (affected.length) { setImpact(affected); setResolutions({}); return }
-      if (await store.save({})) setResult(text('修炼等级设置已保存', 'Cultivation settings saved'))
+      if (await store.save({})) setResult(text('修炼体系已保存', 'Cultivation system saved'))
     } catch (error) { if (sameProjectSessionContext(session, getActiveProjectSessionContext())) setResult(String(error)) }
     finally { setChecking(false) }
   }
@@ -73,10 +73,10 @@ export default function CultivationSettingsPage({ projectKey }: { projectKey: st
   return <div className="h-full overflow-auto text-[var(--color-text)]" data-testid="cultivation-settings">
     <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-5">
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <div><h2 className="text-lg font-semibold">{text('修炼等级设置', 'Cultivation settings')}</h2><p className="text-xs text-[var(--color-text-secondary)] mt-1">{text('当前项目独立使用这一套等级。数字是顺序，不是经验值。', 'This project uses one independent system. Numbers indicate order, not experience.')}</p></div>
+        <div><h2 className="text-lg font-semibold">{text('修炼体系', 'Cultivation system')}</h2><p className="text-xs text-[var(--color-text-secondary)] mt-1">{text('当前项目独立使用这一套等级。数字是顺序，不是经验值。', 'This project uses one independent system. Numbers indicate order, not experience.')}</p></div>
         <div className="flex flex-wrap items-center gap-2"><span role="status" className="text-xs">{!ready ? text('尚未读取', 'Not loaded') : store.dirty ? text('未保存', 'Unsaved') : text('已保存', 'Saved')}</span>
           <Button variant="outline" disabled={locked || !store.dirty} onClick={() => { store.discard(); setResult('') }}>{text('放弃修改', 'Discard changes')}</Button>
-          <Button disabled={locked || !store.dirty || store.conflicted} onClick={() => void save()}>{store.saving || checking ? text('保存中…', 'Saving…') : text('保存等级设置', 'Save cultivation settings')}</Button></div>
+          <Button disabled={locked || !store.dirty || store.conflicted} onClick={() => void save()}>{store.saving || checking ? text('保存中…', 'Saving…') : text('保存修炼体系', 'Save cultivation system')}</Button></div>
       </header>
       {store.error && <p role="alert" className="text-sm text-[var(--color-error)] whitespace-pre-wrap">{store.error}</p>}
       {result && <p role="status" className="text-sm whitespace-pre-wrap">{result}</p>}

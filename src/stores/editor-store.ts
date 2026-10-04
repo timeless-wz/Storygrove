@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 
 import type { DraftStatus } from '../shared/draft-status'
+import type { BlueprintPlanningSelection } from '../shared/blueprint-planning'
 import { sameProjectPathKey } from '../shared/project-session-context'
 import { countUnsavedEditorItems, LEDGER_TYPE_BY_KEY } from './editor-unsaved'
 
@@ -63,6 +64,8 @@ export interface EditorTab {
   chapterView?: 'blueprint' | 'canvas'
   /** 重复打开同一章节蓝图 Tab 时递增，确保本次视图请求生效。 */
   chapterViewRequest?: number
+  /** 章节蓝图工作区显式选中对象；book 不使用特殊章号编码。 */
+  blueprintPlanningSelection?: BlueprintPlanningSelection
 }
 
 interface EditorState {
@@ -146,6 +149,24 @@ const PROJECT_SCOPED_BUILTIN_TYPES = new Set<EditorTab['type']>([
   'project-document',
   'foreshadowing',
 ])
+
+const BUILTIN_TAB_ID_ALIASES: Partial<Record<EditorTab['type'], readonly string[]>> = {
+  'world-building': ['world-building', 'world-building-editor'],
+  'world-map': ['world-map', 'world-map-editor'],
+}
+
+function matchesBuiltinTabAlias(existing: EditorTab, requested: EditorTab): boolean {
+  if (existing.type !== requested.type) return false
+  const aliases = BUILTIN_TAB_ID_ALIASES[requested.type]
+  if (!aliases) return false
+  const sameProject = existing.projectKey && requested.projectKey
+    ? sameProjectPathKey(existing.projectKey, requested.projectKey)
+    : existing.projectKey === requested.projectKey
+  if (!sameProject) return false
+  const existingAliasIds = aliases.map(id => createProjectScopedEditorTabId(id, existing.type, existing.projectKey))
+  const requestedAliasIds = aliases.map(id => createProjectScopedEditorTabId(id, requested.type, requested.projectKey))
+  return existingAliasIds.includes(existing.id) && requestedAliasIds.includes(requested.id)
+}
 
 export interface EditorExitSaveHandler {
   tabId?: string
@@ -231,7 +252,8 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
         && tabWithDraftState.filePath !== undefined
         && t.filePath === tabWithDraftState.filePath
         && t.type === tabWithDraftState.type
-        && t.projectKey === tabWithDraftState.projectKey)
+        && t.projectKey === tabWithDraftState.projectKey) ||
+      (!idOnly && matchesBuiltinTabAlias(t, tabWithDraftState))
     )
     if (existing) {
       // diff / review-report 每次内容不同，强制更新内容后激活
@@ -268,6 +290,9 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
                       chapterView: tabWithDraftState.chapterView,
                       chapterViewRequest: (t.chapterViewRequest ?? 0) + 1,
                     }),
+                ...(tabWithDraftState.blueprintPlanningSelection === undefined
+                  ? {}
+                  : { blueprintPlanningSelection: tabWithDraftState.blueprintPlanningSelection }),
               }
             : t),
           activeTabId: existing.id,

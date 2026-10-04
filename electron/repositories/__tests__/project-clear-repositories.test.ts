@@ -10,7 +10,7 @@ import { BlueprintRepository } from '../blueprint-repository'
 import { CharacterRosterRepository } from '../character-roster-repository'
 import { DraftRepository } from '../draft-repository'
 import { ProjectClearRepository } from '../project-clear-repository'
-import { ProjectCoreRepository } from '../project-core-repository'
+import { hashProjectSynopsis, ProjectCoreRepository } from '../project-core-repository'
 import type { CharacterRosterCommitRequest } from '../../../src/shared/character-roster'
 
 vi.mock('../../database', () => ({
@@ -24,7 +24,7 @@ const Database = require('better-sqlite3') as typeof import('better-sqlite3')
 function createMockDb() {
   const run = vi.fn()
   const all = vi.fn(() => [{ name: 'fact_hash' }])
-  const get = vi.fn(() => ({ present: true }))
+  const get = vi.fn(() => ({ present: true, synopsis: '' }))
   const prepare = vi.fn((sql: string) => ({ sql, run, all, get }))
   const transaction = vi.fn((fn: () => void) => () => fn())
   const exec = vi.fn()
@@ -144,7 +144,7 @@ describe('project clear repositories', () => {
 
     ProjectCoreRepository.resetCreativeFields()
 
-    const sql = db.prepare.mock.calls[0]?.[0]
+    const sql = db.prepare.mock.calls.find(([statement]) => statement.includes('UPDATE project_core'))?.[0]
     expect(sql).toContain('writing_style =')
     expect(sql).toContain('synopsis =')
     expect(sql).toContain('character_states =')
@@ -165,6 +165,7 @@ describe('project clear repositories', () => {
       creativeFields: true,
       blueprints: true,
       generatedText: false,
+      expectedSynopsisHash: hashProjectSynopsis(''),
     })
 
     expect(db.transaction).toHaveBeenCalledOnce()
@@ -194,7 +195,10 @@ describe('project clear repositories', () => {
       expect(beforeClear.snapshot).toMatchObject({ status: 'ready', entries: [expect.objectContaining({ name: '清除前角色' })] })
       expect(db.prepare('SELECT COUNT(*) AS count FROM character_roster_operations').get()).toEqual({ count: 1 })
 
-      expect(ProjectClearRepository.clearGeneratedData({ creativeFields: true })).toMatchObject({
+      expect(ProjectClearRepository.clearGeneratedData({
+        creativeFields: true,
+        expectedSynopsisHash: hashProjectSynopsis(''),
+      })).toMatchObject({
         cleared: ['creativeFields'],
       })
 
@@ -267,6 +271,60 @@ describe('project clear repositories', () => {
       expect(fs.existsSync(generatedFile)).toBe(true)
     } finally {
       fs.rmSync(projectPath, { recursive: true, force: true })
+    }
+  })
+
+  it('requires a matching synopsis hash before clearing any selected scope', () => {
+    const db = createRealProjectDb()
+    vi.mocked(getProjectDb).mockReturnValue(db as never)
+    vi.mocked(getCurrentProjectPath).mockReturnValue(null)
+
+    try {
+      db.prepare("UPDATE project_core SET writing_style = ?, synopsis = ? WHERE id = 'main'")
+        .run('preserve style', 'frozen synopsis')
+      const staleHash = hashProjectSynopsis('older synopsis')
+
+      expect(() => ProjectClearRepository.clearGeneratedData({
+        creativeFields: true,
+        expectedSynopsisHash: staleHash,
+      })).toThrow('全书总纲已变化或缺少来源版本')
+      expect(() => ProjectClearRepository.clearGeneratedData({
+        creativeFields: true,
+      })).toThrow('全书总纲已变化或缺少来源版本')
+      expect(db.prepare('SELECT writing_style, synopsis FROM project_core WHERE id = ?').get('main'))
+        .toEqual({ writing_style: 'preserve style', synopsis: 'frozen synopsis' })
+    } finally {
+      db.close()
+    }
+  })
+
+  it('rechecks the synopsis inside the transaction after preflight', () => {
+    const db = createRealProjectDb()
+    const synopsisHash = hashProjectSynopsis('')
+    let transactionCount = 0
+    const originalTransaction = db.transaction.bind(db)
+    const wrappedDb = {
+      prepare: db.prepare.bind(db),
+      transaction: (fn: () => unknown) => () => {
+        transactionCount += 1
+        if (transactionCount === 1) {
+          db.prepare("UPDATE project_core SET synopsis = 'changed after preflight' WHERE id = 'main'").run()
+        }
+        return originalTransaction(fn)()
+      },
+    }
+    vi.mocked(getProjectDb).mockReturnValue(wrappedDb as never)
+    vi.mocked(getCurrentProjectPath).mockReturnValue(null)
+
+    try {
+      expect(() => ProjectClearRepository.clearGeneratedData({
+        creativeFields: true,
+        expectedSynopsisHash: synopsisHash,
+      })).toThrow('全书总纲已变化或缺少来源版本')
+      expect(db.prepare('SELECT synopsis, writing_style FROM project_core WHERE id = ?').get('main'))
+        .toEqual({ synopsis: 'changed after preflight', writing_style: '旧文风' })
+    } finally {
+      db.close()
     }
   })
 })

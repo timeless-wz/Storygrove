@@ -219,7 +219,7 @@ describe('ProjectReferencePanel writer desktop workbench', () => {
     expect(container.textContent).toContain('林默')
     expect(container.textContent).toContain('17')
 
-    const configuration = findButton('小说配置')
+    const configuration = findButton('创作方向')
     expect(configuration).toBeDefined()
     await act(async () => configuration?.click())
     expect(useEditorStore.getState().tabs[0]).toMatchObject({ type: 'config', projectKey: 'C:\\novels\\reference-project' })
@@ -287,8 +287,8 @@ describe('ProjectReferencePanel writer desktop workbench', () => {
     // 1. 验证隐藏 2 个全局分组（共 6 项）
     const hiddenItems = [
       '项目设定',
-      '小说配置',
-      '故事架构与世界观',
+      '创作方向',
+      '基础设定总览',
       '创作资料',
       '创作资料中枢',
       '本地知识库',
@@ -346,8 +346,8 @@ describe('ProjectReferencePanel writer desktop workbench', () => {
     // 1. 验证隐藏 2 个全局分组（共 6 项）
     const hiddenItems = [
       '项目设定',
-      '小说配置',
-      '故事架构与世界观',
+      '创作方向',
+      '基础设定总览',
       '创作资料',
       '创作资料中枢',
       '本地知识库',
@@ -388,8 +388,8 @@ describe('ProjectReferencePanel writer desktop workbench', () => {
     // 1. 全局参考组正常展示
     const globalItems = [
       '项目设定',
-      '小说配置',
-      '故事架构与世界观',
+      '创作方向',
+      '基础设定总览',
       '创作资料',
       '创作资料中枢',
       '本地知识库',
@@ -449,19 +449,25 @@ describe('ProjectReferencePanel writer desktop workbench', () => {
         el => el.textContent?.includes(label)
       )
 
-    // 小说配置入口（创作参数）
-    const configItem = findTreeItem('创作参数')
+    // 创作方向入口
+    const configItem = findTreeItem('创作方向')
     expect(configItem).toBeDefined()
     await act(async () => (configItem as HTMLElement)?.click())
     expect(useEditorStore.getState().tabs.some(t => t.type === 'config')).toBe(true)
 
-    // 故事架构入口
-    const worldOverviewBtn = treeContainer.querySelector('[aria-label="打开架构总览"]') as HTMLButtonElement | null
-    expect(worldOverviewBtn).not.toBeNull()
-    await act(async () => worldOverviewBtn?.click())
+    // 基础设定总览入口只打开原页面，不自动启动工作流。
+    const worldSetupItem = findTreeItem('基础设定总览')
+    expect(worldSetupItem).toBeDefined()
+    await act(async () => (worldSetupItem as HTMLElement)?.click())
     expect(useEditorStore.getState().tabs.some(t => t.type === 'world-building')).toBe(true)
 
     // 创作资料入口（资料来源与审核）
+    const libraryToggle = treeContainer.querySelector<HTMLButtonElement>(
+      '[data-group-id="library"] button[aria-label="资料库"]',
+    )
+    expect(libraryToggle?.getAttribute('aria-expanded')).toBe('false')
+    await act(async () => libraryToggle?.click())
+    expect(libraryToggle?.getAttribute('aria-expanded')).toBe('true')
     const sourcesItem = findTreeItem('资料来源与审核')
     expect(sourcesItem).toBeDefined()
     await act(async () => (sourcesItem as HTMLElement)?.click())

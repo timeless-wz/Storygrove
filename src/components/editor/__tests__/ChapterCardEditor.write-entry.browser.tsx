@@ -77,6 +77,12 @@ function installIpc(options: {
     if (channel === 'db:blueprint-v2-save') return options.saveOutline?.() ?? { success: true, revision: 1, contentHash: 'a'.repeat(64) }
     if (channel === 'db:blueprint-upsert-many') return { success: true }
     if (channel === 'db:blueprint-volume-list') return [{ id: 'volume-1', name: '第1卷', sortOrder: 1 }]
+    if (channel === 'db:blueprint-volume-outline-list-summaries') return []
+    if (channel === 'db:blueprint-planning-candidate-list') return []
+    if (channel === 'db:blueprint-planning-check-list') return []
+    if (channel === 'db:blueprint-planning-source-status') return (args[0] as string[]).map(snapshotId => ({ snapshotId, state: 'unlinked' }))
+    if (channel === 'db:blueprint-planning-target-source-status') return (args[0] as Array<{ targetKind: string; targetId: string }>).map(target => ({ ...target, snapshotId: null, operationId: null, state: 'unlinked' }))
+    if (channel === 'db:project-core-get') return { synopsis: '' }
     if (channel === 'db:draft-list') return []
     if (channel === 'db:draft-create') return { success: true, id: 101 }
     if (channel === 'db:draft-authority-sequence') return typeof options.authoritySequence === 'function'
@@ -121,6 +127,7 @@ async function renderEditor() {
 }
 
 beforeEach(() => {
+  localStorage.removeItem('blueprint-planning-selection:chapter-write-entry')
   useEditorStore.setState({ tabs: [], activeTabId: null, draftLedgers: {} })
   useLayoutStore.setState({ chapterCreationOpen: false, chapterCreationPrefill: null })
   useProjectStore.setState({ currentProject: project(), fileTree: [], loading: false })
@@ -216,13 +223,15 @@ describe('ChapterCardEditor writing entry', () => {
     })
 
     await renderEditor()
-    await vi.waitFor(() => expect(container?.textContent).toContain('暂无蓝图'))
-    const addButton = Array.from(container?.querySelectorAll<HTMLButtonElement>('button') ?? [])
-      .find(button => button.title === '新建章节')
+    await vi.waitFor(() => expect(container?.querySelector('[data-testid="blueprint-planning-tree"]')).toBeTruthy())
+    const volumeButton = container?.querySelector<HTMLButtonElement>('[data-testid="blueprint-planning-select-volume-volume-1"]')
+    await act(async () => volumeButton?.click())
+    await vi.waitFor(() => expect(container?.querySelector('[data-volume-id="volume-1"] .blueprint-planning-tree__volume-row')?.className).toContain('is-selected'))
+    const addButton = container?.querySelector<HTMLButtonElement>('[data-testid="blueprint-planning-add-chapter"]')
     expect(addButton).toBeDefined()
     await act(async () => addButton?.click())
 
-    expect(container?.textContent).toContain('第 10 章：')
+    await vi.waitFor(() => expect(container?.querySelector('[data-testid="blueprint-planning-select-chapter-10"]')).toBeTruthy())
   })
 
   it('appends after the blueprint maximum when the authoritative next blueprint already exists', async () => {
@@ -240,8 +249,7 @@ describe('ChapterCardEditor writing entry', () => {
 
     await renderEditor()
     await vi.waitFor(() => expect(container?.textContent).toContain('新建第10章正文'))
-    const addButton = Array.from(container?.querySelectorAll<HTMLButtonElement>('button') ?? [])
-      .find(button => button.title === '新建章节')
+    const addButton = container?.querySelector<HTMLButtonElement>('[data-testid="blueprint-planning-add-chapter"]')
     expect(addButton).toBeDefined()
     await act(async () => addButton?.click())
 

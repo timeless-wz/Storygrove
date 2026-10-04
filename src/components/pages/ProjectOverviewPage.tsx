@@ -166,7 +166,7 @@ export default function ProjectOverviewPage() {
   // 打开地图册
   const handleOpenWorldMap = () => {
     if (!projectPath) return
-    openBuiltinEditor('world-map-editor', text('多地图地图册', 'Map atlas'), 'world-map')
+    openBuiltinEditor('world-map-editor', text('地图册', 'Map atlas'), 'world-map')
   }
 
   // 打开章节脉络（章节蓝图的确定性投影）
@@ -178,7 +178,12 @@ export default function ProjectOverviewPage() {
   // 打开章节蓝图
   const handleOpenBlueprints = () => {
     if (!projectPath) return
-    openBuiltinEditor('chapter-card-editor', text('章节蓝图', 'Chapter blueprints'), 'chapter-card')
+    openBuiltinEditor('chapter-card-editor', text('章节蓝图', 'Chapter blueprints'), 'chapter-card', undefined, undefined, undefined, { kind: 'book' })
+  }
+
+  const handleOpenBookOutline = () => {
+    if (!projectPath) return
+    openBuiltinEditor('chapter-card-editor', text('章节蓝图', 'Chapter blueprints'), 'chapter-card', undefined, undefined, undefined, { kind: 'book' })
   }
 
   // 打开故事时间线
@@ -187,21 +192,21 @@ export default function ProjectOverviewPage() {
     openBuiltinEditor('story-timeline-editor', text('故事时间线', 'Story timeline'), 'story-timeline')
   }
 
-  // 打开世界观设定
+  // 打开基础设定总览
   const handleOpenWorldBuilding = () => {
     if (!projectPath) return
-    openBuiltinEditor('world-building', text('世界观设定', 'World building'), 'world-building')
+    openBuiltinEditor('world-building', text('基础设定总览', 'Basic settings overview'), 'world-building')
   }
 
-  // 打开小说配置
+  // 打开创作方向
   const handleOpenConfig = () => {
     if (!projectPath) return
-    openBuiltinEditor('config', text('小说设定', 'Novel config'), 'config')
+    openBuiltinEditor('config', text('创作方向', 'Creative direction'), 'config')
   }
 
   // 打开角色档案
   const handleOpenCharacterProfile = () => {
-    useLayoutStore.getState().openCharacterProfile('overview')
+    useLayoutStore.getState().openCharacterProfile()
   }
 
   // 继续最后编辑的未定稿章节；没有可编辑草稿时进入现有新建草稿流程。
@@ -349,7 +354,7 @@ export default function ProjectOverviewPage() {
               <p className="text-xs mt-1.5 text-[var(--color-text-secondary)] leading-relaxed">
                 {text(
                   '纯粹由作者主导的创作空间：地图册、章节蓝图、正文写作、只读审核。所有数据均保存在本地。',
-                  'Author-driven fiction workspace: World map, blueprints, prose writing, read-only audit. 100% local.',
+                  'Author-driven fiction workspace: map atlas, blueprints, prose writing, read-only audit. 100% local.',
                 )}
               </p>
             </div>
@@ -380,8 +385,18 @@ export default function ProjectOverviewPage() {
                 <Button
                   variant="outline"
                   size="sm"
+                  onClick={handleOpenBookOutline}
+                  title={text('打开章节蓝图中的全书总纲', 'Open the book outline in Chapter Blueprints')}
+                  className="whitespace-nowrap"
+                >
+                  <BookOpen size={13} className="mr-1.5 flex-shrink-0" />
+                  <span>{text('全书总纲', 'Book outline')}</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={handleOpenWorldMap}
-                  title={text('多地图地图册', 'Map atlas')}
+                  title={text('地图册', 'Map atlas')}
                   className="whitespace-nowrap"
                 >
                   <Compass size={13} className="mr-1.5 flex-shrink-0" />
@@ -401,7 +416,7 @@ export default function ProjectOverviewPage() {
                   variant="outline"
                   size="sm"
                   onClick={handleOpenConfig}
-                  title={text('小说设定与受众', 'Novel config')}
+                  title={text('创作方向与受众', 'Creative direction')}
                   className="whitespace-nowrap"
                 >
                   <Settings size={13} className="mr-1.5 flex-shrink-0" />
@@ -516,7 +531,11 @@ export default function ProjectOverviewPage() {
           </div>
 
           {stepperExpanded && (
-            <div className="literary-stepper-grid">
+            <div className="literary-stepper-grid" onClick={event => {
+              const target = event.target as HTMLElement
+              if (target.closest('button, a, input, select, textarea')) return
+              target.closest('.literary-step-card')?.querySelector<HTMLButtonElement>('.literary-step-action > button')?.click()
+            }}>
               {/* 步骤 1: 定方向 */}
               <div className={`literary-step-card ${!hasSomeDirection ? 'active-step' : ''}`}>
                 <div>
@@ -577,19 +596,10 @@ export default function ProjectOverviewPage() {
                         ? characters.length > 0
                           ? text(`${characters.length} 位人物已建立 · 待绘制地图`, `${characters.length} chars · pending maps`)
                           : text(`${nodes.length} 处地点已建立 · 待录入人物`, `${nodes.length} places · pending chars`)
-                        : text('构筑世界观规则、人物小传与地理版图', 'Create world laws, character profiles & maps')}
+                          : text('生成故事前提、角色资料、世界观总纲与全书总纲', 'Generate the premise, character information, worldbuilding overview, and book outline')}
                   </div>
                 </div>
-                <div className="literary-step-action space-y-1.5">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full text-xs justify-between"
-                    onClick={handleOpenWorldBuilding}
-                  >
-                    <span>{hasSomeSetting ? text('世界观设定', 'Worldbuilding') : text('开始建设定', 'Build setting')}</span>
-                    <ArrowRight size={12} />
-                  </Button>
+                <div className="literary-step-action">
                   <div className="flex items-center gap-2 pt-1 text-[11px] text-[var(--color-accent-text)]">
                     <button
                       type="button"
@@ -604,9 +614,18 @@ export default function ProjectOverviewPage() {
                       className="hover:underline cursor-pointer"
                       onClick={handleOpenWorldMap}
                     >
-                      {text('地图册', 'Map Atlas')}
+                      {text('地图册', 'Map atlas')}
                     </button>
                   </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full text-xs justify-between"
+                    onClick={handleOpenWorldBuilding}
+                  >
+                    <span>{text('基础设定总览', 'Basic settings overview')}</span>
+                    <ArrowRight size={12} />
+                  </Button>
                 </div>
               </div>
 
@@ -632,16 +651,7 @@ export default function ProjectOverviewPage() {
                       : text('拟定分卷目标、章节细纲与叙事线索', 'Draft volume goals, chapter cards & threads')}
                   </div>
                 </div>
-                <div className="literary-step-action space-y-1.5">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full text-xs justify-between"
-                    onClick={handleOpenBlueprints}
-                  >
-                    <span>{hasSomePlanning ? text('管理细纲', 'Manage blueprints') : text('规划章节细纲', 'Plan chapters')}</span>
-                    <ArrowRight size={12} />
-                  </Button>
+                <div className="literary-step-action">
                   <div className="flex items-center gap-2 pt-1 text-[11px] text-[var(--color-accent-text)]">
                     <button
                       type="button"
@@ -659,6 +669,15 @@ export default function ProjectOverviewPage() {
                       {text('时间线', 'Timeline')}
                     </button>
                   </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full text-xs justify-between"
+                    onClick={handleOpenBlueprints}
+                  >
+                    <span>{hasSomePlanning ? text('管理细纲', 'Manage blueprints') : text('规划章节细纲', 'Plan chapters')}</span>
+                    <ArrowRight size={12} />
+                  </Button>
                 </div>
               </div>
 
@@ -711,7 +730,7 @@ export default function ProjectOverviewPage() {
           </div>
 
           <div className="literary-stage-grid">
-            {/* 卡片 1: 多地图地图册 */}
+            {/* 卡片 1: 地图册 */}
             <Card
               role="button"
               tabIndex={0}
@@ -728,7 +747,7 @@ export default function ProjectOverviewPage() {
                     </div>
                     <div>
                       <h3 className="font-semibold text-sm text-[var(--color-text)]">
-                        {text('多地图地图册', 'Map Atlas Topology')}
+                        {text('地图册', 'Map atlas')}
                       </h3>
                       <span className="text-[0.7rem] text-[var(--color-text-muted)]">
                         {text('空间地理与势力网络', 'Spatial nodes and connections')}
@@ -827,11 +846,11 @@ export default function ProjectOverviewPage() {
               </div>
             </Card>
 
-            {/* 卡片 3: 世界观与规则设定 */}
+            {/* 卡片 3: 基础设定总览 */}
             <Card
               role="button"
               tabIndex={0}
-              aria-label={text('打开世界观设定', 'Open worldbuilding')}
+              aria-label={text('打开基础设定总览', 'Open basic settings overview')}
               onClick={handleOpenWorldBuilding}
               onKeyDown={(event) => activateCardOnKey(event, handleOpenWorldBuilding)}
               className="literary-workstation-card group"
@@ -844,37 +863,43 @@ export default function ProjectOverviewPage() {
                     </div>
                     <div>
                       <h3 className="font-semibold text-sm text-[var(--color-text)]">
-                        {text('世界观与规则设定', 'Worldbuilding & Rules')}
+                        {text('基础设定总览', 'Basic settings overview')}
                       </h3>
                       <span className="text-[0.7rem] text-[var(--color-text-muted)]">
-                        {text('力量体系、势力派系与世界底则', 'Power system, factions & lore')}
+                        {text('创作方向、故事前提、角色档案、世界观总纲与全书总纲', 'Creative direction, premise, character profiles, worldbuilding overview, and book outline')}
                       </span>
                     </div>
                   </div>
-                  <span className="text-xs font-mono px-2 py-0.5 rounded bg-[var(--color-hover)] text-[var(--color-text-secondary)] border border-[var(--color-border)] font-medium">
-                    {characters.length} {text('位人物', 'chars')}
+                  <span className="text-xs px-2 py-0.5 rounded bg-[var(--color-hover)] text-[var(--color-text-secondary)] border border-[var(--color-border)] font-medium">
+                    {text('按步骤选择', 'Choose steps')}
                   </span>
                 </div>
                 <p className="text-xs leading-relaxed mb-3 text-[var(--color-text-secondary)]">
                   {text(
-                    '长篇小说的世界法则基石：录入力量体系、修炼等级、门派势力与自然法则，保证全书前后设定严谨一致。',
-                    'Establish the foundational rules of your fiction: magic/power hierarchies, factions, and consistent world logic.',
+                    '在同一处查看五类基础设定，也可按需批量生成故事前提、角色资料、世界观总纲与全书总纲；全书总纲在章节蓝图中与卷纲、章纲共同维护。',
+                    'Review all five basic setting areas here, or generate the premise, character information, worldbuilding overview, and book outline in a batch; the book outline is maintained with volume and chapter blueprints.',
                   )}
                 </p>
                 <div className="flex flex-wrap gap-1.5 mb-2">
                   <span className="text-[10px] px-2 py-0.5 rounded-full border border-[var(--color-border)] bg-[var(--color-hover)] text-[var(--color-text-muted)]">
-                    {text('世界法则', 'World laws')}
+                    {text('创作方向', 'Creative direction')}
                   </span>
                   <span className="text-[10px] px-2 py-0.5 rounded-full border border-[var(--color-border)] bg-[var(--color-hover)] text-[var(--color-text-muted)]">
-                    {text('势力派系', 'Factions')}
+                    {text('故事前提', 'Story premise')}
                   </span>
                   <span className="text-[10px] px-2 py-0.5 rounded-full border border-[var(--color-border)] bg-[var(--color-hover)] text-[var(--color-text-muted)]">
-                    {text('人物档案联动', 'Character roster')}
+                    {text('角色档案', 'Character profiles')}
+                  </span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full border border-[var(--color-border)] bg-[var(--color-hover)] text-[var(--color-text-muted)]">
+                    {text('世界观总纲', 'Worldbuilding overview')}
+                  </span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full border border-[var(--color-border)] bg-[var(--color-hover)] text-[var(--color-text-muted)]">
+                    {text('全书总纲', 'Book outline')}
                   </span>
                 </div>
               </div>
               <div className="literary-card-action-bar">
-                <span>{text('进入世界观设定', 'Open worldbuilding')}</span>
+                <span>{text('打开基础设定总览', 'Open basic settings overview')}</span>
                 <ArrowRight size={13} className="group-hover:translate-x-0.5 transition-transform" />
               </div>
             </Card>

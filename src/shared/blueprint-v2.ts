@@ -12,6 +12,8 @@
 
 import { randomCanvasUuid } from './canvas-ids'
 import type { BlueprintData } from '../../electron/repositories/blueprint-repository'
+import type { BlueprintChapterPlanning } from './blueprint-planning'
+export type { BlueprintChapterPlanning } from './blueprint-planning'
 
 export const BLUEPRINT_V2_SCHEMA_VERSION = 2
 
@@ -117,6 +119,8 @@ export interface ChapterBlueprintV2Content {
   chapterTitleLevel?: number
   /** 章题行之后、首个分区之前的原文；与 docPreamble 分开才能原位导出。 */
   chapterPostamble?: string
+  /** Stable semantic planning markers; stored in detail_json and included in contentHash. */
+  planning?: BlueprintChapterPlanning
 }
 
 export interface ChapterBlueprintV2Detail extends ChapterBlueprintV2Content {
@@ -316,6 +320,11 @@ function sha256Hex(text: string): string {
   return Array.from(hash, value => value.toString(16).padStart(8, '0')).join('')
 }
 
+/** Shared UTF-8 SHA-256 primitive for planning source snapshots. */
+export function computeBlueprintV2TextHash(text: string): string {
+  return sha256Hex(text)
+}
+
 /** 稳定键序 JSON（canonicalJSON）：对象键排序，数组保持顺序。 */
 function canonicalJsonStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(item => canonicalJsonStringify(item)).join(',')}]`
@@ -339,6 +348,7 @@ export function computeBlueprintV2ContentHash(content: ChapterBlueprintV2Content
   }
   if (content.chapterTitleLevel !== undefined) hashInput.chapterTitleLevel = content.chapterTitleLevel
   if (content.chapterPostamble !== undefined) hashInput.chapterPostamble = content.chapterPostamble
+  if (content.planning !== undefined) hashInput.planning = content.planning
   return sha256Hex(canonicalJsonStringify(hashInput))
 }
 
@@ -457,6 +467,17 @@ export function assertValidChapterBlueprintV2Content(content: ChapterBlueprintV2
   if (typeof content.chapterTitle !== 'string') throw new Error('章节细纲章题无效')
   if (typeof content.docPreamble !== 'string') throw new Error('章节细纲前导内容无效')
   if (content.chapterPostamble !== undefined && typeof content.chapterPostamble !== 'string') throw new Error('章节细纲章题后内容无效')
+  if (content.planning !== undefined) {
+    if (!content.planning || typeof content.planning !== 'object' || Array.isArray(content.planning)) {
+      throw new Error('章节规划字段无效')
+    }
+    for (const key of ['volumeTask', 'handoff', 'expectedEndChange'] as const) {
+      const value = content.planning[key]
+      if (value !== undefined && (typeof value !== 'string' || value.length > 20_000)) {
+        throw new Error(`章节规划字段 ${key} 无效或超限`)
+      }
+    }
+  }
   if (!Array.isArray(content.sections)) throw new Error('章节细纲分区列表无效')
   if (content.chapterTitle.length > MAX_BLUEPRINT_V2_SCENE_TITLE) {
     throw new Error(`章题超限（≤${MAX_BLUEPRINT_V2_SCENE_TITLE} 字符）`)

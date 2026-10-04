@@ -7,6 +7,7 @@ import { useEditorStore } from '../../stores/editor-store'
 import { useProjectStore } from '../../stores/project-store'
 import { useWorkflowStore } from '../../stores/workflow-store'
 import { setActiveProjectSessionContext } from '../../shared/project-session-context'
+import { blueprintPlanningTextHash } from '../../shared/blueprint-planning'
 import type { ProjectSessionContext } from '../../shared/ipc-channels'
 
 vi.mock('../ipc-client', () => ({
@@ -83,10 +84,12 @@ beforeEach(() => {
   vi.clearAllMocks()
   setActiveProjectSessionContext(projectSession)
   hasActiveRun.mockReturnValue(false)
-  vi.mocked(ipc.invokeWithProjectSession).mockResolvedValue({
-    success: true,
-    cleared: ['generatedText'],
-  } as never)
+  vi.mocked(ipc.invokeWithProjectSession).mockImplementation((async (...args: unknown[]) => {
+    const channel = args[1] as string
+    return channel === 'db:project-core-get'
+      ? { synopsis: '' }
+      : { success: true, cleared: ['generatedText'] }
+  }) as never)
   vi.mocked(useProjectStore.getState).mockReturnValue({
     currentProject: project(),
     openProject,
@@ -120,10 +123,22 @@ describe('clearProjectData', () => {
     }, projectSession)
 
     expect(ipc.invoke).not.toHaveBeenCalled()
-    expect(ipc.invokeWithProjectSession).toHaveBeenCalledWith(
+    expect(ipc.invokeWithProjectSession).toHaveBeenNthCalledWith(
+      1,
+      projectSession,
+      'db:project-core-get',
+      projectPath,
+    )
+    expect(ipc.invokeWithProjectSession).toHaveBeenNthCalledWith(
+      2,
       projectSession,
       'db:project-clear-generated-data',
-      { creativeFields: true, blueprints: true, generatedText: true },
+      {
+        creativeFields: true,
+        blueprints: true,
+        generatedText: true,
+        expectedSynopsisHash: blueprintPlanningTextHash(''),
+      },
       projectPath,
     )
     expect(clearTabs).not.toHaveBeenCalled()
@@ -139,7 +154,7 @@ describe('clearProjectData', () => {
       generatedText: false,
     }, projectSession)
 
-    expect(ipc.invokeWithProjectSession).toHaveBeenCalledOnce()
+    expect(ipc.invokeWithProjectSession).toHaveBeenCalledTimes(2)
     expect(draftReset).not.toHaveBeenCalled()
     expect(openProject).not.toHaveBeenCalled()
   })
@@ -217,7 +232,7 @@ describe('clearProjectData', () => {
     await expect(clearProjectData({ creativeFields: true }, projectSession)).resolves.toEqual({
       cleared: ['generatedText'],
     })
-    expect(ipc.invokeWithProjectSession).toHaveBeenCalledOnce()
+    expect(ipc.invokeWithProjectSession).toHaveBeenCalledTimes(2)
   })
 
   it('does not block creative-field clearing for character cards that the repository does not delete', async () => {
@@ -236,7 +251,7 @@ describe('clearProjectData', () => {
     await expect(clearProjectData({ creativeFields: true }, projectSession)).resolves.toEqual({
       cleared: ['generatedText'],
     })
-    expect(ipc.invokeWithProjectSession).toHaveBeenCalledOnce()
+    expect(ipc.invokeWithProjectSession).toHaveBeenCalledTimes(2)
   })
 
   it('closes only affected clean tabs after clear', async () => {

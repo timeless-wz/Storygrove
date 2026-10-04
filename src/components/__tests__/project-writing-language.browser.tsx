@@ -243,6 +243,7 @@ describe('project writing language', () => {
     })
 
     await mount(<NovelConfigEditor projectKey={currentProject.path} />)
+    await act(async () => page.getByText('高级选项', { exact: true }).click())
     await expect.element(page.getByText('质量与连续性', { exact: true })).toBeVisible()
     await expect.element(page.getByText('作用范围：当前项目', { exact: true })).toBeVisible()
     await expect.element(page.getByText('产品默认值：3 章', { exact: true })).toBeVisible()

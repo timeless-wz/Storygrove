@@ -143,6 +143,7 @@ function stubIpcInvoke(handler: (channel: string, ...args: unknown[]) => unknown
       : channel === 'fs:check-exists' && String(args[0]).endsWith('/.vela/prompts') ? false
       // 默认项目没有任何 v2 细纲；覆盖守卫放行全部章节。
       : channel === 'db:blueprint-v2-summary-list' ? []
+        : channel === 'db:project-core-get' ? { synopsis: '' }
         : handler(channel, ...args),
   ))
   vi.stubGlobal('window', {
@@ -557,6 +558,8 @@ describe('InferGlobalSettingsCommand', () => {
     )
     const commitCalls = invoke.mock.calls.filter(([channel]) => channel === 'db:import-global-facts-commit')
     expect(commitCalls).toHaveLength(1)
+    expect((commitCalls[0]?.[1] as { expectedSynopsisHash: string }).expectedSynopsisHash)
+      .toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')
     const committedCore = (commitCalls[0]?.[1] as { core: { coreOutline: string } }).core
     expect(committedCore.coreOutline).toBe(inferred.novelConfig.coreOutline)
     expect(new TextEncoder().encode(committedCore.coreOutline))

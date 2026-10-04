@@ -22,6 +22,8 @@ export interface ImportGlobalFactsCore {
 export interface ImportGlobalFactsRequest {
   operationId: string
   expectedRosterRevision: number
+  /** SHA-256 of project_core.synopsis captured before the import inference ran. */
+  expectedSynopsisHash: string
   core: ImportGlobalFactsCore
   characterEntries: CharacterRosterEntry[]
 }

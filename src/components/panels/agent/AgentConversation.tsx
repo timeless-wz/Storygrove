@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowDown, Trash2, Workflow } from 'lucide-react'
+import { ArrowDown, BookOpen, Trash2, Workflow } from 'lucide-react'
 import { useAgentStore } from '../../../stores/agent-store'
 import { useLayoutStore } from '../../../stores/layout-store'
+import { useProjectStore } from '../../../stores/project-store'
+import { openBuiltinEditor } from '../sidebar/sidebar-file-openers'
 import { APP_BRAND } from '../../../shared/brand'
 import AgentMessage from './AgentMessage'
 import AgentInputBox from './AgentInputBox'
@@ -199,16 +201,41 @@ function ActiveConversation() {
 /**
  * 重构后的工具栏：贴合小说创作场景
  * 左侧：快速引用按钮（架构、角色、蓝图）
- * 右侧：打开 AI 输出面板按钮
+ * 右侧：打开 AI 工作流面板按钮
  */
 function AgentToolbar() {
   const text = useLocaleStore(s => s.text)
   const openRightPanel = useLayoutStore(s => s.openRightPanel)
+  const hasProject = Boolean(useProjectStore(s => s.currentProject?.path))
 
   return (
-    <div className="flex items-center justify-end mb-1.5">
+    <div className="flex items-center justify-end gap-1.5 mb-1.5">
 
-      {/* 右侧：打开 AI 输出面板 */}
+      <button
+        type="button"
+        onClick={() => openBuiltinEditor(
+          'chapter-card-editor',
+          text('章节蓝图', 'Chapter blueprints'),
+          'chapter-card',
+          undefined,
+          undefined,
+          undefined,
+          { kind: 'book' },
+        )}
+        disabled={!hasProject}
+        className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all select-none disabled:opacity-50"
+        style={{
+          color: 'var(--color-text-muted)',
+          border: '1px solid var(--color-border)',
+        }}
+        title={text('打开章节蓝图中的全书总纲', 'Open the book outline in Chapter Blueprints')}
+        aria-label={text('全书总纲', 'Book outline')}
+      >
+        <BookOpen size={12} strokeWidth={1.75} />
+        {text('全书总纲', 'Book outline')}
+      </button>
+
+      {/* 右侧：打开 AI 工作流面板 */}
       <button
         onClick={() => openRightPanel('ai-output')}
         className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all select-none"
@@ -216,7 +243,8 @@ function AgentToolbar() {
           color: 'var(--color-text-muted)',
           border: '1px solid var(--color-border)',
         }}
-        title={text('切换到 AI 输出面板', 'Switch to AI output panel')}
+        title={text('查看 AI 任务进度与输出', 'View AI task progress and output')}
+        aria-label={text('AI 工作流：查看 AI 任务进度与输出', 'AI workflow: view task progress and output')}
         onMouseEnter={e => {
           e.currentTarget.style.backgroundColor = 'var(--color-hover)'
           e.currentTarget.style.color = 'var(--color-text)'

@@ -54,6 +54,10 @@ import {
   isWritableBlueprintV2Detail,
   type BlueprintV2WritingBlock,
 } from './blueprint-v2-writing'
+import {
+  formatBlueprintVolumeWritingMaterial,
+  loadBlueprintVolumeWritingMaterial,
+} from './blueprint-volume-writing'
 
 export { countDraftUnits } from '../../../shared/draft-units'
 export { previousChapterEnding } from '../chapter-materials'
@@ -569,6 +573,17 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
     const blueprintV2Block: BlueprintV2WritingBlock | null = isWritableBlueprintV2Detail(blueprintV2Detail)
       ? assembleBlueprintV2WritingBlock(blueprintV2Detail, writingLanguage)
       : null
+    const blueprintVolumeMaterial = await loadBlueprintVolumeWritingMaterial(
+      projectSession,
+      this.chapterInfo.chapterNumber,
+    )
+    const blueprintVolumeText = formatBlueprintVolumeWritingMaterial(blueprintVolumeMaterial, writingLanguage)
+    if (blueprintVolumeMaterial?.outline) {
+      callbacks.log(uiText(
+        `已注入本卷计划：卷纲 r${blueprintVolumeMaterial.outline.revision}，${blueprintVolumeMaterial.relatedChapters.length} 条同卷章纲摘要。`,
+        `Injected the current-volume plan: outline r${blueprintVolumeMaterial.outline.revision} and ${blueprintVolumeMaterial.relatedChapters.length} same-volume chapter summaries.`,
+      ))
+    }
     const legacyWriterChapterInfo = toWriterChapterInfo(this.chapterInfo)
     // v2 已携带完整的本章事件与收束；keyEvents/suspenseHook 的 v1 投影摘要不再
     // 作为第二条当前章任务路径重复注入。角色、章节功能、作者微操指导仍保留；
@@ -705,7 +720,14 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
           `[Current-chapter execution card (author text repeated verbatim)]\nThe non-empty items below are current-chapter actions and end states, not new facts. Before output, check that each item is realized through manuscript action or outcome. Each later action must continue from the item ownership, character knowledge, and plan-completion state actually established in the prose.\n${executionItems.flatMap(item => item.value?.trim() ? [`- ${item.enUS}: ${item.value}`] : []).join('\n')}`,
         )
       : ''
-    const prompt = [chapterMaterials.text, promptBuilder.build(), blueprintV2Block?.text ?? '', chapterExecutionCard, chapterLengthContract]
+    const prompt = [
+      chapterMaterials.text,
+      promptBuilder.build(),
+      blueprintVolumeText,
+      blueprintV2Block?.text ?? '',
+      chapterExecutionCard,
+      chapterLengthContract,
+    ]
       .filter(Boolean)
       .join('\n\n')
     const previousEnding = chapterMaterials.previousEnding
@@ -845,6 +867,16 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
         ))
       }
       this.assertNotCancelled(context)
+      const latestVolumeMaterial = await loadBlueprintVolumeWritingMaterial(
+        projectSession,
+        this.chapterInfo.chapterNumber,
+      )
+      if (JSON.stringify(latestVolumeMaterial) !== JSON.stringify(blueprintVolumeMaterial)) {
+        throw new Error(uiText(
+          '生成期间本章的蓝图归卷或卷纲版本已变化，草稿未保存；请重新生成以使用当前规划。',
+          'The chapter assignment or volume-outline version changed during generation, so the draft was not saved. Generate again against the current plan.',
+        ))
+      }
       const nextVersion: number = await ipc.invokeWithProjectSession(
         projectSession,
         'db:draft-next-version',

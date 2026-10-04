@@ -97,6 +97,22 @@ describe('blueprint v2 writing block assembly (contract §9)', () => {
     expect(block.text).not.toContain('userGuidance')
   })
 
+  it('injects confirmed chapter planning fields as intent, not established events', () => {
+    const detail = {
+      ...fixtureDetail(),
+      planning: {
+        volumeTask: 'Expose the hidden cost of the rescue.',
+        handoff: 'Carry the missing key into the next chapter.',
+        expectedEndChange: 'The protagonist loses trust in the dispatcher.',
+      },
+    }
+    const block = assembleBlueprintV2WritingBlock(detail, 'en-US')!
+    expect(block.text).toContain('[Chapter planning intent (author-confirmed plans, not established events)]')
+    expect(block.text).toContain('Chapter role in the volume: Expose the hidden cost of the rescue.')
+    expect(block.text).toContain('Planned handoff: Carry the missing key into the next chapter.')
+    expect(block.text).toContain('Intended end-of-chapter change: The protagonist loses trust in the dispatcher.')
+  })
+
   it('keeps the constraint scaffold a constant independent of outline content', () => {
     expect(BLUEPRINT_V2_CONSTRAINT_SCAFFOLD.zhCN).toBe(BLUEPRINT_V2_CONSTRAINT_SCAFFOLD.zhCN.trim())
     const otherChapter = assembleBlueprintV2WritingBlock(

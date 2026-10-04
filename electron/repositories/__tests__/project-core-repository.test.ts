@@ -2,7 +2,7 @@ import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { getProjectDb } from '../../database'
-import { ProjectCoreRepository } from '../project-core-repository'
+import { hashProjectSynopsis, ProjectCoreRepository } from '../project-core-repository'
 
 vi.mock('../../database', () => ({
   getProjectDb: vi.fn(),
@@ -128,5 +128,37 @@ describe('ProjectCoreRepository synopsis compare-and-set', () => {
       synopsis: 'Replacement outline',
       expected: expectedSynopsisSource,
     })).toBe(true)
+  })
+
+  it('rejects a missing or stale synopsis hash while applying unrelated core fields', () => {
+    const missingHash = ProjectCoreRepository.update({ synopsis: 'stale write', genre: 'romance' })
+    expect(missingHash.success).toBe(false)
+    expect(db.prepare("SELECT synopsis, genre FROM project_core WHERE id = 'main'").get())
+      .toEqual({ synopsis: 'Original outline', genre: 'romance' })
+
+    db.prepare("UPDATE project_core SET synopsis = 'Concurrent outline' WHERE id = 'main'").run()
+    const staleHash = ProjectCoreRepository.update({
+      synopsis: 'older editor overwrite',
+      genre: 'mystery',
+      expectedSynopsisHash: hashProjectSynopsis('Original outline'),
+    })
+    expect(staleHash.success).toBe(false)
+    expect(db.prepare("SELECT synopsis, genre FROM project_core WHERE id = 'main'").get())
+      .toEqual({ synopsis: 'Concurrent outline', genre: 'mystery' })
+  })
+
+  it('accepts a matching synopsis hash and verifies a supplied hash in synopsis commit', () => {
+    expect(ProjectCoreRepository.update({
+      synopsis: 'Manual replacement',
+      expectedSynopsisHash: hashProjectSynopsis('Original outline'),
+    }).success).toBe(true)
+    expect(ProjectCoreRepository.get()?.synopsis).toBe('Manual replacement')
+
+    expect(ProjectCoreRepository.commitSynopsis({
+      synopsis: 'Generated replacement',
+      expected: { ...expectedSynopsisSource, synopsis: 'Manual replacement' },
+      expectedSynopsisHash: hashProjectSynopsis('Original outline'),
+    })).toBe(false)
+    expect(ProjectCoreRepository.get()?.synopsis).toBe('Manual replacement')
   })
 })

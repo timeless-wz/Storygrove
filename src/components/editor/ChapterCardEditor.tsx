@@ -1,16 +1,28 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  Save, BookOpen, RefreshCw, Plus, Trash2,
-  PenLine, AlertTriangle, MapPin, ChevronDown, ChevronRight, FolderPlus
+  Save, BookOpen, RefreshCw, Trash2,
+  PenLine, AlertTriangle, MapPin, FolderPlus, FileText
 } from 'lucide-react'
 import { useProjectStore } from '../../stores/project-store'
 import { useWorkflowStore } from '../../stores/workflow-store'
 import { useDraftStore, readDraftBody } from '../../stores/draft-store'
+import { useLLMStore } from '../../stores/llm-store'
 import { useWorldMapStore } from '../../stores/world-map-store'
 import { WORLD_MAP_NODE_TYPE_LABELS, getWorldMapName } from '../../shared/world-map'
 import { ipc } from '../../services/ipc-client'
 import { clearProjectData } from '../../services/project-clear-service'
 import type { ProjectSessionContext } from '../../shared/ipc-channels'
+import type {
+  BlueprintPlanningCandidateRecord,
+  BlueprintPlanningCheckRecord,
+  BlueprintPlanningConfirmSelection,
+  BlueprintPlanningSelection,
+  BlueprintPlanningSourceState,
+  BlueprintPlanningTargetSourceReference,
+  BlueprintVolumeOutline,
+  BlueprintVolumeOutlineOrigin,
+  BlueprintVolumeOutlineSummary,
+} from '../../shared/blueprint-planning'
 import {
   projectSessionContextFromProject,
   sameProjectPathKey,
@@ -80,11 +92,27 @@ import ChapterCanvasWorkbench from '../canvas/ChapterCanvasWorkbench'
 import {
   PlanningPageShell,
   PlanningPane,
-  PlanningSearch,
-  PlanningChipGroup,
-  PlanningListRow,
   PlanningEmptyState,
 } from '../planning/PlanningPageShell'
+import {
+  BlueprintBookOutlineEditor,
+  BlueprintChapterPlanningActions,
+  BlueprintPlanningTree,
+  BlueprintVolumeOutlineEditor,
+  type BlueprintPlanningCandidateView,
+} from './BlueprintPlanningViews'
+import { startBlueprintPlanningWorkflow } from '../../services/workflows/blueprint-planning-workflow'
+import {
+  prepareBlueprintVolumeOutlineImport,
+  confirmBlueprintVolumeOutlineImport,
+  exportBlueprintVolumeOutlineMarkdown,
+  prepareBlueprintBookOutlineImport,
+  confirmBlueprintBookOutlineImport,
+  exportBlueprintBookOutlineMarkdown,
+  exportBlueprintPlanningPackage,
+  type BlueprintBookOutlineImportPreview,
+  type BlueprintVolumeOutlineImportPreview,
+} from '../../services/blueprint-planning-exchange'
 import { revealSidebarGroup, usePlanningBackPath } from '../planning/planning-navigation'
 import {
   AuthoritativeChapterSequenceError,
@@ -102,6 +130,7 @@ function blueprintV2DetailToContent(detail: ChapterBlueprintV2DetailRead): Chapt
     ...(detail.chapterTitleLevel === undefined ? {} : { chapterTitleLevel: detail.chapterTitleLevel }),
     docPreamble: detail.docPreamble,
     ...(detail.chapterPostamble === undefined ? {} : { chapterPostamble: detail.chapterPostamble }),
+    ...(detail.planning === undefined ? {} : { planning: detail.planning }),
     sections: detail.sections,
     origin: detail.origin,
   }
@@ -128,12 +157,57 @@ function createBlueprintVolumeId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `volume-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-const ROLE_COLORS: Record<string, string> = {
-  高潮: 'bg-[color-mix(in_srgb,var(--color-error-text)_20%,transparent)] text-[var(--color-error-text)]',
-  冲突: 'bg-[color-mix(in_srgb,var(--color-warning-text)_20%,transparent)] text-[var(--color-warning-text)]',
-  转折: 'bg-[color-mix(in_srgb,var(--color-category-review-text)_20%,transparent)] text-[var(--color-category-review-text)]',
-  建置: 'bg-[color-mix(in_srgb,var(--color-category-progress-text)_20%,transparent)] text-[var(--color-category-progress-text)]',
-  收尾: 'bg-[color-mix(in_srgb,var(--color-success-text)_20%,transparent)] text-[var(--color-success-text)]',
+function planningSelectionStorageKey(projectId: string): string {
+  return `blueprint-planning-selection:${projectId}`
+}
+
+function isValidPlanningSelection(
+  selection: BlueprintPlanningSelection | null,
+  blueprints: ChapterBlueprint[],
+  volumes: BlueprintVolumeData[],
+): selection is BlueprintPlanningSelection {
+  if (!selection || typeof selection !== 'object') return false
+  if (selection.kind === 'book') return true
+  if (selection.kind === 'volume') return volumes.some(volume => volume.id === selection.volumeId)
+  return selection.kind === 'chapter' && blueprints.some(blueprint => blueprint.chapterNumber === selection.chapterNumber)
+}
+
+function readStoredPlanningSelection(projectId: string): BlueprintPlanningSelection | null {
+  try {
+    const raw = localStorage.getItem(planningSelectionStorageKey(projectId))
+    return raw ? JSON.parse(raw) as BlueprintPlanningSelection : null
+  } catch {
+    return null
+  }
+}
+
+function persistPlanningSelection(projectId: string, selection: BlueprintPlanningSelection): void {
+  try { localStorage.setItem(planningSelectionStorageKey(projectId), JSON.stringify(selection)) } catch { /* UI preference only. */ }
+}
+
+async function sha256Body(value: string): Promise<string> {
+  const bytes = new TextEncoder().encode(value)
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function candidateView(record: BlueprintPlanningCandidateRecord): BlueprintPlanningCandidateView {
+  const sourceSummary = record.sourceSnapshot.sources.map(source => (
+    `${source.label ?? source.kind} ${source.targetId}${source.revision == null ? '' : ` r${source.revision}`} ${source.contentHash.slice(0, 8)}`
+  )).join(' · ') || '—'
+  return {
+    operationId: record.operationId,
+    kind: record.kind,
+    state: record.state,
+    payloadHash: record.payloadHash,
+    candidate: record.candidate,
+    sourceSummary,
+  }
+}
+
+function planningExchangeError(result: unknown, fallback: string): string {
+  if (typeof result === 'object' && result !== null && 'error' in result && typeof result.error === 'string') return result.error
+  return fallback
 }
 
 function readDraftLedgerFromFixedTab() {
@@ -164,11 +238,13 @@ export default function ChapterCardEditor({
   initialChapterNumber,
   initialChapterView,
   chapterViewRequest,
+  initialPlanningSelection,
 }: {
   projectKey: string
   initialChapterNumber?: number
   initialChapterView?: 'blueprint' | 'canvas'
   chapterViewRequest?: number
+  initialPlanningSelection?: BlueprintPlanningSelection
 }) {
   const text = useLocaleStore(s => s.text)
   const locale = useLocaleStore(s => s.locale)
@@ -181,9 +257,35 @@ export default function ChapterCardEditor({
   const addLog = useWorkflowStore.getState().addLog
   const [blueprints, setBlueprints] = useState<ChapterBlueprint[]>([])
   const [volumes, setVolumes] = useState<BlueprintVolumeData[]>([])
-  const [selectedVolumeId, setSelectedVolumeId] = useState(DEFAULT_VOLUME_ID)
+  const [, setSelectedVolumeId] = useState(DEFAULT_VOLUME_ID)
   const [collapsedVolumeIds, setCollapsedVolumeIds] = useState<Set<string>>(() => new Set())
   const [selectedIdx, setSelectedIdx] = useState<number>(0)
+  const [planningSelection, setPlanningSelection] = useState<BlueprintPlanningSelection>({ kind: 'book' })
+  const planningSelectionRef = useRef<BlueprintPlanningSelection>({ kind: 'book' })
+  const [outlineSummaries, setOutlineSummaries] = useState<BlueprintVolumeOutlineSummary[]>([])
+  const [synopsisStored, setSynopsisStored] = useState('')
+  const [synopsisDraft, setSynopsisDraft] = useState('')
+  const [synopsisBaseHash, setSynopsisBaseHash] = useState<string | null>(null)
+  const [synopsisLoading, setSynopsisLoading] = useState(false)
+  const [synopsisSaving, setSynopsisSaving] = useState(false)
+  const [synopsisError, setSynopsisError] = useState<string | null>(null)
+  const [bookImportPreview, setBookImportPreview] = useState<BlueprintBookOutlineImportPreview | null>(null)
+  const [volumeOutline, setVolumeOutline] = useState<BlueprintVolumeOutline | null>(null)
+  const [volumeOutlineDraft, setVolumeOutlineDraft] = useState('')
+  const [volumeOutlineLoading, setVolumeOutlineLoading] = useState(false)
+  const [volumeOutlineSaving, setVolumeOutlineSaving] = useState(false)
+  const [volumeOutlineError, setVolumeOutlineError] = useState<string | null>(null)
+  const [volumeImportPreview, setVolumeImportPreview] = useState<BlueprintVolumeOutlineImportPreview | null>(null)
+  const [planningCandidates, setPlanningCandidates] = useState<BlueprintPlanningCandidateRecord[]>([])
+  const [planningChecks, setPlanningChecks] = useState<BlueprintPlanningCheckRecord[]>([])
+  const [planningSourceStatuses, setPlanningSourceStatuses] = useState<Record<string, BlueprintPlanningSourceState>>({})
+  const [planningTargetSourceStatuses, setPlanningTargetSourceStatuses] = useState<Record<string, BlueprintPlanningSourceState | 'loading'>>({})
+  const [planningBusyOperationId, setPlanningBusyOperationId] = useState<string | null>(null)
+  const [planningWorkflowStarting, setPlanningWorkflowStarting] = useState(false)
+  const [selectionSaveError, setSelectionSaveError] = useState<string | null>(null)
+  const [selectionSaving, setSelectionSaving] = useState(false)
+  const [planningCandidatesRevision, setPlanningCandidatesRevision] = useState(0)
+  const planningRunIdsRef = useRef(new Map<string, string>())
   // 卷 / 章节清单的搜索与写作状态筛选
   const [searchQuery, setSearchQuery] = useState('')
   const [draftFilter, setDraftFilter] = useState<'all' | 'no-draft' | 'has-draft'>('all')
@@ -229,12 +331,17 @@ export default function ChapterCardEditor({
   const v2LoadGateRef = useRef(new LatestRequestGate())
 
   useEffect(() => {
-    if (loading || initialChapterNumber === undefined) return
+    if (loading || initialPlanningSelection || initialChapterNumber === undefined) return
     const targetIndex = blueprintsRef.current.findIndex(
       blueprint => blueprint.chapterNumber === initialChapterNumber,
     )
-    if (targetIndex >= 0) setSelectedIdx(targetIndex)
-  }, [initialChapterNumber, loading])
+    if (targetIndex >= 0) {
+      const selection: BlueprintPlanningSelection = { kind: 'chapter', chapterNumber: initialChapterNumber }
+      setSelectedIdx(targetIndex)
+      planningSelectionRef.current = selection
+      setPlanningSelection(selection)
+    }
+  }, [initialChapterNumber, initialPlanningSelection, loading])
 
   // 外部视图请求（如概览「回到上次创作位置」直达场景画布）：定位到目标章并
   // 应用请求的视图。与 lastSelectedIdx 同批更新，避免渲染期重置覆盖请求。
@@ -250,6 +357,9 @@ export default function ChapterCardEditor({
       if (targetIndex >= 0) {
         setSelectedIdx(targetIndex)
         setLastSelectedIdx(targetIndex)
+        const selection: BlueprintPlanningSelection = { kind: 'chapter', chapterNumber: initialChapterNumber }
+        planningSelectionRef.current = selection
+        setPlanningSelection(selection)
       }
     }
     // chapterViewRequest 变化代表一次新的外部视图请求。
@@ -354,6 +464,16 @@ export default function ChapterCardEditor({
       setSaving(false)
       setVolumes([])
       setSelectedVolumeId(DEFAULT_VOLUME_ID)
+      planningSelectionRef.current = { kind: 'book' }
+      setPlanningSelection({ kind: 'book' })
+      setOutlineSummaries([])
+      setSynopsisStored('')
+      setSynopsisDraft('')
+      setSynopsisBaseHash(null)
+      setVolumeOutline(null)
+      setVolumeOutlineDraft('')
+      setPlanningCandidates([])
+      setPlanningChecks([])
       applyVisibleDraftState([], new Set())
       setLoading(false)
       return
@@ -374,6 +494,16 @@ export default function ChapterCardEditor({
       setSaving(false)
       setVolumes([])
       setSelectedVolumeId(DEFAULT_VOLUME_ID)
+      planningSelectionRef.current = { kind: 'book' }
+      setPlanningSelection({ kind: 'book' })
+      setOutlineSummaries([])
+      setSynopsisStored('')
+      setSynopsisDraft('')
+      setSynopsisBaseHash(null)
+      setVolumeOutline(null)
+      setVolumeOutlineDraft('')
+      setPlanningCandidates([])
+      setPlanningChecks([])
       applyVisibleDraftState([], new Set())
     }
     try {
@@ -407,11 +537,28 @@ export default function ChapterCardEditor({
         ? loadedVolumes
         : [{ id: DEFAULT_VOLUME_ID, name: text('第1卷', 'Volume 1'), sortOrder: 1 }]
       setVolumes(remoteVolumes)
+      const storedSelection = initialPlanningSelection
+        ?? (initialChapterNumber === undefined ? readStoredPlanningSelection(projectSession.projectId) : null)
+      const routeSelection = initialPlanningSelection
+        ?? (initialChapterNumber === undefined ? null : { kind: 'chapter' as const, chapterNumber: initialChapterNumber })
+      const preferredSelection = routeSelection ?? storedSelection
+      const defaultSelection: BlueprintPlanningSelection = data[0]
+        ? { kind: 'chapter', chapterNumber: data[0].chapterNumber }
+        : { kind: 'book' }
+      const nextSelection = isValidPlanningSelection(preferredSelection, data, remoteVolumes)
+        ? preferredSelection
+        : defaultSelection
+      planningSelectionRef.current = nextSelection
+      setPlanningSelection(nextSelection)
+      persistPlanningSelection(projectSession.projectId, nextSelection)
       setSelectedVolumeId(current => {
         if (remoteVolumes.some(volume => volume.id === current)) return current
         return data[0] ? blueprintVolumeId(data[0]) : (remoteVolumes[0]?.id ?? DEFAULT_VOLUME_ID)
       })
-      if (data.length > 0) setSelectedIdx(0)
+      if (data.length > 0) {
+        const index = data.findIndex(blueprint => blueprint.chapterNumber === (nextSelection.kind === 'chapter' ? nextSelection.chapterNumber : data[0].chapterNumber))
+        setSelectedIdx(Math.max(0, index))
+      }
       try {
         const nextChapter = await readAuthoritativeNextChapter(projectSession, locale)
         if (!isLatestProjectRequest()) return
@@ -441,6 +588,8 @@ export default function ChapterCardEditor({
     }
   }, [
     projectKey,
+    initialChapterNumber,
+    initialPlanningSelection,
     projectMatches,
     renderedProjectId,
     renderedProjectLeaseId,
@@ -458,18 +607,16 @@ export default function ChapterCardEditor({
     return () => { mounted = false }
   }, [loadBlueprints, projectKey])
 
-  // 监听工作流完成事件，如果蓝图生成完毕则自动刷新
+  // 规划候选和检查报告在普通工作流完成后写入；按 runId 识别本编辑器启动的任务。
   useEffect(() => {
     return globalEventBus.on('WORKFLOW_COMPLETE', (payload) => {
-      if (
-        payload.type === 'directory'
-        && sameProjectSessionContext(
-          payload.projectSession,
-          currentProjectSessionForPath(projectKey),
-        )
-      ) {
-        loadBlueprints()
-      }
+      if (!sameProjectSessionContext(payload.projectSession, currentProjectSessionForPath(projectKey))) return
+      if (payload.type === 'directory') loadBlueprints()
+      const operationId = planningRunIdsRef.current.get(payload.runId)
+      if (!operationId) return
+      planningRunIdsRef.current.delete(payload.runId)
+      setPlanningBusyOperationId(current => current === operationId ? null : current)
+      setPlanningCandidatesRevision(value => value + 1)
     })
   }, [loadBlueprints, projectKey])
 
@@ -498,7 +645,184 @@ export default function ChapterCardEditor({
     })
   }, [loadBlueprints, projectKey])
 
-  const selected = projectDataReady ? blueprints[selectedIdx] ?? null : null
+  const selected = projectDataReady && planningSelection.kind === 'chapter'
+    ? blueprints.find(blueprint => blueprint.chapterNumber === planningSelection.chapterNumber) ?? null
+    : null
+  const selectedChapterDirty = Boolean(selected && dirtyChapterNumbers.has(selected.chapterNumber))
+
+  const planningSelectionKey = planningSelection.kind === 'book'
+    ? 'book'
+    : planningSelection.kind === 'volume'
+      ? `volume:${planningSelection.volumeId}`
+      : `chapter:${planningSelection.chapterNumber}`
+
+  useEffect(() => {
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (!projectDataReady || !projectSession) {
+      setSynopsisLoading(false)
+      setVolumeOutlineLoading(false)
+      return
+    }
+    let stale = false
+    const selectionSnapshot = planningSelection
+    const stillCurrent = () => !stale
+      && isCurrentProjectSession(projectSession)
+      && sameProjectSessionContext(dataProjectSessionRef.current, projectSession)
+      && planningSelectionKey === (
+        planningSelectionRef.current.kind === 'book' ? 'book'
+          : planningSelectionRef.current.kind === 'volume' ? `volume:${planningSelectionRef.current.volumeId}`
+            : `chapter:${planningSelectionRef.current.chapterNumber}`
+      )
+    setSynopsisLoading(true)
+    setSynopsisError(null)
+    setPlanningCandidates([])
+    setPlanningChecks([])
+    setPlanningSourceStatuses({})
+    if (selectionSnapshot.kind === 'volume') {
+      setVolumeOutline(null)
+      setVolumeOutlineDraft('')
+      setVolumeOutlineLoading(true)
+      setVolumeOutlineError(null)
+      setVolumeImportPreview(null)
+    } else {
+      setVolumeOutline(null)
+      setVolumeOutlineDraft('')
+      setVolumeOutlineError(null)
+      setVolumeImportPreview(null)
+    }
+    if (selectionSnapshot.kind !== 'book') setBookImportPreview(null)
+    void Promise.all([
+      ipc.invokeWithProjectSession(projectSession, 'db:project-core-get', projectKey),
+      ipc.invokeWithProjectSession(projectSession, 'db:blueprint-volume-outline-list-summaries', projectKey),
+      selectionSnapshot.kind === 'volume'
+        ? ipc.invokeWithProjectSession(projectSession, 'db:blueprint-volume-outline-get', selectionSnapshot.volumeId, projectKey)
+        : Promise.resolve(null),
+    ]).then(async ([core, summaries, volumeRecord]) => {
+      if (!stillCurrent()) return
+      const nextSynopsis = core?.synopsis ?? ''
+      const nextHash = await sha256Body(nextSynopsis)
+      if (!stillCurrent()) return
+      setSynopsisStored(nextSynopsis)
+      setSynopsisDraft(nextSynopsis)
+      setSynopsisBaseHash(nextHash)
+      setOutlineSummaries(Array.isArray(summaries) ? summaries : [])
+      const outline = selectionSnapshot.kind === 'volume' ? volumeRecord : null
+      setVolumeOutline(outline)
+      setVolumeOutlineDraft(outline?.markdown ?? '')
+      setSynopsisLoading(false)
+      setVolumeOutlineLoading(false)
+    }).catch(error => {
+      if (!stillCurrent()) return
+      const message = error instanceof Error ? error.message : String(error)
+      setSynopsisError(message)
+      setSynopsisLoading(false)
+      setVolumeOutlineLoading(false)
+    })
+    return () => { stale = true }
+  }, [
+    projectDataReady,
+    projectKey,
+    renderedProjectId,
+    renderedProjectLeaseId,
+    renderedProjectPath,
+    planningSelectionKey,
+  ])
+
+  useEffect(() => {
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (!projectDataReady || !projectSession) return
+    let stale = false
+    const selectionSnapshot = planningSelection
+    const stillCurrent = () => !stale
+      && isCurrentProjectSession(projectSession)
+      && sameProjectSessionContext(dataProjectSessionRef.current, projectSession)
+      && planningSelectionKey === (
+        planningSelectionRef.current.kind === 'book' ? 'book'
+          : planningSelectionRef.current.kind === 'volume' ? `volume:${planningSelectionRef.current.volumeId}`
+            : `chapter:${planningSelectionRef.current.chapterNumber}`
+      )
+    void Promise.all([
+      ipc.invokeWithProjectSession(projectSession, 'db:blueprint-volume-outline-list-summaries', projectKey),
+      ipc.invokeWithProjectSession(projectSession, 'db:blueprint-planning-candidate-list', { selection: selectionSnapshot, limit: 20 }, projectKey),
+      ipc.invokeWithProjectSession(projectSession, 'db:blueprint-planning-check-list', { selection: selectionSnapshot, limit: 20 }, projectKey),
+    ]).then(([summaries, candidates, checks]) => {
+      if (!stillCurrent()) return
+      setOutlineSummaries(Array.isArray(summaries) ? summaries : [])
+      setPlanningCandidates(Array.isArray(candidates) ? candidates : [])
+      setPlanningChecks(Array.isArray(checks) ? checks : [])
+    }).catch(error => {
+      if (!stillCurrent()) return
+      setPlanningCandidates([])
+      setPlanningChecks([])
+      const message = error instanceof Error ? error.message : String(error)
+      setSelectionSaveError(text(`读取候选与检查报告失败：${message}`, `Could not load candidates and checks: ${message}`))
+    })
+    return () => { stale = true }
+  }, [
+    projectDataReady,
+    projectKey,
+    renderedProjectId,
+    renderedProjectLeaseId,
+    renderedProjectPath,
+    planningSelectionKey,
+    planningCandidatesRevision,
+    text,
+  ])
+
+  const planningSnapshotIds = [
+    volumeOutline?.sourceSnapshotId,
+    ...planningChecks.map(check => check.sourceSnapshot.snapshotId),
+  ].filter((snapshotId): snapshotId is string => Boolean(snapshotId))
+  const planningSnapshotKey = [...new Set(planningSnapshotIds)].sort().join('|')
+  useEffect(() => {
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (!projectDataReady || !projectSession || !planningSnapshotKey) {
+      setPlanningSourceStatuses({})
+      return
+    }
+    let stale = false
+    void ipc.invokeWithProjectSession(
+      projectSession,
+      'db:blueprint-planning-source-status',
+      [...new Set(planningSnapshotIds)],
+      projectKey,
+    ).then(statuses => {
+      if (stale || !isCurrentProjectSession(projectSession)) return
+      setPlanningSourceStatuses(Object.fromEntries(statuses.map(status => [status.snapshotId, status.state])))
+    }).catch(() => {
+      if (!stale && isCurrentProjectSession(projectSession)) setPlanningSourceStatuses({})
+    })
+    return () => { stale = true }
+  }, [planningSnapshotKey, projectDataReady, projectKey, renderedProjectId, renderedProjectLeaseId, renderedProjectPath])
+
+  const planningTargetRefs: BlueprintPlanningTargetSourceReference[] = blueprints.map(blueprint => ({
+    targetKind: 'chapter',
+    targetId: String(blueprint.chapterNumber),
+  }))
+  const planningTargetKey = planningTargetRefs.map(target => target.targetId).sort().join('|')
+  useEffect(() => {
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (!projectDataReady || !projectSession || !planningTargetKey) {
+      setPlanningTargetSourceStatuses({})
+      return
+    }
+    let stale = false
+    const targets: BlueprintPlanningTargetSourceReference[] = planningTargetKey.split('|').map(targetId => ({ targetKind: 'chapter', targetId }))
+    setPlanningTargetSourceStatuses(Object.fromEntries(targets.map(target => [`${target.targetKind}:${target.targetId}`, 'loading'])))
+    void ipc.invokeWithProjectSession(
+      projectSession,
+      'db:blueprint-planning-target-source-status',
+      targets,
+      projectKey,
+    ).then(statuses => {
+      if (stale || !isCurrentProjectSession(projectSession)) return
+      setPlanningTargetSourceStatuses(Object.fromEntries(statuses.map(status => [`${status.targetKind}:${status.targetId}`, status.state])))
+    }).catch(() => {
+      if (stale || !isCurrentProjectSession(projectSession)) return
+      setPlanningTargetSourceStatuses(Object.fromEntries(targets.map(target => [`${target.targetKind}:${target.targetId}`, 'unlinked'])))
+    })
+    return () => { stale = true }
+  }, [planningTargetKey, projectDataReady, projectKey, renderedProjectId, renderedProjectLeaseId, renderedProjectPath])
 
   // ===== 章节蓝图 v2：读取 / 编辑 / 保存 =====
 
@@ -881,6 +1205,592 @@ export default function ChapterCardEditor({
     await saveAllRef.current?.()
   }, [handleSaveAllV2Drafts])
 
+  const synopsisDirty = synopsisDraft !== synopsisStored
+  const volumeOutlineDirty = volumeOutlineDraft !== (volumeOutline?.markdown ?? '')
+
+  const handleSaveSynopsis = useCallback(async (markdown = synopsisDraft): Promise<boolean> => {
+    const projectSession = currentProjectSessionForPath(projectKey)
+    const nextDirty = markdown !== synopsisStored
+    if (!projectSession || !projectMatches || !nextDirty) return !nextDirty
+    if (markdown === '' && (synopsisStored !== '' || synopsisDraft !== '')) {
+      const ok = await confirm(text(
+        '将清空全书总纲正文。该正文保存在项目唯一权威字段中，清空后不能自动恢复。',
+        'This clears the book outline body in its only authoritative project field. The previous text cannot be restored automatically.',
+      ), {
+        title: text('确认清空全书总纲', 'Confirm clearing the book outline'),
+        confirmText: text('清空总纲', 'Clear outline'),
+        danger: true,
+      })
+      if (!ok || !isCurrentProjectSession(projectSession)) return false
+    }
+    setSynopsisSaving(true)
+    setSynopsisError(null)
+    try {
+      const expectedSynopsisHash = synopsisBaseHash ?? await sha256Body(synopsisStored)
+      if (!isCurrentProjectSession(projectSession)) return false
+      const result = await ipc.invokeWithProjectSession(projectSession, 'db:project-core-update', {
+        synopsis: markdown,
+        expectedSynopsisHash,
+      }, projectKey)
+      if (!isCurrentProjectSession(projectSession)) return false
+      if (!result.success) {
+        const message = result.error ?? text('总纲已在其他位置修改，请重新读取后合并。', 'The book outline changed elsewhere. Reload and merge your edits.')
+        setSynopsisError(message)
+        toast.error(text(`保存总纲失败：${message}`, `Could not save the book outline: ${message}`))
+        return false
+      }
+      const readback = await ipc.invokeWithProjectSession(projectSession, 'db:project-core-get', projectKey)
+      if (!isCurrentProjectSession(projectSession)) return false
+      const savedText = readback?.synopsis ?? ''
+      if (savedText !== markdown) {
+        const message = text('保存后的总纲读回与输入不一致；原输入仍保留。', 'The saved outline did not match the editor after read-back; your input is preserved.')
+        setSynopsisError(message)
+        return false
+      }
+      const savedHash = await sha256Body(savedText)
+      if (!isCurrentProjectSession(projectSession)) return false
+      setSynopsisStored(savedText)
+      setSynopsisDraft(savedText)
+      setSynopsisBaseHash(savedHash)
+      setSynopsisError(null)
+      toast.success(text('全书总纲已保存', 'Book outline saved'))
+      setPlanningCandidatesRevision(value => value + 1)
+      return true
+    } catch (error) {
+      if (!isCurrentProjectSession(projectSession)) return false
+      const message = error instanceof Error ? error.message : String(error)
+      setSynopsisError(message)
+      toast.error(text(`保存总纲失败：${message}`, `Could not save the book outline: ${message}`))
+      return false
+    } finally {
+      if (isCurrentProjectSession(projectSession)) setSynopsisSaving(false)
+    }
+  }, [projectKey, projectMatches, synopsisBaseHash, synopsisDraft, synopsisStored, text])
+
+  const handleDiscardSynopsis = useCallback(() => {
+    setSynopsisDraft(synopsisStored)
+    setSynopsisError(null)
+  }, [synopsisStored])
+
+  const handleClearSynopsis = useCallback(async () => {
+    if (!synopsisStored && !synopsisDraft) return
+    const saved = await handleSaveSynopsis('')
+    if (saved) setBookImportPreview(null)
+  }, [handleSaveSynopsis, synopsisDraft, synopsisStored])
+
+  const handleSaveVolumeOutline = useCallback(async (
+    markdown = volumeOutlineDraft,
+    origin: BlueprintVolumeOutlineOrigin = 'manual',
+  ): Promise<boolean> => {
+    if (planningSelection.kind !== 'volume') return false
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (!projectSession || !projectMatches) return false
+    if (markdown === '' && volumeOutline?.markdown) {
+      const ok = await confirm(text(
+        '空卷纲正文会删除当前卷纲记录；本卷和章节归属会保留。',
+        'An empty volume outline deletes this outline record; the volume and chapter assignments remain.',
+      ), {
+        title: text('确认清空本卷卷纲', 'Confirm clearing the volume outline'),
+        confirmText: text('清空卷纲', 'Clear outline'),
+        danger: true,
+      })
+      if (!ok || !isCurrentProjectSession(projectSession)) return false
+      setVolumeOutlineSaving(true)
+      setVolumeOutlineError(null)
+      try {
+        const deleted = await ipc.invokeWithProjectSession(projectSession, 'db:blueprint-volume-outline-delete', {
+          volumeId: planningSelection.volumeId,
+          expectedRevision: volumeOutline.revision,
+        }, projectKey)
+        if (!isCurrentProjectSession(projectSession)) return false
+        if (!deleted.success) {
+          const message = `${deleted.code} · ${deleted.error}`
+          setVolumeOutlineError(message)
+          toast.error(text(`清空卷纲失败：${message}`, `Could not clear the volume outline: ${message}`))
+          return false
+        }
+        setVolumeOutline(null)
+        setVolumeOutlineDraft('')
+        setOutlineSummaries(current => current.filter(summary => summary.volumeId !== planningSelection.volumeId))
+        setPlanningCandidatesRevision(value => value + 1)
+        toast.success(text('本卷卷纲已清空；卷与章节归属保留。', 'The volume outline was cleared; the volume and chapter assignments remain.'))
+        return true
+      } catch (error) {
+        if (!isCurrentProjectSession(projectSession)) return false
+        const message = error instanceof Error ? error.message : String(error)
+        setVolumeOutlineError(message)
+        toast.error(text(`清空卷纲失败：${message}`, `Could not clear the volume outline: ${message}`))
+        return false
+      } finally {
+        if (isCurrentProjectSession(projectSession)) setVolumeOutlineSaving(false)
+      }
+    }
+    if (markdown === '' && !volumeOutline) return false
+    setVolumeOutlineSaving(true)
+    setVolumeOutlineError(null)
+    try {
+      const result = await ipc.invokeWithProjectSession(projectSession, 'db:blueprint-volume-outline-save', {
+        volumeId: planningSelection.volumeId,
+        expectedRevision: volumeOutline?.revision ?? 0,
+        markdown,
+        origin,
+        ...(volumeOutline?.sourceSnapshotId ? { sourceSnapshotId: volumeOutline.sourceSnapshotId } : {}),
+      }, projectKey)
+      if (!isCurrentProjectSession(projectSession)) return false
+      if (!result.success) {
+        const message = result.error ?? text('卷纲版本已变化，请重新读取并合并。', 'The volume outline changed; reload and merge your edits.')
+        setVolumeOutlineError(message)
+        toast.error(text(`保存卷纲失败：${message}`, `Could not save the volume outline: ${message}`))
+        return false
+      }
+      const saved = await ipc.invokeWithProjectSession(
+        projectSession,
+        'db:blueprint-volume-outline-get',
+        planningSelection.volumeId,
+        projectKey,
+      )
+      if (!isCurrentProjectSession(projectSession)) return false
+      if (!saved || saved.revision !== result.outline.revision || saved.contentHash !== result.outline.contentHash || saved.markdown !== markdown) {
+        const message = text('保存卷纲后的数据库读回不一致；编辑输入仍保留。', 'The saved outline did not match the database read-back; editor input is preserved.')
+        setVolumeOutlineError(message)
+        return false
+      }
+      setVolumeOutline(saved)
+      setVolumeOutlineDraft(saved.markdown)
+      setOutlineSummaries(current => {
+        const summary = saved.markdown.replace(/\s+/gu, ' ').trim().slice(0, 240)
+        const item: BlueprintVolumeOutlineSummary = {
+          volumeId: saved.volumeId,
+          revision: saved.revision,
+          contentHash: saved.contentHash,
+          origin: saved.origin,
+          updatedAt: saved.updatedAt,
+          summary,
+        }
+        return [...current.filter(existing => existing.volumeId !== saved.volumeId), item]
+      })
+      setVolumeOutlineError(null)
+      toast.success(text('本卷卷纲已保存', 'Volume outline saved'))
+      setPlanningCandidatesRevision(value => value + 1)
+      return true
+    } catch (error) {
+      if (!isCurrentProjectSession(projectSession)) return false
+      const message = error instanceof Error ? error.message : String(error)
+      setVolumeOutlineError(message)
+      toast.error(text(`保存卷纲失败：${message}`, `Could not save the volume outline: ${message}`))
+      return false
+    } finally {
+      if (isCurrentProjectSession(projectSession)) setVolumeOutlineSaving(false)
+    }
+  }, [planningSelection, projectKey, projectMatches, text, volumeOutline, volumeOutlineDraft])
+
+  const handleDiscardVolumeOutline = useCallback(() => {
+    setVolumeOutlineDraft(volumeOutline?.markdown ?? '')
+    setVolumeOutlineError(null)
+  }, [volumeOutline])
+
+  const saveActivePlanningSelection = useCallback(async (): Promise<boolean> => {
+    const current = planningSelectionRef.current
+    if (current.kind === 'book') return synopsisDirty ? handleSaveSynopsis() : true
+    if (current.kind === 'volume') return volumeOutlineDirty ? handleSaveVolumeOutline() : true
+    if (!dirty && !v2Dirty) return true
+    try {
+      await handleSaveAllWithV2()
+      return dirtyChapterNumbersRef.current.size === 0
+        && (getChapterCardV2ProjectDraft(readV2Ledger(), projectKey)?.drafts.length ?? 0) === 0
+    } catch (error) {
+      setSelectionSaveError(error instanceof Error ? error.message : String(error))
+      return false
+    }
+  }, [dirty, handleSaveAllWithV2, handleSaveSynopsis, handleSaveVolumeOutline, projectKey, synopsisDirty, v2Dirty, volumeOutlineDirty])
+
+  const handleStartPlanningWorkflow = useCallback(async (
+    kind: 'book-outline' | 'volume-plan' | 'volume-outline' | 'chapter-plan' | 'chapter-expand' | 'connection-check',
+    options?: { guidance?: string; mode?: 'generate' | 'improve'; plannedChapterCount?: number; chapterRange?: { from: number; to: number } },
+  ) => {
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (!projectSession || !projectMatches) return
+    const generationModelId = useLLMStore.getState().defaultModelId?.trim()
+    if (!generationModelId) {
+      toast.error(text('请先在设置中配置 AI 生成模型。', 'Configure a generation model in Settings first.'))
+      return
+    }
+    if (kind === 'volume-outline' || kind === 'chapter-plan') {
+      if (planningSelection.kind !== 'volume') {
+        toast.warning(text('请先选中一个现有卷，再生成卷纲或章节计划。', 'Select an existing volume before generating its outline or chapter plan.'))
+        return
+      }
+    }
+    if (kind === 'chapter-expand' && planningSelection.kind !== 'chapter') {
+      toast.warning(text('请先选中一章，再生成细纲候选。', 'Select a chapter before generating a detailed outline candidate.'))
+      return
+    }
+    if (kind === 'connection-check' && planningSelection.kind === 'chapter') {
+      toast.warning(text('衔接检查需要选中全书或一卷。', 'Connection checks require the book or a volume selection.'))
+      return
+    }
+    setPlanningWorkflowStarting(true)
+    try {
+      if (!(await saveActivePlanningSelection())) return
+      if (!isCurrentProjectSession(projectSession)) return
+      const result = await startBlueprintPlanningWorkflow({
+        projectSession,
+        generationModelId,
+        kind,
+        scope: planningSelection,
+        ...(options?.guidance?.trim() ? { guidance: options.guidance.trim() } : {}),
+        ...(options?.mode ? { mode: options.mode } : {}),
+        ...(options?.plannedChapterCount ? { plannedChapterCount: options.plannedChapterCount } : {}),
+        ...(currentProject?.novelConfig.totalChapters ? { totalChapters: currentProject.novelConfig.totalChapters } : {}),
+        ...(options?.chapterRange ? { chapterRange: options.chapterRange } : {}),
+        uiLocale: locale,
+      })
+      if (!isCurrentProjectSession(projectSession)) return
+      if (!result.accepted) return
+      planningRunIdsRef.current.set(result.runId, result.operationId)
+      setPlanningBusyOperationId(result.operationId)
+      toast.info(text(`规划工作流已启动（${result.operationId}），候选完成后会出现在本页。`, `Planning workflow started (${result.operationId}); its candidate will appear here when ready.`))
+      setPlanningCandidatesRevision(value => value + 1)
+    } catch (error) {
+      if (!isCurrentProjectSession(projectSession)) return
+      toast.error(text(`启动规划工作流失败：${error instanceof Error ? error.message : String(error)}`, `Could not start planning workflow: ${error instanceof Error ? error.message : String(error)}`))
+    } finally {
+      if (isCurrentProjectSession(projectSession)) setPlanningWorkflowStarting(false)
+    }
+  }, [currentProject?.novelConfig.totalChapters, locale, planningSelection, projectKey, projectMatches, saveActivePlanningSelection, text])
+
+  const handleConfirmPlanningCandidate = useCallback(async (
+    candidateViewItem: BlueprintPlanningCandidateView,
+    editedJson: string,
+    selectedRows: { volumeIds: string[]; chapterNumbers: number[] },
+  ) => {
+    const projectSession = currentProjectSessionForPath(projectKey)
+    const record = planningCandidates.find(item => item.operationId === candidateViewItem.operationId)
+    if (!projectSession || !record || !projectMatches) return
+    let edited: unknown
+    try { edited = JSON.parse(editedJson) } catch { return }
+    const explicitSelection: BlueprintPlanningConfirmSelection = {}
+    if (record.kind === 'volume-outline' && record.scope.kind === 'volume') explicitSelection.targetVolumeId = record.scope.volumeId
+    if (record.kind === 'chapter-plan' && record.scope.kind === 'volume') {
+      explicitSelection.targetVolumeId = record.scope.volumeId
+      const occupied = new Set(blueprintsRef.current.map(blueprint => blueprint.chapterNumber))
+      const conflicting = selectedRows.chapterNumbers.filter(number => occupied.has(number))
+      if (conflicting.length > 0) {
+        toast.error(text(`候选章号已存在：${conflicting.join(', ')}。请取消选择或修改候选。`, `Chapter numbers already exist: ${conflicting.join(', ')}. Deselect them or edit the candidate.`))
+        return
+      }
+      explicitSelection.chapterNumbers = [...new Set(selectedRows.chapterNumbers)]
+    }
+    if (record.kind === 'chapter-expand' && record.scope.kind === 'chapter') explicitSelection.chapterNumbers = [record.scope.chapterNumber]
+    if (record.kind === 'volume-plan') explicitSelection.volumeIds = selectedRows.volumeIds
+    setPlanningBusyOperationId(record.operationId)
+    try {
+      const updated = await ipc.invokeWithProjectSession(projectSession, 'db:blueprint-planning-candidate-update', {
+        operationId: record.operationId,
+        expectedPayloadHash: record.payloadHash,
+        candidate: edited,
+      }, projectKey)
+      if (!isCurrentProjectSession(projectSession)) return
+      if (!updated.success) {
+        toast.error(text(`候选修改未保存：${updated.code} · ${updated.error}`, `Candidate edits were not saved: ${updated.code} · ${updated.error}`))
+        setPlanningCandidatesRevision(value => value + 1)
+        return
+      }
+      setPlanningCandidates(current => current.map(item => item.operationId === record.operationId ? updated.candidate : item))
+      const result = await ipc.invokeWithProjectSession(projectSession, 'db:blueprint-planning-confirm', {
+        operationId: record.operationId,
+        expectedSourceSnapshot: updated.candidate.sourceSnapshot,
+        selection: explicitSelection,
+        ...(record.kind === 'book-outline' && typeof (edited as { markdown?: unknown })?.markdown === 'string'
+          ? { edits: { markdown: (edited as { markdown: string }).markdown } }
+          : record.kind === 'volume-outline' && typeof (edited as { markdown?: unknown })?.markdown === 'string'
+            ? { edits: { markdown: (edited as { markdown: string }).markdown } }
+            : {}),
+      }, projectKey)
+      if (!isCurrentProjectSession(projectSession)) return
+      if (!result.success) {
+        toast.error(text(`候选未提交：${result.code} · ${result.error}`, `Candidate was not committed: ${result.code} · ${result.error}`))
+        setPlanningCandidatesRevision(value => value + 1)
+        return
+      }
+      toast.success(text('规划候选已确认并保存。', 'Planning candidate confirmed and saved.'))
+      setPlanningCandidatesRevision(value => value + 1)
+      if (record.kind === 'volume-plan' || record.kind === 'chapter-plan') await loadBlueprints()
+      if (record.kind === 'book-outline') {
+        const core = await ipc.invokeWithProjectSession(projectSession, 'db:project-core-get', projectKey)
+        if (!isCurrentProjectSession(projectSession)) return
+        const saved = core?.synopsis ?? ''
+        const hash = await sha256Body(saved)
+        if (!isCurrentProjectSession(projectSession)) return
+        setSynopsisStored(saved)
+        setSynopsisDraft(saved)
+        setSynopsisBaseHash(hash)
+      }
+      if (record.kind === 'volume-outline' && record.scope.kind === 'volume') {
+        const outline = await ipc.invokeWithProjectSession(projectSession, 'db:blueprint-volume-outline-get', record.scope.volumeId, projectKey)
+        if (!isCurrentProjectSession(projectSession)) return
+        if (planningSelectionRef.current.kind === 'volume' && planningSelectionRef.current.volumeId === record.scope.volumeId) {
+          setVolumeOutline(outline)
+          setVolumeOutlineDraft(outline?.markdown ?? '')
+        }
+      }
+      if (record.kind === 'chapter-expand' && record.scope.kind === 'chapter') await handleV2DetailRefresh(record.scope.chapterNumber)
+    } catch (error) {
+      if (isCurrentProjectSession(projectSession)) toast.error(text(`确认候选失败：${error instanceof Error ? error.message : String(error)}`, `Could not confirm candidate: ${error instanceof Error ? error.message : String(error)}`))
+    } finally {
+      if (isCurrentProjectSession(projectSession)) setPlanningBusyOperationId(null)
+    }
+  }, [handleV2DetailRefresh, loadBlueprints, planningCandidates, projectKey, projectMatches, text])
+
+  const handleUpdatePlanningCandidate = useCallback(async (
+    candidateViewItem: BlueprintPlanningCandidateView,
+    editedJson: string,
+  ): Promise<boolean> => {
+    const projectSession = currentProjectSessionForPath(projectKey)
+    const record = planningCandidates.find(item => item.operationId === candidateViewItem.operationId)
+    if (!projectSession || !record || !projectMatches) return false
+    let candidate: unknown
+    try { candidate = JSON.parse(editedJson) } catch { return false }
+    setPlanningBusyOperationId(record.operationId)
+    try {
+      const result = await ipc.invokeWithProjectSession(projectSession, 'db:blueprint-planning-candidate-update', {
+        operationId: record.operationId,
+        expectedPayloadHash: record.payloadHash,
+        candidate,
+      }, projectKey)
+      if (!isCurrentProjectSession(projectSession)) return false
+      if (!result.success) {
+        toast.error(text(`候选修改冲突：${result.code} · ${result.error}`, `Candidate edit conflict: ${result.code} · ${result.error}`))
+        setPlanningCandidatesRevision(value => value + 1)
+        return false
+      }
+      setPlanningCandidates(current => current.map(item => item.operationId === record.operationId ? result.candidate : item))
+      toast.success(text('候选修改已保存，可稍后继续审阅。', 'Candidate edits are saved and can be reviewed later.'))
+      return true
+    } catch (error) {
+      if (isCurrentProjectSession(projectSession)) toast.error(text(`保存候选修改失败：${error instanceof Error ? error.message : String(error)}`, `Could not save candidate edits: ${error instanceof Error ? error.message : String(error)}`))
+      return false
+    } finally {
+      if (isCurrentProjectSession(projectSession)) setPlanningBusyOperationId(null)
+    }
+  }, [planningCandidates, projectKey, projectMatches, text])
+
+  const handleCancelPlanningCandidate = useCallback(async (operationId: string) => {
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (!projectSession) return
+    setPlanningBusyOperationId(operationId)
+    try {
+      const result = await ipc.invokeWithProjectSession(projectSession, 'db:blueprint-planning-candidate-cancel', operationId, projectKey)
+      if (!isCurrentProjectSession(projectSession)) return
+      if (!result.success) toast.error(text(`取消候选失败：${result.code} · ${result.error}`, `Could not cancel candidate: ${result.code} · ${result.error}`))
+      else setPlanningCandidatesRevision(value => value + 1)
+    } catch (error) {
+      if (isCurrentProjectSession(projectSession)) toast.error(text(`取消候选失败：${error instanceof Error ? error.message : String(error)}`, `Could not cancel candidate: ${error instanceof Error ? error.message : String(error)}`))
+    } finally {
+      if (isCurrentProjectSession(projectSession)) setPlanningBusyOperationId(null)
+    }
+  }, [projectKey, text])
+
+  const handleImportVolumeOutline = useCallback(async () => {
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (!projectSession || planningSelection.kind !== 'volume') return
+    if (volumeOutlineDirty) {
+      toast.warning(text('请先保存或放弃当前卷纲修改，再开始导入预览。', 'Save or discard the current volume outline edits before preparing an import.'))
+      return
+    }
+    const result = await prepareBlueprintVolumeOutlineImport(projectSession, planningSelection.volumeId)
+    if (!isCurrentProjectSession(projectSession)) return
+    if (!result.success) {
+      if (!result.cancelled) {
+        const message = planningExchangeError(result, text('读取导入预览失败。', 'Could not read the import preview.'))
+        toast.error(text(`卷纲导入预览失败：${message}`, `Could not prepare outline import: ${message}`))
+      }
+      return
+    }
+    setVolumeImportPreview(result.preview ?? null)
+  }, [planningSelection, projectKey, text, volumeOutlineDirty])
+
+  const handleConfirmVolumeImport = useCallback(async (): Promise<boolean> => {
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (!projectSession || !volumeImportPreview) return false
+    const result = await confirmBlueprintVolumeOutlineImport(projectSession, volumeImportPreview)
+    if (!isCurrentProjectSession(projectSession)) return false
+    if (!result.success || !result.outline) {
+      const message = planningExchangeError(result, text('卷纲导入未完成。', 'Volume outline import did not complete.'))
+      toast.error(text(`卷纲导入未提交：${message}`, `Volume outline import was not committed: ${message}`))
+      return false
+    }
+    setVolumeOutline(result.outline)
+    setVolumeOutlineDraft(result.outline.markdown)
+    setVolumeImportPreview(null)
+    setPlanningCandidatesRevision(value => value + 1)
+    toast.success(text('卷纲已导入并从数据库读回确认。', 'Volume outline imported and verified by database read-back.'))
+    return true
+  }, [projectKey, text, volumeImportPreview])
+
+  const handleExportVolumeOutline = useCallback(async () => {
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (!projectSession || planningSelection.kind !== 'volume') return
+    const result = await exportBlueprintVolumeOutlineMarkdown(projectSession, planningSelection.volumeId)
+    if (!isCurrentProjectSession(projectSession)) return
+    if (!result.success && !result.cancelled) {
+      const message = planningExchangeError(result, text('卷纲导出失败。', 'Could not export the volume outline.'))
+      toast.error(text(`卷纲导出失败：${message}`, `Could not export volume outline: ${message}`))
+    }
+    else if (result.success) toast.success(text(`已导出 ${result.fileName}`, `Exported ${result.fileName}`))
+  }, [planningSelection, projectKey, text])
+
+  const handleClearVolumeOutline = useCallback(async () => {
+    if (planningSelection.kind !== 'volume' || !volumeOutline) return
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (!projectSession || !projectMatches) return
+    const ok = await confirm(text(
+      `清空「${volumes.find(volume => volume.id === planningSelection.volumeId)?.name ?? planningSelection.volumeId}」的卷纲正文？该卷纲行将被删除；本卷和章节不会删除。`,
+      `Delete the volume outline for “${volumes.find(volume => volume.id === planningSelection.volumeId)?.name ?? planningSelection.volumeId}”? The outline record will be removed; the volume and chapters will remain.`,
+    ), {
+      title: text('清空本卷卷纲', 'Clear volume outline'),
+      confirmText: text('清空卷纲', 'Clear outline'),
+      danger: true,
+    })
+    if (!ok || !isCurrentProjectSession(projectSession)) return
+    setVolumeOutlineSaving(true)
+    setVolumeOutlineError(null)
+    try {
+      const result = await ipc.invokeWithProjectSession(projectSession, 'db:blueprint-volume-outline-delete', {
+        volumeId: planningSelection.volumeId,
+        expectedRevision: volumeOutline.revision,
+      }, projectKey)
+      if (!isCurrentProjectSession(projectSession)) return
+      if (!result.success) {
+        const message = `${result.code} · ${result.error}`
+        setVolumeOutlineError(message)
+        toast.error(text(`清空卷纲失败：${message}`, `Could not clear the volume outline: ${message}`))
+        return
+      }
+      setVolumeOutline(null)
+      setVolumeOutlineDraft('')
+      setOutlineSummaries(current => current.filter(summary => summary.volumeId !== planningSelection.volumeId))
+      setVolumeImportPreview(null)
+      setPlanningCandidatesRevision(value => value + 1)
+      toast.success(text('本卷卷纲已清空；卷与章节归属保留。', 'The volume outline was cleared; the volume and chapter assignments remain.'))
+    } catch (error) {
+      if (!isCurrentProjectSession(projectSession)) return
+      const message = error instanceof Error ? error.message : String(error)
+      setVolumeOutlineError(message)
+      toast.error(text(`清空卷纲失败：${message}`, `Could not clear the volume outline: ${message}`))
+    } finally {
+      if (isCurrentProjectSession(projectSession)) setVolumeOutlineSaving(false)
+    }
+  }, [planningSelection, projectKey, projectMatches, text, volumeOutline, volumes])
+
+  const handleImportBookOutline = useCallback(async () => {
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (!projectSession || planningSelection.kind !== 'book') return
+    if (synopsisDirty) {
+      toast.warning(text('请先保存或放弃当前总纲修改，再开始导入预览。', 'Save or discard the current book outline edits before preparing an import.'))
+      return
+    }
+    const result = await prepareBlueprintBookOutlineImport(projectSession)
+    if (!isCurrentProjectSession(projectSession)) return
+    if (!result.success) {
+      if (!result.cancelled) {
+        const message = planningExchangeError(result, text('读取导入预览失败。', 'Could not read the import preview.'))
+        toast.error(text(`总纲导入预览失败：${message}`, `Could not prepare book outline import: ${message}`))
+      }
+      return
+    }
+    setBookImportPreview(result.preview ?? null)
+  }, [planningSelection, projectKey, synopsisDirty, text])
+
+  const handleConfirmBookImport = useCallback(async (): Promise<boolean> => {
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (!projectSession || !bookImportPreview) return false
+    const result = await confirmBlueprintBookOutlineImport(projectSession, bookImportPreview)
+    if (!isCurrentProjectSession(projectSession)) return false
+    if (!result.success || result.content === undefined) {
+      const message = planningExchangeError(result, text('总纲导入未完成。', 'Book outline import did not complete.'))
+      setSynopsisError(message)
+      toast.error(text(`总纲导入未提交：${message}`, `Book outline import was not committed: ${message}`))
+      return false
+    }
+    const savedHash = await sha256Body(result.content)
+    if (!isCurrentProjectSession(projectSession)) return false
+    setSynopsisStored(result.content)
+    setSynopsisDraft(result.content)
+    setSynopsisBaseHash(savedHash)
+    setSynopsisError(null)
+    setBookImportPreview(null)
+    setPlanningCandidatesRevision(value => value + 1)
+    toast.success(text('全书总纲已导入并从数据库读回确认。', 'Book outline imported and verified by database read-back.'))
+    return true
+  }, [bookImportPreview, projectKey, text])
+
+  const handleExportBookOutline = useCallback(async () => {
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (!projectSession) return
+    const result = await exportBlueprintBookOutlineMarkdown(projectSession)
+    if (!isCurrentProjectSession(projectSession)) return
+    if (!result.success && !result.cancelled) {
+      const message = planningExchangeError(result, text('总纲导出失败。', 'Could not export the book outline.'))
+      toast.error(text(`总纲导出失败：${message}`, `Could not export the book outline: ${message}`))
+    }
+    else if (result.success) toast.success(text(`已导出 ${result.fileName}`, `Exported ${result.fileName}`))
+  }, [projectKey, text])
+
+  const handleExportPlanningPackage = useCallback(async () => {
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (!projectSession) return
+    const result = await exportBlueprintPlanningPackage(projectSession)
+    if (!isCurrentProjectSession(projectSession)) return
+    if (!result.success && !result.cancelled) {
+      const message = planningExchangeError(result, text('规划包导出失败。', 'Could not export the planning package.'))
+      toast.error(text(`规划包导出失败：${message}`, `Could not export planning package: ${message}`))
+    }
+    else if (result.success) toast.success(text(`已导出 ${result.fileName}`, `Exported ${result.fileName}`))
+  }, [projectKey, text])
+
+  const requestPlanningSelection = useCallback(async (next: BlueprintPlanningSelection) => {
+    const current = planningSelectionRef.current
+    const same = current.kind === next.kind && (
+      current.kind === 'book' || (current.kind === 'volume' && next.kind === 'volume' && current.volumeId === next.volumeId)
+      || (current.kind === 'chapter' && next.kind === 'chapter' && current.chapterNumber === next.chapterNumber)
+    )
+    if (same) return
+    const hasCurrentEdits = current.kind === 'book' ? synopsisDirty
+      : current.kind === 'volume' ? volumeOutlineDirty
+        : dirty || v2Dirty
+    if (hasCurrentEdits) {
+      setSelectionSaving(true)
+      setSelectionSaveError(null)
+      let saved = false
+      try {
+        saved = await saveActivePlanningSelection()
+      } catch (error) {
+        setSelectionSaveError(error instanceof Error ? error.message : String(error))
+        saved = false
+      } finally {
+        setSelectionSaving(false)
+      }
+      if (!saved) {
+        setSelectionSaveError(text('保存失败，仍停留在当前对象；输入已保留。可先修复后重试或放弃修改。', 'Save failed. The current object stays selected and input is preserved; retry or discard the edits.'))
+        return
+      }
+    }
+    if (next.kind === 'volume' && !volumes.some(volume => volume.id === next.volumeId)) return
+    if (next.kind === 'chapter') {
+      const index = blueprintsRef.current.findIndex(blueprint => blueprint.chapterNumber === next.chapterNumber)
+      if (index < 0) return
+      setSelectedIdx(index)
+      setSelectedVolumeId(blueprintVolumeId(blueprintsRef.current[index]))
+    } else if (next.kind === 'volume') setSelectedVolumeId(next.volumeId)
+    planningSelectionRef.current = next
+    setPlanningSelection(next)
+    setSelectionSaveError(null)
+    setChapterView('blueprint')
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (projectSession) persistPlanningSelection(projectSession.projectId, next)
+  }, [projectKey, saveActivePlanningSelection, text, volumes])
+
   /** 更新选中章节蓝图的字段 */
   const updateField = <K extends EditableChapterBlueprintField>(
     key: K,
@@ -942,6 +1852,47 @@ export default function ChapterCardEditor({
     }
   }
 
+  const handleDiscardChapterEdits = async () => {
+    if (!selected || (!selectedChapterDirty && !v2Dirty)) return
+    const chapterNumber = selected.chapterNumber
+    const selectedVolumeId = blueprintVolumeId(selected)
+    const projectSession = currentProjectSessionForPath(projectKey)
+    if (!projectSession || !projectMatches) return
+    const ok = await confirm(text(
+      `放弃第 ${chapterNumber} 章尚未保存的章节信息与细纲修改？这不会删除数据库中的章节或正式细纲。`,
+      `Discard unsaved chapter metadata and outline edits for Chapter ${chapterNumber}? This will not delete its database row or saved outline.`,
+    ), {
+      title: text('放弃本章修改', 'Discard chapter edits'),
+      confirmText: text('放弃本章修改', 'Discard chapter edits'),
+      danger: true,
+    })
+    if (!ok || !isCurrentProjectSession(projectSession)) return
+    try {
+      const persistedBlueprints = await loadDirectoryBlueprints(projectKey, projectSession)
+      if (!isCurrentProjectSession(projectSession) || planningSelectionRef.current.kind !== 'chapter' || planningSelectionRef.current.chapterNumber !== chapterNumber) return
+      const persisted = persistedBlueprints.find(blueprint => blueprint.chapterNumber === chapterNumber)
+      const current = blueprintsRef.current
+      const nextBlueprints = persisted
+        ? current.map(blueprint => blueprint.chapterNumber === chapterNumber ? persisted : blueprint)
+        : current.filter(blueprint => blueprint.chapterNumber !== chapterNumber)
+      const nextDirty = new Set(dirtyChapterNumbersRef.current)
+      nextDirty.delete(chapterNumber)
+      persistProjectDraftState(projectKey, projectSession, nextBlueprints, nextDirty)
+      persistV2Ledger(null, chapterNumber)
+      setV2Draft(null)
+      setV2Detail(null)
+      if (!persisted) {
+        setSelectedIdx(index => Math.max(0, Math.min(index, nextBlueprints.length - 1)))
+        await requestPlanningSelection({ kind: 'volume', volumeId: selectedVolumeId })
+      } else {
+        await handleDiscardV2Draft()
+      }
+      if (isCurrentProjectSession(projectSession)) toast.success(text(`已放弃第 ${chapterNumber} 章的本地修改。`, `Discarded local edits for Chapter ${chapterNumber}.`))
+    } catch (error) {
+      if (isCurrentProjectSession(projectSession)) toast.error(text(`放弃本章修改失败：${error instanceof Error ? error.message : String(error)}`, `Could not discard chapter edits: ${error instanceof Error ? error.message : String(error)}`))
+    }
+  }
+
   /** 全量保存到 SQLite（含全部 v2 细纲草稿 + v1 蓝图） */
   const handleSaveAll = async () => {
     const projectSession = currentProjectSessionForPath(projectKey)
@@ -998,17 +1949,23 @@ export default function ChapterCardEditor({
   }, [projectKey])
 
   /** 新建空章节 */
-  const handleAddChapter = () => {
+  const handleAddChapter = async () => {
     const projectSession = currentProjectSessionForPath(projectKey)
     if (
       !projectMatches
       || !projectSession
       || !sameProjectSessionContext(dataProjectSessionRef.current, projectSession)
     ) return
-    if (!volumes.some(volume => volume.id === selectedVolumeId)) {
+    const targetVolumeId = planningSelection.kind === 'volume'
+      ? planningSelection.volumeId
+      : planningSelection.kind === 'chapter' && selected
+        ? blueprintVolumeId(selected)
+        : null
+    if (!targetVolumeId || !volumes.some(volume => volume.id === targetVolumeId)) {
       toast.warning(text('请先在左侧目录中新建或选择一个卷。', 'Create or select a volume in the outline first.'))
       return
     }
+    if (!(await saveActivePlanningSelection())) return
     if (nextWriteChapter === null) {
       toast.warning(authorityError || text(
         '当前无法确定权威下一章，请先修复定稿章节。',
@@ -1025,7 +1982,7 @@ export default function ChapterCardEditor({
       : nextWriteChapter
     const newBlueprint: ChapterBlueprint = {
       chapterNumber,
-      volumeId: selectedVolumeId,
+      volumeId: targetVolumeId,
       title: '',
       role: '发展',
       purpose: '',
@@ -1037,7 +1994,7 @@ export default function ChapterCardEditor({
       notesUpdatedAt: '',
     }
     markChapterDirty([...currentBlueprints, newBlueprint], newBlueprint.chapterNumber)
-    setSelectedIdx(currentBlueprints.length)
+    void requestPlanningSelection({ kind: 'chapter', chapterNumber: newBlueprint.chapterNumber })
     if (authoritativeBlueprintExists) {
       toast.info(text(
         `第 ${nextWriteChapter} 章蓝图已存在，已新增第 ${chapterNumber} 章；写作入口仍为第 ${nextWriteChapter} 章。`,
@@ -1054,6 +2011,7 @@ export default function ChapterCardEditor({
       || !projectSession
       || !sameProjectSessionContext(dataProjectSessionRef.current, projectSession)
     ) return
+    if (!(await saveActivePlanningSelection())) return
     const nextVolume: BlueprintVolumeData = {
       id: createBlueprintVolumeId(),
       name: text(`第${volumes.length + 1}卷`, `Volume ${volumes.length + 1}`),
@@ -1077,6 +2035,9 @@ export default function ChapterCardEditor({
       next.delete(nextVolume.id)
       return next
     })
+    planningSelectionRef.current = { kind: 'volume', volumeId: nextVolume.id }
+    setPlanningSelection({ kind: 'volume', volumeId: nextVolume.id })
+    persistPlanningSelection(projectSession.projectId, { kind: 'volume', volumeId: nextVolume.id })
     toast.success(text(`已新增${nextVolume.name}`, `Created ${nextVolume.name}`))
   }
 
@@ -1143,11 +2104,11 @@ export default function ChapterCardEditor({
     ) return
     const clearedSnapshots = captureBlueprintSnapshots(blueprintsRef.current)
     const ok = await confirm(text(
-      `确认清空全部 ${blueprints.length} 章蓝图？\n此操作不可撤销，但不会删除草稿或正文章节。`,
-      `Clear all ${blueprints.length} chapter blueprints?\nThis cannot be undone, but drafts and manuscript chapters will remain.`,
+      `仅清空 ${blueprints.length} 章的章节简纲与细纲。全书总纲、各卷卷纲、规划候选、检查报告、正文和草稿均保留。此操作不可撤销。`,
+      `Clear the brief and detailed outlines for ${blueprints.length} chapters only. The book outline, volume outlines, planning candidates, check reports, manuscript, and drafts will remain. This cannot be undone.`,
     ), {
-      title: text('清空全部蓝图', 'Clear all blueprints'),
-      confirmText: text('清空全部', 'Clear all'),
+      title: text('清空全部章纲', 'Clear all chapter outlines'),
+      confirmText: text('清空全部章纲', 'Clear chapter outlines'),
       danger: true,
     })
     if (!ok || !isCurrentProjectSession(projectSession)) return
@@ -1171,7 +2132,7 @@ export default function ChapterCardEditor({
       projectPath: projectKey,
       projectSession,
     })
-    toast.success(text('已清空全部蓝图', 'All chapter blueprints cleared'))
+    toast.success(text('已清空全部章纲', 'All chapter outlines cleared'))
   }
 
   /**
@@ -1345,21 +2306,7 @@ export default function ChapterCardEditor({
   const canOpenOrCreateDraft = (blueprint: ChapterBlueprint) =>
     hasDraftFor(blueprint) || (nextWriteChapter !== null && blueprint.chapterNumber === nextWriteChapter)
 
-  const matchesListFilter = (blueprint: ChapterBlueprint) => {
-    if (draftFilter === 'no-draft' && hasDraftFor(blueprint)) return false
-    if (draftFilter === 'has-draft' && !hasDraftFor(blueprint)) return false
-    const query = searchQuery.trim().toLowerCase()
-    if (query && !(
-      String(blueprint.chapterNumber).includes(query)
-      || (blueprint.title || '').toLowerCase().includes(query)
-    )) return false
-    return true
-  }
-
   const hasDraftCount = visibleBlueprints.filter(hasDraftFor).length
-  const noDraftCount = visibleBlueprints.length - hasDraftCount
-  const filteredBlueprintCount = visibleBlueprints.filter(matchesListFilter).length
-  const listFilterActive = draftFilter !== 'all' || searchQuery.trim() !== ''
 
   return (
     <PlanningPageShell
@@ -1414,10 +2361,10 @@ export default function ChapterCardEditor({
             size="sm"
             onClick={handleClearAllBlueprints}
             disabled={saving || visibleBlueprints.length === 0 || !projectDataReady}
-            title={text('清空全部章节蓝图', 'Clear all chapter blueprints')}
+            title={text('清空全部章纲', 'Clear all chapter outlines')}
           >
             <Trash2 size={12} />
-            {text('清空全部蓝图', 'Clear all')}
+            {text('清空章纲', 'Clear chapter outlines')}
           </Button>
           {(visibleDirty || v2Dirty) && (
             <Button variant="outline" size="sm" onClick={() => { void handleSaveAllWithV2().catch(error => toast.error(error instanceof Error ? error.message : String(error))) }} disabled={saving || v2Saving || !projectDataReady}>
@@ -1476,165 +2423,120 @@ export default function ChapterCardEditor({
       }
     >
       <PlanningPane
-        title={text('卷与章节', 'Volumes & chapters')}
+        title={text('层级规划', 'Planning hierarchy')}
         icon={<BookOpen size={12} />}
-        width={252}
+        width={270}
         actions={
-          <>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              onClick={() => void handleAddVolume()}
-              disabled={!projectDataReady}
-              title={text('新建卷', 'New volume')}
-              aria-label={text('新建卷', 'New volume')}
-            >
-              <FolderPlus size={13} />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              onClick={handleAddChapter}
-              disabled={!projectDataReady || nextWriteChapter === null || Boolean(authorityError)}
-              title={text('新建章节', 'New chapter')}
-              aria-label={text('新建章节', 'New chapter')}
-            >
-              <Plus size={13} />
-            </Button>
-          </>
+          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => void handleExportPlanningPackage()} title={text('导出完整规划包（不含正文）', 'Export planning package (no prose)')} aria-label={text('导出规划包', 'Export planning package')}>
+            <FileText size={13} />
+          </Button>
         }
-        filters={
-          <>
-            <PlanningSearch
-              value={searchQuery}
-              onChange={setSearchQuery}
-              placeholder={text('搜索章节号或标题…', 'Search chapter number or title…')}
-            />
-            <PlanningChipGroup
-              value={draftFilter}
-              onChange={setDraftFilter}
-              ariaLabel={text('写作状态筛选', 'Writing status filter')}
-              options={[
-                { value: 'all', label: text('全部', 'All'), count: visibleBlueprints.length },
-                { value: 'no-draft', label: text('待写作', 'No draft'), count: noDraftCount },
-                { value: 'has-draft', label: text('有正文', 'Has draft'), count: hasDraftCount },
-              ]}
-            />
-          </>
-        }
-        footer={text(
-          `显示 ${filteredBlueprintCount} / ${visibleBlueprints.length} 章`,
-          `Showing ${filteredBlueprintCount} of ${visibleBlueprints.length} chapters`,
-        )}
+        footer={text('总纲、卷纲与章纲分别保存；搜索不会隐藏上层规划。', 'Book, volume, and chapter plans are saved separately; search keeps parent plans visible.')}
       >
-        {visibleBlueprints.length === 0 && !listFilterActive ? (
-          <PlanningEmptyState
-            icon={<BookOpen size={20} />}
-            title={text('暂无蓝图', 'No blueprints yet')}
-            description={text(
-              '章节蓝图按「卷」组织：先建卷，再往卷里加章节，然后逐章填写细纲。',
-              'Blueprints are organized by volume: create a volume, add chapters to it, then fill in each chapter’s outline.',
-            )}
-            steps={[
-              text('点上方文件夹图标新建一卷；', 'Use the folder icon above to create a volume.'),
-              text('点「+」在当前卷新增章节；', 'Use “+” to add a chapter to the current volume.'),
-              text('在右侧填写本章小目标、冲突与钩子。', 'Fill in the goal, conflict, and hook on the right.'),
-            ]}
-            actions={
-              <>
-                <Button variant="default" size="sm" onClick={() => void handleAddVolume()} disabled={!projectDataReady}>
-                  <FolderPlus size={13} /> {text('新建卷', 'New volume')}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleAddChapter}
-                  disabled={!projectDataReady || nextWriteChapter === null || Boolean(authorityError)}
-                >
-                  <Plus size={13} /> {text('新建章节', 'New chapter')}
-                </Button>
-              </>
-            }
-          />
-        ) : (
-           <div>
-             {volumes.map(volume => {
-               const volumeBlueprints = visibleBlueprints
-                 .map((blueprint, index) => ({ blueprint, index }))
-                 .filter(({ blueprint }) => blueprintVolumeId(blueprint) === volume.id)
-                 .filter(({ blueprint }) => matchesListFilter(blueprint))
-               const collapsed = collapsedVolumeIds.has(volume.id)
-               return (
-                 <div key={volume.id} className="mb-1">
-                   <button
-                     type="button"
-                     className={cn('planning-volume-row', selectedVolumeId === volume.id && 'is-selected')}
-                     onClick={() => {
-                       setSelectedVolumeId(volume.id)
-                       setCollapsedVolumeIds(current => {
-                         const next = new Set(current)
-                         if (next.has(volume.id)) next.delete(volume.id)
-                         else next.add(volume.id)
-                         return next
-                       })
-                     }}
-                     title={text('展开或收起本卷章节', 'Expand or collapse this volume')}
-                   >
-                     {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
-                     <BookOpen size={13} className="opacity-70" />
-                     <span className="flex-1 truncate font-semibold">{volume.name}</span>
-                     <span className="text-[10px] opacity-60">{volumeBlueprints.length}</span>
-                   </button>
-                   {!collapsed && (
-                     <div className="planning-volume-body">
-                       {volumeBlueprints.length === 0 ? (
-                         <p className="px-2 py-1.5 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
-                           {listFilterActive
-                             ? text('本卷没有符合筛选的章节', 'No chapters in this volume match the filters')
-                             : text('本卷暂无章节', 'No chapters in this volume')}
-                         </p>
-                       ) : volumeBlueprints.map(({ blueprint: bp, index: idx }) => {
-                         const hasDraft = hasDraftFor(bp)
-                         const subtitle = [
-                           hasDraft ? text('有正文', 'Has draft') : text('待写作', 'No draft'),
-                           bp.userGuidance ? text('有指导', 'Guidance') : '',
-                         ].filter(Boolean).join(' · ')
-                         return (
-                           <PlanningListRow
-                             key={bp.chapterNumber}
-                             selected={selectedIdx === idx}
-                             onSelect={() => { setSelectedIdx(idx); setSelectedVolumeId(volume.id) }}
-                             onDoubleClick={() => void handleOpenOrNewDraft(bp)}
-                             icon={<span className="planning-tag is-muted font-mono">{bp.chapterNumber}</span>}
-                             title={bp.title || text('未命名', 'Untitled')}
-                             subtitle={subtitle}
-                             titleAttr={text('单击查看/编辑蓝图，双击打开正文', 'Click to view/edit the blueprint, double-click to open the draft')}
-                             trailing={
-                               <span className={cn('text-[10px] px-1.5 py-0.5 rounded', ROLE_COLORS[bp.role] || 'planning-tag')}>
-                                 {roleLabel(bp.role)}
-                               </span>
-                             }
-                           />
-                         )
-                       })}
-                     </div>
-                   )}
-                 </div>
-               )
-             })}
-           </div>
-        )}
+        <BlueprintPlanningTree
+          selection={planningSelection}
+          volumes={volumes}
+          chapters={visibleBlueprints.map(blueprint => ({
+            chapterNumber: blueprint.chapterNumber,
+            title: blueprint.title,
+            volumeId: blueprintVolumeId(blueprint),
+            role: blueprint.role,
+            hasDraft: hasDraftFor(blueprint),
+            sourceStatus: planningTargetSourceStatuses[`chapter:${blueprint.chapterNumber}`] ?? 'loading',
+          }))}
+          synopsis={synopsisStored}
+          outlineSummaries={outlineSummaries}
+          searchQuery={searchQuery}
+          draftFilter={draftFilter}
+          collapsedVolumeIds={collapsedVolumeIds}
+          onSearchChange={setSearchQuery}
+          onDraftFilterChange={setDraftFilter}
+          onToggleVolume={volumeId => setCollapsedVolumeIds(current => {
+            const next = new Set(current)
+            if (next.has(volumeId)) next.delete(volumeId)
+            else next.add(volumeId)
+            return next
+          })}
+          onSelect={selection => void requestPlanningSelection(selection)}
+          onAddVolume={() => void handleAddVolume()}
+          onAddChapter={handleAddChapter}
+        />
       </PlanningPane>
 
       <main className={cn('planning-page__main', chapterView === 'blueprint' && 'planning-page__scroll')}>
+          {selectionSaveError && <div className="blueprint-planning-selection-error" role="alert" data-testid="blueprint-selection-save-error">{selectionSaveError}</div>}
+          {planningSelection.kind === 'book' ? (
+            <BlueprintBookOutlineEditor
+              markdown={synopsisDraft}
+              currentMarkdown={synopsisStored}
+              dirty={synopsisDirty}
+              saving={synopsisSaving || selectionSaving}
+              loading={synopsisLoading}
+              error={synopsisError}
+              contentHash={synopsisBaseHash}
+              candidates={planningCandidates.map(candidateView)}
+              checks={planningChecks}
+              busyOperationId={planningBusyOperationId}
+              workflowStarting={planningWorkflowStarting}
+              importPreview={bookImportPreview}
+              onChange={setSynopsisDraft}
+              onSave={handleSaveSynopsis}
+              onDiscard={handleDiscardSynopsis}
+              onImport={() => void handleImportBookOutline()}
+              onCancelImport={() => setBookImportPreview(null)}
+              onConfirmImport={handleConfirmBookImport}
+              onExport={() => void handleExportBookOutline()}
+              onClear={() => void handleClearSynopsis()}
+              onRefresh={() => setPlanningCandidatesRevision(value => value + 1)}
+              onGenerate={handleStartPlanningWorkflow}
+              onConfirmCandidate={handleConfirmPlanningCandidate}
+              onUpdateCandidate={handleUpdatePlanningCandidate}
+              onCancelCandidate={handleCancelPlanningCandidate}
+            />
+          ) : planningSelection.kind === 'volume' ? (
+            <BlueprintVolumeOutlineEditor
+              volumeId={planningSelection.volumeId}
+              volumeName={volumes.find(volume => volume.id === planningSelection.volumeId)?.name ?? planningSelection.volumeId}
+              markdown={volumeOutlineDraft}
+              revision={volumeOutline?.revision ?? 0}
+              contentHash={volumeOutline?.contentHash ?? null}
+              currentMarkdown={volumeOutline?.markdown ?? ''}
+              actualChapterCount={blueprints.filter(blueprint => blueprintVolumeId(blueprint) === planningSelection.volumeId).length}
+              dirty={volumeOutlineDirty}
+              saving={volumeOutlineSaving || selectionSaving}
+              loading={volumeOutlineLoading}
+              error={volumeOutlineError}
+              sourceStatus={!volumeOutline?.sourceSnapshotId
+                ? 'unlinked'
+                : planningSourceStatuses[volumeOutline.sourceSnapshotId] ?? 'loading'}
+              candidates={planningCandidates.map(candidateView)}
+              checks={planningChecks}
+              busyOperationId={planningBusyOperationId}
+              workflowStarting={planningWorkflowStarting}
+              importPreview={volumeImportPreview}
+              onChange={setVolumeOutlineDraft}
+              onSave={handleSaveVolumeOutline}
+              onDiscard={handleDiscardVolumeOutline}
+              onImport={() => void handleImportVolumeOutline()}
+              onCancelImport={() => setVolumeImportPreview(null)}
+              onConfirmImport={handleConfirmVolumeImport}
+              onExport={() => void handleExportVolumeOutline()}
+              onClear={() => void handleClearVolumeOutline()}
+              onRefresh={() => setPlanningCandidatesRevision(value => value + 1)}
+              onGenerate={handleStartPlanningWorkflow}
+              onConfirmCandidate={handleConfirmPlanningCandidate}
+              onUpdateCandidate={handleUpdatePlanningCandidate}
+              onCancelCandidate={handleCancelPlanningCandidate}
+            />
+          ) : <>
           {selected && (
-            <div className="flex flex-shrink-0 items-center justify-between gap-3 px-5 pt-3">
+              <div className="flex flex-shrink-0 items-center justify-between gap-3 px-5 pt-3">
               <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                 {text(`第 ${selected.chapterNumber} 章`, `Chapter ${selected.chapterNumber}`)}
               </span>
-              <div className="planning-segmented" role="group" aria-label={text('章节视图', 'Chapter views')}>
+                <div className="flex items-center gap-2">
+                  {(selectedChapterDirty || v2Dirty) && <Button variant="ghost" size="sm" onClick={() => void handleDiscardChapterEdits()} disabled={saving || v2Saving} data-testid="blueprint-chapter-discard-edits">{text('放弃本章修改', 'Discard chapter edits')}</Button>}
+                  <div className="planning-segmented" role="group" aria-label={text('章节视图', 'Chapter views')}>
                 <button
                   type="button"
                   aria-pressed={chapterView === 'blueprint'}
@@ -1655,6 +2557,7 @@ export default function ChapterCardEditor({
                   {text('场景画布', 'Scene canvas')}
                 </button>
               </div>
+                </div>
             </div>
           )}
           {selected && chapterView === 'canvas' ? (
@@ -1703,10 +2606,10 @@ export default function ChapterCardEditor({
               </Button>
             </div>
           ) : selected && v2Content ? (
-            <div className="max-w-3xl mx-auto px-5 py-4" data-testid="blueprint-v2-view">
+            <div className="blueprint-v2-view" data-testid="blueprint-v2-view">
               {/* 统一细纲编辑区头部 */}
-              <div className="flex items-start justify-between gap-3 mb-3">
-                <div className="min-w-0">
+              <div className="blueprint-v2-view__header">
+                <div className="blueprint-v2-view__heading">
                   <h3 className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>
                     {text(
                       `第 ${selected.chapterNumber} 章：${v2Content.chapterTitle || selected.title || '未命名'}`,
@@ -1722,7 +2625,7 @@ export default function ChapterCardEditor({
                       )}
                   </p>
                 </div>
-                <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap justify-end">
+                <div className="blueprint-v2-view__actions">
                   <Button variant="ai" size="sm" onClick={() => handleAIWriting(selected)} disabled={selected.chapterNumber !== nextWriteChapter || dirty || (v2Dirty && !v2SeedUnsaved) || v2Loading || !!v2Detail?.readStatus} title={text('保存修改后从此章蓝图启动 AI 写作', 'Save changes, then start AI writing from this blueprint')}>
                     {text('写作此章', 'Write this chapter')}
                   </Button>
@@ -1819,6 +2722,19 @@ export default function ChapterCardEditor({
                   data-testid="blueprint-v2-chapter-title"
                 />
               </div>
+
+              <BlueprintChapterPlanningActions
+                chapterNumber={selected.chapterNumber}
+                title={v2Content.chapterTitle || selected.title}
+                candidates={planningCandidates.map(candidateView).filter(candidate => candidate.kind === 'chapter-expand')}
+                busyOperationId={planningBusyOperationId}
+                workflowStarting={planningWorkflowStarting}
+                onGenerate={() => void handleStartPlanningWorkflow('chapter-expand')}
+                onRefresh={() => setPlanningCandidatesRevision(value => value + 1)}
+                onConfirmCandidate={handleConfirmPlanningCandidate}
+                onUpdateCandidate={handleUpdatePlanningCandidate}
+                onCancelCandidate={handleCancelPlanningCandidate}
+              />
 
               <BlueprintV2Editor content={v2Content} onChange={updateV2Content} />
 
@@ -1917,7 +2833,7 @@ export default function ChapterCardEditor({
                     onClick={() => {
                       useEditorStore.getState().openFile({
                         id: 'world-map',
-                        name: text('多地图地图册', 'Map atlas'),
+                        name: text('地图册', 'Map atlas'),
                         type: 'world-map',
                         projectKey,
                       })
@@ -2005,6 +2921,7 @@ export default function ChapterCardEditor({
               )}
             />
           )}
+          </>}
       </main>
       {projectDataReady && currentProjectSession && (
         <BlueprintV2ImportDialog

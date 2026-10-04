@@ -1,13 +1,13 @@
 /**
  * ProjectTree — 项目导航树（侧边栏核心视图）
  *
- * 包含：小说配置、故事架构、章节蓝图、草稿箱、正文章节、全局摘要
+ * 包含：创作方向、故事设定、创作规划、草稿箱、正文章节与项目工具
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  ChevronRight, ChevronDown, RefreshCw, CheckCircle2, Circle,
-  FolderOpen, Copy, FolderTree, Sparkles, Trash2,
+  ChevronRight, ChevronDown, RefreshCw, CheckCircle2, Circle, Globe2,
+  FolderOpen, Copy, Trash2,
   Layers, BookOpen, Library, FolderCog, PenTool,
 } from 'lucide-react'
 import { useProjectStore } from '../../../stores/project-store'
@@ -27,7 +27,7 @@ import { SidebarGroup, SidebarGroupLabel, SidebarGroupContent, SidebarMenu, Side
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '../../ui/collapsible'
 
 import { LeafItem } from './SidebarShared'
-import { ARCH_FILES } from './sidebar-arch-files'
+import { ARCH_FILES, type ArchFile } from './sidebar-arch-files'
 import {
   confirmCurrentProjectSession,
   openArchFile,
@@ -46,12 +46,6 @@ import {
 } from '../../project-session-gate'
 import { globalEventBus } from '../../../shared/event-bus'
 import { shouldRefreshBlueprints } from '../../editor/blueprint-refresh'
-
-const ARCH_FILE_EN: Record<string, { label: string; desc: string }> = {
-  premise: { label: 'Premise', desc: 'Core premise and conflict' },
-  worldbuilding: { label: 'World building', desc: 'World rules and systems' },
-  synopsis: { label: 'Plot outline', desc: 'Whole-book plan and pacing' },
-}
 
 export default function ProjectTree() {
   const currentProject = useProjectStore(s => s.currentProject)
@@ -242,26 +236,28 @@ export default function ProjectTree() {
     .filter(drafts => drafts.some(d => d.status !== 'archived' && d.status !== 'finalized'))
     .length
 
-  // 小说配置是否已完成（核心大纲非空视为已完成）
+  // 仅表示是否已经录入故事构想，不代表创作方向表单全部完成。
   const nc = currentProject.novelConfig
   const configDone = !!(nc.coreOutline?.trim() || nc.protagonistProfile?.trim())
 
-  // 故事架构进度
-  const archDone = ARCH_FILES.filter(f => archStatus[f.key]).length
-
   const openOverview = () => openBuiltinEditor('project-overview', text('项目总览', 'Project overview'), 'overview')
-  const openWorldMap = () => openBuiltinEditor('world-map-editor', text('多地图地图册', 'Map atlas'), 'world-map')
-  const openWorldWorkbench = () => openBuiltinEditor('world-workbench', text('世界', 'Worlds'), 'world')
+  const openWorldMap = () => openBuiltinEditor('world-map-editor', text('地图册', 'Map atlas'), 'world-map')
+  const openWorldWorkbench = () => openBuiltinEditor('world-workbench', text('世界管理', 'World management'), 'world')
   const openStoryTimeline = () => openBuiltinEditor('story-timeline-editor', text('故事时间线', 'Story timeline'), 'story-timeline')
   const openForeshadowing = () => openBuiltinEditor('foreshadowing-manager', text('伏笔管理', 'Foreshadowing'), 'foreshadowing')
+  const openBasicSettingsOverview = () => openBuiltinEditor(
+    'world-building-editor',
+    text('基础设定总览', 'Basic settings overview'),
+    'world-building',
+  )
   const openConfigEditor = () => useEditorStore.getState().openFile({
     id: 'config',
-    name: text('创作参数', 'Creative parameters'),
+    name: text('创作方向', 'Creative direction'),
     type: 'config',
     projectKey: currentProject.path,
   })
   const openCultivationEditor = () => useEditorStore.getState().openFile({
-    id: 'cultivation-settings', name: text('修炼等级设置', 'Cultivation settings'),
+    id: 'cultivation-settings', name: text('修炼体系', 'Cultivation system'),
     type: 'cultivation', projectKey: currentProject.path,
   })
 
@@ -313,6 +309,21 @@ export default function ProjectTree() {
     }
   }
 
+  const renderArchFileMenuItem = (key: string) => {
+    const file = ARCH_FILES.find(candidate => candidate.key === key)
+    if (!file) return null
+    return (
+      <SidebarMenuItem key={file.key}>
+        <ArchFileRow
+          f={file}
+          filePath={`vela://core/${file.key}`}
+          hasContent={archStatus[file.key]}
+          onCleared={refreshAll}
+        />
+      </SidebarMenuItem>
+    )
+  }
+
   return (
     <div className="writer-project-tree min-h-full text-sm py-1">
       {/* 项目名 + 刷新 */}
@@ -357,7 +368,7 @@ export default function ProjectTree() {
       <ProjectTreeCollapsibleGroup
         id="setting"
         title={text('故事设定', 'Story setup')}
-        detail={text('创作参数、架构文档与角色档案', 'Creative parameters, architecture documents, and characters')}
+        detail={text('创作方向、故事前提、人物与世界设定', 'Creative direction, story premise, characters, and world setup')}
         icon={BookOpen}
         isOpen={projectTreeGroupOpen.setting ?? true}
         onOpenChange={(nextOpen) => setProjectTreeGroupOpen('setting', nextOpen)}
@@ -365,34 +376,83 @@ export default function ProjectTree() {
         <SidebarMenuItem>
           <LeafItem
             iconName="book-open"
-            label={text('创作参数', 'Creative parameters')}
-            desc={text('书名、题材、受众、章数与叙事视角', 'Title metadata, genre, audience, chapters, and point of view')}
-            badge={configDone ? text('已完成', 'Complete') : text('待配置', 'Pending')}
+            label={text('基础设定总览', 'Basic settings overview')}
+            desc={text('查看设定内容状态，打开原文档或选择批量生成', 'Review content status, open source documents, or choose batch generation')}
+            onClick={openBasicSettingsOverview}
+          />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <LeafItem
+            iconName="book-open"
+            label={text('创作方向', 'Creative direction')}
+            desc={text('基础信息、故事构想与写作要求', 'Basic information, initial ideas, and writing requirements')}
+            badge={configDone ? text('已有构想', 'Idea present') : text('待补充构想', 'Add an idea')}
             badgeDone={configDone}
             onClick={openConfigEditor}
             onContextMenu={e => showSidebarMenu([
               {
                 key: 'open',
-                label: text('打开创作参数', 'Open creative parameters'),
+                label: text('打开创作方向', 'Open creative direction'),
                 icon: <FolderOpen size={13} />,
                 onClick: openConfigEditor,
               },
             ], e)}
           />
         </SidebarMenuItem>
-        <SidebarMenuItem>
-          <LeafItem iconName="bar-chart-3" label={text('修炼等级设置', 'Cultivation settings')} desc={text('项目境界体系、等级顺序与角色绑定', 'Project realms, level order and character bindings')} onClick={openCultivationEditor} />
-        </SidebarMenuItem>
-        <SidebarMenuItem>
-          <WorldBuildingGroup archStatus={archStatus} archDone={archDone} onCleared={refreshAll} />
-        </SidebarMenuItem>
+        {renderArchFileMenuItem('premise')}
         <SidebarMenuItem>
           <LeafItem
             iconName="users"
             label={text('角色档案', 'Character profile')}
             desc={text('角色事实来源：档案、关系、动机、弧光与当前状态', 'Single source of truth: profiles, relationships, motivations, arcs, and state')}
-            onClick={() => useLayoutStore.getState().openCharacterProfile('overview')}
+            onClick={() => useLayoutStore.getState().openCharacterProfile()}
           />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <ProjectTreeCollapsibleGroup
+            id="worldSetup"
+            level={2}
+            title={text('世界设定', 'World setup')}
+            detail={text('世界观总纲、结构化世界管理、地图册与修炼体系', 'Worldbuilding overview, world management, map atlas, and cultivation system')}
+            icon={Globe2}
+            isOpen={projectTreeGroupOpen.worldSetup ?? false}
+            onOpenChange={(nextOpen) => setProjectTreeGroupOpen('worldSetup', nextOpen)}
+          >
+            {renderArchFileMenuItem('worldbuilding')}
+            <SidebarMenuItem>
+              <LeafItem
+                iconName="globe-2"
+                label={text('世界管理', 'World management')}
+                desc={text(
+                  '结构化世界实体：世界、势力、秘境、通道、规则、历史事件与人物行踪',
+                  'Structured records for worlds, factions, relics, portals, rules, history, and character trails',
+                )}
+                badge={worldCount > 0 ? text(`${worldCount} 个世界`, `${worldCount} worlds`) : text('待创建', 'Empty')}
+                badgeColor={worldCount > 0 ? 'var(--color-accent)' : undefined}
+                badgeDone={worldCount > 0}
+                onClick={openWorldWorkbench}
+              />
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <LeafItem
+                iconName="compass"
+                label={text('地图册', 'Map atlas')}
+                desc={text('地图、地点与空间拓扑网络', 'World maps, locations, and spatial relationships')}
+                badge={mapNodes.length > 0 ? text(`${mapNodes.length} 处地点`, `${mapNodes.length} locations`) : text('待创建', 'Empty')}
+                badgeColor={mapNodes.length > 0 ? 'var(--color-accent)' : undefined}
+                badgeDone={mapNodes.length > 0}
+                onClick={openWorldMap}
+              />
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <LeafItem
+                iconName="bar-chart-3"
+                label={text('修炼体系', 'Cultivation system')}
+                desc={text('项目级境界体系、等级顺序与角色绑定', 'Project realms, level order, and character bindings')}
+                onClick={openCultivationEditor}
+              />
+            </SidebarMenuItem>
+          </ProjectTreeCollapsibleGroup>
         </SidebarMenuItem>
       </ProjectTreeCollapsibleGroup>
 
@@ -401,8 +461,8 @@ export default function ProjectTree() {
         id="plan"
         title={text('创作规划', 'Writing plan')}
         detail={text(
-          '章节蓝图、章节脉络、故事时间线、伏笔管理与空间地图册',
-          'Chapter blueprints, chapter thread, story timeline, foreshadowing, and the spatial map atlas',
+          '全书总纲、分卷卷纲、章节细纲、章节脉络、故事时间线与伏笔管理',
+          'Book outline, volume outlines, chapter blueprints, chapter thread, story timeline, and foreshadowing',
         )}
         icon={Layers}
         badge={blueprintCount > 0 ? text(`${blueprintCount} 章蓝图`, `${blueprintCount} blueprints`) : undefined}
@@ -414,8 +474,8 @@ export default function ProjectTree() {
             iconName="layout-list"
             label={text('章节蓝图', 'Chapter blueprints')}
             desc={text(
-              `逐章细纲、关键事件与作者微操指导；共 ${nc.totalChapters} 章，可直接从这里写正文`,
-              `Per-chapter outline, key events, and author guidance; ${nc.totalChapters} chapters, with direct drafting`,
+              `全书总纲、分卷卷纲与逐章细纲；共 ${nc.totalChapters} 章，可直接从这里写正文`,
+              `Book outline, volume outlines, and per-chapter blueprints; ${nc.totalChapters} chapters, with direct drafting`,
             )}
             badge={blueprintCount > 0 ? text(`${blueprintCount}/${nc.totalChapters} 章`, `${blueprintCount}/${nc.totalChapters} chapters`) : text('待生成', 'Pending')}
             badgeColor={
@@ -426,13 +486,13 @@ export default function ProjectTree() {
                   : undefined
             }
             badgeDone={blueprintCount >= nc.totalChapters}
-            onClick={() => openBuiltinEditor('chapter-card-editor', text('章节蓝图', 'Chapter blueprints'), 'chapter-card')}
+            onClick={() => openBuiltinEditor('chapter-card-editor', text('章节蓝图', 'Chapter blueprints'), 'chapter-card', undefined, undefined, undefined, { kind: 'book' })}
             onContextMenu={e => showSidebarMenu([
               {
                 key: 'open',
                 label: text('打开章节蓝图', 'Open chapter blueprints'),
                 icon: <FolderOpen size={13} />,
-                onClick: () => openBuiltinEditor('chapter-card-editor', text('章节蓝图', 'Chapter blueprints'), 'chapter-card'),
+                onClick: () => openBuiltinEditor('chapter-card-editor', text('章节蓝图', 'Chapter blueprints'), 'chapter-card', undefined, undefined, undefined, { kind: 'book' }),
               },
             ], e)}
           />
@@ -470,28 +530,6 @@ export default function ProjectTree() {
             onClick={openForeshadowing}
           />
         </SidebarMenuItem>
-        <SidebarMenuItem>
-          <LeafItem
-            iconName="compass"
-            label={text('多地图地图册', 'Map atlas')}
-            desc={text('地点、势力与空间拓扑网络', 'Locations, factions, and spatial network')}
-            badge={mapNodes.length > 0 ? text(`${mapNodes.length} 处地点`, `${mapNodes.length} locations`) : text('待创建', 'Empty')}
-            badgeColor={mapNodes.length > 0 ? 'var(--color-accent)' : undefined}
-            badgeDone={mapNodes.length > 0}
-            onClick={openWorldMap}
-          />
-        </SidebarMenuItem>
-        <SidebarMenuItem>
-          <LeafItem
-            iconName="globe-2"
-            label={text('世界', 'Worlds')}
-            desc={text('多世界资料：势力、秘境、通道、规则、历史事件与人物行踪', 'Multi-world records: factions, relics, portals, rules, history, and trails')}
-            badge={worldCount > 0 ? text(`${worldCount} 个世界`, `${worldCount} worlds`) : text('待创建', 'Empty')}
-            badgeColor={worldCount > 0 ? 'var(--color-accent)' : undefined}
-            badgeDone={worldCount > 0}
-            onClick={openWorldWorkbench}
-          />
-        </SidebarMenuItem>
       </ProjectTreeCollapsibleGroup>
 
       {/* 3. 正文写作：紧随创作规划，让写正文的入口在项目树上半部分就能看到 */}
@@ -526,7 +564,7 @@ export default function ProjectTree() {
         title={text('资料库', 'Library')}
         detail={text('自由文档、资料来源审核与知识检索', 'Free documents, source review, and knowledge retrieval')}
         icon={Library}
-        isOpen={projectTreeGroupOpen.library ?? true}
+        isOpen={projectTreeGroupOpen.library ?? false}
         onOpenChange={(nextOpen) => setProjectTreeGroupOpen('library', nextOpen)}
       >
         <SidebarMenuItem>
@@ -561,7 +599,7 @@ export default function ProjectTree() {
         title={text('项目管理', 'Project management')}
         detail={text('本项目的导入、导出与配置', 'Import, export, and configuration for this project')}
         icon={FolderCog}
-        isOpen={projectTreeGroupOpen.management ?? true}
+        isOpen={projectTreeGroupOpen.management ?? false}
         onOpenChange={(nextOpen) => setProjectTreeGroupOpen('management', nextOpen)}
       >
         <SidebarMenuItem>
@@ -605,6 +643,7 @@ export default function ProjectTree() {
 
 function ProjectTreeCollapsibleGroup({
   id,
+  level = 1,
   title,
   detail,
   icon: Icon,
@@ -614,6 +653,7 @@ function ProjectTreeCollapsibleGroup({
   children,
 }: {
   id: string
+  level?: 1 | 2
   title: string
   detail?: string
   icon: React.ComponentType<{ size?: number; className?: string; style?: React.CSSProperties }>
@@ -624,7 +664,7 @@ function ProjectTreeCollapsibleGroup({
   children: React.ReactNode
 }) {
   return (
-    <SidebarGroup className="py-0.5 px-1" data-group-id={id}>
+    <SidebarGroup className="py-0.5 px-1" data-group-id={id} data-group-level={level}>
       <Collapsible open={isOpen} onOpenChange={onOpenChange}>
         <SidebarGroupLabel asChild className="p-0 h-auto">
           <CollapsibleTrigger
@@ -665,117 +705,28 @@ function ProjectTreeCollapsibleGroup({
 }
 
 
-// ===== 故事架构折叠组 =====
-
-function WorldBuildingGroup({
-  archStatus,
-  archDone,
-  onCleared,
-}: {
-  archStatus: Record<string, boolean>
-  archDone: number
-  onCleared: () => void | Promise<void>
-}) {
-  const [open, setOpen] = useState(true)
-  const text = useLocaleStore(s => s.text)
-
-  const allDone = archDone === ARCH_FILES.length
-
-  return (
-    <div>
-      {/*
-       * 分组标题本身不再打开编辑器：故事架构下只有三个可编辑的架构文档，
-       * 打开总览（AI 生成 / 断点续写）保留为独立的显式动作。
-       */}
-      <div
-        className="tree-item gap-1.5 select-none"
-        style={{ paddingLeft: 10 }}
-        title={text('故事前提、世界观、情节大纲', 'Premise, worldbuilding, and plot outline')}
-      >
-        <button
-          type="button"
-          style={{ width: 12, flexShrink: 0, display: 'flex', alignItems: 'center', cursor: 'pointer' }}
-          aria-expanded={open}
-          aria-label={open ? text('折叠故事架构', 'Collapse story architecture') : text('展开故事架构', 'Expand story architecture')}
-          onClick={() => setOpen(v => !v)}
-        >
-          {open
-            ? <ChevronDown size={12} style={{ color: 'var(--color-text-muted)' }} />
-            : <ChevronRight size={12} style={{ color: 'var(--color-text-muted)' }} />
-          }
-        </button>
-        <FolderTree size={14} style={{ color: 'var(--color-text-muted)' }} />
-        <span className="text-sm font-medium flex-1 min-w-0 truncate" style={{ color: 'var(--color-text)' }}>{text('故事架构', 'Story architecture')}</span>
-        {/* 进度徽章：故事前提、世界观、情节大纲三项 */}
-        <span
-          className="text-[0.7rem] flex-shrink-0 ml-1"
-          style={{
-            color: allDone
-              ? 'var(--color-success-text)'
-              : archDone > 0
-                ? 'var(--color-warning-text, #7A5414)'
-                : 'var(--color-text-muted)'
-          }}
-        >
-          {archDone}/{ARCH_FILES.length}
-        </span>
-        <IconTooltip label={text('打开架构总览（AI 生成 / 断点续写）', 'Open architecture overview (AI generation / resume)')}>
-          <button
-            type="button"
-            className="opacity-70 hover:opacity-100 rounded p-0.5 flex-shrink-0"
-            aria-label={text('打开架构总览', 'Open architecture overview')}
-            onClick={() => openBuiltinEditor('world-building-editor', text('故事架构', 'Story architecture'), 'world-building')}
-            style={{ color: 'var(--color-text-muted)' }}
-          >
-            <Sparkles size={11} />
-          </button>
-        </IconTooltip>
-      </div>
-
-      {/* 子文件列表（点击直接在 Markdown 编辑器打开） */}
-      {open && (
-        <div>
-          {ARCH_FILES.map(f => {
-            const isGenerated = archStatus[f.key]
-            const filePath = `vela://core/${f.key}`
-            return (
-              <ArchFileRow
-                key={f.key}
-                f={f}
-                filePath={filePath}
-                isGenerated={isGenerated}
-                onCleared={onCleared}
-              />
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
 /** 单个架构文件行 */
 function ArchFileRow({
   f,
   filePath,
-  isGenerated,
+  hasContent,
   onCleared,
 }: {
-  f: { key: string; iconName: string; label: string; desc: string }
+  f: ArchFile
   filePath: string
-  isGenerated: boolean
+  hasContent: boolean
   onCleared: () => void | Promise<void>
 }) {
   const text = useLocaleStore(s => s.text)
-  const english = ARCH_FILE_EN[f.key] ?? { label: f.label, desc: f.desc }
+  const english = { label: f.labelEn, desc: f.descEn }
   const label = text(f.label, english.label)
   const isCharacterProjection = f.key === 'characters'
   const clearArchFile = async () => {
     if (isCharacterProjection) return
     const projectSession = await confirmCurrentProjectSession(
       useProjectStore.getState().currentProject,
-      () => confirm(text(`确认清空「${f.label}」内容？\n此操作会删除该项故事架构文本，不影响其他架构项、蓝图或正文。`, `Clear “${english.label}”?\nThis removes only this architecture section and preserves the other sections, blueprints, and manuscript.`), {
-        title: text('清空故事架构项', 'Clear architecture section'),
+      () => confirm(text(`确认清空「${f.label}」内容？\n此操作只清除此份设定文档，不影响其他设定文档、蓝图或正文。`, `Clear “${english.label}”?\nThis removes only this setup document and preserves the other documents, blueprints, and manuscript.`), {
+        title: text('清空设定文档', 'Clear setup document'),
         confirmText: text('清空', 'Clear'),
         danger: true,
       }),
@@ -804,6 +755,7 @@ function ArchFileRow({
     <div
       className="tree-item gap-1.5 cursor-pointer select-none"
       style={{ paddingLeft: 26 }}
+      data-arch-file-key={f.key}
       onClick={() => openArchFile(filePath, label)}
       onContextMenu={e => showSidebarMenu([
         {
@@ -826,30 +778,44 @@ function ArchFileRow({
             label: text(`清空${f.label}`, `Clear ${english.label}`),
             icon: <Trash2 size={13} />,
             danger: true,
-            disabled: !isGenerated,
+            disabled: !hasContent,
             onClick: clearArchFile,
           },
         ]),
       ], e)}
       title={text(f.desc, english.desc)}
     >
-      {isGenerated
-        ? <CheckCircle2 size={10} style={{ flexShrink: 0, color: 'var(--color-success)' }} />
-        : <Circle size={6} style={{ flexShrink: 0, fill: 'transparent', stroke: 'var(--color-text-muted)' }} />
-      }
-      <span className="flex-shrink-0" style={{ color: 'var(--color-text-muted)' }}>{renderIcon(f.iconName, 13)}</span>
-      <span
-        className="text-sm flex-1 truncate"
-        style={{ color: isGenerated ? 'var(--color-text)' : 'var(--color-text-secondary)' }}
+      <button
+        type="button"
+        className="flex min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent p-0 text-left font-inherit focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+        aria-label={text(`打开${f.label}`, `Open ${english.label}`)}
+        onClick={event => {
+          event.stopPropagation()
+          void openArchFile(filePath, label)
+        }}
       >
-        {label}
-      </span>
-      {!isGenerated && (
+        {hasContent
+          ? <CheckCircle2 size={10} style={{ flexShrink: 0, color: 'var(--color-success)' }} />
+          : <Circle size={6} style={{ flexShrink: 0, fill: 'transparent', stroke: 'var(--color-text-muted)' }} />
+        }
+        <span className="flex-shrink-0" style={{ color: 'var(--color-text-muted)' }}>{renderIcon(f.iconName, 13)}</span>
+        <span
+          className="text-sm min-w-0 flex-1 truncate"
+          style={{ color: hasContent ? 'var(--color-text)' : 'var(--color-text-secondary)' }}
+        >
+          {label}
+        </span>
+      </button>
+      {hasContent ? (
         <span className="text-[0.7rem] flex-shrink-0" style={{ color: 'var(--color-text-muted)' }}>
-          {text('待生成', 'Pending')}
+          {text('有内容', 'Has content')}
+        </span>
+      ) : (
+        <span className="text-[0.7rem] flex-shrink-0" style={{ color: 'var(--color-text-muted)' }}>
+          {text('待补充', 'Needs content')}
         </span>
       )}
-      {isGenerated && !isCharacterProjection && (
+      {hasContent && !isCharacterProjection && (
         <IconTooltip label={text(`清空${f.label}`, `Clear ${english.label}`)}>
           <button
             type="button"

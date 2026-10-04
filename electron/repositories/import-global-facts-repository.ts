@@ -7,7 +7,7 @@ import type {
 } from '../../src/shared/import-global-facts'
 import { getProjectDb } from '../database'
 import { CharacterRosterRepository } from './character-roster-repository'
-import { ProjectCoreRepository } from './project-core-repository'
+import { hashProjectSynopsis, ProjectCoreRepository } from './project-core-repository'
 
 interface OperationRow {
   operation_id: string
@@ -28,6 +28,9 @@ function normalizedRequest(candidate: ImportGlobalFactsRequest): ImportGlobalFac
   if (!operationId || operationId.length > 160) throw new Error('导入全局事实 operationId 无效')
   if (!Number.isSafeInteger(candidate.expectedRosterRevision) || candidate.expectedRosterRevision < 0) {
     throw new Error('导入全局事实角色 revision 无效')
+  }
+  if (typeof candidate.expectedSynopsisHash !== 'string' || !/^[a-f0-9]{64}$/u.test(candidate.expectedSynopsisHash)) {
+    throw new Error('导入全局事实缺少有效的总纲来源 hash')
   }
   if (!candidate.core || typeof candidate.core !== 'object') throw new Error('导入全局事实配置无效')
   const core = { ...candidate.core }
@@ -51,6 +54,7 @@ function normalizedRequest(candidate: ImportGlobalFactsRequest): ImportGlobalFac
   return {
     operationId,
     expectedRosterRevision: candidate.expectedRosterRevision,
+    expectedSynopsisHash: candidate.expectedSynopsisHash,
     core,
     characterEntries: structuredClone(candidate.characterEntries),
   }
@@ -156,7 +160,15 @@ export class ImportGlobalFactsRepository {
         }
       }
 
-      ProjectCoreRepository.update(request.core)
+      const currentCore = ProjectCoreRepository.get()
+      if (!currentCore || hashProjectSynopsis(currentCore.synopsis) !== request.expectedSynopsisHash) {
+        throw new Error('全书总纲已变化，已拒绝覆盖导入来源版本')
+      }
+      const coreUpdate = ProjectCoreRepository.update({
+        ...request.core,
+        expectedSynopsisHash: request.expectedSynopsisHash,
+      })
+      if (!coreUpdate.success) throw new Error(coreUpdate.error ?? '全局事实导入总纲 CAS 失败')
       const roster = CharacterRosterRepository.commit({
         operationId: `${request.operationId}:roster`,
         expectedRevision: request.expectedRosterRevision,

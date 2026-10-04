@@ -1,0 +1,362 @@
+/**
+ * 故事时间线工作台（任务 D）：内侧栏分组、支线操作、折叠导轨与读取失败态。
+ *
+ * 只使用主题 token（--color-*）与时间线局部语义色板（--tl-*，定义在
+ * .writer-timeline-flow 上），不引入第二套配色；所有类名以
+ * .timeline-sidebar / .timeline-workbench 前缀限定作用域，绝不泛改
+ * 其他页面的按钮、菜单或 PlanningPane 基础样式。
+ */
+
+/* ===== 画布宿主盒 =====
+ *
+ * StoryTimelineScene 的样式作用域限定在 `.writer-timeline-flow` 之内，
+ * 并把宿主盒本身交给页面（见 story-timeline-scene.css 顶部契约）：
+ * 这里提供 position:relative 的弹性填充盒、纸边圆角与裁切，以及
+ * min-width/min-height: 0 —— 画布必须能被侧栏收起后的窄容器压缩，
+ * 否则 flex 子项的最小尺寸会把它顶宽，出现横向溢出。
+ */
+.writer-timeline-flow {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--tl-paper-edge, var(--color-border));
+  border-radius: var(--radius-lg);
+}
+
+/* ===== 画布外壳：折叠导轨的定位基准，收起后不留占位宽度 ===== */
+
+.timeline-workbench__canvas-shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ===== 折叠后的展开导轨：悬浮在画布左缘，不占布局宽度 ===== */
+
+.timeline-sidebar-rail {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 20;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 5px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-panel) 94%, transparent);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(15, 23, 20, 0.12);
+  transition: color 0.14s ease, border-color 0.14s ease, background 0.14s ease;
+}
+
+.timeline-sidebar-rail:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  background: var(--color-panel);
+}
+
+.timeline-sidebar-rail:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 32%, transparent);
+}
+
+.timeline-sidebar-rail-label {
+  writing-mode: vertical-rl;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+}
+
+/* ===== 内侧栏：分组与分组头 ===== */
+
+.timeline-sidebar__group {
+  margin-bottom: 2px;
+}
+
+.timeline-sidebar__group-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 5px 4px 3px;
+  border-radius: 6px;
+}
+
+.timeline-sidebar__group-head:hover,
+.timeline-sidebar__group-head:focus-within {
+  background: var(--color-hover);
+}
+
+.timeline-sidebar__group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.timeline-sidebar__group-toggle:disabled {
+  cursor: default;
+}
+
+.timeline-sidebar__group-toggle:focus-visible {
+  outline: none;
+  color: var(--color-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.timeline-sidebar__group-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-sidebar__swatch {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--tl-sage, var(--color-accent));
+  flex-shrink: 0;
+}
+
+.timeline-sidebar__group-count {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+}
+
+.timeline-sidebar__group-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.timeline-sidebar__group-head:hover .timeline-sidebar__group-actions,
+.timeline-sidebar__group-head:focus-within .timeline-sidebar__group-actions {
+  opacity: 1;
+}
+
+/* 触摸与键盘用户拿不到 hover：分组头的按钮本身始终可聚焦，
+   聚焦时整组操作按钮一起显形即可。 */
+@media (hover: none) {
+  .timeline-sidebar__group-actions { opacity: 1; }
+}
+
+.timeline-sidebar__icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.timeline-sidebar__icon-button:hover {
+  background: var(--color-panel);
+  color: var(--color-text);
+}
+
+.timeline-sidebar__icon-button.is-danger {
+  color: var(--color-error-text);
+}
+
+.timeline-sidebar__icon-button.is-danger:hover {
+  background: color-mix(in srgb, var(--color-error) 10%, transparent);
+}
+
+.timeline-sidebar__icon-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ===== 支线重命名 ===== */
+
+.timeline-sidebar__rename {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px 6px 8px;
+}
+
+.timeline-sidebar__rename-input {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: var(--color-input, var(--color-panel));
+  color: var(--color-text);
+  font-size: 11px;
+}
+
+.timeline-sidebar__rename-input:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+/* ===== 删除支线的级联影响确认 ===== */
+
+.timeline-sidebar__confirm {
+  margin: 2px 6px 6px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--color-error) 24%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-error) 7%, transparent);
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--color-text);
+}
+
+.timeline-sidebar__confirm p {
+  margin: 0;
+}
+
+.timeline-sidebar__confirm-title {
+  font-weight: 600;
+  margin-bottom: 3px !important;
+}
+
+.timeline-sidebar__confirm-names {
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.timeline-sidebar__confirm-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.timeline-sidebar__confirm-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-panel);
+  color: var(--color-text);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.timeline-sidebar__confirm-button:hover {
+  background: var(--color-hover);
+}
+
+.timeline-sidebar__confirm-button.is-danger {
+  border-color: color-mix(in srgb, var(--color-error) 35%, transparent);
+  color: var(--color-error-text);
+}
+
+.timeline-sidebar__confirm-button.is-danger:hover {
+  background: color-mix(in srgb, var(--color-error) 12%, transparent);
+}
+
+.timeline-sidebar__confirm-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.timeline-sidebar__error {
+  margin: 2px 6px 4px;
+  color: var(--color-error-text);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* ===== 空支线占位与页脚统计 ===== */
+
+.timeline-sidebar__empty-branch {
+  margin: 0 6px 4px;
+  padding: 5px 8px;
+  border: 1px dashed var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-style: italic;
+}
+
+/* 数据还没读入：明确说明原因，绝不展示成「没有事件」的空项目。
+   这里没有“重试”按钮，重试入口在画布上，属于读取失败态本身。 */
+.timeline-sidebar__pending {
+  margin: 6px;
+  padding: 8px 9px;
+  border: 1px dashed var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.timeline-sidebar__scope-note {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+
+.timeline-sidebar__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+}
+
+/* ===== 读取失败：显式重试，绝不伪装成空项目 ===== */
+
+.timeline-workbench__read-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+  padding: 24px;
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+
+.timeline-workbench__read-error h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.timeline-workbench__read-error p {
+  max-width: 420px;
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+}

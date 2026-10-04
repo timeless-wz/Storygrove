@@ -4,7 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { closeProjectDatabase, getProjectDb, initProjectDatabase } from '../../database'
-import { ProjectCoreRepository } from '../project-core-repository'
+import { hashProjectSynopsis, ProjectCoreRepository } from '../project-core-repository'
 import { CharacterRosterRepository } from '../character-roster-repository'
 import { ImportGlobalFactsRepository } from '../import-global-facts-repository'
 import type { ImportGlobalFactsRequest } from '../../../src/shared/import-global-facts'
@@ -20,6 +20,7 @@ function request(overrides: Partial<ImportGlobalFactsRequest> = {}): ImportGloba
   return {
     operationId: 'import-global-run-1',
     expectedRosterRevision: 0,
+    expectedSynopsisHash: hashProjectSynopsis(ProjectCoreRepository.get()?.synopsis ?? ''),
     core: {
       genre: '现实', subGenre: '讽刺', targetAudience: '通用', totalChapters: 9,
       wordsPerChapter: 2500, plotStructure: 'three_act', narrativePov: 'third_limited',
@@ -85,9 +86,27 @@ describe('ImportGlobalFactsRepository transaction seam', () => {
       .toEqual({ count: 0 })
   })
 
+  it('rejects an import whose captured synopsis hash became stale before commit', () => {
+    const frozen = request()
+    expect(ProjectCoreRepository.update({
+      synopsis: 'A concurrent author edit',
+      expectedSynopsisHash: frozen.expectedSynopsisHash,
+    }).success).toBe(true)
+
+    expect(() => ImportGlobalFactsRepository.commit(frozen)).toThrow(/总纲已变化/)
+    expect(ProjectCoreRepository.get()).toMatchObject({
+      synopsis: 'A concurrent author edit',
+      genre: '', premise: '',
+    })
+    expect(CharacterRosterRepository.read()).toMatchObject({ revision: 0, status: 'empty' })
+    expect(getProjectDb()!.prepare('SELECT COUNT(*) AS count FROM import_global_fact_operations').get())
+      .toEqual({ count: 0 })
+  })
+
   it('replays the same operation without duplicating or rewriting facts', () => {
-    const first = ImportGlobalFactsRepository.commit(request())
-    const replay = ImportGlobalFactsRepository.commit(request())
+    const frozenRequest = request()
+    const first = ImportGlobalFactsRepository.commit(frozenRequest)
+    const replay = ImportGlobalFactsRepository.commit(frozenRequest)
 
     expect(replay).toEqual({ ...first, idempotent: true })
     expect(CharacterRosterRepository.read().revision).toBe(1)

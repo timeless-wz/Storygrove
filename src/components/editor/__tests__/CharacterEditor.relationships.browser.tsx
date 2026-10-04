@@ -163,7 +163,7 @@ beforeEach(() => {
   useProjectStore.setState(originalProjectState)
   useLocaleStore.setState({ locale: 'zh-CN', initialized: true })
   useProjectStore.setState({ currentProject: project(), fileTree: [], loading: false })
-  useLayoutStore.setState({ characterViewRequest: null })
+  useLayoutStore.setState({ characterViewRequest: { view: 'overview', requestId: 1 } })
   useCharacterStore.setState({
     characters: [shenLi, luYunfei, suLi, legacyCard, unknownJsonCard],
     selectedName: '沈砺',
@@ -277,7 +277,7 @@ afterEach(async () => {
 })
 
 describe('character profile overview', () => {
-  it('opens on the overview with a summary instead of a screen full of inputs', async () => {
+  it('supports explicitly opening the read-only overview', async () => {
     await renderEditor()
 
     expect(container?.textContent).toContain('人物概览')
@@ -293,7 +293,7 @@ describe('character profile overview', () => {
 
     const sections = Array.from(container?.querySelectorAll('section') ?? [])
       .map(section => section.querySelector('h4')?.textContent ?? '')
-    expect(sections).toEqual(['核心动机', '性格特征与弱点', '当前状态', '关系'])
+    expect(sections).toEqual(['修炼等级', '核心动机', '性格特征与弱点', '当前状态', '关系'])
     expect(container?.textContent).toContain('为父复仇')
     expect(container?.textContent).toContain('青云城')
   })
@@ -315,7 +315,7 @@ describe('character profile overview', () => {
       await page.getByRole('button', { name: '陆云飞' }).click()
     })
     expect(useCharacterStore.getState().selectedName).toBe('陆云飞')
-    expect(container?.querySelector('[data-testid="character-summary"]')?.textContent).toContain('陆云飞')
+    expect(container?.querySelector('[data-testid="character-profile-form"]')).not.toBeNull()
   })
 
   it('keeps legacy relationship text verbatim instead of guessing at structure', async () => {
@@ -463,9 +463,9 @@ describe('character profile edit mode', () => {
     expect(legacy?.relationships).toEqual([])
     expect(legacy?.legacyRelationshipNotes).toBe(legacyRelationshipText)
 
-    // 保存成功后回到只读概览。
-    await expect.element(page.getByTestId('character-summary')).toBeVisible()
-    expect(container?.querySelector('[data-testid="character-profile-form"]')).toBeNull()
+    // 保存成功后仍停留在编辑档案。
+    await expect.element(page.getByTestId('character-profile-form')).toBeVisible()
+    expect(container?.querySelector('[data-testid="character-summary"]')).toBeNull()
   })
 })
 

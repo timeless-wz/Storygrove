@@ -170,6 +170,8 @@ export function installApi({ withData }: { withData: boolean }): void {
     value: {
       invoke: vi.fn(async (channel: string) => {
         switch (channel) {
+          case 'config:set':
+            return { success: true }
           case 'fs:list-dir':
             return []
           case 'db:draft-list-all':
@@ -287,7 +289,7 @@ export function registerPlanningVisualHooks(): void {
     sidebarView: 'project',
     activeRailItem: 'project',
     characterViewRequest: null,
-    projectTreeGroupOpen: { plan: true, setting: true, library: true, management: true, manuscript: true },
+    projectTreeGroupOpen: { plan: true, setting: true, worldSetup: false, library: false, management: false, manuscript: true },
   })
   useStoryTimelineStore.setState({
     ...originalStates.timeline,
@@ -361,13 +363,13 @@ export function pageText(): string {
   return container.textContent ?? ''
 }
 
-/** 五个规划页面共用的返回路径：项目总览 › 创作规划 › 当前页面。 */
-export function expectSharedChrome(currentLabel: string): void {
+/** 规划页与世界设定工具共用页面外壳，但按所属分区返回。 */
+export function expectSharedChrome(currentLabel: string, parentLabels: string[] = ['创作规划']): void {
   const crumb = container.querySelector('nav[aria-label="返回路径"]')
   expect(crumb, 'every planning page must expose the same breadcrumb').not.toBeNull()
   const crumbItems = Array.from(crumb?.querySelectorAll('.planning-page__crumb') ?? [])
     .map(item => item.textContent?.trim())
-  expect(crumbItems).toEqual(['项目总览', '创作规划', currentLabel])
+  expect(crumbItems).toEqual(['项目总览', ...parentLabels, currentLabel])
   expect(container.querySelector('h1')?.textContent?.trim()).toBeTruthy()
 }
 

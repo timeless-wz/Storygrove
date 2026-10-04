@@ -114,6 +114,40 @@ describe('editor store project-scoped tabs', () => {
     ])
   })
 
+  it.each([
+    { type: 'world-building' as const, firstId: 'world-building', secondId: 'world-building-editor' },
+    { type: 'world-map' as const, firstId: 'world-map', secondId: 'world-map-editor' },
+  ])('reuses an open $type tab across current and legacy IDs in the same project', ({ type, firstId, secondId }) => {
+    const store = useEditorStore.getState()
+    store.openFile({ id: firstId, name: 'Old label', type, projectKey: projectA })
+    store.openFile({ id: secondId, name: 'Current label', type, projectKey: projectA })
+
+    expect(useEditorStore.getState().tabs).toEqual([
+      expect.objectContaining({
+        id: createProjectScopedEditorTabId(firstId, type, projectA),
+        name: 'Current label',
+        type,
+        projectKey: projectA,
+      }),
+    ])
+    expect(useEditorStore.getState().activeTabId)
+      .toBe(createProjectScopedEditorTabId(firstId, type, projectA))
+  })
+
+  it.each([
+    { type: 'world-building' as const, firstId: 'world-building', secondId: 'world-building-editor' },
+    { type: 'world-map' as const, firstId: 'world-map', secondId: 'world-map-editor' },
+  ])('keeps $type alias tabs separate across projects', ({ type, firstId, secondId }) => {
+    useEditorStore.getState().openFile({ id: firstId, name: 'Project A', type, projectKey: projectA })
+    useEditorStore.getState().openFile({ id: secondId, name: 'Project B', type, projectKey: projectB })
+
+    expect(useEditorStore.getState().tabs).toHaveLength(2)
+    expect(useEditorStore.getState().tabs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: createProjectScopedEditorTabId(firstId, type, projectA), projectKey: projectA }),
+      expect.objectContaining({ id: createProjectScopedEditorTabId(secondId, type, projectB), projectKey: projectB }),
+    ]))
+  })
+
   beforeEach(() => {
     useEditorStore.setState({ tabs: [], activeTabId: null })
   })

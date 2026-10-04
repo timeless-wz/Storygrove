@@ -284,11 +284,12 @@ export default function WorldMapView({ projectKey }: { projectKey: string }) {
     <PlanningPageShell
       breadcrumb={[
         { label: backPath.overviewLabel, onClick: backPath.openOverview },
-        { label: backPath.planLabel, onClick: backPath.revealWritingPlan },
-        { label: text('多地图地图册', 'Map atlas') },
+        { label: backPath.storySetupLabel, onClick: backPath.revealStorySetup },
+        { label: backPath.worldSetupLabel, onClick: backPath.revealWorldSetup },
+        { label: text('地图册', 'Map atlas') },
       ]}
       icon={<Compass size={15} />}
-      title={text('多地图地图册', 'Map atlas')}
+      title={text('地图册', 'Map atlas')}
       description={text(
         '空间地图册：每张地图是独立空间，各自拥有一张底图、一组地点、地点层级与内部连接，地图之间只通过左侧地图册树和面包屑切换。它描述的是地点与空间关系，不含剧情时间与伏笔。',
         'A spatial atlas: each map is an independent space with its own base image, locations, hierarchy, and internal connections. Maps switch only through the atlas tree and breadcrumb. It describes places and spatial relations, not plot time or setups.',

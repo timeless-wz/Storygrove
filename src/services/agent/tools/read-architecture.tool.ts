@@ -8,8 +8,8 @@ import { agentToolText, assertAgentProjectCurrent, requireAgentProject } from '.
 
 export const readArchitectureTool = buildAgentTool({
   name: 'read_architecture',
-  description: '读取小说的故事架构文件（四段式架构：故事前提、世界观、角色图谱、剧情大纲等）。是理解小说全局结构的核心工具。',
-  descriptionEn: 'Read the story architecture, including the premise, worldbuilding, character graph, and plot synopsis.',
+  description: '读取小说的故事架构文件，包括故事前提、世界观、角色图谱与章节蓝图共用的全书总纲。',
+  descriptionEn: 'Read the story architecture, including the premise, worldbuilding, character graph, and the authoritative book outline used by Chapter Blueprints.',
   source: 'builtin',
   inputSchema: {
     type: 'object',
@@ -50,14 +50,17 @@ export const readArchitectureTool = buildAgentTool({
         if (!property) {
           return { success: false, content: '', error: text(`架构文件内容为空：${fileName}`, `The architecture content is empty: ${fileName}`) }
         }
-        return { success: true, content: text(`📐 架构文件：${fileName}\n\n${property}`, `📐 Architecture: ${fileName}\n\n${property}`) }
+        const label = isSynopsis
+          ? text('全书总纲（章节蓝图共用）', 'Book outline (shared with Chapter Blueprints)')
+          : fileName
+        return { success: true, content: text(`📐 架构文件：${label}\n\n${property}`, `📐 Architecture: ${label}\n\n${property}`) }
       }
 
       const contents: string[] = []
       if (core.premise) contents.push(`## 📄 premise.md\n\n${core.premise}`)
       if (core.worldbuilding) contents.push(`## 📄 worldbuilding.md\n\n${core.worldbuilding}`)
       if (core.charactersArch) contents.push(`## 📄 characters.md\n\n${core.charactersArch}`)
-      if (core.synopsis) contents.push(`## 📄 synopsis.md\n\n${core.synopsis}`)
+      if (core.synopsis) contents.push(`## 📄 全书总纲（章节蓝图共用；project_core.synopsis）\n\n${core.synopsis}`)
 
       if (contents.length === 0) {
         return { success: true, content: text('⚠️ 架构为空，暂无架构文件。建议通过工作流生成故事架构。', '⚠️ The architecture is empty. Generate the story architecture with the workflow first.') }

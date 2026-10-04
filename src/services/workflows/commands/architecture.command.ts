@@ -1952,6 +1952,12 @@ export class GeneratePlotArchitectureCommand extends BaseWorkflowCommand<string>
     const projectSession = requireWorkflowProjectSession(context)
     assertArchitectureProjectSessionCurrent(projectSession, context)
     const writingLanguage = workflowWritingLanguage(context)
+    if (!this.options.resumeSynopsis && this.options.synopsisRange == null) {
+      throw new Error(text(
+        '整本总纲生成已改为待确认候选；此兼容命令只接受明确的章节范围或断点续写。',
+        'Whole-book outline generation now creates a reviewable candidate; this compatibility command requires an explicit chapter range or checkpoint resume.',
+      ))
+    }
     const { expectedProjectPath } = this.snapshot
     const { novelConfig: config } = this.snapshot
     const modelFacts = localizeNovelConfigFacts(config, writingLanguage)

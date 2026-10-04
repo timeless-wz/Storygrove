@@ -8,7 +8,7 @@ import { workflowRuntimeDependencies } from './workflow-generation-runtime.fixtu
 
 class GenerateFieldCommand extends RuntimeGenerateFieldCommand {
   constructor(...args: ConstructorParameters<typeof RuntimeGenerateFieldCommand>) {
-    super(args[0], workflowRuntimeDependencies)
+    super(args[0], args[1] ?? workflowRuntimeDependencies, args[2])
   }
 }
 
@@ -274,6 +274,76 @@ describe('GenerateFieldCommand project identity', () => {
       .toBe('B 项目原有文风')
   })
 
+  it('checks cancellation after the model response and before changing or saving the field', async () => {
+    const updateNovelConfig = vi.fn()
+    const saveProject = vi.fn(async () => true)
+    useProjectStore.setState({
+      currentProject: {
+        ...project(projectAPath),
+        novelConfig: { genre: '玄幻', coreOutline: '作者已经写好的故事构想' },
+      } as never,
+      updateNovelConfig,
+      saveProject,
+    })
+    const cancelledContext = { ...context }
+    const command = new GenerateFieldCommand('coreOutline')
+    vi.spyOn(
+      command as unknown as { callLLM: (...args: unknown[]) => Promise<string> },
+      'callLLM',
+    ).mockImplementation(async (...args: unknown[]) => {
+      ;(args[4] as WorkflowContext).cancelled = true
+      return '生成器刚返回的补充内容'
+    })
+
+    await expect(command.execute({ step: {}, context: cancelledContext, callbacks }))
+      .rejects.toThrow('工作流已取消')
+
+    expect(updateNovelConfig).not.toHaveBeenCalled()
+    expect(saveProject).not.toHaveBeenCalled()
+    expect(useProjectStore.getState().currentProject?.novelConfig.coreOutline)
+      .toBe('作者已经写好的故事构想')
+  })
+
+  it('keeps an author edit made during generation instead of applying the captured stale field', async () => {
+    const updateNovelConfig = vi.fn()
+    const saveProject = vi.fn(async () => true)
+    const originalProject = {
+      ...project(projectAPath),
+      novelConfig: { genre: '玄幻', worldSetting: '启动时的背景构想' },
+    }
+    useProjectStore.setState({
+      currentProject: originalProject as never,
+      updateNovelConfig,
+      saveProject,
+    })
+    const command = new GenerateFieldCommand('worldSetting', undefined, {
+      projectSession: context.projectSession,
+      novelConfig: Object.freeze({ ...originalProject.novelConfig }) as never,
+    })
+    vi.spyOn(
+      command as unknown as { callLLM: (...args: unknown[]) => Promise<string> },
+      'callLLM',
+    ).mockImplementation(async () => {
+      useProjectStore.setState(state => ({
+        currentProject: state.currentProject
+          ? {
+              ...state.currentProject,
+              novelConfig: { ...state.currentProject.novelConfig, worldSetting: '生成期间作者更新的背景' },
+            }
+          : null,
+      }))
+      return '过时生成结果'
+    })
+
+    await expect(command.execute({ step: {}, context, callbacks }))
+      .rejects.toThrow('已被修改')
+
+    expect(updateNovelConfig).not.toHaveBeenCalled()
+    expect(saveProject).not.toHaveBeenCalled()
+    expect(useProjectStore.getState().currentProject?.novelConfig.worldSetting)
+      .toBe('生成期间作者更新的背景')
+  })
+
   it('requires the current project to match the frozen workflow project before reading config', async () => {
     useProjectStore.setState({
       currentProject: project(projectBPath, 'B 项目原有文风') as never,
@@ -314,6 +384,14 @@ describe('GenerateFieldCommand project identity', () => {
   })
 
   it('does not expose a provider failure through the frozen English workflow UI', async () => {
+    const saveProject = vi.fn(async () => true)
+    useProjectStore.setState({
+      currentProject: {
+        ...project(projectAPath),
+        novelConfig: { genre: 'Mystery', writingStyle: 'Existing author style' },
+      } as never,
+      saveProject,
+    })
     const command = new GenerateFieldCommand('writingStyle')
     vi.spyOn(
       command as unknown as { callLLM: (...args: unknown[]) => Promise<string> },
@@ -334,5 +412,7 @@ describe('GenerateFieldCommand project identity', () => {
     expect(failure).toBeInstanceOf(Error)
     expect((failure as Error).message).toBe('Field generation failed. Please try again.')
     expect((failure as Error).message).not.toContain('provider-secret-field-failure')
+    expect(useProjectStore.getState().currentProject?.novelConfig.writingStyle).toBe('Existing author style')
+    expect(saveProject).not.toHaveBeenCalled()
   })
 })

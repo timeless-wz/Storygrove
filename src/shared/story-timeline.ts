@@ -151,6 +151,73 @@ export interface StoryTimelineSnapshot {
 
 export const STORY_TIMELINE_MAIN_BRANCH_ID = 'main'
 
+/**
+ * 起止锚点在画布上的伪节点 ID（布局层渲染用）。它们来自范围设置而不是事件表，
+ * 因此任何删除通道都必须显式拒绝，绝不能静默无操作后报告成功。
+ */
+export const STORY_TIMELINE_ANCHOR_NODE_IDS = ['timeline-anchor-start', 'timeline-anchor-end'] as const
+
+export type StoryTimelineAnchorNodeId = (typeof STORY_TIMELINE_ANCHOR_NODE_IDS)[number]
+
+export function isStoryTimelineAnchorNodeId(id: string): boolean {
+  return (STORY_TIMELINE_ANCHOR_NODE_IDS as readonly string[]).includes(id)
+}
+
+/**
+ * 删除影响的权威预览。由主进程用与真实删除完全相同的递归收集逻辑生成，
+ * UI 不允许自行猜测级联范围。fingerprint 是规范化 ID 集合指纹：
+ * 确认删除时回传，主进程重新计算后不一致即要求重新确认，绝不静默扩大删除范围。
+ */
+export interface StoryTimelineDeleteImpact {
+  /** 删除入口的目标类型：事件（连带下游支线）或支线。 */
+  kind: 'event' | 'branch'
+  targetId: string
+  /** 目标的展示名（事件标题 / 支线名称），供确认弹窗直接使用。 */
+  targetLabel: string
+  /** 将被删除的事件 ID（含目标事件本身），已按 ID 去重。 */
+  eventIds: string[]
+  /** 将被整体删除的支线 ID（含嵌套；绝不含主线），已按 ID 去重。 */
+  branchIds: string[]
+  /** 将被删除支线的名称，顺序与 branchIds 对应。 */
+  branchNames: string[]
+  eventCount: number
+  branchCount: number
+  fingerprint: string
+}
+
+export interface StoryTimelineDeletePreviewResult {
+  success: boolean
+  preview?: StoryTimelineDeleteImpact
+  error?: string
+}
+
+export type StoryTimelineDeleteCommitResult =
+  | { success: true; deletedEventIds: string[]; deletedBranchIds: string[] }
+  | {
+      success: false
+      error: string
+      /** true 表示确认后影响集合已变化：未删除任何数据，需用返回的最新预览重新确认。 */
+      needsReconfirmation?: boolean
+      preview?: StoryTimelineDeleteImpact
+    }
+
+/**
+ * 规范化 ID 集合指纹：排序去重后拼接再取 FNV-1a 散列。
+ * 预览与确认删除共用同一实现，避免两端各算一套导致误判。
+ */
+export function fingerprintStoryTimelineIds(eventIds: readonly string[], branchIds: readonly string[]): string {
+  const normalize = (ids: readonly string[]) => [...new Set(ids)].sort()
+  const eventKey = normalize(eventIds).join('\u0000')
+  const branchKey = normalize(branchIds).join('\u0000')
+  const payload = `e:${eventIds.length}:${eventKey}|b:${branchIds.length}:${branchKey}`
+  let hash = 0x811c9dc5
+  for (let index = 0; index < payload.length; index += 1) {
+    hash ^= payload.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return `fnv1a-${hash.toString(16).padStart(8, '0')}-${payload.length.toString(16)}`
+}
+
 export const STORY_TIMELINE_PRECISION_LABELS: Record<StoryTimelinePrecision, { zh: string; en: string }> = {
   exact: { zh: '精确时间', en: 'Exact time' },
   range: { zh: '时间范围', en: 'Time range' },

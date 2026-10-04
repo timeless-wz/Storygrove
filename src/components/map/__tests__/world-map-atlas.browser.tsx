@@ -268,6 +268,10 @@ describe('world map atlas view', () => {
   it('renders the atlas tree and defaults to the first map', async () => {
     await render()
 
+    const pageBreadcrumb = container.querySelector('nav[aria-label="返回路径"]')
+    expect(pageBreadcrumb?.textContent).toContain('项目总览')
+    expect(pageBreadcrumb?.textContent).toContain('故事设定')
+    expect(pageBreadcrumb?.textContent).toContain('世界设定')
     expect(text()).toContain('地图册')
     expect(text()).toContain('世界总图')
     expect(text()).toContain('苍穹星地图')
@@ -357,7 +361,15 @@ describe('world map atlas view', () => {
   })
 
   it('renders a breadcrumb trail from the atlas root to the selected map', async () => {
+    useLayoutStore.setState({ projectTreeGroupOpen: { setting: false, worldSetup: false } })
     await render()
+
+    const pageBreadcrumb = container.querySelector('nav[aria-label="返回路径"]')
+    const setupCrumb = Array.from(pageBreadcrumb?.querySelectorAll<HTMLButtonElement>('button') ?? [])
+      .find(button => button.textContent?.trim() === '世界设定')
+    expect(setupCrumb).toBeDefined()
+    await act(async () => setupCrumb?.click())
+    expect(useLayoutStore.getState().projectTreeGroupOpen).toMatchObject({ setting: true, worldSetup: true })
 
     await clickButton('北境大陆地图')
 

@@ -24,6 +24,7 @@ import SettingsModal from './components/settings/SettingsModal'
 import { ANIME_SKIN_URL } from './components/settings/AppearanceSettings'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { actionToast } from './components/ui/ActionToast'
+import { openBuiltinEditor } from './components/panels/sidebar/sidebar-file-openers'
 import { TooltipProvider } from './components/ui/Tooltip'
 import { UpdateNotifier } from './components/updates/UpdateNotifier'
 import { useResponsiveWorkbenchLayout } from './hooks/useResponsiveWorkbenchLayout'
@@ -165,10 +166,60 @@ export default function App() {
       const completedRun = activeRuns.find(r => r.id === runId)
         ?? history.find(r => r.id === runId)
       if (!completedRun) return
-      actionToast.workflowComplete(
-        text(`「${completedRun.title}」已完成`, `“${completedRun.title}” completed`),
-        () => useLayoutStore.getState().openBottomTab('tasks')
-      )
+      const message = text(`「${completedRun.title}」已完成`, `“${completedRun.title}” completed`)
+      const generatedBookOutline = completedRun.resourceKeys?.includes('blueprint-planning:book') === true
+      if (generatedBookOutline) {
+        actionToast.workflowComplete(
+          message,
+          () => {
+            const currentProject = useProjectStore.getState().currentProject
+            if (sameProjectSessionContext(
+              projectSession,
+              projectSessionContextFromProject(currentProject),
+            )) {
+              openBuiltinEditor(
+                'chapter-card-editor',
+                text('章节蓝图', 'Chapter blueprints'),
+                'chapter-card',
+                undefined,
+                undefined,
+                undefined,
+                { kind: 'book' },
+              )
+              return
+            }
+            useLayoutStore.getState().openBottomTab('tasks')
+          },
+          text('打开全书总纲', 'Open book outline'),
+        )
+      } else if (completedRun.type === 'architecture_generation') {
+        actionToast.workflowComplete(
+          message,
+          () => {
+            const currentProject = useProjectStore.getState().currentProject
+            if (sameProjectSessionContext(
+              projectSession,
+              projectSessionContextFromProject(currentProject),
+            )) {
+              useEditorStore.getState().openFile({
+                id: 'world-building',
+                name: text('基础设定总览', 'Basic settings overview'),
+                type: 'world-building',
+                projectKey: completedRun.projectPath,
+                projectSessionLease: projectSession?.leaseId,
+              })
+              return
+            }
+            useLayoutStore.getState().openBottomTab('tasks')
+          },
+          text('打开基础设定总览', 'Open basic settings overview'),
+        )
+      } else {
+        actionToast.workflowComplete(
+          message,
+          () => useLayoutStore.getState().openBottomTab('tasks'),
+        )
+      }
     })
 
     const unsubAutoOpenNextChapter = globalEventBus.on('FINALIZE_COMPLETE', ({

@@ -24,6 +24,7 @@ import ProjectOverviewPage from '../pages/ProjectOverviewPage'
 import ClearProjectDataDialog from '../dialogs/ClearProjectDataDialog'
 import NewProjectDialog from '../dialogs/NewProjectDialog'
 import ExportDialog from '../dialogs/ExportDialog'
+import { openArchFile } from '../panels/sidebar/sidebar-file-openers'
 
 const PROJECT_PATH = 'C:\\novels\\nav-audit-test'
 const PROJECT_SESSION = {
@@ -157,6 +158,7 @@ beforeEach(() => {
     projectTreeGroupOpen: {
       plan: true,
       setting: true,
+      worldSetup: false,
       library: true,
       management: true,
       manuscript: true,
@@ -516,6 +518,13 @@ describe('ProjectTree Leaf Entries and Editor Mounting (NAV-TREE-01 ~ NAV-TREE-3
   it('mounts correct editors for all leaf items and sub-documents with return paths verified', async () => {
     await renderProjectTree()
 
+    const worldSetupToggle = container.querySelector<HTMLButtonElement>(
+      '[data-group-id="worldSetup"] button[aria-label="世界设定"]',
+    )
+    expect(worldSetupToggle?.getAttribute('aria-expanded')).toBe('false')
+    await act(async () => worldSetupToggle?.click())
+    expect(worldSetupToggle?.getAttribute('aria-expanded')).toBe('true')
+
     // 1. NAV-TREE-01: 章节蓝图
     const bpItem = Array.from(container.querySelectorAll<HTMLElement>('.tree-item')).find(el => el.textContent?.includes('章节蓝图'))
     expect(bpItem, 'NAV-TREE-01: 章节蓝图树节点必须严格存在').toBeDefined()
@@ -566,17 +575,17 @@ describe('ProjectTree Leaf Entries and Editor Mounting (NAV-TREE-01 ~ NAV-TREE-3
     act(() => useEditorStore.getState().closeTab(mapTab!.id))
     expect(useEditorStore.getState().tabs.some(t => t.type === 'world-map')).toBe(false)
 
-    // 6. NAV-TREE-TOP-02: 创作参数
-    const configItem = Array.from(container.querySelectorAll<HTMLElement>('.tree-item')).find(el => el.textContent?.includes('创作参数'))
-    expect(configItem, 'NAV-TREE-TOP-02: 创作参数树节点必须严格存在').toBeDefined()
+    // 6. NAV-TREE-TOP-02: 创作方向
+    const configItem = Array.from(container.querySelectorAll<HTMLElement>('.tree-item')).find(el => el.textContent?.includes('创作方向'))
+    expect(configItem, 'NAV-TREE-TOP-02: 创作方向树节点必须严格存在').toBeDefined()
     await act(async () => configItem?.click())
     const configTab = useEditorStore.getState().tabs.find(t => t.type === 'config')
-    expect(configTab, '创作参数 Tab 必须已打开').toBeDefined()
+    expect(configTab, '创作方向 Tab 必须已打开').toBeDefined()
     // 返回路径：关闭 Tab
     act(() => useEditorStore.getState().closeTab(configTab!.id))
     expect(useEditorStore.getState().tabs.some(t => t.type === 'config')).toBe(false)
 
-    // 7. NAV-TREE-04 ~ 06: 故事架构子文档 (故事前提/世界观/情节大纲)
+    // 7. NAV-TREE-04 ~ 05: 故事设定文档 (故事前提/世界观总纲)
     const premiseItem = Array.from(container.querySelectorAll<HTMLElement>('.tree-item')).find(el => el.textContent?.includes('故事前提'))
     expect(premiseItem, 'NAV-TREE-04: 故事前提必须严格存在').toBeDefined()
     await act(async () => premiseItem?.click())
@@ -587,8 +596,8 @@ describe('ProjectTree Leaf Entries and Editor Mounting (NAV-TREE-01 ~ NAV-TREE-3
     act(() => useEditorStore.getState().closeTab(premiseTab.id))
     expect(useEditorStore.getState().tabs.some(t => t.filePath === 'vela://core/premise')).toBe(false)
 
-    const worldItem = Array.from(container.querySelectorAll<HTMLElement>('.tree-item')).find(el => el.textContent?.includes('世界观'))
-    expect(worldItem, 'NAV-TREE-05: 世界观必须严格存在').toBeDefined()
+    const worldItem = Array.from(container.querySelectorAll<HTMLElement>('.tree-item')).find(el => el.textContent?.includes('世界观总纲'))
+    expect(worldItem, 'NAV-TREE-05: 世界观总纲必须严格存在').toBeDefined()
     await act(async () => worldItem?.click())
     await vi.waitFor(() => {
       expect(useEditorStore.getState().tabs.some(t => t.type === 'arch-file' && t.filePath === 'vela://core/worldbuilding')).toBe(true)
@@ -597,48 +606,38 @@ describe('ProjectTree Leaf Entries and Editor Mounting (NAV-TREE-01 ~ NAV-TREE-3
     act(() => useEditorStore.getState().closeTab(worldTab.id))
     expect(useEditorStore.getState().tabs.some(t => t.filePath === 'vela://core/worldbuilding')).toBe(false)
 
-    const synopsisItem = Array.from(container.querySelectorAll<HTMLElement>('.tree-item')).find(el => el.textContent?.includes('情节大纲'))
-    expect(synopsisItem, 'NAV-TREE-06: 情节大纲必须严格存在').toBeDefined()
-    await act(async () => synopsisItem?.click())
-    await vi.waitFor(() => {
-      expect(useEditorStore.getState().tabs.some(t => t.type === 'arch-file' && t.filePath === 'vela://core/synopsis')).toBe(true)
-    })
-    const synopsisTab = useEditorStore.getState().tabs.find(t => t.filePath === 'vela://core/synopsis')!
-    act(() => useEditorStore.getState().closeTab(synopsisTab.id))
-    expect(useEditorStore.getState().tabs.some(t => t.filePath === 'vela://core/synopsis')).toBe(false)
+    const legacySynopsisItem = Array.from(container.querySelectorAll<HTMLElement>('.tree-item')).find(el => el.textContent?.includes('情节大纲'))
+    expect(legacySynopsisItem, 'NAV-TREE-06: 旧情节大纲不得继续显示为独立侧栏入口').toBeUndefined()
+    const blueprintItem = Array.from(container.querySelectorAll<HTMLElement>('.tree-item')).find(el => el.textContent?.includes('章节蓝图'))
+    expect(blueprintItem, '章节蓝图树节点必须存在').toBeDefined()
+    await act(async () => blueprintItem?.click())
+    let bookTab = useEditorStore.getState().tabs.find(t => t.type === 'chapter-card')
+    expect(bookTab?.blueprintPlanningSelection).toEqual({ kind: 'book' })
+    act(() => useEditorStore.getState().closeTab(bookTab!.id))
 
-    // 8. NAV-TREE-17: 正文写作 - 草稿项点击打开 DraftEditor (无条件判断)
-    let draftRow: HTMLElement | undefined
-    await vi.waitFor(() => {
-      draftRow = Array.from(container.querySelectorAll<HTMLElement>('div[title*="点击打开"]')).find(
-        el => el.textContent?.includes('第1章') || el.textContent?.includes('v1')
-      )
-      expect(draftRow, 'NAV-TREE-17: 章节草稿项必须严格存在').toBeDefined()
-    })
-    await act(async () => draftRow?.click())
-    const draftTab = useEditorStore.getState().tabs.find(t => t.filePath === 'vela://draft/101' || t.filePath === 'drafts/ch1/draft_1.md')
-    expect(draftTab, '草稿 Tab 必须已打开').toBeDefined()
-    // 返回路径：关闭草稿 Tab
-    act(() => useEditorStore.getState().closeTab(draftTab!.id))
-    expect(useEditorStore.getState().tabs.some(t => t.id === draftTab!.id)).toBe(false)
+    // A legacy synopsis URL remains routable and lands on the same book-outline selection.
+    await act(async () => openArchFile('vela://core/synopsis', '情节大纲'))
+    bookTab = useEditorStore.getState().tabs.find(t => t.type === 'chapter-card')
+    expect(bookTab?.blueprintPlanningSelection).toEqual({ kind: 'book' })
+    act(() => useEditorStore.getState().closeTab(bookTab!.id))
 
-    // 9. NAV-TREE-19: 正文写作 - 正文章节项点击打开 ProseEditor (无条件判断)
-    let manuscriptRow: HTMLElement | undefined
-    await vi.waitFor(() => {
-      manuscriptRow = Array.from(container.querySelectorAll<HTMLElement>('.tree-item')).find(
-        el => el.textContent?.includes('第2章')
-      )
-      expect(manuscriptRow, 'NAV-TREE-19: 正文章节项必须严格存在').toBeDefined()
-    })
-    await act(async () => manuscriptRow?.click())
-    let manuscriptTab: ReturnType<typeof useEditorStore.getState>['tabs'][number] | undefined
-    await vi.waitFor(() => {
-      manuscriptTab = useEditorStore.getState().tabs.find(t => t.filePath === 'vela://manuscript/102')
-      expect(manuscriptTab, '正文章节 Tab 必须已打开').toBeDefined()
-    })
-    // 返回路径：关闭正文章节 Tab
-    act(() => useEditorStore.getState().closeTab(manuscriptTab!.id))
-    expect(useEditorStore.getState().tabs.some(t => t.id === manuscriptTab!.id)).toBe(false)
+    // 8. NAV-TREE-17: 正文写作入口分别打开草稿箱和正文章节目录。
+    const draftBoxItem = Array.from(container.querySelectorAll<HTMLElement>('.tree-item')).find(el => el.textContent?.includes('草稿箱'))
+    expect(draftBoxItem, 'NAV-TREE-17: 草稿箱入口必须严格存在').toBeDefined()
+    await act(async () => draftBoxItem?.click())
+    const draftDirectoryTab = useEditorStore.getState().tabs.find(t => t.type === 'chapter-directory' && t.proseDirectoryKind === 'draft')
+    expect(draftDirectoryTab, '草稿箱目录 Tab 必须已打开').toBeDefined()
+    act(() => useEditorStore.getState().closeTab(draftDirectoryTab!.id))
+    expect(useEditorStore.getState().tabs.some(t => t.id === draftDirectoryTab!.id)).toBe(false)
+
+    // 9. NAV-TREE-19: 正文章节入口打开正文章节目录。
+    const manuscriptItem = Array.from(container.querySelectorAll<HTMLElement>('.tree-item')).find(el => el.textContent?.includes('正文章节'))
+    expect(manuscriptItem, 'NAV-TREE-19: 正文章节入口必须严格存在').toBeDefined()
+    await act(async () => manuscriptItem?.click())
+    const manuscriptDirectoryTab = useEditorStore.getState().tabs.find(t => t.type === 'chapter-directory' && t.proseDirectoryKind === 'manuscript')
+    expect(manuscriptDirectoryTab, '正文章节目录 Tab 必须已打开').toBeDefined()
+    act(() => useEditorStore.getState().closeTab(manuscriptDirectoryTab!.id))
+    expect(useEditorStore.getState().tabs.some(t => t.id === manuscriptDirectoryTab!.id)).toBe(false)
 
     // 10. NAV-TREE-24: 导入创作资料
     const importItem = Array.from(container.querySelectorAll<HTMLElement>('.tree-item')).find(el => el.textContent?.includes('导入创作资料'))

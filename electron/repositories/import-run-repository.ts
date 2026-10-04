@@ -277,9 +277,11 @@ function assertEffectPayloadSchema(kind: ImportRunEffectKind, payload: unknown):
   }
   if (kind === 'project-global-facts') {
     if (
-      !exactKeys(payload, ['operationId', 'expectedRosterRevision', 'core', 'characterEntries'])
+      !exactKeys(payload, ['operationId', 'expectedRosterRevision', 'expectedSynopsisHash', 'core', 'characterEntries'])
       || typeof payload.operationId !== 'string'
       || !Number.isSafeInteger(payload.expectedRosterRevision)
+      || typeof payload.expectedSynopsisHash !== 'string'
+      || !/^[a-f0-9]{64}$/u.test(payload.expectedSynopsisHash)
       || !isRecord(payload.core)
       || !Array.isArray(payload.characterEntries)
       || payload.characterEntries.length === 0

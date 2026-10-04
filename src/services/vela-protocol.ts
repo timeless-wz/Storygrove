@@ -62,14 +62,19 @@ export async function writeCoreContent(
     velaPath: string,
     content: string,
     projectSession: ProjectSessionContext,
+    expectedSynopsisHash?: string,
 ): Promise<boolean> {
     if (velaPath === 'vela://core/characters') return false
     const dbField = parseCoreField(velaPath)
     if (!dbField) return false
+    if (dbField === 'synopsis' && !expectedSynopsisHash) return false
     const res = await ipc.invokeWithProjectSession(
         projectSession,
         'db:project-core-update',
-        { [dbField]: content },
+        {
+            [dbField]: content,
+            ...(dbField === 'synopsis' ? { expectedSynopsisHash } : {}),
+        },
         projectSession.projectPath,
     )
     return res.success === true

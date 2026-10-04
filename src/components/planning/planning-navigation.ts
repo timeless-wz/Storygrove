@@ -1,7 +1,7 @@
 /**
  * planning-navigation.ts
  *
- * 创作规划区域五个页面共用的返回路径。放在独立的 .ts 模块里，
+ * 规划页与世界设定工具共用的返回路径。放在独立的 .ts 模块里，
  * 让 PlanningPageShell.tsx 只导出组件，Fast Refresh 才能在编辑外壳时保留状态。
  */
 
@@ -26,8 +26,7 @@ export function revealSidebarGroup(groupId: string): void {
 }
 
 /**
- * 返回路径的根节点：把作者带回项目总览标签页，或直接展开项目树里的创作规划分组。
- * 五个规划页面共用同一条返回路径，避免每页各写一套「怎么回去」。
+ * 返回路径的根节点：把作者带回项目总览，或展开所属侧栏分组。
  */
 export function usePlanningBackPath() {
   const text = useLocaleStore(s => s.text)
@@ -41,10 +40,19 @@ export function usePlanningBackPath() {
     })
   }, [])
   const revealWritingPlan = useCallback(() => revealSidebarGroup('plan'), [])
+  const revealStorySetup = useCallback(() => revealSidebarGroup('setting'), [])
+  const revealWorldSetup = useCallback(() => {
+    revealSidebarGroup('setting')
+    revealSidebarGroup('worldSetup')
+  }, [])
   return useMemo(() => ({
     overviewLabel: text('项目总览', 'Project overview'),
     planLabel: text('创作规划', 'Writing plan'),
+    storySetupLabel: text('故事设定', 'Story setup'),
+    worldSetupLabel: text('世界设定', 'World setup'),
     openOverview,
     revealWritingPlan,
-  }), [openOverview, revealWritingPlan, text])
+    revealStorySetup,
+    revealWorldSetup,
+  }), [openOverview, revealWritingPlan, revealStorySetup, revealWorldSetup, text])
 }

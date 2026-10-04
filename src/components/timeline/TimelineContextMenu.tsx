@@ -1,51 +1,46 @@
 import { useEffect, useRef } from 'react'
 import {
   Compass,
-  Edit3,
   Flag,
-  FolderMinus,
-  FolderPlus,
-  GitBranch,
   Milestone,
   Plus,
-  Trash2,
 } from 'lucide-react'
 import { useLocaleStore } from '../../stores/locale-store'
+import type {
+  TimelineCanvasBounds,
+  TimelineScreenPoint,
+} from './timeline-ui-contract'
+
+/**
+ * 画布空白处与起止锚点的右键菜单（任务 B）。
+ *
+ * 事件本身的详情与操作由 TimelineEventFloat 负责；这里只处理
+ * 「在此创建事件」与「设置故事范围」两类画布级动作，并始终完整地
+ * 钳制在画布容器边界内，而不是按整个窗口避让。
+ */
 
 export interface TimelineContextMenuProps {
-  x: number
-  y: number
-  targetEventId?: string | null
+  point: TimelineScreenPoint
+  bounds: TimelineCanvasBounds
   targetAnchor?: 'start' | 'end' | null
   suggestedOrder?: number | null
   canCreateEventAtPosition?: boolean
-  hasChildBranches?: boolean
-  isBranchExpanded?: boolean
   onClose: () => void
   onCreateMainEvent: (suggestedOrder?: number) => void
-  onCreateNextEvent?: () => void
-  onCreateBranch?: () => void
-  onToggleExpand?: () => void
-  onEditEvent?: () => void
-  onDeleteEvent?: () => void
   onOpenRangeSettings?: (focusField?: 'start' | 'end' | 'general') => void
 }
+
+const MENU_MARGIN = 12
+const MENU_WIDTH = 220
+
 export function TimelineContextMenu({
-  x,
-  y,
-  targetEventId,
+  point,
+  bounds,
   targetAnchor,
   suggestedOrder,
   canCreateEventAtPosition = true,
-  hasChildBranches,
-  isBranchExpanded,
   onClose,
   onCreateMainEvent,
-  onCreateNextEvent,
-  onCreateBranch,
-  onToggleExpand,
-  onEditEvent,
-  onDeleteEvent,
   onOpenRangeSettings,
 }: TimelineContextMenuProps) {
   const text = useLocaleStore(s => s.text)
@@ -53,7 +48,8 @@ export function TimelineContextMenu({
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+      if (!(event.target instanceof Node)) return
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
         onClose()
       }
     }
@@ -68,11 +64,16 @@ export function TimelineContextMenu({
     }
   }, [onClose])
 
-  // 边界保护：确保菜单不超出视口边界
-  const menuWidth = 200
-  const menuHeight = targetEventId ? 220 : 100
-  const safeX = Math.max(12, Math.min(x, window.innerWidth - menuWidth - 16))
-  const safeY = Math.max(12, Math.min(y, window.innerHeight - menuHeight - 16))
+  const menuHeight = targetAnchor ? 92 : (canCreateEventAtPosition ? 84 : 48)
+  // 菜单渲染在画布容器内（absolute），先把 client 坐标换算成容器坐标再钳制。
+  const safeX = Math.max(
+    MENU_MARGIN,
+    Math.min(point.clientX - bounds.left, bounds.width - MENU_WIDTH - MENU_MARGIN),
+  )
+  const safeY = Math.max(
+    MENU_MARGIN,
+    Math.min(point.clientY - bounds.top, bounds.height - menuHeight - MENU_MARGIN),
+  )
 
   return (
     <div
@@ -138,7 +139,7 @@ export function TimelineContextMenu({
             <span>{text('设置故事范围', 'Set story range')}</span>
           </button>
         </>
-      ) : !targetEventId ? (
+      ) : (
         // 右键空白画布或主干
         <>
           {canCreateEventAtPosition && (
@@ -172,90 +173,6 @@ export function TimelineContextMenu({
             >
               <Compass size={14} />
               <span>{text('设置故事范围', 'Set story range')}</span>
-            </button>
-          )}
-        </>
-      ) : (
-        // 右键特定事件
-        <>
-          {onCreateNextEvent && (
-            <button
-              type="button"
-              role="menuitem"
-              className="writer-timeline-context-item"
-              onClick={() => {
-                onCreateNextEvent()
-                onClose()
-              }}
-            >
-              <Plus size={14} />
-              <span>{text('在此后添加事件', 'Add next event')}</span>
-            </button>
-          )}
-
-          {onCreateBranch && (
-            <button
-              type="button"
-              role="menuitem"
-              className="writer-timeline-context-item text-[var(--color-success-text)]"
-              onClick={() => {
-                onCreateBranch()
-                onClose()
-              }}
-            >
-              <GitBranch size={14} />
-              <span>{text('在此创建支线', 'Branch off from here')}</span>
-            </button>
-          )}
-
-          {hasChildBranches && onToggleExpand && (
-            <button
-              type="button"
-              role="menuitem"
-              className="writer-timeline-context-item"
-              onClick={() => {
-                onToggleExpand()
-                onClose()
-              }}
-            >
-              {isBranchExpanded ? <FolderMinus size={14} /> : <FolderPlus size={14} />}
-              <span>
-                {isBranchExpanded
-                  ? text('折叠支线', 'Collapse branch')
-                  : text('展开支线', 'Expand branch')}
-              </span>
-            </button>
-          )}
-
-          <div className="writer-timeline-context-divider" />
-
-          {onEditEvent && (
-            <button
-              type="button"
-              role="menuitem"
-              className="writer-timeline-context-item"
-              onClick={() => {
-                onEditEvent()
-                onClose()
-              }}
-            >
-              <Edit3 size={14} />
-              <span>{text('编辑事件', 'Edit event')}</span>
-            </button>
-          )}
-
-          {onDeleteEvent && (
-            <button
-              type="button"
-              role="menuitem"
-              className="writer-timeline-context-item text-[var(--color-error-text)]"
-              onClick={() => {
-                onDeleteEvent()
-                onClose()
-              }}
-            >
-              <Trash2 size={14} />
-              <span>{text('删除事件', 'Delete event')}</span>
             </button>
           )}
         </>

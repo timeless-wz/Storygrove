@@ -537,6 +537,7 @@
   }
 
   .literary-step-card {
+    cursor: pointer;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
@@ -623,6 +624,14 @@
 
   .literary-step-action {
     margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .literary-step-card:focus-within {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 3px;
   }
 
   /* ===== 创作阶段分组工作区 ===== */

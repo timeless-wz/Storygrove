@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import { page } from 'vitest/browser'
 
 import { useWorkflowStore, type WorkflowRun } from '../../../stores/workflow-store'
 import { useLocaleStore } from '../../../stores/locale-store'
@@ -8,6 +9,7 @@ import { useProjectStore } from '../../../stores/project-store'
 import { useEditorStore } from '../../../stores/editor-store'
 import AIOutputPanel from '../AIOutputPanel'
 import type { PromptBudgetReport } from '../../../services/generation/generation-harness'
+import '../../../index.css'
 
 const originalWorkflowState = useWorkflowStore.getState()
 const originalLocaleState = useLocaleStore.getState()
@@ -151,14 +153,36 @@ beforeEach(() => {
     } as never,
   })
   useEditorStore.setState({ tabs: [], activeTabId: null, draftLedgers: {} })
+  Object.assign(window, {
+    velaAPI: {
+      invoke: async (channel: string) => {
+        if (channel === 'db:recovery-candidate-list') return []
+        throw new Error(`unexpected IPC: ${channel}`)
+      },
+      on: () => () => {},
+      once: () => {},
+      send: () => {},
+      setZoomLevel: () => {},
+      setZoomFactor: () => {},
+      getZoomLevel: () => 0,
+    },
+  })
   container = document.createElement('div')
+  container.style.width = '460px'
+  container.style.height = '760px'
   document.body.append(container)
+  document.body.style.margin = '0'
+  document.body.style.background = 'var(--color-bg)'
   root = createRoot(container)
 })
 
 afterEach(async () => {
   await act(async () => root?.unmount())
   container?.remove()
+  delete (window as typeof window & { velaAPI?: unknown }).velaAPI
+  document.body.style.margin = ''
+  document.body.style.background = ''
+  await page.viewport(1280, 800)
   root = undefined
   container = undefined
   useWorkflowStore.setState(originalWorkflowState)
@@ -177,7 +201,8 @@ describe('AIOutputPanel failed chapter draft', () => {
       root?.render(<AIOutputPanel />)
     })
 
-    expect(container?.textContent).toContain('AI output')
+    expect(container?.textContent).toContain('AI workflow')
+    expect(container?.textContent).toContain('View AI task progress and output')
     expect(container?.textContent).toContain('Waiting for the workflow step...')
     expect(container?.textContent).toContain('Stop generation')
     expect(container?.textContent).not.toMatch(/AI 输出|等待指令响应|中止生成/u)
@@ -236,6 +261,10 @@ describe('AIOutputPanel failed chapter draft', () => {
 
     expect(container?.textContent).toContain('模型的内容安全策略拦截了这次输出。')
     expect(container?.textContent).toContain('本次未保存草稿或正文章节')
+    expect(container?.textContent).toContain('AI 工作流')
+    expect(container?.textContent).toContain('查看 AI 任务进度与输出')
+    await page.viewport(460, 760)
+    await page.screenshot({ path: '../../../../screenshots/basic-settings-workflow-failure.png' })
   })
 
   it('uses the draft run structure to explain an unsaved English generation failure', async () => {
@@ -270,8 +299,8 @@ describe('AIOutputPanel failed chapter draft', () => {
 
 describe('AIOutputPanel prompt budget failure', () => {
   it.each([
-    ['zh-CN', '提示词预算不足', '打开小说配置'],
-    ['en-US', 'Prompt budget is insufficient', 'Open novel configuration'],
+    ['zh-CN', '提示词预算不足', '打开创作方向'],
+    ['en-US', 'Prompt budget is insufficient', 'Open creative direction'],
   ] as const)('shows a %s actionable adjustment entry', async (locale, heading, actionLabel) => {
     useLocaleStore.setState({ locale })
     useWorkflowStore.setState({ history: [failedPromptBudget(locale)] })
@@ -296,8 +325,8 @@ describe('AIOutputPanel prompt budget failure', () => {
   })
 
   it.each([
-    ['zh-CN', '请返回该生成步骤，缩短步骤指导后重试。', '本次被预算预检阻止的请求未发送，未产生额外模型尝试或消费。', '打开小说配置'],
-    ['en-US', 'Return to that generation step, shorten its step guidance, and try again.', 'The request blocked by this budget preflight was not sent and caused no additional model attempt or consumption.', 'Open novel configuration'],
+    ['zh-CN', '请返回该生成步骤，缩短步骤指导后重试。', '本次被预算预检阻止的请求未发送，未产生额外模型尝试或消费。', '打开创作方向'],
+    ['en-US', 'Return to that generation step, shorten its step guidance, and try again.', 'The request blocked by this budget preflight was not sent and caused no additional model attempt or consumption.', 'Open creative direction'],
   ] as const)('shows accurate %s guidance without a configuration action for a non-configuration section', async (
     locale,
     guidance,
@@ -342,9 +371,9 @@ describe('AIOutputPanel prompt budget failure', () => {
 
     expect(container?.textContent).toContain('提示词预算不足')
     expect(container?.textContent).not.toContain('Prompt budget is insufficient')
-    expect(container?.textContent).toContain('此结果属于另一项目会话。请切回该项目后再打开小说配置。')
+    expect(container?.textContent).toContain('此结果属于另一项目会话。请切回该项目后再打开创作方向。')
     const action = Array.from(container?.querySelectorAll('button') ?? [])
-      .find(button => button.textContent?.includes('打开小说配置'))
+      .find(button => button.textContent?.includes('打开创作方向'))
     expect(action).toBeDisabled()
 
     await act(async () => action?.click())

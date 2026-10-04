@@ -4,6 +4,7 @@
  * 合并 NovelConfig + 架构四大件的统一读写。
  * 始终只有一行数据 (id = 'main')。
  */
+import { createHash } from 'node:crypto'
 import { getProjectDb } from '../database'
 import { CREATIVE_STRATEGIES, type CreativeStrategy } from '../../src/shared/reasoning-types'
 import {
@@ -87,6 +88,18 @@ export type ProjectCoreSynopsisExpected = Pick<ProjectCoreData,
 export interface ProjectCoreSynopsisCommitRequest {
     synopsis: string
     expected: ProjectCoreSynopsisExpected
+    expectedSynopsisHash?: string
+}
+
+export type ProjectCoreUpdateInput = Partial<ProjectCoreData> & { expectedSynopsisHash?: string }
+
+export interface ProjectCoreUpdateResult {
+    success: boolean
+    error?: string
+}
+
+export function hashProjectSynopsis(synopsis: string): string {
+    return createHash('sha256').update(synopsis, 'utf8').digest('hex')
 }
 
 /** 数据库行 → 前端数据 */
@@ -152,15 +165,31 @@ export class ProjectCoreRepository {
     }
 
     /** 更新项目配置（传入部分字段即可） */
-    static update(data: Partial<ProjectCoreData>): void {
+    static update(data: ProjectCoreUpdateInput): ProjectCoreUpdateResult {
         const db = getProjectDb()
         if (!db) throw new Error('项目数据库未打开')
         if (Object.hasOwn(data, 'charactersArch')) {
             throw new Error('角色图谱由角色名单自动生成；请通过角色管理修改角色资料')
         }
 
-        // 构建动态 SET 子句，只更新传入的字段
-        const fieldMap: Record<string, string> = {
+        const { expectedSynopsisHash, ...requestedData } = data
+        const updateData: Partial<ProjectCoreData> = { ...requestedData }
+        let synopsisRejected = false
+
+        const transaction = db.transaction(() => {
+            if (Object.hasOwn(updateData, 'synopsis')) {
+                const row = db.prepare("SELECT synopsis FROM project_core WHERE id = 'main'")
+                    .get() as { synopsis: string } | undefined
+                const validHash = typeof expectedSynopsisHash === 'string'
+                    && /^[a-f0-9]{64}$/u.test(expectedSynopsisHash)
+                if (!row || !validHash || hashProjectSynopsis(row.synopsis ?? '') !== expectedSynopsisHash) {
+                    synopsisRejected = true
+                    delete updateData.synopsis
+                }
+            }
+
+            // 构建动态 SET 子句，只更新传入的字段。
+            const fieldMap: Record<string, string> = {
             projectName: 'project_name',
             genre: 'genre',
             subGenre: 'sub_genre',
@@ -183,36 +212,44 @@ export class ProjectCoreRepository {
             worldbuilding: 'worldbuilding',
             synopsis: 'synopsis',
             characterStates: 'character_states',
-        }
-
-        const setClauses: string[] = []
-        const values: unknown[] = []
-
-        for (const [camel, col] of Object.entries(fieldMap)) {
-            if (camel in data) {
-                setClauses.push(`${col} = ?`)
-                const value = (data as Record<string, unknown>)[camel]
-                values.push(camel === 'narrativeThreadDormantChapterThreshold'
-                    ? resolveNarrativeThreadDormantThreshold(value)
-                    : value)
             }
-        }
 
-        if (setClauses.length === 0) return
+            const setClauses: string[] = []
+            const values: unknown[] = []
 
-        // 追加 updated_at
-        setClauses.push("updated_at = datetime('now')")
-        values.push('main')
+            for (const [camel, col] of Object.entries(fieldMap)) {
+                if (camel in updateData) {
+                    setClauses.push(`${col} = ?`)
+                    const value = (updateData as Record<string, unknown>)[camel]
+                    values.push(camel === 'narrativeThreadDormantChapterThreshold'
+                        ? resolveNarrativeThreadDormantThreshold(value)
+                        : value)
+                }
+            }
 
-        db.prepare(`
+            if (setClauses.length === 0) return
+
+            // 追加 updated_at
+            setClauses.push("updated_at = datetime('now')")
+            values.push('main')
+
+            db.prepare(`
       UPDATE project_core SET ${setClauses.join(', ')} WHERE id = ?
     `).run(...values)
+        })
+        transaction()
+        return synopsisRejected
+            ? { success: false, error: '全书总纲已变化或缺少来源版本，已拒绝覆盖；其余项目配置已保存' }
+            : { success: true }
     }
 
     static commitSynopsis(request: ProjectCoreSynopsisCommitRequest): boolean {
         const db = getProjectDb()
         if (!db) throw new Error('项目数据库未打开')
         const { expected } = request
+        const expectedSynopsisHash = request.expectedSynopsisHash ?? hashProjectSynopsis(expected.synopsis)
+        if (!/^[a-f0-9]{64}$/u.test(expectedSynopsisHash)
+            || hashProjectSynopsis(expected.synopsis) !== expectedSynopsisHash) return false
         const result = db.prepare(`
           UPDATE project_core
           SET synopsis = ?, updated_at = datetime('now')
@@ -247,6 +284,7 @@ export class ProjectCoreRepository {
 
     /** 清空由架构/导入/AI 分析生成的创作字段，保留项目名、章节规模与基础偏好 */
     static resetCreativeFields(): void {
+        const core = ProjectCoreRepository.get()
         ProjectCoreRepository.update({
             writingStyle: '',
             referenceWorks: '',
@@ -259,6 +297,7 @@ export class ProjectCoreRepository {
             worldbuilding: '',
             synopsis: '',
             characterStates: '',
+            ...(core ? { expectedSynopsisHash: hashProjectSynopsis(core.synopsis) } : {}),
         })
     }
 }

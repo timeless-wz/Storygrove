@@ -17,6 +17,10 @@ import { assertMateriallyCompleteRevision } from './refinement-completeness'
 import { countDraftUnits } from '../../../shared/draft-units'
 import { throwIfSourceDraftChanged } from '../source-draft-changed'
 import { assembleBlueprintV2WritingBlock, isWritableBlueprintV2Detail } from './blueprint-v2-writing'
+import {
+  formatBlueprintVolumeWritingMaterial,
+  loadBlueprintVolumeWritingMaterial,
+} from './blueprint-volume-writing'
 
 import type { ChapterInfo, FrozenDraftSourceIdentity } from '../chapter-workflow'
 
@@ -54,6 +58,27 @@ export class RefineDraftCommand extends BaseWorkflowCommand<string> {
     )) throw new Error(text('当前项目已切换，修稿已停止', 'The project changed, so the revision stopped.'))
     const novelConfig = Object.freeze({ ...project.novelConfig })
 
+    const initialDraftMeta = await readWorkflowDraftMeta(
+      this.params.draftPath,
+      context.projectPath,
+      projectSession,
+    )
+    if (
+      !initialDraftMeta
+      || (this.params.sourceDraft && (
+        initialDraftMeta.id !== this.params.sourceDraft.id
+        || initialDraftMeta.chapterNumber !== this.params.sourceDraft.chapterNumber
+        || initialDraftMeta.version !== this.params.sourceDraft.version
+        || initialDraftMeta.status !== this.params.sourceDraft.status
+      ))
+    ) throw new Error(text('基准草稿已变化，修稿已停止。', 'The source draft changed, so revision stopped.'))
+    const boundBlueprintChapterNumber = initialDraftMeta.blueprintChapterNumber
+    const volumeMaterial = await loadBlueprintVolumeWritingMaterial(
+      projectSession,
+      boundBlueprintChapterNumber,
+    )
+    const volumePlanningText = formatBlueprintVolumeWritingMaterial(volumeMaterial, writingLanguage)
+
     const draft = this.params.draftContent
     if (!draft) throw new Error(text('无草稿内容', 'There is no draft content to revise.'))
 
@@ -77,9 +102,11 @@ export class RefineDraftCommand extends BaseWorkflowCommand<string> {
     let hasBlueprintV2Content = false
     let detail
     try {
-      detail = await ipc.invokeWithProjectSession(
-        projectSession, 'db:blueprint-v2-get', this.params.chapterNumber, context.projectPath,
-      )
+      detail = boundBlueprintChapterNumber === undefined
+        ? null
+        : await ipc.invokeWithProjectSession(
+            projectSession, 'db:blueprint-v2-get', boundBlueprintChapterNumber, context.projectPath,
+          )
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
       const message = text(
@@ -102,10 +129,10 @@ export class RefineDraftCommand extends BaseWorkflowCommand<string> {
       callbacks.log(message)
       throw new Error(message)
     }
-    if (detail && detail.chapterNumber !== this.params.chapterNumber) {
+    if (detail && detail.chapterNumber !== boundBlueprintChapterNumber) {
       const message = text(
-        `读取到第 ${detail.chapterNumber} 章 v2 细纲，但当前修稿绑定第 ${this.params.chapterNumber} 章；已停止以防串章。`,
-        `The v2 outline read is for Chapter ${detail.chapterNumber}, but this revision is bound to Chapter ${this.params.chapterNumber}. Revision stopped to prevent a chapter mismatch.`,
+        `读取到第 ${detail.chapterNumber} 章 v2 细纲，但当前草稿绑定第 ${boundBlueprintChapterNumber} 章；已停止以防串章。`,
+        `The v2 outline read is for Chapter ${detail.chapterNumber}, but this draft is bound to Chapter ${boundBlueprintChapterNumber}. Revision stopped to prevent a chapter mismatch.`,
       )
       callbacks.log(message)
       throw new Error(message)
@@ -132,7 +159,7 @@ export class RefineDraftCommand extends BaseWorkflowCommand<string> {
       .withUserRefinePrompt(userPromptBlock)
 
     const refined = await this.callLLMWithBoundedCompletion(
-      [promptBuilder.build(), blueprintV2Text].filter(Boolean).join('\n\n'),
+      [promptBuilder.build(), volumePlanningText, blueprintV2Text].filter(Boolean).join('\n\n'),
       promptBuilder.getSystemRole(),
       callbacks,
       { mode: 'append-visible-text', maxContinuations: 3 },
@@ -154,9 +181,31 @@ export class RefineDraftCommand extends BaseWorkflowCommand<string> {
     )) throw new Error(text('当前项目已切换，修稿结果未保存', 'The project changed, so the revision was not saved.'))
 
     const frozenSource = this.params.sourceDraft
-    const legacyBaseDraft = frozenSource
-      ? null
-      : await readWorkflowDraftMeta(this.params.draftPath, context.projectPath, projectSession)
+    const latestDraftMeta = await readWorkflowDraftMeta(
+      this.params.draftPath,
+      context.projectPath,
+      projectSession,
+    )
+    if (
+      !latestDraftMeta
+      || latestDraftMeta.id !== initialDraftMeta.id
+      || latestDraftMeta.chapterNumber !== initialDraftMeta.chapterNumber
+      || latestDraftMeta.version !== initialDraftMeta.version
+      || latestDraftMeta.status !== initialDraftMeta.status
+      || latestDraftMeta.blueprintChapterNumber !== initialDraftMeta.blueprintChapterNumber
+    ) throw new Error(text(
+      '修稿期间草稿蓝图绑定已变化，未保存结果。',
+      'The draft blueprint binding changed during revision, so the result was not saved.',
+    ))
+    const latestVolumeMaterial = await loadBlueprintVolumeWritingMaterial(
+      projectSession,
+      latestDraftMeta.blueprintChapterNumber,
+    )
+    if (JSON.stringify(latestVolumeMaterial) !== JSON.stringify(volumeMaterial)) throw new Error(text(
+      '修稿期间本章归卷或卷纲版本已变化，未保存结果。',
+      'The chapter assignment or volume-outline version changed during revision, so the result was not saved.',
+    ))
+    const legacyBaseDraft = frozenSource ? null : latestDraftMeta
     const baseDraftId = frozenSource?.id ?? legacyBaseDraft?.id
     if (baseDraftId === undefined) throw new Error(text('找不到基准草稿版本', 'The source draft version could not be found.'))
 

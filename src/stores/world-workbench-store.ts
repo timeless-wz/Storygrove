@@ -173,7 +173,7 @@ function sessionFor(projectPath: string): ProjectSessionContext | null {
 
 export const useWorldWorkbenchStore = create<WorldWorkbenchState>((set, get) => {
   /**
-   * 统一的写入口：捕获会话 → 调用 → 失败只提示、绝不改动本地状态。
+   * 统一的写入口：捕获会话 → 调用 → 当前会话失败时记录原因并提示，不刷新快照。
    * 成功后才刷新快照，因此「保存失败保留输入」是默认行为而不是特例。
    */
   async function write(
@@ -183,24 +183,27 @@ export const useWorldWorkbenchStore = create<WorldWorkbenchState>((set, get) => 
     options: { silent?: boolean } = {},
   ): Promise<WriteResult | null> {
     const session = sessionFor(projectPath)
-    if (!session) {
-      set({ lastError: '当前项目会话已失效，已拒绝写入' })
-      if (!options.silent) toast.error('当前项目会话已失效，已拒绝写入')
-      return null
-    }
+    // 过期表单调用不能把错误写进当前项目的 store / 全局 toast。
+    if (!session) return null
     try {
       const result = await invoke(session)
+      // 请求期间可能已经关闭项目、切换项目，或以新 lease 重开同一路径。
+      // 迟到的成功与失败都属于旧会话，必须在触碰当前 store 前丢弃。
+      if (!isProjectSessionCurrent(session)) return null
       if (!result?.success) {
         const message = result?.error || fallbackError
         set({ lastError: message })
         if (!options.silent) toast.error(message)
         return result ?? null
       }
-      if (!isProjectSessionCurrent(session)) return result
       set({ lastError: null })
       await get().loadAll(projectPath)
+      // loadAll 自己也会丢弃过期读；这里再拦一次，避免成功结果继续流到
+      // saveWorld/deleteWorld 等调用方并改动新项目的选中状态。
+      if (!isProjectSessionCurrent(session)) return null
       return result
     } catch (error) {
+      if (!isProjectSessionCurrent(session)) return null
       const message = error instanceof Error ? error.message : String(error)
       set({ lastError: message })
       if (!options.silent) toast.error(message)
@@ -262,6 +265,7 @@ export const useWorldWorkbenchStore = create<WorldWorkbenchState>((set, get) => 
     },
 
     saveWorld: async (world, projectPath) => {
+      const session = sessionFor(projectPath)
       const result = await write(projectPath, '保存世界失败', session =>
         ipc.invokeWithProjectSession(session, 'db:world-upsert', {
           id: world.id ?? newWorldId(),
@@ -273,7 +277,8 @@ export const useWorldWorkbenchStore = create<WorldWorkbenchState>((set, get) => 
           createdAt: world.createdAt,
         } as WorldRecord, projectPath))
       const saved = (result as { world?: WorldRecord } | null)?.world ?? null
-      if (saved) set({ selectedWorldId: saved.id })
+      if (saved && session && isProjectSessionCurrent(session)) set({ selectedWorldId: saved.id })
+      else if (saved) return null
       return saved
     },
 
@@ -282,17 +287,20 @@ export const useWorldWorkbenchStore = create<WorldWorkbenchState>((set, get) => 
       if (!session) return null
       try {
         const result = await ipc.invokeWithProjectSession(session, 'db:world-delete-plan', worldId, projectPath)
+        if (!isProjectSessionCurrent(session)) return null
         return result?.plan ?? null
       } catch (error) {
+        if (!isProjectSessionCurrent(session)) return null
         toast.error(error instanceof Error ? error.message : String(error))
         return null
       }
     },
 
     deleteWorld: async (worldId, projectPath) => {
+      const session = sessionFor(projectPath)
       const result = await write(projectPath, '删除世界失败', session =>
         ipc.invokeWithProjectSession(session, 'db:world-delete', worldId, projectPath))
-      if (!result?.success) return false
+      if (!result?.success || !session || !isProjectSessionCurrent(session)) return false
       if (get().selectedWorldId === worldId) set({ selectedWorldId: null })
       return true
     },
@@ -302,8 +310,10 @@ export const useWorldWorkbenchStore = create<WorldWorkbenchState>((set, get) => 
       if (!session) return null
       try {
         const result = await ipc.invokeWithProjectSession(session, 'db:world-map-assignment-plan', mapId, nextWorldId, projectPath)
+        if (!isProjectSessionCurrent(session)) return null
         return result?.plan ?? null
       } catch (error) {
+        if (!isProjectSessionCurrent(session)) return null
         toast.error(error instanceof Error ? error.message : String(error))
         return null
       }
@@ -500,15 +510,17 @@ export const useWorldWorkbenchStore = create<WorldWorkbenchState>((set, get) => 
           session, 'db:world-character-current-location-commit',
           characterId, worldId, nodeId, options, projectPath,
         )
+        if (!isProjectSessionCurrent(session)) return { ok: false }
         if (!result?.success) {
           const message = result?.error || '设置目前所在地失败'
           toast.error(message)
           return { ok: false, error: message }
         }
-        if (!isProjectSessionCurrent(session)) return { ok: true, locationText: result.locationText }
         await get().loadAll(projectPath)
+        if (!isProjectSessionCurrent(session)) return { ok: false }
         return { ok: true, locationText: result.locationText }
       } catch (error) {
+        if (!isProjectSessionCurrent(session)) return { ok: false }
         const message = error instanceof Error ? error.message : String(error)
         toast.error(message)
         return { ok: false, error: message }
@@ -532,8 +544,10 @@ export const useWorldWorkbenchStore = create<WorldWorkbenchState>((set, get) => 
       if (!session) return null
       try {
         const result = await ipc.invokeWithProjectSession(session, 'db:world-trail-delete-plan', trailId, projectPath)
+        if (!isProjectSessionCurrent(session)) return null
         return result?.plan ?? null
       } catch (error) {
+        if (!isProjectSessionCurrent(session)) return null
         toast.error(error instanceof Error ? error.message : String(error))
         return null
       }
@@ -564,8 +578,10 @@ export const useWorldWorkbenchStore = create<WorldWorkbenchState>((set, get) => 
       if (!session) return null
       try {
         const result = await deletePlanChannel(kind)(session, entityId, projectPath)
+        if (!isProjectSessionCurrent(session)) return null
         return result?.plan ?? null
       } catch (error) {
+        if (!isProjectSessionCurrent(session)) return null
         toast.error(error instanceof Error ? error.message : String(error))
         return null
       }

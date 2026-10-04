@@ -95,6 +95,8 @@ import type {
 } from './world-workbench'
 import type {
   StoryTimelineBranch,
+  StoryTimelineDeleteCommitResult,
+  StoryTimelineDeletePreviewResult,
   StoryTimelineEvent,
   StoryTimelineSettings,
   StoryTimelineSnapshot,
@@ -883,6 +885,8 @@ export interface ProjectClearOptions {
   creativeFields?: boolean
   blueprints?: boolean
   generatedText?: boolean
+  /** Required when creativeFields clears the synopsis; guards against stale UI state. */
+  expectedSynopsisHash?: string
 }
 
 export type ProjectClearScope = 'creativeFields' | 'blueprints' | 'generatedText'
@@ -892,6 +896,26 @@ import type {
   ProjectCoreData,
   ProjectCoreSynopsisCommitRequest,
 } from '../../electron/repositories/project-core-repository'
+import type {
+  BlueprintPlanningCandidateListScope,
+  BlueprintPlanningCandidateRecord,
+  BlueprintPlanningCandidateSaveInput,
+  BlueprintPlanningCandidateUpdateInput,
+  BlueprintPlanningCheckListScope,
+  BlueprintPlanningCheckRecord,
+  BlueprintPlanningCheckReport,
+  BlueprintPlanningCheckSaveResult,
+  BlueprintPlanningConfirmInput,
+  BlueprintPlanningConfirmResult,
+  BlueprintPlanningExportPackage,
+  BlueprintPlanningSourceStatusRecord,
+  BlueprintPlanningTargetSourceReference,
+  BlueprintPlanningTargetSourceStatusRecord,
+  BlueprintVolumeOutline,
+  BlueprintVolumeOutlineDeleteInput,
+  BlueprintVolumeOutlineSaveInput,
+  BlueprintVolumeOutlineSummary,
+} from './blueprint-planning'
 import type {
   BlueprintCharacterSyncOperation,
   BlueprintData,
@@ -962,7 +986,7 @@ export interface DatabaseChannels {
     return: ProjectCoreData | null
   }
   'db:project-core-update': {
-    args: [data: Partial<ProjectCoreData>, expectedProjectPath: string]
+    args: [data: Partial<ProjectCoreData> & { expectedSynopsisHash?: string }, expectedProjectPath: string]
     return: { success: boolean; error?: string }
   }
   'db:project-core-synopsis-commit': {
@@ -1029,6 +1053,54 @@ export interface DatabaseChannels {
   'db:blueprint-recent-notes': { args: [expectedProjectPath: string]; return: BlueprintRecentNoteSummary[] }
   'db:blueprint-volume-list': { args: [expectedProjectPath: string]; return: BlueprintVolumeData[] }
   'db:blueprint-volume-upsert': { args: [volume: BlueprintVolumeData, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:blueprint-volume-outline-get': { args: [volumeId: string, expectedProjectPath: string]; return: BlueprintVolumeOutline | null }
+  'db:blueprint-volume-outline-list-summaries': { args: [expectedProjectPath: string]; return: BlueprintVolumeOutlineSummary[] }
+  'db:blueprint-volume-outline-save': {
+    args: [input: BlueprintVolumeOutlineSaveInput, expectedProjectPath: string]
+    return: { success: true; outline: BlueprintVolumeOutline } | { success: false; code: string; error: string; current?: BlueprintVolumeOutline | null }
+  }
+  'db:blueprint-volume-outline-delete': {
+    args: [input: BlueprintVolumeOutlineDeleteInput, expectedProjectPath: string]
+    return: { success: true; deleted: boolean } | { success: false; code: string; error: string; current?: BlueprintVolumeOutline | null }
+  }
+  'db:blueprint-planning-candidate-save': {
+    args: [input: BlueprintPlanningCandidateSaveInput, expectedProjectPath: string]
+    return: { success: true; candidate: BlueprintPlanningCandidateRecord; idempotent: boolean } | { success: false; code: string; error: string }
+  }
+  'db:blueprint-planning-candidate-update': {
+    args: [input: BlueprintPlanningCandidateUpdateInput, expectedProjectPath: string]
+    return: { success: true; candidate: BlueprintPlanningCandidateRecord } | { success: false; code: string; error: string; current?: BlueprintPlanningCandidateRecord }
+  }
+  'db:blueprint-planning-candidate-get': { args: [operationId: string, expectedProjectPath: string]; return: BlueprintPlanningCandidateRecord | null }
+  'db:blueprint-planning-candidate-list': {
+    args: [scope: BlueprintPlanningCandidateListScope, expectedProjectPath: string]
+    return: BlueprintPlanningCandidateRecord[]
+  }
+  'db:blueprint-planning-candidate-cancel': {
+    args: [operationId: string, expectedProjectPath: string]
+    return: { success: true; candidate: BlueprintPlanningCandidateRecord } | { success: false; code: string; error: string }
+  }
+  'db:blueprint-planning-confirm': {
+    args: [input: BlueprintPlanningConfirmInput, expectedProjectPath: string]
+    return: BlueprintPlanningConfirmResult
+  }
+  'db:blueprint-planning-source-status': {
+    args: [snapshotIds: string[], expectedProjectPath: string]
+    return: BlueprintPlanningSourceStatusRecord[]
+  }
+  'db:blueprint-planning-target-source-status': {
+    args: [targets: BlueprintPlanningTargetSourceReference[], expectedProjectPath: string]
+    return: BlueprintPlanningTargetSourceStatusRecord[]
+  }
+  'db:blueprint-planning-check-save': {
+    args: [report: BlueprintPlanningCheckReport, expectedProjectPath: string]
+    return: BlueprintPlanningCheckSaveResult
+  }
+  'db:blueprint-planning-check-list': {
+    args: [scope: BlueprintPlanningCheckListScope, expectedProjectPath: string]
+    return: BlueprintPlanningCheckRecord[]
+  }
+  'db:blueprint-planning-export': { args: [expectedProjectPath: string]; return: BlueprintPlanningExportPackage }
   'db:blueprint-get': { args: [chapterNumber: number, expectedProjectPath: string]; return: BlueprintData | null }
   'db:blueprint-upsert': { args: [data: BlueprintData, expectedProjectPath: string]; return: { success: boolean; error?: string } }
   'db:blueprint-upsert-many': { args: [items: BlueprintData[], expectedProjectPath: string]; return: { success: boolean; error?: string } }
@@ -1360,6 +1432,13 @@ export interface DatabaseChannels {
   'db:timeline-events-reorder': { args: [orderedIds: string[], expectedProjectPath: string]; return: { success: boolean; error?: string } }
   'db:timeline-branch-upsert': { args: [branch: StoryTimelineBranch, expectedProjectPath: string]; return: { success: boolean; branch?: StoryTimelineBranch; error?: string } }
   'db:timeline-branch-delete': { args: [id: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:timeline-branch-create-with-event': { args: [branch: StoryTimelineBranch, event: StoryTimelineEvent, expectedProjectPath: string]; return: { success: boolean; branch?: StoryTimelineBranch; event?: StoryTimelineEvent; error?: string } }
+  // 删除影响预览与确认删除：预览由主进程按真实级联规则收集；确认删除回传
+  // 预览指纹，影响集合已变化时返回 needsReconfirmation 而不是静默扩大范围。
+  'db:timeline-event-delete-preview': { args: [eventId: string, expectedProjectPath: string]; return: StoryTimelineDeletePreviewResult }
+  'db:timeline-branch-delete-preview': { args: [branchId: string, expectedProjectPath: string]; return: StoryTimelineDeletePreviewResult }
+  'db:timeline-event-delete-confirmed': { args: [eventId: string, fingerprint: string, expectedProjectPath: string]; return: StoryTimelineDeleteCommitResult }
+  'db:timeline-branch-delete-confirmed': { args: [branchId: string, fingerprint: string, expectedProjectPath: string]; return: StoryTimelineDeleteCommitResult }
 
   // 7.5 world — 多世界资料（世界/势力/秘境/通道/规则/人物关联与行踪）
   // 读路径返回完整快照；写路径返回 { success, error } 并携带保存后的实体。

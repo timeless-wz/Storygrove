@@ -79,8 +79,8 @@ export function guardArchitectureGeneration(
       ok: false,
       message: localize(
         uiLocale,
-        `请先填写「小说配置」中的核心大纲或主角人设，AI 才能据此生成故事架构。\n\n当前类型：${genre || '未设置'}`,
-        `Fill in the core outline or protagonist profile in Novel Configuration before generating the story architecture.\n\nCurrent genre: ${genre || 'Not set'}`,
+        `请先在「创作方向」填写核心大纲或主角人设，并保存，AI 才能据此生成故事设定。\n\n当前类型：${genre || '未设置'}`,
+        `Add a core outline or protagonist profile in Creative direction and save it before generating the story setup.\n\nCurrent genre: ${genre || 'Not set'}`,
       ),
       action: 'open-config',
     }
@@ -93,7 +93,7 @@ export function guardArchitectureGeneration(
 
 /**
  * 生成章节蓝图前的前置校验：
- * 要求至少有 1 个架构信息（故事前提）已生成，
+ * 要求故事前提已有可用内容（手写内容也有效），
  * 建议 4 个都完成，但允许继续（仅提示警告）。
  */
 export async function guardDirectoryGeneration(
@@ -133,8 +133,8 @@ export async function guardDirectoryGeneration(
       ok: false,
       message: localize(
         uiLocale,
-        '「故事前提」尚未生成，它是章节蓝图的基础。\n\n请先在「故事架构」中点击「AI 生成架构」，生成故事前提后再来生成章节蓝图。',
-        'The story premise has not been generated, and chapter blueprints depend on it.\n\nGenerate the story premise in Story Architecture before generating chapter blueprints.',
+        '「故事前提」缺失或内容不足，它是章节蓝图的基础。\n\n请先在「基础设定总览」打开故事前提补充内容；也可以使用 AI 辅助生成，再来生成章节蓝图。',
+        'The story premise is missing or incomplete, and chapter blueprints depend on it.\n\nOpen Story premise from Basic settings overview to add content, or use AI assistance, before generating chapter blueprints.',
       ),
       action: 'open-world-building',
     }
@@ -147,8 +147,8 @@ export async function guardDirectoryGeneration(
       ok: false,
       message: localize(
         uiLocale,
-        '角色卡不存在（数据库中没有角色记录）。\n\n请先在「故事架构」中生成角色图谱（会自动创建角色卡），或在「角色管理」中手动创建角色卡。',
-        'No character cards exist (the database has no character records).\n\nGenerate the character graph in Story Architecture, or create character cards manually.',
+        '角色卡不存在（数据库中没有角色记录）。\n\n请先在「角色档案」中创建人物资料；角色图谱会由档案生成投影。',
+        'No character cards exist (the database has no character records).\n\nCreate character profiles in Character Profiles; the character graph is projected from those records.',
       ),
     }
   }
@@ -159,8 +159,8 @@ export async function guardDirectoryGeneration(
       ok: true, // 允许继续，但携带警告信息
       message: localize(
         uiLocale,
-        `注意：以下架构信息尚未生成，蓝图质量可能受影响：\n${missing.map(m => `• ${m}`).join('\n')}\n\n建议先生成完整架构，或继续使用现有内容。`,
-        `The following architecture sections have not been generated, which may affect blueprint quality:\n${missing.map(m => `• ${m}`).join('\n')}\n\nGenerate the complete architecture first, or continue with the available content.`,
+        `注意：以下设定内容缺失或不足，蓝图质量可能受影响：\n${missing.map(m => `• ${m}`).join('\n')}\n\n可先补充这些内容，也可以继续使用当前上下文。`,
+        `The following setting content is missing or incomplete and may affect blueprint quality:\n${missing.map(m => `• ${m}`).join('\n')}\n\nYou can add this content first or continue with the available context.`,
       ),
     }
   }
@@ -210,8 +210,8 @@ export async function guardChapterWriting(
       ok: false,
       message: localize(
         uiLocale,
-        '角色卡不存在（数据库中没有角色记录）。\n\nAI 写稿需要角色状态作为上下文，请先在「故事架构」中生成角色图谱，或在「角色管理」中手动创建角色卡。',
-        'No character cards exist (the database has no character records).\n\nAI drafting needs character state as context. Generate the character graph in Story Architecture or create character cards manually.',
+        '角色卡不存在（数据库中没有角色记录）。\n\nAI 写稿需要角色状态作为上下文，请先在「角色档案」中创建人物资料；角色图谱会由档案生成投影。',
+        'No character cards exist (the database has no character records).\n\nAI drafting needs character state as context. Create character profiles in Character Profiles; the character graph is projected from those records.',
       ),
     }
   }

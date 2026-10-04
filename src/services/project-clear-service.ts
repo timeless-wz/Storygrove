@@ -3,7 +3,8 @@ import { useDraftStore } from '../stores/draft-store'
 import { useEditorStore, type EditorTab } from '../stores/editor-store'
 import { useProjectStore } from '../stores/project-store'
 import { useWorkflowStore } from '../stores/workflow-store'
-import type { ProjectClearScope, ProjectSessionContext } from '../shared/ipc-channels'
+import type { DatabaseChannels, ProjectClearScope, ProjectSessionContext } from '../shared/ipc-channels'
+import { blueprintPlanningTextHash } from '../shared/blueprint-planning'
 import {
   getActiveProjectSessionContext,
   sameProjectSessionContext,
@@ -138,10 +139,26 @@ export async function clearProjectData(
   }
 
   assertProjectSessionCurrent(projectSession)
+  let clearRequest: DatabaseChannels['db:project-clear-generated-data']['args'][0] = normalized
+  if (normalized.creativeFields) {
+    const core = await ipc.invokeWithProjectSession(
+      projectSession,
+      'db:project-core-get',
+      projectPath,
+    )
+    assertProjectSessionCurrent(projectSession)
+    if (!core || typeof core.synopsis !== 'string') {
+      throw new Error('无法读取清除开始时的全书总纲版本；未清除任何项目数据。')
+    }
+    clearRequest = {
+      ...normalized,
+      expectedSynopsisHash: blueprintPlanningTextHash(core.synopsis),
+    }
+  }
   const result = await ipc.invokeWithProjectSession(
     projectSession,
     'db:project-clear-generated-data',
-    normalized,
+    clearRequest,
     projectPath,
   )
   if (!isProjectSessionCurrent(projectSession)) {

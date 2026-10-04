@@ -1,6 +1,6 @@
 import { BaseWorkflowCommand, CommandExecuteParams, type WorkflowGenerationRuntimeDependencies } from './base-command'
 import { useProjectStore } from '../../../stores/project-store'
-import type { NovelConfig } from '../../../shared/ipc-channels'
+import type { NovelConfig, ProjectSessionContext } from '../../../shared/ipc-channels'
 import {
   projectSessionContextFromProject,
   sameProjectSessionContext,
@@ -19,26 +19,14 @@ import {
   isGeneratedGlobalGuidanceValid,
   preserveAuthorText,
 } from '../novel-config-expansion'
+import { GENERATABLE_FIELD_LABELS, type GeneratableField } from '../novel-config-field-labels'
 
-/**
- * 支持的单字段生成 Key
- * 每个 key 对应 NovelConfig 中的一个文本字段
- */
-export type GeneratableField =
-  | 'coreOutline'
-  | 'worldSetting'
-  | 'goldenFinger'
-  | 'protagonistProfile'
-  | 'globalGuidance'
-  | 'writingStyle'
+export { GENERATABLE_FIELD_LABELS } from '../novel-config-field-labels'
+export type { GeneratableField } from '../novel-config-field-labels'
 
-const FIELD_LABELS: Record<GeneratableField, readonly [string, string]> = {
-  coreOutline: ['核心大纲', 'Core outline'],
-  worldSetting: ['世界观设定', 'World setting'],
-  goldenFinger: ['金手指/核心卖点', 'Special advantage / core story engine'],
-  protagonistProfile: ['主角人设', 'Protagonist profile'],
-  globalGuidance: ['全局写作要求', 'Global writing guidance'],
-  writingStyle: ['文风配置', 'Writing-style guide'],
+export interface GenerateFieldFrozenInput {
+  readonly projectSession: ProjectSessionContext
+  readonly novelConfig: Readonly<NovelConfig>
 }
 
 /**
@@ -49,6 +37,7 @@ export class GenerateFieldCommand extends BaseWorkflowCommand<string> {
   constructor(
     private fieldKey: GeneratableField,
     generationDependencies?: WorkflowGenerationRuntimeDependencies,
+    private readonly frozenInput?: GenerateFieldFrozenInput,
   ) {
     super(generationDependencies)
   }
@@ -58,7 +47,15 @@ export class GenerateFieldCommand extends BaseWorkflowCommand<string> {
   }
 
   private async executeWithinGeneration({ context, callbacks }: CommandExecuteParams): Promise<string> {
-    const projectSession = requireWorkflowProjectSession(context)
+    const workflowProjectSession = requireWorkflowProjectSession(context)
+    const projectSession = this.frozenInput?.projectSession ?? workflowProjectSession
+    if (!sameProjectSessionContext(projectSession, workflowProjectSession)) {
+      throw new Error(workflowUiText(
+        context,
+        '字段生成快照与工作流项目会话不匹配，已拒绝执行',
+        'The field-generation snapshot does not match the workflow project session, so execution was rejected.',
+      ))
+    }
     const project = useProjectStore.getState().currentProject
     if (
       !project
@@ -74,9 +71,9 @@ export class GenerateFieldCommand extends BaseWorkflowCommand<string> {
       ))
     }
 
-    const config = project.novelConfig
+    const config = this.frozenInput?.novelConfig ?? project.novelConfig
     const writingLanguage = workflowWritingLanguage(context)
-    const labelPair = FIELD_LABELS[this.fieldKey]
+    const labelPair = GENERATABLE_FIELD_LABELS[this.fieldKey]
     const label = workflowUiText(context, labelPair[0], labelPair[1])
 
     callbacks.log(workflowUiText(context, `正在为「${label}」生成内容...`, `Generating “${label}”...`))
@@ -173,6 +170,15 @@ export class GenerateFieldCommand extends BaseWorkflowCommand<string> {
       ))
     }
 
+    const currentFieldValue = projectState.currentProject?.novelConfig[this.fieldKey]
+    if (this.frozenInput && currentFieldValue !== config[this.fieldKey]) {
+      throw new Error(workflowUiText(
+        context,
+        `生成期间「${label}」已被修改，已保留当前内容；请确认后重新生成。`,
+        `“${label}” changed while generation was running. The current content was preserved; review it before generating again.`,
+      ))
+    }
+
     // updateNovelConfig 是同步操作，此处检查与修改之间不会让出事件循环。
     this.assertNotCancelled(context)
     const { updateNovelConfig, saveProject } = projectState
@@ -226,13 +232,13 @@ export class GenerateFieldCommand extends BaseWorkflowCommand<string> {
     if (config.totalChapters) parts.push(line('总章数', 'Total chapters', config.totalChapters))
     if (config.wordsPerChapter) parts.push(line('每章目标字数', 'Target words per chapter', config.wordsPerChapter))
     if (config.coreOutline?.trim())
-      parts.push(line('核心大纲', 'Core outline', config.coreOutline))
+      parts.push(line('故事构想', 'Story concept', config.coreOutline))
     if (config.worldSetting?.trim())
-      parts.push(line('世界观设定', 'World setting', config.worldSetting))
+      parts.push(line('背景构想', 'Background concept', config.worldSetting))
     if (config.goldenFinger?.trim())
       parts.push(line('金手指体系', 'Special advantage', config.goldenFinger))
     if (config.protagonistProfile?.trim())
-      parts.push(line('主角人设', 'Protagonist profile', config.protagonistProfile))
+      parts.push(line('主角构想', 'Protagonist concept', config.protagonistProfile))
     if (config.globalGuidance?.trim())
       parts.push(line('全局写作要求', 'Global writing guidance', config.globalGuidance))
     if (config.referenceWorks?.trim())

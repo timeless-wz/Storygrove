@@ -238,8 +238,10 @@ function requireEntityRow(
 export interface NodeWorldReference {
   kind: string
   label: string
-  /** 引用方所属世界；null 表示引用方没有可比较的世界归属。 */
+  /** 聚合后的单一世界归属；null 表示无归属或混合归属，精确列表见 worldIds。 */
   worldId: string | null
+  /** 保留聚合内每条引用的所属世界，避免 null 与混合世界被误当成一致。 */
+  worldIds: Array<string | null>
   ids: string[]
 }
 
@@ -250,10 +252,17 @@ function groupReferences(
   for (const row of rows) {
     const bucket = byKind.get(row.kind)
     if (bucket) {
-      if (bucket.worldId !== row.worldId && bucket.worldId !== null) bucket.worldId = null
+      if (!bucket.worldIds.includes(row.worldId)) bucket.worldIds.push(row.worldId)
+      bucket.worldId = bucket.worldIds.length === 1 ? bucket.worldIds[0] : null
       bucket.ids.push(row.id)
     } else {
-      byKind.set(row.kind, { kind: row.kind, label: row.label, worldId: row.worldId, ids: [row.id] })
+      byKind.set(row.kind, {
+        kind: row.kind,
+        label: row.label,
+        worldId: row.worldId,
+        worldIds: [row.worldId],
+        ids: [row.id],
+      })
     }
   }
   return [...byKind.values()]
@@ -330,6 +339,16 @@ const NODE_REFERENCE_QUERIES: Array<{
           WHERE rt.target_kind = 'node' AND rt.target_id IN `,
     worldColumn: 'world_id',
     worldKind: 'rule',
+  },
+  {
+    kind: 'event-node',
+    label: '历史事件地点关联',
+    sql: `SELECT l.id AS id, l.world_id AS owner, COALESCE(n.name, l.target_id) AS owner_name
+          FROM world_event_links l
+          LEFT JOIN world_map_nodes n ON n.id = l.target_id
+          WHERE l.target_kind = 'node' AND l.target_id IN `,
+    worldColumn: 'world_id',
+    worldKind: null,
   },
 ]
 
@@ -891,11 +910,17 @@ export class WorldWorkbenchRepository {
   static planMapWorldAssignment(mapId: string, nextWorldId: string | null): WorldMapAssignmentPlan {
     const db = readyDb()
     if (!isSafeWorldEntityId(mapId, 'map')) throw new Error('地图标识无效')
-    const map = db.prepare('SELECT id, name FROM world_maps WHERE id = ?').get(mapId) as { id: string; name: string } | undefined
+    const maps = db.prepare('SELECT id, name, parent_map_id, world_id FROM world_maps').all() as Array<{
+      id: string
+      name: string
+      parent_map_id: string | null
+      world_id: string | null
+    }>
+    const mapById = new Map(maps.map(row => [row.id, row]))
+    const map = mapById.get(mapId)
     if (!map) throw new Error('要修改归属的地图不存在')
     if (nextWorldId !== null) requireWorld(db, nextWorldId)
 
-    const maps = db.prepare('SELECT id, parent_map_id FROM world_maps').all() as Array<{ id: string; parent_map_id: string | null }>
     const childrenByParent = new Map<string, string[]>()
     for (const row of maps) {
       if (!row.parent_map_id) continue
@@ -911,26 +936,54 @@ export class WorldWorkbenchRepository {
       descendants.push(current)
       queue.push(...(childrenByParent.get(current) ?? []))
     }
-    // 已绑定世界的父子地图树不允许跨世界混挂：子孙里已经属于其他世界的先拦下。
+
+    const ancestors: typeof maps = []
+    const visitedAncestors = new Set([mapId])
+    let parentMapId = map.parent_map_id
+    while (parentMapId && !visitedAncestors.has(parentMapId)) {
+      visitedAncestors.add(parentMapId)
+      const parent = mapById.get(parentMapId)
+      if (!parent) break
+      ancestors.push(parent)
+      parentMapId = parent.parent_map_id
+    }
+
+    // The selected map and its descendants move together. Only descendants already
+    // bound to a third world block that move; the selected map's old world is not a
+    // conflict with itself. A bound ancestor stays in place, so a non-null target
+    // must agree with every bound ancestor.
     const affected = [mapId, ...descendants]
     const placeholders = affected.map(() => '?').join(', ')
-    const conflictingChildren = (db.prepare(`
-      SELECT id, name, world_id FROM world_maps
-      WHERE id IN (${placeholders}) AND world_id IS NOT NULL AND world_id <> ''
-        AND (? IS NULL OR world_id <> ?)
-    `).all(...affected, nextWorldId, nextWorldId) as Array<{ id: string; name: string; world_id: string }>)
+    const currentWorldId = map.world_id || null
+    const conflictingChildren = descendants
+      .map(id => mapById.get(id))
+      .filter((row): row is (typeof maps)[number] => {
+        if (!row?.world_id) return false
+        return row.world_id !== currentWorldId && row.world_id !== nextWorldId
+      })
+    const conflictingParents = nextWorldId === null
+      ? []
+      : ancestors.filter(row => row.world_id && row.world_id !== nextWorldId)
 
-    const blockers: WorldDeleteBlocker[] = conflictingChildren.map(row => ({
-      kind: 'child-map',
-      label: `子地图「${row.name}」已归属其他世界（${worldLabelOf(db, row.world_id)}）`,
-      count: 1,
-      ids: [row.id],
-    }))
+    const blockers: WorldDeleteBlocker[] = [
+      ...conflictingChildren.map(row => ({
+        kind: 'child-map',
+        label: `子地图「${row.name}」已归属其他世界（${worldLabelOf(db, row.world_id)}）`,
+        count: 1,
+        ids: [row.id],
+      })),
+      ...conflictingParents.map(row => ({
+        kind: 'parent-map',
+        label: `父地图「${row.name}」已归属其他世界（${worldLabelOf(db, row.world_id)}）`,
+        count: 1,
+        ids: [row.id],
+      })),
+    ]
 
     const nodeIds = (db.prepare(`SELECT id FROM world_map_nodes WHERE map_id IN (${placeholders})`).all(...affected) as Array<{ id: string }>)
       .map(row => row.id)
     for (const reference of collectNodeWorldReferences(db, nodeIds)) {
-      if (reference.worldId === nextWorldId) continue
+      if (reference.worldIds.every(worldId => worldId === nextWorldId)) continue
       blockers.push({
         kind: reference.kind,
         label: reference.label,
@@ -1656,6 +1709,7 @@ export class WorldWorkbenchRepository {
       pushByWorld('world_character_links', 'id', '人物关联')
       pushByWorld('world_trails', 'id', '人物行踪')
       pushByWorld('world_character_locations', 'id', '人物位置')
+      pushByWorld('world_event_links', 'id', '历史事件关联')
       // world_event_worlds 是世界 ↔ 事件的复合主键表，没有自己的 id 列。
       pushByWorld('world_event_worlds', 'event_id', '历史事件')
       pushByWorld('world_maps', 'id', '关联地图')

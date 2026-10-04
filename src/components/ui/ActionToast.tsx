@@ -234,12 +234,16 @@ export const actionToast = {
   },
 
   /** 工作流完成快捷方法 */
-  workflowComplete: (message: string, openAction?: () => void | Promise<void>) => {
+  workflowComplete: (
+    message: string,
+    openAction?: () => void | Promise<void>,
+    openActionLabel?: string,
+  ) => {
     ensureContainer()
     const actions: ActionToastAction[] = []
     if (openAction) {
       const text = useLocaleStore.getState().text
-      actions.push({ label: text('打开查看', 'Open'), onClick: openAction })
+      actions.push({ label: openActionLabel ?? text('打开查看', 'Open'), onClick: openAction })
       actions.push({ label: text('忽略', 'Dismiss'), variant: 'ghost' })
     }
     const item: ActionToastItem = {

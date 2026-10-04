@@ -11,6 +11,7 @@
  * 浏览器测试与既有测试隔离，避免同一次运行里相互干扰（见交接报告）。
  */
 
+import { act } from 'react'
 import { describe, expect, it } from 'vitest'
 
 import ChapterCardEditor from '../../editor/ChapterCardEditor'
@@ -51,9 +52,22 @@ describe('planning area visual contract', () => {
     for (const label of ['项目总览', '故事设定', '创作规划', '正文写作', '资料库', '项目管理']) {
       expect(text, `project tree must present ${label}`).toContain(label)
     }
-    for (const entry of ['章节蓝图', '章节脉络', '故事时间线', '伏笔管理', '多地图地图册', '草稿箱', '正文章节']) {
+    for (const entry of ['故事前提', '角色档案', '基础设定总览', '章节蓝图', '章节脉络', '故事时间线', '伏笔管理', '草稿箱', '正文章节']) {
       expect(text, `project tree must keep the ${entry} entry`).toContain(entry)
     }
+    const planGroup = container().querySelector('[data-group-id="plan"]')
+    expect(planGroup?.textContent).toContain('全书总纲')
+    expect(planGroup?.textContent).not.toContain('地图册')
+    const worldSetupToggle = container().querySelector<HTMLButtonElement>(
+      '[data-group-id="worldSetup"] button[aria-label="世界设定"]',
+    )
+    expect(worldSetupToggle?.getAttribute('aria-expanded')).toBe('false')
+    await act(async () => worldSetupToggle?.click())
+    const worldSetupGroup = container().querySelector('[data-group-id="worldSetup"]')
+    for (const entry of ['世界观总纲', '世界管理', '地图册', '修炼体系']) {
+      expect(worldSetupGroup?.textContent).toContain(entry)
+    }
+    expect(worldSetupToggle?.getAttribute('aria-expanded')).toBe('true')
     // 作者任务顺序：总览 → 故事设定 → 创作规划 → 正文写作 → 资料库 → 项目管理
     const positions = ['项目总览', '故事设定', '创作规划', '正文写作', '资料库', '项目管理']
       .map(label => text.indexOf(label))
@@ -72,12 +86,19 @@ describe('planning area visual contract', () => {
       </div>,
     )
 
-    const text = pageText()
+    let text = pageText()
     // 空项目里五个任务区同样在，且都给出「待生成 / 待创建 / 待配置」的真实状态。
     for (const label of ['项目总览', '故事设定', '创作规划', '正文写作', '资料库', '项目管理']) {
       expect(text, `empty project tree must present ${label}`).toContain(label)
     }
     expect(text).toContain('待生成')
+    const worldSetupToggle = container().querySelector<HTMLButtonElement>(
+      '[data-group-id="worldSetup"] button[aria-label="世界设定"]',
+    )
+    await act(async () => worldSetupToggle?.click())
+    const worldSetupGroup = container().querySelector('[data-group-id="worldSetup"]')
+    expect(worldSetupGroup?.textContent).toContain('世界管理')
+    text = pageText()
     expect(text).toContain('待创建')
   })
 
@@ -161,10 +182,16 @@ describe('planning area visual contract', () => {
     installApi({ withData: true })
     await mount(<StoryTimelineView key="with-data" projectKey={PROJECT_PATH} />)
     expect(container().querySelectorAll('[data-testid="timeline-event-label"]')).toHaveLength(3)
-    expect(Array.from(container().querySelectorAll('.planning-pane__group-label'))
-      .filter(label => label.textContent === '主轴事件')).toHaveLength(1)
-    expect(Array.from(container().querySelectorAll('button'))
-      .filter(button => button.textContent?.trim() === '仅主轴')).toHaveLength(1)
+    // 内侧栏按主线/支线分组：这里只有主线一组，组里是真实事件行。
+    const timelineGroups = Array.from(container().querySelectorAll('[data-testid="timeline-branch-group"]'))
+    expect(timelineGroups).toHaveLength(1)
+    expect(timelineGroups[0].getAttribute('data-is-main')).toBe('true')
+    expect(timelineGroups[0].querySelectorAll('[data-testid^="timeline-event-row:"]')).toHaveLength(3)
+    // 线路筛选只在真的存在支线时才出现：这份 fixture 没有支线，所以不显示
+    // 只有「仅主轴」一个有效选项的胶囊组，改为核对筛选范围说明与统计口径。
+    expect(container().querySelector('[data-testid="timeline-filter-scope-note"]')).not.toBeNull()
+    expect(container().querySelector('[data-testid="timeline-sidebar-count"]')?.textContent)
+      .toContain('显示 3 / 3 个事件')
     expect(pageText()).toContain('3 个事件')
     expect(pageText()).toContain('灰潮初现')
   })
@@ -193,7 +220,7 @@ describe('planning area visual contract', () => {
     installApi({ withData: false })
     await mount(<WorldMapView projectKey={PROJECT_PATH} />)
 
-    expectSharedChrome('多地图地图册')
+    expectSharedChrome('地图册', ['故事设定', '世界设定'])
     const text = pageText()
     expect(text).toContain('先新建一张地图')
     expect(text).toContain('新建一张顶层地图（可作为世界总图）')

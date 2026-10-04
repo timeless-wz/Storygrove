@@ -1,6 +1,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { page } from 'vitest/browser'
 
 import type { ProjectData } from '../../../shared/ipc-channels'
 import { setActiveProjectSessionContext } from '../../../shared/project-session-context'
@@ -13,10 +14,15 @@ import type {
   WorldCharacterLocation,
   WorldCharacterTrail,
   WorldFaction,
+  WorldFactionRelation,
+  WorldPortal,
   WorldRecord,
+  WorldRelic,
   WorldWorkbenchSnapshot,
 } from '../../../shared/world-workbench'
+import { DEFAULT_TIMELINE_SETTINGS, STORY_TIMELINE_MAIN_BRANCH_ID } from '../../../shared/story-timeline'
 import WorldWorkbenchView from '../WorldWorkbenchView'
+import '../../../index.css'
 
 const PROJECT_PATH = 'C:\\novels\\world-workbench'
 const PROJECT_SESSION = { projectId: 'world-workbench', leaseId: 'lease-1', projectPath: PROJECT_PATH }
@@ -72,6 +78,81 @@ function worldOf(id: string): WorldRecord | undefined {
   return backend.snapshot.worlds.find(world => world.id === id)
 }
 
+function seedTwoWorldFixture(): { worldA: WorldRecord; worldB: WorldRecord } {
+  const worldA: WorldRecord = {
+    id: 'world-fixture-a', name: '雾海诸境', summary: '潮汐决定航路，古老灯塔守望群岛。',
+    background: '雾海环绕着七座群岛。潮汐每七年改道一次，商船与流亡者都沿灯塔寻找归路。',
+    notes: '旧航海日志仍由港口公会保管。', sortOrder: 0,
+  }
+  const worldB: WorldRecord = {
+    id: 'world-fixture-b', name: '烬原王朝', summary: '赤色荒原上的流亡王朝。',
+    background: '烬原在三百年前的火雨后分裂成诸侯领地，失去王冠的家族仍守着边境城墙。',
+    notes: '王朝纪年沿用旧历。', sortOrder: 1,
+  }
+  const factionA: WorldFaction = {
+    id: 'faction-fixture-a', worldId: worldA.id, name: '雾灯公会', type: '商会',
+    summary: '维护航标与灯塔。', description: '控制沉船湾的旧灯塔。', seat: '沉船湾',
+    domainNote: '北群岛航线', notes: '',
+  }
+  const factionB: WorldFaction = {
+    id: 'faction-fixture-b', worldId: worldB.id, name: '赤烬同盟', type: '诸侯联盟',
+    summary: '寻找失落的王冠。', description: '由边境诸侯结盟而成。', seat: '赤城关',
+    domainNote: '烬原北部', notes: '',
+  }
+  const relicA: WorldRelic = {
+    id: 'relic-fixture-a', worldId: worldA.id, name: '潮汐镜宫', type: '遗迹',
+    summary: '只有退潮时才显露的镜面宫殿。', description: '墙面映出尚未发生的航程。',
+    locationNote: '沉船湾外海', nodeId: 'node-qtc', entranceNodeId: 'node-qtc',
+    entryCondition: '退潮后持灯靠岸', danger: '镜像会误导方向', rewards: '古航图',
+    availabilityNote: '每七年开放一次', status: 'sealed', customStatusLabel: '', notes: '',
+  }
+  const relicB: WorldRelic = {
+    id: 'relic-fixture-b', worldId: worldB.id, name: '王冠熔窟', type: '禁区',
+    summary: '火雨遗留下来的地下熔窟。', description: '同盟禁止私自进入。',
+    locationNote: '赤城关以北', nodeId: 'node-tmc', entranceNodeId: null,
+    entryCondition: '需持有边境通行牌', danger: '地层仍不稳定', rewards: '失落王纹',
+    availabilityNote: '开放状况由各领主公告', status: 'opening', customStatusLabel: '', notes: '',
+  }
+  const relation: WorldFactionRelation = {
+    id: 'relation-fixture-a-b', worldId: worldA.id,
+    fromFactionId: factionA.id, toFactionId: factionB.id,
+    relation: 'hostile', customLabel: '', directed: false, note: '争夺旧灯塔下的航路税权。',
+  }
+  const portal: WorldPortal = {
+    id: 'portal-fixture-a-b', name: '沉船湾裂隙', type: 'rift', customTypeLabel: '',
+    fromWorldId: worldA.id, toWorldId: worldB.id, fromNodeId: 'node-qtc', toNodeId: 'node-tmc',
+    bidirectional: false, condition: '退潮时点燃三座灯塔', cost: '一枚潮汐石', scheduleNote: '每月初三',
+    status: 'unstable', customStatusLabel: '', description: '旧王朝战争后出现的裂隙。', notes: '',
+  }
+  backend.snapshot = {
+    ...EMPTY_WORLD_SNAPSHOT,
+    worlds: [worldA, worldB],
+    factions: [factionA, factionB],
+    factionRelations: [relation],
+    relics: [relicA, relicB],
+    portals: [portal],
+    mapWorldLinks: [
+      { mapId: MORTAL_MAP, worldId: worldA.id },
+      { mapId: IMMORTAL_MAP, worldId: worldB.id },
+    ],
+    characterRefs: [{ id: 'char-1', name: '林尘', role: 'protagonist', locationText: '' }],
+    characterLinks: [
+      { id: 'world-char-a-1', worldId: worldA.id, characterId: 'char-1', relation: '灯塔见习生', note: '' },
+      { id: 'world-char-a-2', worldId: worldA.id, characterId: 'char-1', relation: '失踪船员', note: '' },
+      { id: 'world-char-b-1', worldId: worldB.id, characterId: 'char-1', relation: '流亡者', note: '' },
+    ],
+    eventWorlds: [
+      { eventId: 'event-fixture-migration', worldId: worldA.id },
+      { eventId: 'event-fixture-migration', worldId: worldA.id },
+    ],
+  }
+  backend.maps.push({
+    id: 'map-fixture-unassigned', name: '未归属草图', parentMapId: null,
+    sortOrder: 3, image: null, worldId: null,
+  })
+  return { worldA, worldB }
+}
+
 /** 一个最小的「主进程」：只实现本测试真正用到的校验与副作用。 */
 function stubApi(): void {
   Object.defineProperty(window, 'velaAPI', {
@@ -84,21 +165,35 @@ function stubApi(): void {
             return backend.snapshot
           case 'db:map-get-all':
             return { maps: backend.maps, nodes: backend.nodes, edges: [], migration: null }
+          case 'db:timeline-get-all':
+            return {
+              settings: DEFAULT_TIMELINE_SETTINGS,
+              branches: [{ id: STORY_TIMELINE_MAIN_BRANCH_ID, name: '主时间轴', sortOrder: 0 }],
+              events: [{
+                id: 'event-fixture-migration', branchId: STORY_TIMELINE_MAIN_BRANCH_ID,
+                title: '灯塔迁徙之夜', timeLabel: '三百年前', sortOrder: 0, precision: 'unknown',
+                description: '群岛居民沿着旧灯塔迁往北岸。', chapterNumbers: [],
+                characterNames: ['林尘'], locationNodeIds: ['node-qtc'], status: 'finalized', isHistorical: true,
+              }],
+            }
           case 'db:world-upsert': {
             backend.writes.push({ channel, args })
             const incoming = payload as WorldRecord
             const name = incoming.name.trim()
             if (!name) return { success: false, error: '世界名称不能为空' }
-            if (backend.snapshot.worlds.some(world => world.name === name)) {
+            if (backend.snapshot.worlds.some(world => world.name.toLocaleLowerCase() === name.toLocaleLowerCase() && world.id !== incoming.id)) {
               return { success: false, error: `已存在同名世界「${name}」` }
             }
+            const alreadyExists = backend.snapshot.worlds.some(world => world.id === incoming.id)
             const saved: WorldRecord = {
               ...incoming,
               id: incoming.id && incoming.id.startsWith('world-') ? incoming.id : `world-${nextId += 1}`,
             }
             backend.snapshot = {
               ...backend.snapshot,
-              worlds: [...backend.snapshot.worlds, saved],
+              worlds: alreadyExists
+                ? backend.snapshot.worlds.map(world => world.id === incoming.id ? saved : world)
+                : [...backend.snapshot.worlds, saved],
             }
             return { success: true, world: saved }
           }
@@ -357,7 +452,7 @@ beforeEach(() => {
   root = createRoot(container)
 })
 
-afterEach(() => {
+afterEach(async () => {
   act(() => root.unmount())
   container.remove()
   Reflect.deleteProperty(window, 'velaAPI')
@@ -365,11 +460,16 @@ afterEach(() => {
   useProjectStore.setState({ currentProject: null })
   useWorldWorkbenchStore.getState().reset()
   vi.restoreAllMocks()
+  document.body.style.margin = ''
+  await page.viewport(1280, 850)
 })
 
 describe('世界工作台', () => {
-  it('starts with an explicit empty state and creates the first world', async () => {
+  it('starts empty and selects a newly created world on its introduction section', async () => {
     await render()
+    expect(container.querySelector('h1')?.textContent).toBe('世界管理')
+    expect(container.querySelector('nav[aria-label="返回路径"]')?.textContent)
+      .toContain('故事设定')
     expect(container.textContent).toContain('还没有任何世界')
 
     await click(findButton('新建世界'))
@@ -380,6 +480,13 @@ describe('世界工作台', () => {
     expect(backend.snapshot.worlds.map(world => world.name)).toEqual(['凡人界'])
     expect(container.textContent).toContain('凡人界')
     expect(container.textContent).toContain('灵气稀薄的凡俗世界')
+
+    await act(async () => { useWorldWorkbenchStore.getState().setSection('factions') })
+    await click(findButton('新建世界'))
+    await setInput('#world-field-name', '修真界')
+    await click(findButton('创建'))
+    expect(useWorldWorkbenchStore.getState().selectedWorldId).toBe(backend.snapshot.worlds[1].id)
+    expect(useWorldWorkbenchStore.getState().section).toBe('overview')
   })
 
   it('keeps each world’s records separate when switching worlds', async () => {
@@ -412,6 +519,112 @@ describe('世界工作台', () => {
 
     const faction = backend.snapshot.factions.find(item => item.name === '青云门')
     expect(faction?.worldId).toBe(mortalId)
+  })
+
+  it('integrates the two-world fixture, preserves stable links, and captures the four review pages', async () => {
+    const { worldA, worldB } = seedTwoWorldFixture()
+    const oldBodyMargin = document.body.style.margin
+    document.body.style.margin = '0'
+    container.style.width = '100vw'
+    container.style.height = '100vh'
+    await page.viewport(1360, 900)
+    await render()
+
+    expect(useWorldWorkbenchStore.getState().selectedWorldId).toBe(worldA.id)
+    expect(useWorldWorkbenchStore.getState().section).toBe('overview')
+    expect(container.textContent).toContain('潮汐决定航路')
+    expect(container.textContent).toContain('雾海环绕着七座群岛')
+    expect(container.textContent).toContain('灯塔迁徙之夜')
+    expect(container.querySelector('[aria-label="进入相关人物分区"]')?.textContent).toContain('1 项')
+    expect(container.querySelector('[aria-label="进入历史事件分区"]')?.textContent).toContain('1 项')
+    expect(container.textContent).not.toContain('未归属草图')
+    await page.screenshot({ path: '../../../../screenshots/world-management-introduction.png' })
+
+    await click(container.querySelector('[data-testid="world-section-factions"]'))
+    expect(container.querySelector('[data-testid="world-faction-faction-fixture-a"]')).toBeTruthy()
+    expect(container.textContent).not.toContain('赤烬同盟 · 诸侯联盟')
+    expect(container.textContent).toContain('赤烬同盟（烬原王朝）')
+    const crossWorldTarget = container.querySelector<HTMLSelectElement>('select[aria-label="选择对端势力"]')
+    expect(Array.from(crossWorldTarget?.options ?? []).map(option => option.textContent)).toContain('赤烬同盟（烬原王朝）')
+    await page.screenshot({ path: '../../../../screenshots/world-management-factions.png' })
+
+    await click(container.querySelector('[data-testid="world-section-relics"]'))
+    expect(container.querySelector('[data-testid="world-relic-relic-fixture-a"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="world-relic-relic-fixture-b"]')).toBeNull()
+    await page.screenshot({ path: '../../../../screenshots/world-management-relics.png' })
+
+    await click(container.querySelector('[data-testid="world-navigation-item-world-fixture-b"]'))
+    expect(useWorldWorkbenchStore.getState().selectedWorldId).toBe(worldB.id)
+    expect(useWorldWorkbenchStore.getState().section).toBe('overview')
+    expect(container.textContent).toContain('烬原在三百年前的火雨后分裂')
+    expect(container.textContent).not.toContain('雾海环绕着七座群岛')
+    await click(container.querySelector('[data-testid="world-section-portals"]'))
+    const inboundPortal = container.querySelector('[data-testid="world-connection-portal-fixture-a-b"]')
+    expect(inboundPortal?.textContent).toContain('雾海诸境')
+    expect(inboundPortal?.textContent).toContain('烬原王朝')
+    expect(inboundPortal?.textContent).toContain('沉船湾裂隙')
+    expect(inboundPortal?.textContent).toContain('退潮时点燃三座灯塔')
+    expect(container.querySelectorAll('[data-testid="world-connection-portal-fixture-a-b"]')).toHaveLength(1)
+    await page.screenshot({ path: '../../../../screenshots/world-management-cross-world-links.png' })
+    await page.viewport(620, 900)
+    const narrowNavigation = container.querySelector<HTMLElement>('[data-testid="world-navigation"]')!.getBoundingClientRect()
+    const narrowMain = container.querySelector<HTMLElement>('.planning-page__main')!.getBoundingClientRect()
+    expect(narrowNavigation.y).toBeLessThan(narrowMain.y)
+    expect(narrowNavigation.x).toBeCloseTo(narrowMain.x, 0)
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(620)
+    await page.screenshot({ path: '../../../../screenshots/world-management-narrow.png' })
+    await page.viewport(1360, 900)
+    container.classList.add('dark')
+    expect(getComputedStyle(container).getPropertyValue('--color-bg').trim()).toBe('#1E1E1E')
+    await page.screenshot({ path: '../../../../screenshots/world-management-cross-world-links-dark.png' })
+    container.classList.remove('dark')
+
+    // A 在目标端也看到同一条通道。直接新建仍回到 A 的介绍，并把表单 worldId 固定为 A。
+    await click(container.querySelector('[data-testid="world-navigation-item-world-fixture-a"]'))
+    await click(findButton('添加秘境'))
+    expect(pageText()).toContain(`所属世界：${worldA.name}`)
+    await setInput('#world-field-name', '新建的潮汐密室')
+    await click(findButton('保存'))
+    const savedRelic = backend.snapshot.relics.find(relic => relic.name === '新建的潮汐密室')
+    expect(savedRelic?.worldId).toBe(worldA.id)
+
+    // 编辑完整背景后重新读回：名称 ID、未编辑字段和关联表都保留。
+    await click(container.querySelector('[data-testid="world-section-overview"]'))
+    await click(findButton('编辑世界介绍'))
+    await setInput('#world-introduction-background', '雾海新的背景段落。')
+    await click(findButton('保存介绍'))
+    const savedWorld = backend.snapshot.worlds.find(world => world.id === worldA.id)
+    expect(savedWorld).toMatchObject({
+      id: worldA.id,
+      name: worldA.name,
+      summary: worldA.summary,
+      notes: worldA.notes,
+      background: '雾海新的背景段落。',
+    })
+    expect(backend.snapshot.factionRelations).toHaveLength(1)
+    expect(backend.snapshot.characterLinks.filter(link => link.worldId === worldA.id)).toHaveLength(2)
+
+    // 草稿期间切换世界必须先明确确认；取消保留原草稿，确认后不向 B 串写。
+    await click(container.querySelector('[data-testid="world-section-factions"]'))
+    await click(findButton('新建势力'))
+    await setInput('#world-field-name', '尚未保存的雾海势力')
+    await click(container.querySelector('[data-testid="world-navigation-item-world-fixture-b"]'))
+    expect(document.querySelector('.vela-feedback-overlay .vela-feedback-panel')?.textContent).toContain('还有未保存内容')
+    const guardButtons = () => Array.from(document.querySelectorAll<HTMLButtonElement>('.vela-feedback-overlay .vela-feedback-panel button'))
+    await click(guardButtons().find(button => button.textContent?.trim() === '取消'))
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 220)) })
+    expect(useWorldWorkbenchStore.getState().selectedWorldId).toBe(worldA.id)
+    expect((document.querySelector('#world-field-name') as HTMLInputElement | null)?.value).toBe('尚未保存的雾海势力')
+    await click(container.querySelector('[data-testid="world-navigation-item-world-fixture-b"]'))
+    await click(guardButtons().find(button => button.textContent?.trim() === '放弃并离开'))
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 220)) })
+    expect(useWorldWorkbenchStore.getState().selectedWorldId).toBe(worldB.id)
+    expect(backend.snapshot.factions.some(faction => faction.name === '尚未保存的雾海势力')).toBe(false)
+
+    container.style.width = ''
+    container.style.height = ''
+    document.body.style.margin = oldBodyMargin
+    await page.viewport(1280, 850)
   })
 
   it('links the static and current locations of a character through the world', async () => {
@@ -563,7 +776,7 @@ describe('世界工作台', () => {
   it('renders English copy without Han characters when the UI locale is en-US', async () => {
     useLocaleStore.setState({ locale: 'en-US', initialized: true })
     await render()
-    expect(container.textContent).toContain('Worlds')
+    expect(container.textContent).toContain('World Management')
     expect(container.textContent).toContain('New world')
 
     await click(findButton('New world'))

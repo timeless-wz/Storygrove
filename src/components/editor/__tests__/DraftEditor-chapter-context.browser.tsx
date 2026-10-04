@@ -152,6 +152,7 @@ function installIpc(options: {
         chapterNumber: boundBlueprintChapter, title: '风暴降临', purpose: '', keyEvents: '',
       }]
     }
+    if (channel === 'db:blueprint-volume-list') return [{ id: 'volume-1', name: '第1卷', sortOrder: 1 }, { id: 'volume-2', name: '第2卷', sortOrder: 2 }]
     if (channel === 'db:blueprint-v2-summary-list') return []
     if (channel === 'db:blueprint-get') {
       if (blueprintValue === null) return null
@@ -458,14 +459,14 @@ describe('DraftEditor 本章创作上下文', () => {
 
     // 选中第 4 章蓝图并保存：真实调用 db:draft-set-blueprint。
     await act(async () => {
-      const select = document.body.querySelector<HTMLSelectElement>('select')
+      const select = document.body.querySelector<HTMLInputElement>('input[name="blueprint-binding"][value="4"]')
       expect(select).not.toBeNull()
-      select!.value = '4'
-      select!.dispatchEvent(new Event('change', { bubbles: true }))
+      select!.click()
+
     })
     await act(async () => {
       const save = Array.from(document.body.querySelectorAll('button'))
-        .find(button => button.textContent?.includes('保存绑定'))
+        .find(button => button.textContent?.includes('确认绑定'))
       expect(save).toBeDefined()
       save!.click()
     })
@@ -493,7 +494,8 @@ describe('DraftEditor 本章创作上下文', () => {
         { chapterNumber: 4, title: '旧章', purpose: '', keyEvents: '' },
         { chapterNumber: 12, title: '新章', purpose: '', keyEvents: '' },
       ]
-      if (channel === 'db:blueprint-v2-summary-list') return []
+      if (channel === 'db:blueprint-volume-list') return [{ id: 'volume-1', name: '第1卷', sortOrder: 1 }, { id: 'volume-2', name: '第2卷', sortOrder: 2 }]
+    if (channel === 'db:blueprint-v2-summary-list') return []
       if (channel === 'db:blueprint-get') return blueprintRow({
         chapterNumber: Number(args[0]),
         purpose: Number(args[0]) === 4 ? '旧章目标' : '新章目标',
@@ -521,13 +523,13 @@ describe('DraftEditor 本章创作上下文', () => {
     })
     await expect.element(page.getByRole('heading', { name: '绑定章节蓝图' })).toBeVisible()
     await act(async () => {
-      const select = document.body.querySelector<HTMLSelectElement>('select')!
-      select.value = '12'
-      select.dispatchEvent(new Event('change', { bubbles: true }))
+      const select = document.body.querySelector<HTMLInputElement>('input[name="blueprint-binding"][value="12"]')!
+      select.click()
+
     })
     await act(async () => {
       const save = Array.from(document.body.querySelectorAll('button'))
-        .find(button => button.textContent?.includes('保存绑定'))
+        .find(button => button.textContent?.includes('确认绑定'))
       save?.click()
     })
     await waitForSidebar('chapter-context-purpose')
@@ -576,7 +578,8 @@ describe('DraftEditor 本章创作上下文', () => {
     const readsBefore = invoke.mock.calls.filter(([channel]) => channel === 'db:draft-get-meta').length
     await act(async () => document.body.querySelector<HTMLButtonElement>('[title="绑定或更换章节蓝图"]')!.click())
     await expect.element(page.getByRole('heading', { name: '绑定章节蓝图' })).toBeVisible()
-    await act(async () => Array.from(document.body.querySelectorAll('button')).find(button => button.textContent === '保存绑定')!.click())
+    await act(async () => Array.from(document.body.querySelectorAll('button')).find(button => button.textContent === '解除绑定')!.click())
+    await act(async () => Array.from(document.body.querySelectorAll('button')).find(button => button.textContent === '确认解绑')!.click())
     expect(sidebarRoot()?.textContent).toContain('让主角在码头拿到账本')
     await expect.element(page.getByRole('heading', { name: '绑定章节蓝图' })).toBeVisible()
     await act(async () => Array.from(document.body.querySelectorAll('button')).find(button => button.textContent === '取消')!.click())

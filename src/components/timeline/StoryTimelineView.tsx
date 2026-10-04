@@ -1,38 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { Viewport } from '@xyflow/react'
 import {
-  Background,
-  BackgroundVariant,
-  BaseEdge,
-  Controls,
-  getBezierPath,
-  getSmoothStepPath,
-  Handle,
-  Position,
-  ReactFlow,
-  type Edge,
-  type EdgeProps,
-  type Node,
-  type NodeProps,
-  type ReactFlowInstance,
-} from '@xyflow/react'
-import '@xyflow/react/dist/style.css'
-import {
-  ChevronDown,
-  ChevronUp,
+  AlertTriangle,
   Clock3,
-  GitBranch,
+  Crosshair,
   Maximize2,
-  Pencil,
   Plus,
+  RefreshCw,
   Settings2,
-  Trash2,
 } from 'lucide-react'
 import type {
+  StoryTimelineBranch,
   StoryTimelineEvent,
-  StoryTimelineEventStatus,
   StoryTimelineMention,
 } from '../../shared/story-timeline'
 import { STORY_TIMELINE_MAIN_BRANCH_ID, STORY_TIMELINE_STATUS_LABELS } from '../../shared/story-timeline'
+import type { StoryTimelineDeleteImpact } from '../../shared/story-timeline'
 import { useStoryTimelineStore } from '../../stores/story-timeline-store'
 import { useWorldMapStore } from '../../stores/world-map-store'
 import { useCharacterStore } from '../../stores/character-store'
@@ -43,277 +26,100 @@ import { Button } from '../ui/Button'
 import { toast } from '../ui/Toast'
 import {
   PlanningPageShell,
-  PlanningPane,
-  PlanningSearch,
-  PlanningChipGroup,
-  PlanningListRow,
-  PlanningEmptyState,
 } from '../planning/PlanningPageShell'
 import { usePlanningBackPath } from '../planning/planning-navigation'
 import {
   buildStoryTimelineLayout,
   sortTimelineEvents,
-  type StoryTimelineLabelSide,
 } from './story-timeline-layout'
+import { StoryTimelineScene } from './StoryTimelineScene'
+import { TimelineEventFloat } from './TimelineEventFloat'
+import {
+  readTimelineUiPrefs,
+  sanitizeTimelineCanvasViewport,
+  writeTimelineUiPrefs,
+  type TimelineCanvasViewport,
+} from './timeline-ui-prefs'
 import { TimelineContextMenu } from './TimelineContextMenu'
 import { TimelineEventModal } from './TimelineEventModal'
 import { TimelineRangeModal } from './TimelineRangeModal'
+import {
+  TimelineEventSidebar,
+  TimelineSidebarRail,
+  DEFAULT_TIMELINE_SIDEBAR_FILTERS,
+  type TimelineDeleteBranchResult,
+  type TimelineSidebarFilters,
+} from './TimelineEventSidebar'
+import type {
+  TimelineCanvasBounds,
+  TimelineCascadePreview,
+  TimelineScreenPoint,
+  TimelineUiResult,
+  TimelineViewportIntent,
+} from './timeline-ui-contract'
 
-const TIMELINE_AXIS_NODE_ID = 'timeline-axis'
-
-type TimelineNodeData = Record<string, unknown> & {
-  handles?: Array<{ id: string; offsetX: number }>
-  eventId?: string
-  branchId?: string
-  title?: string
-  timeText?: string
-  side?: StoryTimelineLabelSide
-  staggerLevel?: number
-  width?: number
-  status?: StoryTimelineEventStatus
-  childBranchCount?: number
-  isExpanded?: boolean
-  label?: string
-  timeLabel?: string
-  order?: number
-  anchorType?: 'start' | 'end'
-  onEdit?: (anchorType: 'start' | 'end') => void
-  onToggleExpand?: (eventId: string) => void
-  onCreateBranch?: (eventId: string) => void
-  onSelect?: (eventId: string) => void
-  onDoubleClick?: (eventId: string) => void
+interface EventFloatState {
+  eventId: string
+  point: TimelineScreenPoint
+  mode: 'details' | 'edit'
+  bounds: TimelineCanvasBounds
 }
 
-type TimelineNode = Node<TimelineNodeData, 'timeline-axis' | 'timeline-event' | 'timeline-anchor'>
-
-type TimelineEdgeData = Record<string, unknown> & {
-  color?: string
-}
-
-type TimelineEdge = Edge<TimelineEdgeData, 'timeline-connector' | 'timeline-trunk' | 'timeline-branch'>
-
-/**
- * 主轴：一条水平连续线，并为每个事件暴露引出点。
- */
-function TimelineAxisNodeView({ data }: NodeProps<TimelineNode>) {
-  return (
-    <div className="writer-timeline-axis" data-testid="timeline-axis">
-      <div className="writer-timeline-axis-line" aria-hidden="true" />
-      {data.handles?.map(handle => (
-        <Handle
-          key={handle.id}
-          id={handle.id}
-          type="source"
-          position={Position.Top}
-          isConnectable={false}
-          className="writer-timeline-axis-handle"
-          style={{ left: handle.offsetX, top: 0, transform: 'translate(-50%, -50%)' }}
-        />
-      ))}
-    </div>
-  )
-}
-
-/**
- * 事件节点卡片：
- * 包含时间、标题、状态指示点、以及支线折叠/展开徽标（有支线时展示）。
- */
-function TimelineEventNodeView({ data, selected }: NodeProps<TimelineNode>) {
-  return (
-    <div
-      className={`writer-timeline-label is-${data.side}${selected ? ' is-selected' : ''}`}
-      data-testid="timeline-event-label"
-      data-event-id={data.eventId}
-      data-side={data.side}
-      data-stagger-level={data.staggerLevel}
-      style={{ width: data.width }}
-      title={data.title}
-      onClick={() => {
-        if (data.eventId) data.onSelect?.(data.eventId)
-      }}
-      onDoubleClick={() => {
-        if (data.eventId) data.onDoubleClick?.(data.eventId)
-      }}
-    >
-      {/* 针对从主轴引出线的接收 handle */}
-      <Handle
-        id="event-in"
-        type="target"
-        position={data.side === 'above' ? Position.Bottom : Position.Top}
-        isConnectable={false}
-        className="writer-timeline-label-handle"
-      />
-      {/* 针对横向主干与支线贝塞尔的接收与引出 handle */}
-      <Handle
-        id="tree-in"
-        type="target"
-        position={Position.Left}
-        isConnectable={false}
-        className="writer-timeline-label-handle"
-      />
-      <Handle
-        id="tree-out"
-        type="source"
-        position={Position.Right}
-        isConnectable={false}
-        className="writer-timeline-label-handle"
-      />
-
-      <div className="writer-timeline-label-header">
-        <span className="writer-timeline-label-time">{data.timeText}</span>
-        <span
-          className={`writer-timeline-status-dot is-${data.status}`}
-          data-testid="timeline-status-dot"
-          aria-label={data.status}
-        />
-      </div>
-
-      <strong className="writer-timeline-label-title">{data.title}</strong>
-
-      {/* 选中事件后直接给出分叉入口，避免把核心创作动作藏在右键菜单中。 */}
-      {selected && (
-        <button
-          type="button"
-          className="writer-timeline-create-branch"
-          data-testid="timeline-create-branch"
-          onClick={(event) => {
-            event.stopPropagation()
-            if (data.eventId) data.onCreateBranch?.(data.eventId)
-          }}
-          title="从此事件创建一条向后发展的支线"
-        >
-          <GitBranch size={10} />
-          <span>创建支线</span>
-        </button>
-      )}
-
-      {(data.childBranchCount ?? 0) > 0 && (
-        <button
-          type="button"
-          className="writer-timeline-branch-badge"
-          data-testid="timeline-branch-badge"
-          onClick={(event) => {
-            event.stopPropagation()
-            if (data.eventId) data.onToggleExpand?.(data.eventId)
-          }}
-          title={data.isExpanded ? '点击折叠该支线' : '点击展开该支线'}
-        >
-          <GitBranch size={10} />
-          <span>{data.childBranchCount} 支线</span>
-          {data.isExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
-        </button>
-      )}
-    </div>
-  )
-}
-
-/** 主轴到事件标注的竖向连接线 */
-function TimelineConnectorEdgeView({ sourceX, sourceY, targetX, targetY, selected }: EdgeProps<TimelineEdge>) {
-  const path = `M ${sourceX},${sourceY} L ${targetX},${targetY}`
-  return (
-    <BaseEdge
-      path={path}
-      className={`writer-timeline-connector${selected ? ' is-selected' : ''}`}
-      style={{ stroke: 'var(--color-border-strong, var(--color-border))', strokeWidth: 1.2 }}
-    />
-  )
-}
-
-/** 支线内部事件顺延连接线 */
-function TimelineTrunkEdgeView({ sourceX, sourceY, targetX, targetY, data, selected }: EdgeProps<TimelineEdge>) {
-  const [path] = getSmoothStepPath({
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    sourcePosition: Position.Right,
-    targetPosition: Position.Left,
-    borderRadius: 6,
-  })
-  return (
-    <BaseEdge
-      path={path}
-      className={`writer-timeline-trunk-edge${selected ? ' is-selected' : ''}`}
-      style={{
-        stroke: data?.color || 'var(--color-border-strong, var(--color-border))',
-        strokeWidth: 1.6,
-      }}
-    />
-  )
-}
-
-/** 分叉源到支线首节点的平滑贝塞尔曲线 */
-function TimelineBranchEdgeView({ sourceX, sourceY, targetX, targetY, data, selected }: EdgeProps<TimelineEdge>) {
-  const [path] = getBezierPath({
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    sourcePosition: Position.Right,
-    targetPosition: Position.Left,
-    curvature: 0.35,
-  })
-  return (
-    <BaseEdge
-      path={path}
-      className={`writer-timeline-branch-edge${selected ? ' is-selected' : ''}`}
-      style={{
-        stroke: data?.color || '#10b981',
-        strokeWidth: 1.8,
-      }}
-    />
-  )
-}
-
-/**
- * 故事开端与结束锚点卡片：界定故事范围，不可删除、不可分叉，可点击或右键编辑
- */
-function TimelineAnchorNodeView({ data }: NodeProps<TimelineNode>) {
-  return (
-    <div
-      className={`writer-timeline-anchor is-${data.anchorType}`}
-      data-testid={`timeline-anchor-${data.anchorType}`}
-      title={data.timeLabel ? `${data.label} (${data.timeLabel})` : data.label}
-      onClick={(e) => {
-        e.stopPropagation()
-        data.onEdit?.(data.anchorType!)
-      }}
-    >
-      <span className="writer-timeline-anchor-title">{data.label}</span>
-      <span className="writer-timeline-anchor-meta">
-        [{data.order}]{data.timeLabel ? ` · ${data.timeLabel}` : ''}
-      </span>
-    </div>
-  )
-}
-
-const nodeTypes = {
-  'timeline-axis': TimelineAxisNodeView,
-  'timeline-event': TimelineEventNodeView,
-  'timeline-anchor': TimelineAnchorNodeView,
-}
-
-const edgeTypes = {
-  'timeline-connector': TimelineConnectorEdgeView,
-  'timeline-trunk': TimelineTrunkEdgeView,
-  'timeline-branch': TimelineBranchEdgeView,
-}
-
-interface ModalState {
-  open: boolean
-  mode: 'create-main' | 'create-next' | 'create-branch' | 'edit'
-  initialEvent?: StoryTimelineEvent | null
-  sourceEvent?: StoryTimelineEvent | null
-  initialSortOrder?: number
-}
-
-interface ContextMenuState {
-  x: number
-  y: number
-  targetEventId: string | null
-  targetAnchor: 'start' | 'end' | null
+interface CanvasMenuState {
+  point: TimelineScreenPoint
   suggestedOrder: number | null
-  canCreateEventAtPosition: boolean
+  canCreate: boolean
+  bounds: TimelineCanvasBounds
+}
+
+interface AnchorMenuState {
+  anchor: 'start' | 'end'
+  point: TimelineScreenPoint
+  bounds: TimelineCanvasBounds
+}
+
+interface CreateModalState {
+  mode: 'create-main' | 'create-next' | 'create-branch'
+  sourceEventId?: string
+  /** create-next 追加到指定支线（含该支线首个事件）时的真实归属。 */
+  branchId?: string
+  /** 仅用于表单标题显示的真实支线名。 */
+  branchName?: string
+  suggestedOrder?: number
+}
+
+/**
+ * 恢复视口时使用的 nonce。
+ *
+ * Scene 的视口意图按 nonce 去重，内部把初始值和 -1 视为「已处理」。
+ * 宿主保存了真实视口时用这个值进入本帧：画布停在保存位置，不做初始适配。
+ * 任何真实意图都从 0 开始递增，绝不会被误判成已处理。
+ */
+const RESTORE_VIEWPORT_NONCE = -1
+
+function windowBounds(): TimelineCanvasBounds {
+  return { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight }
+}
+
+/** 支线追加事件时的表单预填种子：只承载真实归属，不是一条真实事件记录。 */
+function branchSeedEvent(
+  branch: StoryTimelineBranch,
+  lastEvent: StoryTimelineEvent | null,
+): StoryTimelineEvent {
+  return {
+    id: '',
+    branchId: branch.id,
+    parentEventId: branch.sourceEventId ?? null,
+    title: '',
+    timeLabel: lastEvent?.timeLabel ?? '',
+    sortOrder: lastEvent ? lastEvent.sortOrder + 1 : 1,
+    precision: 'exact',
+    description: '',
+    chapterNumbers: [],
+    characterNames: [],
+    locationNodeIds: [],
+    status: 'planned',
+  }
 }
 
 export default function StoryTimelineView({
@@ -330,32 +136,77 @@ export default function StoryTimelineView({
   const branches = useStoryTimelineStore(s => s.branches)
   const events = useStoryTimelineStore(s => s.events)
   const expandedBranchIds = useStoryTimelineStore(s => s.expandedBranchIds)
-  const loading = useStoryTimelineStore(s => s.loading)
   const dataProjectKey = useStoryTimelineStore(s => s.dataProjectKey)
   const loadAll = useStoryTimelineStore(s => s.loadAll)
   const saveSettings = useStoryTimelineStore(s => s.saveSettings)
-  const upsertEvent = useStoryTimelineStore(s => s.upsertEvent)
-  const deleteEvent = useStoryTimelineStore(s => s.deleteEvent)
+  const upsertEventResult = useStoryTimelineStore(s => s.upsertEventResult)
+  const previewEventDelete = useStoryTimelineStore(s => s.previewEventDelete)
+  const previewBranchDelete = useStoryTimelineStore(s => s.previewBranchDelete)
+  const deleteEventConfirmed = useStoryTimelineStore(s => s.deleteEventConfirmed)
+  const deleteBranchConfirmed = useStoryTimelineStore(s => s.deleteBranchConfirmed)
+  const createBranchWithEvent = useStoryTimelineStore(s => s.createBranchWithEvent)
   const upsertBranch = useStoryTimelineStore(s => s.upsertBranch)
   const setBranchExpanded = useStoryTimelineStore(s => s.setBranchExpanded)
   const loadWorldMap = useWorldMapStore(s => s.loadAll)
   const worldMapNodes = useWorldMapStore(s => s.nodes)
 
-  const flowInstanceRef = useRef<ReactFlowInstance<TimelineNode, TimelineEdge> | null>(null)
+  const flowRef = useRef<HTMLDivElement>(null)
   const [rangeModalOpen, setRangeModalOpen] = useState(false)
   const [rangeModalFocus, setRangeModalFocus] = useState<'start' | 'end' | 'general'>('general')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  /** 清单请求把画布视线移到某个事件；nonce 让同一事件被重复点击时也会再次定位。 */
-  const [centerRequest, setCenterRequest] = useState<{ eventId: string | null; nonce: number }>({ eventId: null, nonce: 0 })
+  /**
+   * 画布视口只响应这类意图；nonce 让同一目标可重复触发。
+   * 恢复保存的视口时先停在 RESTORE_VIEWPORT_NONCE，避免初始适配覆盖它。
+   */
+  const [viewportIntent, setViewportIntent] = useState<TimelineViewportIntent>({
+    nonce: RESTORE_VIEWPORT_NONCE,
+    kind: 'initial',
+  })
+  /** 本项目上次离开时的真实视口：作为 React Flow 的 defaultViewport。 */
+  const storedCanvas = useMemo(() => readTimelineUiPrefs(projectKey)?.canvas ?? null, [projectKey])
 
-  // 浮层上下文菜单与编辑弹窗状态
-  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
-  const [modalState, setModalState] = useState<ModalState>({ open: false, mode: 'create-main' })
+  // 画布浮层：事件浮窗 / 空白菜单 / 锚点菜单互斥，打开一个就关掉其他。
+  const [eventFloat, setEventFloat] = useState<EventFloatState | null>(null)
+  const [canvasMenu, setCanvasMenu] = useState<CanvasMenuState | null>(null)
+  const [anchorMenu, setAnchorMenu] = useState<AnchorMenuState | null>(null)
+  const [createModal, setCreateModal] = useState<CreateModalState | null>(null)
+  /** 事件删除的权威影响预览：浮窗展示用；确认那一刻再取一次最新指纹。 */
+  const [eventDeletePreview, setEventDeletePreview] = useState<{
+    eventId: string
+    impact: StoryTimelineDeleteImpact
+  } | null>(null)
 
-  // 左侧事件清单：搜索与按状态 / 主线支线筛选
-  const [searchQuery, setSearchQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all' | StoryTimelineEventStatus>('all')
-  const [branchFilter, setBranchFilter] = useState<string>('all')
+  // 左侧事件清单：搜索与状态 / 主线支线筛选（只作用列表）
+  const [filters, setFilters] = useState<TimelineSidebarFilters>(DEFAULT_TIMELINE_SIDEBAR_FILTERS)
+  /** 「事件与支线」内侧栏默认展开；收起后画布占满释放的空间，展开按钮始终在画布左缘。 */
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => readTimelineUiPrefs(projectKey)?.sidebarCollapsed ?? false,
+  )
+  /** 读取失败必须显式重试，绝不把失败伪装成空项目。 */
+  const [readFailed, setReadFailed] = useState(false)
+  /** 每个项目的数据就绪后只恢复一次界面偏好。 */
+  const [restoredProjectKey, setRestoredProjectKey] = useState<string | null>(null)
+
+  const isDataReady = dataProjectKey === projectKey
+
+  // 切项目：立刻用新项目自己的偏好与空选中重排，绝不复用另一个项目的选中/浮窗。
+  const [activeProjectKey, setActiveProjectKey] = useState(projectKey)
+  if (activeProjectKey !== projectKey) {
+    setActiveProjectKey(projectKey)
+    setRestoredProjectKey(null)
+    const prefs = readTimelineUiPrefs(projectKey)
+    setSidebarCollapsed(prefs?.sidebarCollapsed ?? false)
+    setSelectedId(null)
+    setEventFloat(null)
+    setCanvasMenu(null)
+    setAnchorMenu(null)
+    setCreateModal(null)
+    setFilters(DEFAULT_TIMELINE_SIDEBAR_FILTERS)
+    setReadFailed(false)
+    // 先不移动画布：真实视口由 defaultViewport 恢复，没有保存值时由就绪后的
+    // 恢复逻辑发一次可读适配意图。
+    setViewportIntent({ nonce: RESTORE_VIEWPORT_NONCE, kind: 'initial' })
+  }
 
   /**
    * 提及只是一条导航入口，不能凭空创建人物或写入人物事实。若调用者没有
@@ -379,38 +230,51 @@ export default function StoryTimelineView({
     }
 
     useCharacterStore.getState().setSelectedName(target.name)
-    useLayoutStore.getState().openCharacterProfile('overview')
+    useLayoutStore.getState().openCharacterProfile()
   }, [currentProject?.path, onNavigateMention, projectKey, text])
 
+  /** 读取（含手动重试）：只有确认本项目数据仍未就绪时才标记失败。 */
+  const runLoad = useCallback(async () => {
+    await loadAll(projectKey)
+    if (useProjectStore.getState().currentProject?.path !== projectKey) return
+    if (useStoryTimelineStore.getState().dataProjectKey !== projectKey) setReadFailed(true)
+  }, [loadAll, projectKey])
+
   useEffect(() => {
-    void loadAll(projectKey)
+    void Promise.resolve().then(runLoad)
     void loadWorldMap(projectKey)
-  }, [projectKey, loadAll, loadWorldMap])
+  }, [runLoad, loadWorldMap, projectKey])
 
   const orderedEvents = useMemo(() => sortTimelineEvents(events), [events])
+
+  // 统计口径：branches 数据里含 main，主线不是支线，不能计入支线数。
+  const nonMainBranches = useMemo(
+    () => branches.filter(branch => branch.id !== STORY_TIMELINE_MAIN_BRANCH_ID),
+    [branches],
+  )
+  const branchById = useMemo(() => {
+    const map = new Map<string, StoryTimelineBranch>()
+    for (const branch of branches) map.set(branch.id, branch)
+    return map
+  }, [branches])
+  const eventById = useMemo(() => {
+    const map = new Map<string, StoryTimelineEvent>()
+    for (const event of events) map.set(event.id, event)
+    return map
+  }, [events])
+
   const nextMainOrder = useMemo(() => {
-    const mainEvents = orderedEvents.filter(e => (e.branchId || STORY_TIMELINE_MAIN_BRANCH_ID) === STORY_TIMELINE_MAIN_BRANCH_ID)
+    const mainEvents = orderedEvents.filter(
+      event => (event.branchId || STORY_TIMELINE_MAIN_BRANCH_ID) === STORY_TIMELINE_MAIN_BRANCH_ID,
+    )
     return mainEvents.length > 0
-      ? Math.max(...mainEvents.map(e => e.sortOrder)) + 1
+      ? Math.max(...mainEvents.map(event => event.sortOrder)) + 1
       : 1
   }, [orderedEvents])
-
-  // 处理源事件上的分支展开/折叠
-  const handleToggleEventBranch = useCallback((eventId: string) => {
-    const childBranches = branches.filter(b => b.sourceEventId === eventId)
-    if (childBranches.length === 0) return
-    const isAnyExpanded = childBranches.some(b => expandedBranchIds.includes(b.id))
-    childBranches.forEach(b => {
-      setBranchExpanded(b.id, !isAnyExpanded)
-    })
-  }, [branches, expandedBranchIds, setBranchExpanded])
-
-  const handleCreateBranchFromEvent = useCallback((eventId: string) => {
-    const sourceEvent = events.find(event => event.id === eventId)
-    if (!sourceEvent) return
-    setSelectedId(eventId)
-    setModalState({ open: true, mode: 'create-branch', sourceEvent })
-  }, [events])
+  const nextBranchSortOrder = useMemo(() => {
+    const orders = nonMainBranches.map(branch => branch.sortOrder)
+    return orders.length > 0 ? Math.max(...orders) + 1 : 1
+  }, [nonMainBranches])
 
   // 纯函数推导时间树布局
   const layout = useMemo(() => {
@@ -423,319 +287,457 @@ export default function StoryTimelineView({
     return names
   }, [branches])
 
-  const statusLabel = useCallback((status: StoryTimelineEventStatus) => {
+  const statusLabel = useCallback((status: StoryTimelineEvent['status']) => {
     const label = STORY_TIMELINE_STATUS_LABELS[status]
     return text(label.zh, label.en)
   }, [text])
 
-  /** 左侧清单：搜索 + 状态筛选 + 主线/支线筛选，三者都作用在自己的数据上。 */
-  const listedEvents = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase()
-    return orderedEvents.filter(event => {
-      const branchId = event.branchId || STORY_TIMELINE_MAIN_BRANCH_ID
-      if (branchFilter !== 'all' && branchId !== branchFilter) return false
-      if (statusFilter !== 'all' && event.status !== statusFilter) return false
-      if (query && !(
-        event.title.toLowerCase().includes(query)
-        || event.timeLabel.toLowerCase().includes(query)
-      )) return false
-      return true
+  // ============================================================
+  // 支线展开链：定位/创建时必须展开目标支线的全部祖先，而不只是自身。
+  // ============================================================
+
+  const branchChain = useCallback((branchId: string): string[] => {
+    const chain: string[] = []
+    const seen = new Set<string>()
+    let current: string | undefined = branchId
+    while (current && current !== STORY_TIMELINE_MAIN_BRANCH_ID && !seen.has(current)) {
+      seen.add(current)
+      chain.push(current)
+      const branch = branchById.get(current)
+      const sourceEvent = branch?.sourceEventId ? eventById.get(branch.sourceEventId) : undefined
+      current = sourceEvent?.branchId || STORY_TIMELINE_MAIN_BRANCH_ID
+    }
+    return chain.reverse()
+  }, [branchById, eventById])
+
+  const expandBranchChain = useCallback((branchId: string) => {
+    for (const id of branchChain(branchId)) setBranchExpanded(id, true)
+  }, [branchChain, setBranchExpanded])
+
+  /** 处理源事件上的分支展开/折叠 */
+  const handleToggleEventBranch = useCallback((eventId: string) => {
+    const childBranches = branches.filter(branch => branch.sourceEventId === eventId)
+    if (childBranches.length === 0) return
+    const isAnyExpanded = childBranches.some(branch => expandedBranchIds.includes(branch.id))
+    childBranches.forEach((branch) => {
+      setBranchExpanded(branch.id, !isAnyExpanded)
     })
-  }, [orderedEvents, branchFilter, statusFilter, searchQuery])
+  }, [branches, expandedBranchIds, setBranchExpanded])
 
-  /** 按主线 / 支线分组，只保留筛选后仍有事件的分组。 */
-  const listedEventGroups = useMemo(() => {
-    const groups: Array<{ id: string; name: string; events: StoryTimelineEvent[] }> = []
-    const mainEvents = listedEvents.filter(
-      event => (event.branchId || STORY_TIMELINE_MAIN_BRANCH_ID) === STORY_TIMELINE_MAIN_BRANCH_ID,
-    )
-    if (mainEvents.length > 0) {
-      groups.push({ id: STORY_TIMELINE_MAIN_BRANCH_ID, name: text('主轴事件', 'Main axis'), events: mainEvents })
-    }
-    for (const branch of branches) {
-      if (branch.id === STORY_TIMELINE_MAIN_BRANCH_ID) continue
-      const branchEvents = listedEvents.filter(event => event.branchId === branch.id)
-      if (branchEvents.length === 0) continue
-      groups.push({ id: branch.id, name: branch.name, events: branchEvents })
-    }
-    return groups
-  }, [listedEvents, branches, text])
+  // ============================================================
+  // 画布回调：selection 与浮层是不同状态，互不代替。
+  // ============================================================
 
-  const selectedEvent = useMemo(
-    () => events.find(event => event.id === selectedId) ?? null,
-    [events, selectedId],
-  )
+  const closeAllOverlays = useCallback(() => {
+    setEventFloat(null)
+    setCanvasMenu(null)
+    setAnchorMenu(null)
+  }, [])
 
-  const listFilterActive = statusFilter !== 'all' || branchFilter !== 'all' || searchQuery.trim() !== ''
+  const captureBounds = useCallback((): TimelineCanvasBounds => {
+    const rect = flowRef.current?.getBoundingClientRect()
+    return rect
+      ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+      : windowBounds()
+  }, [])
+
+  const handleSelectEvent = useCallback((eventId: string | null) => {
+    setSelectedId(eventId)
+  }, [])
+
+  const handleOpenEventFloat = useCallback((eventId: string, point: TimelineScreenPoint, mode: 'details' | 'edit') => {
+    setCanvasMenu(null)
+    setAnchorMenu(null)
+    setSelectedId(eventId)
+    setEventFloat({ eventId, point, mode, bounds: captureBounds() })
+  }, [captureBounds])
+
+  /** 从清单发起的编辑没有鼠标位置，把浮窗放在画布内容区中央。 */
+  const openEditFloatFromList = useCallback((eventId: string) => {
+    const rect = flowRef.current?.getBoundingClientRect()
+    const point: TimelineScreenPoint = rect
+      ? { clientX: rect.left + rect.width / 2, clientY: rect.top + Math.min(rect.height / 3, 220) }
+      : { clientX: 0, clientY: 0 }
+    handleOpenEventFloat(eventId, point, 'edit')
+  }, [handleOpenEventFloat])
+
+  const handleCanvasContextMenu = useCallback((point: TimelineScreenPoint, hint: { suggestedOrder: number | null; canCreate: boolean }) => {
+    setEventFloat(null)
+    setAnchorMenu(null)
+    setCanvasMenu({ point, suggestedOrder: hint.suggestedOrder, canCreate: hint.canCreate, bounds: captureBounds() })
+  }, [captureBounds])
+
+  const handleAnchorContextMenu = useCallback((anchor: 'start' | 'end', point: TimelineScreenPoint) => {
+    setEventFloat(null)
+    setCanvasMenu(null)
+    setAnchorMenu({ anchor, point, bounds: captureBounds() })
+  }, [captureBounds])
+
+  const handleOpenRangeEditor = useCallback((anchor: 'start' | 'end') => {
+    setRangeModalFocus(anchor)
+    setRangeModalOpen(true)
+  }, [])
+
+  /** Escape 关闭浮窗后把焦点还给触发节点，键盘操作不断链。 */
+  const handleFloatClose = useCallback((options?: { viaEscape?: boolean }) => {
+    setEventFloat((current) => {
+      if (current && options?.viaEscape) {
+        // 轴点也带 data-event-id，必须精确到事件标注本身。
+        const node = document.querySelector<HTMLElement>(
+          `[data-testid="timeline-event-label"][data-event-id="${CSS.escape(current.eventId)}"]`,
+        )
+        node?.focus()
+      }
+      return null
+    })
+  }, [])
 
   /**
-   * 在清单里选中事件：同时展开它所在的支线，并请求画布把视线移到它上面。
-   *
-   * 这里只记录「本次要定位的事件 id」；真正的视口移动放在 effect 里、拿到
-   * React Flow 实例之后再执行，事件回调本身不读取 ref。
+   * 清单定位：展开目标的全部祖先支线，选中，并请求画布以可读比例聚焦。
+   * 视口意图只记录诉求，真正的移动在 Scene 内部执行。
    */
-  const focusEventFromList = useCallback((eventId: string) => {
-    setSelectedId(eventId)
-    const event = events.find(item => item.id === eventId)
+  const locateEvent = useCallback((eventId: string) => {
+    const event = eventById.get(eventId)
     if (!event) return
-    const branchId = event.branchId || STORY_TIMELINE_MAIN_BRANCH_ID
-    if (branchId !== STORY_TIMELINE_MAIN_BRANCH_ID && !expandedBranchIds.includes(branchId)) {
-      setBranchExpanded(branchId, true)
+    expandBranchChain(event.branchId || STORY_TIMELINE_MAIN_BRANCH_ID)
+    setSelectedId(eventId)
+    setViewportIntent(current => ({ kind: 'focus-event', eventId, nonce: current.nonce + 1 }))
+  }, [eventById, expandBranchChain])
+
+  // ============================================================
+  // 写入适配：store 的写入/删除结果在这里统一收敛成 UI 结果。
+  // 删除一律走 C 的权威影响预览 + 指纹确认，页面不自己猜级联范围。
+  // ============================================================
+
+  const handleFloatSave = useCallback(async (event: StoryTimelineEvent): Promise<TimelineUiResult> => {
+    const wasFirstEvent = useStoryTimelineStore.getState().events.length === 0
+    const result = await upsertEventResult(event)
+    if (!result.success) return result
+    setSelectedId(event.id)
+    // 成功后回到该事件的详情浮窗并保持视角；只有首事件需要校正一次视口。
+    setEventFloat(current => (current && current.eventId === event.id
+      ? { ...current, mode: 'details' }
+      : current))
+    if (wasFirstEvent) {
+      // 首个事件加入后节点尺寸在下一帧才完成测量；此时校正一次视口。
+      setViewportIntent(current => ({ kind: 'initial', nonce: current.nonce + 1 }))
     }
-    setCenterRequest(current => ({ eventId, nonce: current.nonce + 1 }))
-  }, [events, expandedBranchIds, setBranchExpanded])
+    return result
+  }, [upsertEventResult])
 
-  useEffect(() => {
-    if (!centerRequest.eventId) return
-    const placed = layout.events.find(item => item.id === centerRequest.eventId)
-    const instance = flowInstanceRef.current
-    if (!placed || !instance) return
-    instance.setCenter(
-      placed.x + placed.width / 2,
-      placed.y + placed.height / 2,
-      { zoom: instance.getZoom(), duration: 250 },
-    )
-  }, [centerRequest, layout])
+  /** 删除成功后清理已经失效的 selection 与浮窗目标。 */
+  const pruneStaleSelection = useCallback(() => {
+    const state = useStoryTimelineStore.getState()
+    const alive = new Set(state.events.map(event => event.id))
+    setSelectedId(current => (current && !alive.has(current) ? null : current))
+    setEventFloat(current => (current && !alive.has(current.eventId) ? null : current))
+  }, [])
 
-  const flowNodes = useMemo<TimelineNode[]>(() => {
-    const startAnchorNode: TimelineNode = {
-      id: layout.startAnchor.id,
-      type: 'timeline-anchor',
-      position: { x: layout.startAnchor.x, y: layout.startAnchor.y },
-      style: { width: layout.startAnchor.width, height: layout.startAnchor.height },
-      selectable: false,
-      draggable: false,
-      data: {
-        label: layout.startAnchor.label,
-        timeLabel: layout.startAnchor.timeLabel,
-        order: layout.startAnchor.order,
-        anchorType: 'start',
-        onEdit: () => {
-          setRangeModalFocus('start')
-          setRangeModalOpen(true)
-        },
-      },
+  /**
+   * 事件删除：确认瞬间重新取一次权威预览，用它的指纹提交。
+   * 影响集合在“预览 → 确认”之间变化时，C 返回 needsReconfirmation，
+   * 这里把最新影响交回浮窗显示并要求重新确认，绝不静默扩大删除范围。
+   */
+  const handleFloatDelete = useCallback(async (eventId: string): Promise<TimelineUiResult> => {
+    const preview = await previewEventDelete(eventId)
+    if (!preview.success || !preview.preview) {
+      return {
+        success: false,
+        error: preview.error || text('无法确认删除影响，请重试', 'Could not verify the delete impact; please retry'),
+      }
     }
-
-    const endAnchorNode: TimelineNode = {
-      id: layout.endAnchor.id,
-      type: 'timeline-anchor',
-      position: { x: layout.endAnchor.x, y: layout.endAnchor.y },
-      style: { width: layout.endAnchor.width, height: layout.endAnchor.height },
-      selectable: false,
-      draggable: false,
-      data: {
-        label: layout.endAnchor.label,
-        timeLabel: layout.endAnchor.timeLabel,
-        order: layout.endAnchor.order,
-        anchorType: 'end',
-        onEdit: () => {
-          setRangeModalFocus('end')
-          setRangeModalOpen(true)
-        },
-      },
+    const result = await deleteEventConfirmed(eventId, preview.preview.fingerprint)
+    if (!result.success) {
+      if (result.needsReconfirmation && result.preview) {
+        setEventDeletePreview({ eventId, impact: result.preview })
+        return {
+          success: false,
+          error: text(
+            `影响范围已经变化：现在将删除 ${result.preview.eventCount} 个事件、${result.preview.branchCount} 条支线。请重新确认。`,
+            `The impact changed: ${result.preview.eventCount} events and ${result.preview.branchCount} branches will now be deleted. Please confirm again.`,
+          ),
+        }
+      }
+      return { success: false, error: result.error }
     }
+    pruneStaleSelection()
+    setEventFloat(null)
+    return { success: true }
+  }, [deleteEventConfirmed, previewEventDelete, pruneStaleSelection, text])
 
-    const axis: TimelineNode = {
-      id: TIMELINE_AXIS_NODE_ID,
-      type: 'timeline-axis',
-      position: { x: layout.axis.x, y: layout.axis.y },
-      style: { width: layout.axis.width, height: layout.axis.height },
-      selectable: false,
-      draggable: false,
-      focusable: false,
-      data: {
-        handles: layout.events
-          .filter(e => e.branchId === STORY_TIMELINE_MAIN_BRANCH_ID)
-          .map((event, index) => ({
-            id: `axis-out-${index}`,
-            offsetX: (event.x + event.width / 2) - layout.axis.x,
-          })),
-        eventId: '',
-        branchId: STORY_TIMELINE_MAIN_BRANCH_ID,
-        title: '',
-        timeText: '',
-        side: 'above',
-        staggerLevel: 0,
-        width: layout.axis.width,
-        status: 'planned',
-        childBranchCount: 0,
-        isExpanded: false,
-      },
+  const handleRenameBranch = useCallback(async (branchId: string, name: string): Promise<TimelineUiResult> => {
+    const branch = useStoryTimelineStore.getState().branches.find(item => item.id === branchId)
+    if (!branch) return { success: false, error: text('找不到这条支线', 'Branch not found') }
+    const trimmed = name.trim()
+    if (!trimmed) return { success: false, error: text('支线名称不能为空', 'Branch name is required') }
+    if (trimmed === branch.name) return { success: true }
+    const success = await upsertBranch({ ...branch, name: trimmed })
+    if (!success) return { success: false, error: text('重命名失败，请重试', 'Rename failed; please retry') }
+    return { success: true }
+  }, [text, upsertBranch])
+
+  /** 支线删除的权威影响预览：直接交给 C 计算，主线一律拒绝。 */
+  const handlePreviewDeleteBranch = useCallback(async (branchId: string) => {
+    if (branchId === STORY_TIMELINE_MAIN_BRANCH_ID) {
+      return { success: false as const, error: text('主时间轴不可删除', 'The main timeline cannot be deleted') }
     }
+    return previewBranchDelete(branchId)
+  }, [previewBranchDelete, text])
 
-    const eventNodes = layout.events.map<TimelineNode>((event, index) => ({
-      id: event.id,
-      type: 'timeline-event',
-      position: { x: event.x, y: event.y },
-      draggable: false,
-      selected: event.id === selectedId,
-      data: {
-        handles: [{ id: `axis-out-${index}`, offsetX: 0 }],
-        eventId: event.id,
-        branchId: event.branchId,
-        title: event.title,
-        timeText: event.timeText,
-        side: event.side,
-        staggerLevel: event.staggerLevel,
-        width: event.width,
-        status: event.status,
-        childBranchCount: event.childBranchCount,
-        isExpanded: event.isExpanded,
-        onToggleExpand: handleToggleEventBranch,
-        onCreateBranch: handleCreateBranchFromEvent,
-        onSelect: (id: string) => setSelectedId(id),
-        onDoubleClick: (id: string) => {
-          const target = events.find(e => e.id === id)
-          if (target) {
-            setModalState({ open: true, mode: 'edit', initialEvent: target })
+  const handleDeleteBranch = useCallback(async (
+    branchId: string,
+    fingerprint: string,
+  ): Promise<TimelineDeleteBranchResult> => {
+    if (branchId === STORY_TIMELINE_MAIN_BRANCH_ID) {
+      return { success: false, error: text('主时间轴不可删除', 'The main timeline cannot be deleted') }
+    }
+    const result = await deleteBranchConfirmed(branchId, fingerprint)
+    if (!result.success) {
+      if (result.needsReconfirmation && result.preview) {
+        return {
+          success: false,
+          needsReconfirmation: true,
+          preview: result.preview,
+          error: text(
+            `影响范围已经变化：现在将删除 ${result.preview.eventCount} 个事件、${result.preview.branchCount} 条支线。请重新确认。`,
+            `The impact changed: ${result.preview.eventCount} events and ${result.preview.branchCount} branches will now be deleted. Please confirm again.`,
+          ),
+        }
+      }
+      return { success: false, error: result.error }
+    }
+    // 成功后清理失效的选中与浮窗目标（store 已按返回的 ID 集合清理数据）。
+    pruneStaleSelection()
+    setCanvasMenu(null)
+    setAnchorMenu(null)
+    return { success: true }
+  }, [deleteBranchConfirmed, pruneStaleSelection, text])
+
+  /**
+   * 事件级联影响的本地临时估算，规则与仓库层 deleteEvent 一致：
+   * 以该事件为源的所有下游支线（含嵌套）及其事件都会被连带删除。
+   *
+   * 只用于浮窗打开后、权威预览返回前的过渡显示；真正的删除范围与指纹
+   * 一律来自 C 的主进程预览，本地估算绝不参与删除决策。
+   */
+  const computeEventCascade = useCallback((eventId: string): TimelineCascadePreview => {
+    const branchesBySource = new Map<string, StoryTimelineBranch[]>()
+    for (const branch of branches) {
+      if (!branch.sourceEventId) continue
+      const list = branchesBySource.get(branch.sourceEventId) ?? []
+      list.push(branch)
+      branchesBySource.set(branch.sourceEventId, list)
+    }
+    const doomedEvents = new Set<string>([eventId])
+    const doomedBranches: string[] = []
+    let frontier = [eventId]
+    while (frontier.length > 0) {
+      const next: string[] = []
+      for (const currentId of frontier) {
+        for (const branch of branchesBySource.get(currentId) ?? []) {
+          if (doomedBranches.includes(branch.id)) continue
+          doomedBranches.push(branch.id)
+          for (const event of events) {
+            if ((event.branchId || STORY_TIMELINE_MAIN_BRANCH_ID) === branch.id && !doomedEvents.has(event.id)) {
+              doomedEvents.add(event.id)
+              next.push(event.id)
+            }
           }
-        },
-      },
-    }))
+        }
+      }
+      frontier = next
+    }
+    return {
+      branchNames: doomedBranches.map(id => branchNameById.get(id) ?? id),
+      eventCount: doomedEvents.size,
+    }
+  }, [branches, events, branchNameById])
 
-    return [axis, startAnchorNode, endAnchorNode, ...eventNodes]
-  }, [layout, selectedId, events, handleToggleEventBranch, handleCreateBranchFromEvent])
+  /** 创建支线/后续事件从浮窗发起时先收起浮窗，再打开创建表单。 */
+  const openCreateModal = useCallback((state: CreateModalState) => {
+    closeAllOverlays()
+    setCreateModal(state)
+  }, [closeAllOverlays])
 
-  const flowEdges = useMemo<TimelineEdge[]>(() => {
-    // 1. 主轴到主轴事件的垂直接线
-    const mainPlaced = layout.events.filter(e => e.branchId === STORY_TIMELINE_MAIN_BRANCH_ID)
-    const connectors = mainPlaced.map((event, index) => ({
-      id: `connector-${event.id}`,
-      type: 'timeline-connector' as const,
-      source: TIMELINE_AXIS_NODE_ID,
-      sourceHandle: `axis-out-${index}`,
-      target: event.id,
-      targetHandle: 'event-in',
-      selectable: false,
-      focusable: false,
-      data: {},
-    }))
-
-    // 2. 布局中生成的树状连线（主干/支线平滑贝塞尔）
-    const treeEdges = layout.edges.map(edge => ({
-      id: edge.id,
-      type: edge.type,
-      source: edge.source,
-      sourceHandle: 'tree-out',
-      target: edge.target,
-      targetHandle: 'tree-in',
-      selectable: false,
-      focusable: false,
-      data: { color: edge.color },
-    }))
-
-    return [...connectors, ...treeEdges]
-  }, [layout])
-
-  // 浮层表单保存回调
-  const handleModalSave = async ({
+  /** 创建表单提交：创建支线走原子事务，其余走单个 upsert。 */
+  const handleModalSave = useCallback(async ({
     event,
     newBranchName,
   }: {
     event: StoryTimelineEvent
     newBranchName?: string
-  }) => {
-    // React Flow 初次初始化时只有两个范围锚点。首个普通事件加入后，节点
-    // 尺寸与连线会在下一帧才完成测量；此时只校正一次视口，避免窗口落在
-    // 旧的空白坐标上。后续创建/编辑绝不自动重置作者已调整过的视角。
-    const isFirstTimelineEvent = events.length === 0
+  }): Promise<TimelineUiResult> => {
+    const isFirstTimelineEvent = useStoryTimelineStore.getState().events.length === 0
 
-    if (newBranchName && modalState.mode === 'create-branch' && modalState.sourceEvent) {
-      // 先持久化新分支
-      const branchCreated = await upsertBranch({
-        id: event.branchId!,
+    if (newBranchName && createModal?.mode === 'create-branch' && createModal.sourceEventId) {
+      const sourceEvent = eventById.get(createModal.sourceEventId)
+      if (!sourceEvent) return { success: false, error: text('找不到分叉源事件', 'Source event not found') }
+      // 支线与首事件一次事务提交，绝不留下空支线。
+      const commit = await createBranchWithEvent({
+        id: event.branchId ?? `branch-${Date.now()}`,
         name: newBranchName,
-        sourceEventId: modalState.sourceEvent.id,
-        sortOrder: branches.length + 1,
-      })
-      if (!branchCreated) return
+        sourceEventId: sourceEvent.id,
+        sortOrder: nextBranchSortOrder,
+      }, event)
+      if (!commit.success) return { success: false, error: commit.error }
+      // 创建成功后展开全部祖先与新支线，选中并定位首个事件。
+      expandBranchChain(commit.branch.id)
+      setBranchExpanded(commit.branch.id, true)
+      setSelectedId(commit.event.id)
+      setViewportIntent(current => ({ kind: 'focus-event', eventId: commit.event.id, nonce: current.nonce + 1 }))
+      return { success: true }
     }
 
-    const saved = await upsertEvent(event)
-    if (saved) {
+    const result = await upsertEventResult(event)
+    if (result.success) {
+      expandBranchChain(event.branchId || STORY_TIMELINE_MAIN_BRANCH_ID)
       setSelectedId(event.id)
-      if (isFirstTimelineEvent) {
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            flowInstanceRef.current?.fitView({ padding: 0.2, duration: 0 })
-          })
-        })
-      }
+      setViewportIntent(current => (isFirstTimelineEvent
+        ? { kind: 'initial', nonce: current.nonce + 1 }
+        : { kind: 'focus-event', eventId: event.id, nonce: current.nonce + 1 }))
     }
+    return result
+  }, [createBranchWithEvent, createModal, eventById, expandBranchChain, nextBranchSortOrder, setBranchExpanded, text, upsertEventResult])
+
+  const floatEvent = eventFloat ? eventById.get(eventFloat.eventId) ?? null : null
+  const floatChildBranches = useMemo(() => {
+    if (!floatEvent) return []
+    return nonMainBranches.filter(branch => branch.sourceEventId === floatEvent.id)
+  }, [floatEvent, nonMainBranches])
+  const floatIsExpanded = floatChildBranches.some(branch => expandedBranchIds.includes(branch.id))
+
+  // 浮窗打开时向主进程取一次权威删除影响，供浮窗展示真实计数；
+  // 事件或项目切换后旧预览立即作废，绝不跨事件复用。
+  const floatEventId = eventFloat?.eventId ?? null
+  const [renderedFloatEventId, setRenderedFloatEventId] = useState<string | null>(null)
+  if (renderedFloatEventId !== floatEventId) {
+    setRenderedFloatEventId(floatEventId)
+    setEventDeletePreview(null)
   }
-
-  // 画布右键：弹出空白处/主干上下文菜单，并换算鼠标对应刻度
-  const handlePaneContextMenu = (e: MouseEvent | React.MouseEvent) => {
-    e.preventDefault()
-    let suggestedOrder: number | null = null
-    let canCreate = true
-
-    if (flowInstanceRef.current) {
-      const flowPos = flowInstanceRef.current.screenToFlowPosition({ x: e.clientX, y: e.clientY })
-      const startAnchorX = layout.startAnchor.x
-      const endAnchorX = layout.endAnchor.x + layout.endAnchor.width
-
-      // 必须在“故事开端”和“故事结束”之间右键才能创建事件
-      if (flowPos.x < startAnchorX - 20 || flowPos.x > endAnchorX + 20) {
-        canCreate = false
-      } else {
-        const trunkEventStartX = layout.startAnchor.x + layout.startAnchor.width + 30
-        const trunkEventEndX = layout.endAnchor.x - 30
-        const span = Math.max(1, trunkEventEndX - trunkEventStartX)
-        const t = Math.max(0, Math.min(1, (flowPos.x - trunkEventStartX) / span))
-        const rawOrder = Math.round(layout.range.startOrder + t * (layout.range.endOrder - layout.range.startOrder))
-        suggestedOrder = Math.max(layout.range.startOrder, Math.min(layout.range.endOrder, rawOrder))
-      }
-    }
-
-    setContextMenu({
-      x: e.clientX,
-      y: e.clientY,
-      targetEventId: null,
-      targetAnchor: null,
-      suggestedOrder,
-      canCreateEventAtPosition: canCreate,
+  useEffect(() => {
+    if (!floatEventId) return
+    let cancelled = false
+    void previewEventDelete(floatEventId).then((result) => {
+      if (cancelled) return
+      setEventDeletePreview(result.success && result.preview
+        ? { eventId: floatEventId, impact: result.preview }
+        : null)
     })
-  }
+    return () => { cancelled = true }
+  }, [floatEventId, previewEventDelete])
 
-  // 节点右键：弹出节点上下文菜单
-  const handleNodeContextMenu = (e: React.MouseEvent, node: TimelineNode) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (node.type === 'timeline-event') {
-      setContextMenu({
-        x: e.clientX,
-        y: e.clientY,
-        targetEventId: node.data.eventId ?? null,
-        targetAnchor: null,
-        suggestedOrder: null,
-        canCreateEventAtPosition: false,
-      })
-    } else if (node.type === 'timeline-anchor') {
-      const anchorType = node.data.anchorType
-      if (!anchorType) return
-      setContextMenu({
-        x: e.clientX,
-        y: e.clientY,
-        targetEventId: null,
-        targetAnchor: anchorType,
-        suggestedOrder: null,
-        canCreateEventAtPosition: false,
+  /**
+   * 浮窗展示用的级联影响：优先用主进程的权威预览，未返回前显示同规则的
+   * 本地临时估算（只用于文字展示，删除范围永远以指纹提交为准）。
+   */
+  const floatCascade = useMemo<TimelineCascadePreview>(() => {
+    if (!floatEvent) return { branchNames: [], eventCount: 1 }
+    if (eventDeletePreview && eventDeletePreview.eventId === floatEvent.id) {
+      return {
+        branchNames: eventDeletePreview.impact.branchNames,
+        eventCount: eventDeletePreview.impact.eventCount,
+      }
+    }
+    return computeEventCascade(floatEvent.id)
+  }, [computeEventCascade, eventDeletePreview, floatEvent])
+
+  /**
+   * 创建表单的源事件：create-next 追加到某支线时用真实归属做预填种子
+   * （支线可能还没有任何事件），种子绝不会被保存成事件。
+   */
+  const modalSourceEvent = useMemo<StoryTimelineEvent | null>(() => {
+    if (!createModal) return null
+    if (createModal.sourceEventId) return eventById.get(createModal.sourceEventId) ?? null
+    if (createModal.branchId) {
+      const branch = branchById.get(createModal.branchId)
+      if (!branch) return null
+      const last = sortTimelineEvents(events.filter(item => item.branchId === branch.id)).at(-1) ?? null
+      return branchSeedEvent(branch, last)
+    }
+    return null
+  }, [branchById, createModal, eventById, events])
+
+  // ============================================================
+  // 界面偏好：切项目恢复，操作后持久化（建议值，绝不触发额外 fitView）。
+  // ============================================================
+
+  /** 最近一次真实视口；写入偏好时取这里的值。 */
+  const canvasRef = useRef<TimelineCanvasViewport | null>(storedCanvas)
+  useEffect(() => {
+    canvasRef.current = storedCanvas
+  }, [storedCanvas])
+
+  if (isDataReady && restoredProjectKey !== projectKey) {
+    setRestoredProjectKey(projectKey)
+    const prefs = readTimelineUiPrefs(projectKey)
+    const savedId = prefs?.selectedEventId
+    if (savedId && events.some(event => event.id === savedId)) setSelectedId(savedId)
+    // 有保存视口时画布已经停在原位，这里不再移动；
+    // 没有保存视口才发一次可读适配（选中事件优先，否则整体适配）。
+    if (!storedCanvas) {
+      setViewportIntent({
+        nonce: 0,
+        kind: savedId && events.some(event => event.id === savedId) ? 'focus-event' : 'initial',
+        eventId: savedId ?? undefined,
       })
     }
   }
 
-  const contextTargetEvent = contextMenu?.targetEventId
-    ? events.find(e => e.id === contextMenu.targetEventId)
-    : null
-  const targetChildBranches = contextTargetEvent
-    ? branches.filter(b => b.sourceEventId === contextTargetEvent.id)
-    : []
-  const hasChildBranches = targetChildBranches.length > 0
-  const isBranchExpanded = hasChildBranches && targetChildBranches.some(b => expandedBranchIds.includes(b.id))
+  const persistPrefs = useCallback(() => {
+    if (!isDataReady) return
+    writeTimelineUiPrefs(projectKey, {
+      sidebarCollapsed,
+      selectedEventId: selectedId,
+      canvas: canvasRef.current,
+    })
+  }, [isDataReady, projectKey, selectedId, sidebarCollapsed])
 
-  const isDataReady = dataProjectKey === projectKey
+  useEffect(() => {
+    persistPrefs()
+  }, [persistPrefs])
+
+  // 平移/缩放结束后记录真实视口，供卸载重入恢复（数字与 zoom 由写入层校验）。
+  const persistRef = useRef(persistPrefs)
+  const persistFrameRef = useRef<number | null>(null)
+  useEffect(() => {
+    persistRef.current = persistPrefs
+  }, [persistPrefs])
+  useEffect(() => () => {
+    if (persistFrameRef.current !== null) window.cancelAnimationFrame(persistFrameRef.current)
+  }, [])
+  const schedulePersist = useCallback(() => {
+    if (persistFrameRef.current !== null) return
+    persistFrameRef.current = window.requestAnimationFrame(() => {
+      persistFrameRef.current = null
+      persistRef.current()
+    })
+  }, [])
+
+  const handleViewportChange = useCallback((viewport: Viewport) => {
+    const valid = sanitizeTimelineCanvasViewport(viewport)
+    if (!valid) return
+    canvasRef.current = valid
+    schedulePersist()
+  }, [schedulePersist])
+
+  /**
+   * 用户开始缩放时关闭清洁浮窗与画布菜单。
+   *
+   * Scene 的 onInteractStart 由 React Flow 的 onMoveStart 驱动，程序化视口变化
+   * （初始适配、恢复保存视口、定位事件）同样会触发它；这里只认滚轮这类真实
+   * 用户缩放手势，避免浮窗刚打开就被随之而来的适配动作关掉。指针手势不需要
+   * 在这里处理：浮窗自身会在浮窗外 pointerdown 时关闭（脏编辑仍由它守卫）。
+   */
+  const userZoomGestureRef = useRef(false)
+  const handleInteractStart = useCallback(() => {
+    if (!userZoomGestureRef.current) return
+    userZoomGestureRef.current = false
+    setCanvasMenu(null)
+    setAnchorMenu(null)
+    setEventFloat(current => (current && current.mode === 'details' ? null : current))
+  }, [])
+
+  const selectedEvent = selectedId ? eventById.get(selectedId) ?? null : null
 
   return (
     <>
@@ -752,11 +754,44 @@ export default function StoryTimelineView({
           'A story timeline arranged by the author: ruler, custom time labels, and events are all entered by hand, independent of blueprints or AI. The axis advances rightwards while anchors bound the story range.',
         )}
         meta={text(
-          `${events.length} 个事件 · ${branches.length} 条支线`,
-          `${events.length} events · ${branches.length} branches`,
+          `${events.length} 个事件 · ${nonMainBranches.length} 条支线`,
+          `${events.length} events · ${nonMainBranches.length} branches`,
         )}
         actions={
           <>
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => openCreateModal({ mode: 'create-main', suggestedOrder: nextMainOrder })}
+              data-testid="timeline-toolbar-new-event"
+            >
+              <Plus size={13} /> {text('新建事件', 'New event')}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!selectedEvent}
+              onClick={() => {
+                if (!selectedEvent) return
+                locateEvent(selectedEvent.id)
+              }}
+              title={selectedEvent
+                ? text('把画布移到选中的事件', 'Move the canvas to the selected event')
+                : text('先在画布或列表里选中一个事件', 'Select an event on the canvas or in the list first')}
+              data-testid="timeline-toolbar-focus-selected"
+            >
+              <Crosshair size={13} /> {text('定位选中', 'Locate selected')}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setViewportIntent(current => ({ kind: 'fit-all', nonce: current.nonce + 1 }))
+              }}
+              data-testid="timeline-toolbar-fit-all"
+            >
+              <Maximize2 size={13} /> {text('查看全部', 'View all')}
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -764,139 +799,40 @@ export default function StoryTimelineView({
                 setRangeModalFocus('general')
                 setRangeModalOpen(true)
               }}
+              data-testid="timeline-toolbar-ruler"
             >
               <Settings2 size={13} /> {text('刻度设置', 'Ruler settings')}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                flowInstanceRef.current?.fitView({ padding: 0.2, duration: 250 })
-              }}
-            >
-              <Maximize2 size={13} /> {text('适应视图', 'Fit view')}
             </Button>
           </>
         }
       >
-        <PlanningPane
-          title={text('事件与支线', 'Events & branches')}
-          icon={<GitBranch size={12} />}
-          width={250}
-          actions={
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              onClick={() => {
-                setSelectedId(null)
-                setModalState({ open: true, mode: 'create-main', initialSortOrder: nextMainOrder })
-              }}
-              title={text('新建主轴事件', 'New main-axis event')}
-              aria-label={text('新建主轴事件', 'New main-axis event')}
-            >
-              <Plus size={13} />
-            </Button>
-          }
-          filters={
-            <>
-              <PlanningSearch
-                value={searchQuery}
-                onChange={setSearchQuery}
-                placeholder={text('搜索标题或时间…', 'Search title or time…')}
-              />
-              <PlanningChipGroup
-                value={statusFilter}
-                onChange={setStatusFilter}
-                ariaLabel={text('事件状态筛选', 'Event status filter')}
-                options={[
-                  { value: 'all', label: text('全部', 'All') },
-                  { value: 'planned', label: statusLabel('planned') },
-                  { value: 'drafted', label: statusLabel('drafted') },
-                  { value: 'finalized', label: statusLabel('finalized') },
-                ]}
-              />
-              {branches.length > 0 && (
-                <PlanningChipGroup
-                  value={branchFilter}
-                  onChange={setBranchFilter}
-                  ariaLabel={text('主线与支线筛选', 'Main line and branch filter')}
-                  options={[
-                    { value: 'all', label: text('全部线路', 'All lines') },
-                    { value: STORY_TIMELINE_MAIN_BRANCH_ID, label: text('仅主轴', 'Main axis') },
-                    ...branches
-                      .filter(branch => branch.id !== STORY_TIMELINE_MAIN_BRANCH_ID)
-                      .map(branch => ({ value: branch.id, label: branch.name })),
-                  ]}
-                />
-              )}
-            </>
-          }
-          footer={text(
-            `显示 ${listedEvents.length} / ${events.length} 个事件`,
-            `Showing ${listedEvents.length} of ${events.length} events`,
-          )}
-        >
-          {listedEventGroups.length === 0 ? (
-            <PlanningEmptyState
-              icon={<Clock3 size={20} />}
-              title={events.length === 0
-                ? text('时间线上还没有事件', 'No timeline events yet')
-                : text('没有符合筛选的事件', 'No events match the filters')}
-              description={events.length === 0
-                ? text(
-                    '时间线只记录你自己排布的剧情时间，画布上不会预置任何占位事件。',
-                    'The timeline only holds events you arrange; no placeholder events are pre-filled.',
-                  )
-                : text('可以调整搜索词，或切换状态与线路筛选。', 'Adjust the search term, or switch the status and line filters.')}
-              steps={events.length === 0 ? [
-                text('先在「刻度设置」里确定故事开端与结束，界定时间范围；', 'Set the story start and end in “Ruler settings” to bound the range.'),
-                text('再在画布右键主干选择「添加事件」，或点下方「新建事件」。', 'Right-click the trunk in the canvas to add an event, or use “New event” below.'),
-              ] : undefined}
-              actions={events.length === 0 ? (
-                <Button
-                  variant="default"
-                  size="sm"
-                  onClick={() => {
-                    setSelectedId(null)
-                    setModalState({ open: true, mode: 'create-main', initialSortOrder: nextMainOrder })
-                  }}
-                >
-                  <Plus size={13} /> {text('新建事件', 'New event')}
-                </Button>
-              ) : listFilterActive ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setSearchQuery('')
-                    setStatusFilter('all')
-                    setBranchFilter('all')
-                  }}
-                >
-                  {text('清除筛选', 'Clear filters')}
-                </Button>
-              ) : undefined}
-            />
-          ) : listedEventGroups.map(group => (
-            <div key={group.id}>
-              <div className="planning-pane__group-label">{group.name}</div>
-              {group.events.map(event => (
-                <PlanningListRow
-                  key={event.id}
-                  selected={selectedId === event.id}
-                  onSelect={() => focusEventFromList(event.id)}
-                  onDoubleClick={() => setModalState({ open: true, mode: 'edit', initialEvent: event })}
-                  icon={<span className={`writer-timeline-status-dot is-${event.status}`} aria-hidden="true" />}
-                  title={event.title || text('未命名事件', 'Untitled event')}
-                  subtitle={event.timeLabel || text('未填写时间', 'No time label')}
-                  titleAttr={text('单击定位到画布，双击编辑事件', 'Click to locate on the canvas, double-click to edit')}
-                  trailing={<span className="planning-tag">{statusLabel(event.status)}</span>}
-                />
-              ))}
-            </div>
-          ))}
-        </PlanningPane>
+        {!sidebarCollapsed && (
+          <TimelineEventSidebar
+            events={events}
+            branches={branches}
+            expandedBranchIds={expandedBranchIds}
+            selectedId={selectedId}
+            dataReady={isDataReady}
+            filters={filters}
+            onFiltersChange={setFilters}
+            onCollapse={() => setSidebarCollapsed(true)}
+            onLocateEvent={locateEvent}
+            onEditEvent={openEditFloatFromList}
+            onCreateMainEvent={() => openCreateModal({ mode: 'create-main', suggestedOrder: nextMainOrder })}
+            onAddBranchEvent={(branchId) => {
+              const branch = branchById.get(branchId)
+              openCreateModal({
+                mode: 'create-next',
+                branchId,
+                branchName: branch?.name,
+              })
+            }}
+            onToggleBranch={(branchId) => setBranchExpanded(branchId, !expandedBranchIds.includes(branchId))}
+            onRenameBranch={handleRenameBranch}
+            onPreviewDeleteBranch={handlePreviewDeleteBranch}
+            onDeleteBranch={handleDeleteBranch}
+          />
+        )}
 
         <main className="planning-page__main">
           <section
@@ -908,263 +844,177 @@ export default function StoryTimelineView({
               <small>{settings.rulerUnit}</small>
               <small className="writer-timeline-ruler-hint">
                 {text(
-                  '拖动平移，滚轮缩放；右键主干或节点添加事件与分支。',
-                  'Drag to pan, scroll to zoom; right-click to add events.',
+                  '拖动平移，滚轮缩放；右键事件或空白处添加、编辑事件。',
+                  'Drag to pan, scroll to zoom; right-click events or blank canvas to edit and add events.',
                 )}
               </small>
             </div>
 
-            {loading && !isDataReady ? (
-              <div className="writer-timeline-empty">
-                {text('正在读取项目时间线…', 'Loading project timeline…')}
-              </div>
-            ) : (
-              <div
-                className="writer-timeline-flow w-full flex-1 min-h-0 relative"
-                data-testid="timeline-flow"
-                onContextMenu={handlePaneContextMenu}
-              >
-                <ReactFlow<TimelineNode, TimelineEdge>
-                  nodes={flowNodes}
-                  edges={flowEdges}
-                  nodeTypes={nodeTypes}
-                  edgeTypes={edgeTypes}
-                  onInit={(instance) => {
-                    flowInstanceRef.current = instance
-                    instance.fitView({ padding: 0.2 })
-                  }}
-                  onPaneContextMenu={handlePaneContextMenu}
-                  onNodeContextMenu={handleNodeContextMenu}
-                  onNodeClick={(_event, node) => {
-                    if (node.type === 'timeline-event') {
-                      setSelectedId(node.data.eventId ?? null)
-                    }
-                  }}
-                  onNodeDoubleClick={(_event, node) => {
-                    if (node.type === 'timeline-event') {
-                      const target = events.find(e => e.id === node.data.eventId)
-                      if (target) {
-                        setModalState({ open: true, mode: 'edit', initialEvent: target })
-                      }
-                    } else if (node.type === 'timeline-anchor') {
-                      if (!node.data.anchorType) return
-                      setRangeModalFocus(node.data.anchorType)
-                      setRangeModalOpen(true)
-                    }
-                  }}
-                  // 时间轴按刻度 160px 展开，故事范围大时总宽可达数千像素；
-                  // 允许缩到 0.05 才能把整条主轴框进视口。
-                  minZoom={0.05}
-                  maxZoom={2.0}
-                  panOnDrag={true}
-                  zoomOnScroll={true}
-                  nodesDraggable={false}
-                  nodesConnectable={false}
-                  elementsSelectable
-                  proOptions={{ hideAttribution: true }}
-                  className="bg-[var(--color-editor-bg)]"
-                >
-                  <Background
-                    variant={BackgroundVariant.Dots}
-                    gap={18}
-                    size={1}
-                    color="var(--color-border)"
-                  />
-                  <Controls showInteractive={false} position="bottom-right" />
-                </ReactFlow>
-              </div>
-            )}
-          </section>
+            <div className="timeline-workbench__canvas-shell">
+              {/* 收起内侧栏后画布占满释放的空间，展开按钮悬浮在画布左缘。 */}
+              {sidebarCollapsed && <TimelineSidebarRail onExpand={() => setSidebarCollapsed(false)} />}
 
-          {selectedEvent && (
-            <aside className="planning-timeline-detail" data-testid="timeline-event-detail">
-              <div className="planning-pane__header">
-                <span className="planning-pane__title">
-                  <span className={`writer-timeline-status-dot is-${selectedEvent.status}`} aria-hidden="true" />
-                  {text('事件详情', 'Event detail')}
-                </span>
-                <span className="planning-pane__actions">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
-                    onClick={() => setModalState({ open: true, mode: 'edit', initialEvent: selectedEvent })}
-                    title={text('编辑事件', 'Edit event')}
-                    aria-label={text('编辑事件', 'Edit event')}
-                  >
-                    <Pencil size={13} />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
-                    onClick={() => { void deleteEvent(selectedEvent.id) }}
-                    title={text('删除事件', 'Delete event')}
-                    aria-label={text('删除事件', 'Delete event')}
-                  >
-                    <Trash2 size={13} />
-                  </Button>
-                </span>
-              </div>
-              <div className="planning-timeline-detail__body">
-                <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
-                  {selectedEvent.title || text('未命名事件', 'Untitled event')}
-                </h3>
-                <p className="mt-1 text-xs" style={{ color: 'var(--color-accent)' }}>
-                  {selectedEvent.timeLabel || text('未填写时间', 'No time label')}
-                </p>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  <span className="planning-tag">{statusLabel(selectedEvent.status)}</span>
-                  <span className="planning-tag is-muted">
-                    {(selectedEvent.branchId || STORY_TIMELINE_MAIN_BRANCH_ID) === STORY_TIMELINE_MAIN_BRANCH_ID
-                      ? text('主轴', 'Main axis')
-                      : branchNameById.get(selectedEvent.branchId!) ?? text('支线', 'Branch')}
-                  </span>
-                </div>
-                {selectedEvent.description
-                  ? (
-                    <p className="mt-3 whitespace-pre-wrap text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                      {selectedEvent.description}
+              {!isDataReady ? (
+                readFailed ? (
+                  // 读取失败必须显式重试，绝不伪装成空项目。
+                  <div className="timeline-workbench__read-error" data-testid="timeline-read-error">
+                    <AlertTriangle size={20} aria-hidden="true" />
+                    <h3>{text('读取故事时间线失败', 'Failed to load the story timeline')}</h3>
+                    <p>
+                      {text(
+                        '当前项目的刻度与事件没有被读入，画面上的空画布不代表你的时间线是空的。请重试读取，或确认项目仍然打开。',
+                        'This project’s ruler and events were not loaded; the empty canvas does not mean your timeline is empty. Retry the read, or check that the project is still open.',
+                      )}
                     </p>
-                  )
-                  : (
-                    <p className="mt-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                      {text('这条事件还没有描述。双击画布标注或点上方铅笔补充。', 'This event has no description yet. Double-click its label on the canvas, or use the pencil above.')}
-                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setReadFailed(false)
+                        void runLoad()
+                      }}
+                      data-testid="timeline-read-retry"
+                    >
+                      <RefreshCw size={13} /> {text('重试读取', 'Retry')}
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="writer-timeline-empty">
+                    {text('正在读取项目时间线…', 'Loading project timeline…')}
+                  </div>
+                )
+              ) : (
+                <div
+                  ref={flowRef}
+                  className="writer-timeline-flow w-full flex-1 min-h-0 relative"
+                  data-testid="timeline-flow"
+                  onWheelCapture={() => { userZoomGestureRef.current = true }}
+                >
+                  <StoryTimelineScene
+                    key={projectKey}
+                    layout={layout}
+                    selectedId={selectedId}
+                    contentReady={isDataReady}
+                    viewportIntent={viewportIntent}
+                    initialViewport={storedCanvas ?? undefined}
+                    callbacks={{
+                      onSelectEvent: handleSelectEvent,
+                      onOpenEventFloat: handleOpenEventFloat,
+                      onToggleBranch: handleToggleEventBranch,
+                      onCanvasContextMenu: handleCanvasContextMenu,
+                      onAnchorContextMenu: handleAnchorContextMenu,
+                      onOpenRangeEditor: handleOpenRangeEditor,
+                      onInteractStart: handleInteractStart,
+                      onViewportChange: handleViewportChange,
+                    }}
+                  />
+
+                  {eventFloat && floatEvent && (
+                    <TimelineEventFloat
+                      key={`${eventFloat.eventId}:${eventFloat.mode}`}
+                      eventId={eventFloat.eventId}
+                      point={eventFloat.point}
+                      mode={eventFloat.mode}
+                      bounds={eventFloat.bounds}
+                      event={floatEvent}
+                      branchName={(floatEvent.branchId && floatEvent.branchId !== STORY_TIMELINE_MAIN_BRANCH_ID)
+                        ? branchNameById.get(floatEvent.branchId) ?? null
+                        : null}
+                      statusLabel={statusLabel(floatEvent.status)}
+                      chapterText={floatEvent.chapterNumbers.length > 0
+                        ? floatEvent.chapterNumbers.map(number => text(`第${number}章`, `Ch.${number}`)).join('、')
+                        : null}
+                      characterNames={floatEvent.characterNames}
+                      locationNames={floatEvent.locationNodeIds
+                        .map(id => worldMapNodes.find(node => node.id === id)?.name ?? id)}
+                      childBranches={floatChildBranches.map(branch => ({ id: branch.id, name: branch.name }))}
+                      isExpanded={floatIsExpanded}
+                      cascade={floatCascade}
+                      callbacks={{
+                        onClose: handleFloatClose,
+                        onSwitchToEdit: () => setEventFloat(current => (current
+                          ? { ...current, mode: 'edit' }
+                          : current)),
+                        onSaveEvent: handleFloatSave,
+                        onDeleteEvent: handleFloatDelete,
+                        onCreateBranch: (eventId) => {
+                          openCreateModal({ mode: 'create-branch', sourceEventId: eventId })
+                        },
+                        onCreateNext: (eventId) => {
+                          const source = eventById.get(eventId)
+                          openCreateModal({
+                            mode: 'create-next',
+                            sourceEventId: eventId,
+                            branchId: source?.branchId || STORY_TIMELINE_MAIN_BRANCH_ID,
+                            branchName: source
+                              ? branchNameById.get(source.branchId || STORY_TIMELINE_MAIN_BRANCH_ID)
+                              : undefined,
+                          })
+                        },
+                        onToggleBranches: handleToggleEventBranch,
+                        onNavigateMention: handleNavigateMention,
+                      }}
+                    />
                   )}
-                <dl className="mt-4 space-y-1.5 text-[11px]">
-                  <div className="flex gap-2">
-                    <dt style={{ color: 'var(--color-text-muted)' }}>{text('关联章节', 'Chapters')}</dt>
-                    <dd style={{ color: 'var(--color-text)' }}>
-                      {selectedEvent.chapterNumbers.length > 0
-                        ? selectedEvent.chapterNumbers.map(number => text(`第${number}章`, `Ch.${number}`)).join('、')
-                        : text('未关联', 'None')}
-                    </dd>
-                  </div>
-                  <div className="flex gap-2">
-                    <dt style={{ color: 'var(--color-text-muted)' }}>{text('涉及角色', 'Characters')}</dt>
-                    <dd style={{ color: 'var(--color-text)' }}>
-                      {selectedEvent.characterNames.length > 0
-                        ? selectedEvent.characterNames.join('、')
-                        : text('未关联', 'None')}
-                    </dd>
-                  </div>
-                  <div className="flex gap-2">
-                    <dt style={{ color: 'var(--color-text-muted)' }}>{text('涉及地点', 'Locations')}</dt>
-                    <dd style={{ color: 'var(--color-text)' }}>
-                      {selectedEvent.locationNodeIds.length > 0
-                        ? selectedEvent.locationNodeIds
-                            .map(id => worldMapNodes.find(node => node.id === id)?.name ?? id)
-                            .join('、')
-                        : text('未关联', 'None')}
-                    </dd>
-                  </div>
-                </dl>
-                <div className="mt-4 flex flex-wrap gap-1.5">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleCreateBranchFromEvent(selectedEvent.id)}
-                  >
-                    <GitBranch size={13} /> {text('创建支线', 'Create branch')}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setModalState({ open: true, mode: 'create-next', sourceEvent: selectedEvent })}
-                  >
-                    <Plus size={13} /> {text('在此后添加事件', 'Add event after')}
-                  </Button>
+
+                  {canvasMenu && (
+                    <TimelineContextMenu
+                      point={canvasMenu.point}
+                      bounds={canvasMenu.bounds}
+                      suggestedOrder={canvasMenu.suggestedOrder}
+                      canCreateEventAtPosition={canvasMenu.canCreate}
+                      onClose={() => setCanvasMenu(null)}
+                      onCreateMainEvent={(suggestedOrder) => {
+                        setCanvasMenu(null)
+                        openCreateModal({ mode: 'create-main', suggestedOrder: suggestedOrder ?? nextMainOrder })
+                      }}
+                      onOpenRangeSettings={(focusField) => {
+                        setCanvasMenu(null)
+                        setRangeModalFocus(focusField || 'general')
+                        setRangeModalOpen(true)
+                      }}
+                    />
+                  )}
+
+                  {anchorMenu && (
+                    <TimelineContextMenu
+                      point={anchorMenu.point}
+                      bounds={anchorMenu.bounds}
+                      targetAnchor={anchorMenu.anchor}
+                      canCreateEventAtPosition={false}
+                      onClose={() => setAnchorMenu(null)}
+                      onCreateMainEvent={() => {}}
+                      onOpenRangeSettings={(focusField) => {
+                        setAnchorMenu(null)
+                        setRangeModalFocus(focusField || 'general')
+                        setRangeModalOpen(true)
+                      }}
+                    />
+                  )}
                 </div>
-              </div>
-            </aside>
-          )}
+              )}
+            </div>
+          </section>
         </main>
       </PlanningPageShell>
 
-      {/* 画布右键浮层菜单 */}
-      {contextMenu && (
-        <TimelineContextMenu
-          x={contextMenu.x}
-          y={contextMenu.y}
-          targetEventId={contextMenu.targetEventId}
-          targetAnchor={contextMenu.targetAnchor}
-          suggestedOrder={contextMenu.suggestedOrder}
-          canCreateEventAtPosition={contextMenu.canCreateEventAtPosition}
-          hasChildBranches={hasChildBranches}
-          isBranchExpanded={isBranchExpanded}
-          onClose={() => setContextMenu(null)}
-          onOpenRangeSettings={(focusField) => {
-            setRangeModalFocus(focusField || 'general')
-            setRangeModalOpen(true)
-          }}
-          onCreateMainEvent={(suggestedOrder) => {
-            setSelectedId(null)
-            setModalState({
-              open: true,
-              mode: 'create-main',
-              initialSortOrder: suggestedOrder,
-            })
-          }}
-          onCreateNextEvent={() => {
-            if (contextTargetEvent) {
-              setModalState({
-                open: true,
-                mode: 'create-next',
-                sourceEvent: contextTargetEvent,
-              })
-            }
-          }}
-          onCreateBranch={() => {
-            if (contextTargetEvent) {
-              handleCreateBranchFromEvent(contextTargetEvent.id)
-            }
-          }}
-          onToggleExpand={() => {
-            if (contextTargetEvent) {
-              handleToggleEventBranch(contextTargetEvent.id)
-            }
-          }}
-          onEditEvent={() => {
-            if (contextTargetEvent) {
-              setModalState({
-                open: true,
-                mode: 'edit',
-                initialEvent: contextTargetEvent,
-              })
-            }
-          }}
-          onDeleteEvent={async () => {
-            if (contextTargetEvent) {
-              await deleteEvent(contextTargetEvent.id)
-            }
-          }}
-        />
-      )}
-
-      {/* 浮层事件编辑弹窗 */}
+      {/* 创建主轴事件 / 后续事件 / 支线的浮层表单 */}
       <TimelineEventModal
-        open={modalState.open}
-        mode={modalState.mode}
-        initialEvent={modalState.initialEvent}
-        sourceEvent={modalState.sourceEvent}
-        currentBranchName={
-          modalState.initialEvent
-            ? branches.find(b => b.id === (modalState.initialEvent?.branchId || STORY_TIMELINE_MAIN_BRANCH_ID))?.name
-            : undefined
-        }
+        open={createModal !== null}
+        mode={createModal?.mode ?? 'create-main'}
+        sourceEvent={modalSourceEvent}
+        currentBranchName={createModal?.branchName
+          ?? (modalSourceEvent && (modalSourceEvent.branchId || STORY_TIMELINE_MAIN_BRANCH_ID) !== STORY_TIMELINE_MAIN_BRANCH_ID
+            ? branchNameById.get(modalSourceEvent.branchId ?? '')
+            : undefined)}
         nextSortOrder={nextMainOrder}
-        initialSortOrder={modalState.initialSortOrder}
+        initialSortOrder={createModal?.suggestedOrder}
         storyRange={{
           startOrder: layout.range.startOrder,
           endOrder: layout.range.endOrder,
         }}
-        onClose={() => setModalState({ open: false, mode: 'create-main' })}
+        onClose={() => setCreateModal(null)}
         onSave={handleModalSave}
-        onDelete={async (id) => {
-          await deleteEvent(id)
-        }}
-        onNavigateMention={handleNavigateMention}
       />
 
       {/* 故事范围与刻度设置弹窗 */}

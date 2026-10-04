@@ -40,18 +40,28 @@ export function TimelineRangeModal({
   const startInputRef = useRef<HTMLInputElement>(null)
   const endInputRef = useRef<HTMLInputElement>(null)
 
+  // 打开时按最新 settings 重置表单：用「渲染期调整状态」模式替代 effect，
+  // 避免级联渲染；关闭时清掉标记，保证同一次设置再次打开也会重置。
+  const [renderedOpenKey, setRenderedOpenKey] = useState<string | null>(null)
+  const openKey = open ? String(settings.updatedAt ?? '') : null
+  if (openKey !== renderedOpenKey) {
+    setRenderedOpenKey(openKey)
+    if (open) {
+      setTitle(settings.title)
+      setRulerLabel(settings.rulerLabel)
+      setRulerUnit(settings.rulerUnit)
+      setStartLabel(settings.startLabel || '故事开端')
+      setStartTimeLabel(settings.startTimeLabel || '')
+      setStartOrder(String(settings.startOrder ?? 0))
+      setEndLabel(settings.endLabel || '故事结束')
+      setEndTimeLabel(settings.endTimeLabel || '')
+      setEndOrder(String(settings.endOrder ?? 100))
+    }
+  }
+
+  // 打开后把焦点带到一个锚点输入框
   useEffect(() => {
     if (!open) return
-    setTitle(settings.title)
-    setRulerLabel(settings.rulerLabel)
-    setRulerUnit(settings.rulerUnit)
-    setStartLabel(settings.startLabel || '故事开端')
-    setStartTimeLabel(settings.startTimeLabel || '')
-    setStartOrder(String(settings.startOrder ?? 0))
-    setEndLabel(settings.endLabel || '故事结束')
-    setEndTimeLabel(settings.endTimeLabel || '')
-    setEndOrder(String(settings.endOrder ?? 100))
-
     const timer = setTimeout(() => {
       if (initialFocusField === 'start') {
         startInputRef.current?.focus()
@@ -60,7 +70,7 @@ export function TimelineRangeModal({
       }
     }, 50)
     return () => clearTimeout(timer)
-  }, [open, settings, initialFocusField])
+  }, [open, initialFocusField])
 
   // 监听 Esc 键关闭
   useEffect(() => {

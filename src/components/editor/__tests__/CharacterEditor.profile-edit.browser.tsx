@@ -78,9 +78,6 @@ async function renderEditor(): Promise<void> {
 }
 
 async function enterEditMode(): Promise<void> {
-  await act(async () => {
-    await page.getByRole('button', { name: '编辑档案' }).click()
-  })
   await expect.element(page.getByTestId('character-profile-form')).toBeVisible()
 }
 
@@ -323,13 +320,13 @@ describe('character profile edit mode', () => {
     await expect.element(page.getByTestId('character-profile-form')).toBeVisible()
     expect(container?.querySelector('[data-testid="character-summary"]')).toBeNull()
 
-    // “完成”必须先保存，再安全地回到只读概览。
+    // “完成”保存后仍留在当前编辑页。
     await act(async () => {
       await page.getByRole('button', { name: '完成' }).click()
       await new Promise(resolve => setTimeout(resolve, 20))
     })
-    await expect.element(page.getByTestId('character-summary')).toBeVisible()
-    expect(container?.querySelector('[data-testid="character-profile-form"]')).toBeNull()
+    await expect.element(page.getByTestId('character-profile-form')).toBeVisible()
+    expect(container?.querySelector('[data-testid="character-summary"]')).toBeNull()
 
     // 重新加载项目后，保存的字段仍然存在。
     await act(async () => {
