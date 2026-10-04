@@ -530,6 +530,17 @@ export default function ProjectTree() {
             onClick={openForeshadowing}
           />
         </SidebarMenuItem>
+        <SidebarMenuItem>
+          <LeafItem
+            iconName="book-open"
+            label={text('信息与揭露', 'Info & Revelation')}
+            desc={text(
+              '信息条目、人物知情与读者记录：区分实际真相、误解隐瞒与揭露时机',
+              'Info entries, character knowledge, and reader records: truth vs misconception, concealment, and reveal timing',
+            )}
+            onClick={() => openBuiltinEditor('knowledge-gap', text('信息与揭露', 'Info & Revelation'), 'knowledge-gap')}
+          />
+        </SidebarMenuItem>
       </ProjectTreeCollapsibleGroup>
 
       {/* 3. 正文写作：紧随创作规划，让写正文的入口在项目树上半部分就能看到 */}

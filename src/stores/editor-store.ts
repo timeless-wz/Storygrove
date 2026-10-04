@@ -14,7 +14,9 @@ export interface EditorTabSaveSnapshot {
 export interface EditorTab {
   id: string
   name: string
-  type: 'chapter-directory' | 'chapter' | 'outline' | 'character' | 'config' | 'diff' | 'chapter-card' | 'world-building' | 'arch-file' | 'version-history' | 'review-report' | 'narrative-thread' | 'world-map' | 'story-timeline' | 'world' | 'overview' | 'project-document' | 'foreshadowing' | 'cultivation'
+  type: 'chapter-directory' | 'chapter' | 'outline' | 'character' | 'config' | 'diff' | 'chapter-card' | 'world-building' | 'arch-file' | 'version-history' | 'review-report' | 'narrative-thread' | 'world-map' | 'story-timeline' | 'world' | 'overview' | 'project-document' | 'foreshadowing' | 'cultivation' | 'knowledge-gap'
+  /** 信息与揭露页打开时预选的章节过滤（章节细纲/正文侧快捷入口使用）。 */
+  knowledgeGapChapterFilter?: number
   proseDirectoryKind?: 'draft' | 'manuscript'
   filePath?: string
   content?: string
@@ -148,6 +150,7 @@ const PROJECT_SCOPED_BUILTIN_TYPES = new Set<EditorTab['type']>([
   'overview',
   'project-document',
   'foreshadowing',
+  'knowledge-gap',
 ])
 
 const BUILTIN_TAB_ID_ALIASES: Partial<Record<EditorTab['type'], readonly string[]>> = {

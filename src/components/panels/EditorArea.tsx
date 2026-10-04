@@ -20,6 +20,7 @@ import VersionHistory from '../editor/VersionHistory'
 import ReviewReport from '../editor/ReviewReport'
 import NarrativeThreadEditor from '../editor/NarrativeThreadEditor'
 import ForeshadowingManagementView from '../editor/ForeshadowingManagementView'
+import KnowledgeGapView from '../planning/knowledge-gap/KnowledgeGapView'
 import ThreeWayMerge from '../editor/ThreeWayMerge'  // 保留引用以防其他入口使用
 import WelcomePage from '../pages/WelcomePage'
 import KnowledgeOverview from '../pages/KnowledgeOverview'
@@ -787,6 +788,13 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
         )}
         {activeTab?.type === 'foreshadowing' && activeTab.projectKey === currentProject.path && (
           <ForeshadowingManagementView key={activeTab.id} projectKey={activeTab.projectKey} />
+        )}
+        {activeTab?.type === 'knowledge-gap' && activeTab.projectKey === currentProject.path && (
+          <KnowledgeGapView
+            key={activeTab.id}
+            projectKey={activeTab.projectKey}
+            initialChapterFilter={activeTab.knowledgeGapChapterFilter}
+          />
         )}
         {/* AI 建议预览 — 只读对比，统一使用弹出式 Dialog（与 DraftEditor 一致） */}
         <Dialog

@@ -141,11 +141,12 @@ export async function openArchFile(filePath: string, name: string): Promise<void
 export function openBuiltinEditor(
   id: string,
   name: string,
-  type: 'chapter-card' | 'character' | 'world-building' | 'narrative-thread' | 'world-map' | 'story-timeline' | 'world' | 'overview' | 'config' | 'foreshadowing',
+  type: 'chapter-card' | 'character' | 'world-building' | 'narrative-thread' | 'world-map' | 'story-timeline' | 'world' | 'overview' | 'config' | 'foreshadowing' | 'knowledge-gap',
   narrativeThreadView?: 'plot-tree' | 'canvas' | 'plans',
   chapterNumber?: number,
   chapterView?: 'blueprint' | 'canvas',
   blueprintPlanningSelection?: BlueprintPlanningSelection,
+  knowledgeGapChapterFilter?: number,
 ): void {
   const projectKey = useProjectStore.getState().currentProject?.path
   useEditorStore.getState().openFile({
@@ -154,6 +155,9 @@ export function openBuiltinEditor(
     type,
     ...(type === 'narrative-thread'
       ? { narrativeThreadView: narrativeThreadView ?? 'plans' }
+      : {}),
+    ...(type === 'knowledge-gap' && knowledgeGapChapterFilter !== undefined
+      ? { knowledgeGapChapterFilter }
       : {}),
     ...(type === 'chapter-card' && chapterNumber !== undefined ? { chapterNumber } : {}),
     ...(type === 'chapter-card' && chapterView !== undefined ? { chapterView } : {}),

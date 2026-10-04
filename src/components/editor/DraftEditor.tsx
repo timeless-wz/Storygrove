@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Search, Upload, Save, FileText, Wrench, Check, Link2, Bookmark,
-  ChevronLeft, ChevronRight, BookOpen, Layers,
+  ChevronLeft, ChevronRight, BookOpen, Layers, GitCompareArrows,
 } from 'lucide-react'
 
 import { useProjectStore } from '../../stores/project-store'
@@ -29,6 +29,9 @@ import {
 import { getReviewsForVersion } from '../../services/draft-index'
 import { ipc } from '../../services/ipc-client'
 import { requireIpcSuccess } from '../../services/ipc-result'
+import { markOutlineSyncPending } from '../../services/knowledge-gap-client'
+import { computeProseContentHash } from '../../shared/prose-anchor'
+import OutlineSyncReviewDialog from './outline-sync/OutlineSyncReviewDialog'
 import { publishChapterSnapshot, retryFinalizationPublication } from '../../services/finalization-client'
 import { captureFinalizationSnapshot } from '../../services/finalization-snapshot'
 
@@ -121,6 +124,8 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
   const tabDraftStatus = editorTab?.draftStatus
   const [reviewCount, setReviewCount] = useState(0)
   const [bindingDialogOpen, setBindingDialogOpen] = useState(false)
+  /** 正文反向修纲（细纲对照）对话框；使用显式绑定定位目标章。 */
+  const [outlineSyncOpen, setOutlineSyncOpen] = useState(false)
   /**
    * 绑定变更计数。
    *
@@ -518,6 +523,15 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
           projectSession.projectPath,
         )
         if (!result.success) throw new Error(result.error || text('草稿保存失败', 'Could not save the draft'))
+        // 正文已保存 → 标记「细纲待核对」（仅显式绑定蓝图时；只写标记，不自动调用 AI）。
+        const syncChapter = meta?.blueprintChapterNumber
+        if (syncChapter && Number.isSafeInteger(syncChapter)) {
+          void markOutlineSyncPending(projectSession, {
+            chapterNumber: syncChapter,
+            draftId,
+            proseHash: computeProseContentHash(saveSnapshot.content),
+          }).catch(() => { /* 标记失败不阻断保存流程 */ })
+        }
         // 真实保存完成 → 记录“上次创作位置”（只写导航辅助，不动权威数据）。
         const resumeChapterNumber = targetTab.chapterNumber ?? meta?.chapterNumber
         if (Number.isSafeInteger(resumeChapterNumber) && (resumeChapterNumber as number) > 0) {
@@ -925,6 +939,28 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
                   <Link2 size={12} />
                   <span className="draft-action-label">{text('绑定蓝图', 'Link blueprint')}</span>
                 </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    if (!meta?.blueprintChapterNumber) {
+                      toast.info(text(
+                        '本章尚未绑定章节蓝图；请先绑定蓝图，再对照同步（不按正文章号猜蓝图）。',
+                        'This draft has no blueprint binding; bind one first. The blueprint is never guessed from the chapter number.',
+                      ))
+                      setBindingDialogOpen(true)
+                      return
+                    }
+                    setOutlineSyncOpen(true)
+                  }}
+                  className="draft-action draft-action--quiet"
+                  aria-label={text('检查并同步细纲', 'Check & sync outline')}
+                  data-testid="draft-outline-sync"
+                  title={text('对照正文与细纲，逐项确认后回写正式细纲', 'Compare prose with the outline; the formal outline changes only after per-item confirmation')}
+                >
+                  <GitCompareArrows size={12} />
+                  <span className="draft-action-label">{text('检查并同步细纲', 'Check & sync outline')}</span>
+                </Button>
                 {reviewCount > 0 && (
                   <Button
                     variant="outline"
@@ -1247,6 +1283,16 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
           label: text(`第${meta.chapterNumber}章`, `Chapter ${meta.chapterNumber}`),
         } : null}
       />
+
+      {/* 正文反向修纲：对照并经作者确认后回写正式 v2 细纲 */}
+      {meta?.blueprintChapterNumber && (
+        <OutlineSyncReviewDialog
+          projectKey={projectKey}
+          chapterNumber={meta.blueprintChapterNumber}
+          open={outlineSyncOpen}
+          onClose={() => setOutlineSyncOpen(false)}
+        />
+      )}
 
       {/* 标记为伏笔轻量对话框 */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>

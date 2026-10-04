@@ -13,6 +13,11 @@ import { countDraftUnits } from '../src/shared/draft-units'
 import { migrateDraftUnitCounts } from './services/draft-unit-migration'
 import { migrateWorldMapAtlas } from './services/world-map-atlas-migration'
 import { ensureWorldWorkbenchSchema } from './services/world-workbench-schema'
+import { ensureKnowledgeGapSchema } from './services/knowledge-gap-schema'
+import { ensureCharacterActionSchema } from './services/character-action-schema'
+import { ensureOutlineSyncSchema } from './services/outline-sync-schema'
+import { ensureKnowledgeCheckSchema } from './services/knowledge-check-schema'
+import { ensureThreadMarkerLinkSchema } from './services/thread-marker-link-schema'
 
 const require = createRequire(import.meta.url)
 const Database = require('better-sqlite3') as typeof import('better-sqlite3')
@@ -230,6 +235,14 @@ export function initProjectDatabase(projectPath: string, importSourceSecret?: Bu
   // 世界资料（世界/势力/秘境/通道/规则/人物行踪）。幂等：只新增表与可空列，
   // 不创建默认世界、不推断旧地图归属、不升级候选状态。
   ensureWorldWorkbenchSchema(projectDb)
+
+  // 信息与揭露 / 人物行动线 / 正文反向修纲 / 检查报告 / 伏笔↔脉络关系
+  // （knowledge-action-outline-sync-contract §9）：全部全新表，幂等 DDL，无旧行迁移。
+  ensureKnowledgeGapSchema(projectDb)
+  ensureCharacterActionSchema(projectDb)
+  ensureOutlineSyncSchema(projectDb)
+  ensureKnowledgeCheckSchema(projectDb)
+  ensureThreadMarkerLinkSchema(projectDb)
 
   // 章节蓝图统一版本：把仅剩 v1 简纲行的章安全迁移为 v2 权威细纲。
   // 幂等（只补 blueprint_details 缺行）；单章失败保留原 v1 行，下次打开重试。

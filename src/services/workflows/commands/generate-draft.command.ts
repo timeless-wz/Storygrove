@@ -38,6 +38,7 @@ import type { WritingLanguage } from '../../../shared/writing-language'
 import type { FinalizedContinuityProjection } from '../../../shared/finalized-continuity'
 import type { NarrativeThreadView } from '../../../shared/narrative-thread'
 import { promptLanguageText } from '../../prompt-language'
+import { buildKnowledgeGapMaterial } from './knowledge-material'
 import { countDraftUnits } from '../../../shared/draft-units'
 import type { RecoveryChapterSource } from '../../../shared/recovery-candidate'
 import { CHARACTER_STATE_TEXT_FIELDS } from '../../../shared/character-roster'
@@ -662,6 +663,29 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
         .withShortSummary('')
     }
 
+    // 信息差材料（信息与揭露模块）：按故事位置/叙事位置筛选"角色可知/读者已见"，
+    // 作者真相只作为后台约束注入；加载失败不阻断写作（knowledge-action-outline-sync-contract §8）。
+    let knowledgeGapContext = ''
+    try {
+      const knowledgeGapMaterial = await buildKnowledgeGapMaterial(
+        projectSession,
+        this.chapterInfo.chapterNumber,
+        this.chapterInfo.characters,
+      )
+      if (knowledgeGapMaterial) {
+        knowledgeGapContext = knowledgeGapMaterial.text
+        callbacks.log(uiText(
+          `  已注入信息差材料（角色可知 ${knowledgeGapMaterial.characterRecordCount} 条，读者已见 ${knowledgeGapMaterial.readerRecordCount} 条，后台约束 ${knowledgeGapMaterial.backgroundEntryCount} 条）`,
+          `  Injected info-gap material (${knowledgeGapMaterial.characterRecordCount} character-known, ${knowledgeGapMaterial.readerRecordCount} reader-seen, ${knowledgeGapMaterial.backgroundEntryCount} background constraints)`,
+        ))
+      }
+    } catch (error) {
+      callbacks.log(uiText(
+        `  信息差材料加载失败（不阻断写作）：${String(error)}`,
+        `  Could not load info-gap material (non-blocking): ${String(error)}`,
+      ))
+    }
+
     const selectedCandidateDrafts = this.selectedCandidateDrafts
       .filter(candidate => candidate.chapterNumber < this.chapterInfo.chapterNumber)
       .sort((left, right) => left.chapterNumber - right.chapterNumber)
@@ -687,6 +711,7 @@ export class GenerateDraftCommand extends BaseWorkflowCommand {
       futurePlans: futureBlueprintsStr,
       references: [
         ...(activeThreadContext ? [{ text: activeThreadContext, rendered: activeThreadContext }] : []),
+        ...(knowledgeGapContext ? [{ text: knowledgeGapContext, rendered: knowledgeGapContext }] : []),
         ...knowledgeReferences,
       ],
       finalized: finalizedSources,

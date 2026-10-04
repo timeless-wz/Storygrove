@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Save, Trash2, Users, Network, PencilLine, Check, AlertTriangle, RefreshCw } from 'lucide-react'
+import { Save, Trash2, Users, Network, PencilLine, Check, AlertTriangle, RefreshCw, Route } from 'lucide-react'
 import { useProjectStore } from '../../stores/project-store'
 import { registerEditorExitSaveHandler, useEditorStore } from '../../stores/editor-store'
 import { CHARACTER_DRAFT_TAB, parseProjectEditorDraftLedger } from '../../stores/project-editor-draft-ledger'
@@ -14,6 +14,8 @@ import {
 import RelationshipGraph from './RelationshipGraph'
 import CharacterProfileOverview from './character-profile/CharacterProfileOverview'
 import CharacterProfileForm from './character-profile/CharacterProfileForm'
+import CharacterKnowledgeSummary from './character-profile/CharacterKnowledgeSummary'
+import CharacterActionLineView from './character-action/CharacterActionLineView'
 import { EmptyState as BaseEmptyState } from '../ui/EmptyState'
 import { Button } from '../ui/Button'
 import { useLocaleStore } from '../../stores/locale-store'
@@ -270,9 +272,11 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
 
   const viewTitle = viewMode === 'graph'
     ? text('角色档案 — 关系图谱（只读投影）', 'Character profile — relationship graph (read-only projection)')
-    : selectedCard
-      ? `${selectedCard.name || text('新角色', 'New character')} ${viewMode === 'edit' ? text('— 编辑档案', '— Edit profile') : text('— 人物概览', '— Character overview')}`
-      : text('角色档案', 'Character profile')
+    : viewMode === 'actions'
+      ? `${selectedCard?.name || text('新角色', 'New character')} ${text('— 人物行动线', '— Action line')}`
+      : selectedCard
+        ? `${selectedCard.name || text('新角色', 'New character')} ${viewMode === 'edit' ? text('— 编辑档案', '— Edit profile') : text('— 人物概览', '— Character overview')}`
+        : text('角色档案', 'Character profile')
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-[var(--color-bg)]">
@@ -324,6 +328,9 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
                 <Button variant="outline" size="sm" onClick={() => setViewMode('graph')} title={text('查看全员关系网', 'View all character relationships')}>
                   <Network size={12} /> {text('关系图谱', 'Relationship graph')}
                 </Button>
+                <Button variant="outline" size="sm" onClick={() => setViewMode('actions')} title={text('维护该人物的目标、资源与台前幕后行动', 'Maintain goals, resources, and on/off-stage actions')}>
+                  <Route size={12} /> {text('行动线', 'Action line')}
+                </Button>
                 <div className="h-3.5 w-px bg-[var(--color-border)] mx-0.5" />
                 <Button
                   variant="ghost"
@@ -364,6 +371,9 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
               <>
                 <Button variant="outline" size="sm" onClick={() => setViewMode('graph')} title={text('查看全员关系网', 'View all character relationships')}>
                   <Network size={12} /> {text('关系图谱', 'Relationship graph')}
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setViewMode('actions')} title={text('维护该人物的目标、资源与台前幕后行动', 'Maintain goals, resources, and on/off-stage actions')}>
+                  <Route size={12} /> {text('行动线', 'Action line')}
                 </Button>
                 <div className="h-3.5 w-px bg-[var(--color-border)] mx-0.5" />
                 <Button
@@ -458,6 +468,12 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
               : (currentProject ? text('在左侧选择或创建角色卡', 'Select or create a character card on the left') : text('请先打开项目', 'Open a project first'))}
             opacity={currentProject ? 0.3 : 0.4}
           />
+        ) : viewMode === 'actions' ? (
+          <CharacterActionLineView
+            projectKey={projectKey}
+            characterId={selectedCharacterId}
+            characterName={selectedCard.name}
+          />
         ) : (
           viewMode === 'edit' ? (
             <CharacterProfileForm
@@ -475,13 +491,16 @@ export default function CharacterEditor({ projectKey }: { projectKey: string }) 
               onUpdateField={(key, value) => updateCurrentField(selectedCard.name, key, value)}
             />
           ) : (
-            <CharacterProfileOverview
-              card={selectedCard}
-              characters={characters}
-              characterId={selectedCharacterId}
-              sharedRelationships={selectedSharedRelationships}
-              onOpenCharacter={openCharacterCard}
-            />
+            <div className="flex flex-col">
+              <CharacterProfileOverview
+                card={selectedCard}
+                characters={characters}
+                characterId={selectedCharacterId}
+                sharedRelationships={selectedSharedRelationships}
+                onOpenCharacter={openCharacterCard}
+              />
+              <CharacterKnowledgeSummary projectKey={projectKey} characterId={selectedCharacterId} />
+            </div>
           )
         )}
       </div>

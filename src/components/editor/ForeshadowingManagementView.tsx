@@ -10,6 +10,7 @@ import { globalEventBus } from '../../shared/event-bus'
 import { captureProjectSession, isProjectSessionCurrent, isProjectSessionPath } from '../project-session-gate'
 import { openChapterFile } from '../panels/sidebar/sidebar-file-openers'
 import { locateForeshadowingInText } from '../../services/foreshadowing-locator'
+import ForeshadowingThreadLinks from './ForeshadowingThreadLinks'
 import { Button } from '../ui/Button'
 import { toast } from '../ui/Toast'
 import { confirm } from '../ui/Confirm'
@@ -629,6 +630,8 @@ export default function ForeshadowingManagementView({ projectKey }: Props) {
                   {selectedItem.note || text('(无说明)', '(No note)')}
                 </p>
               </section>
+
+              <ForeshadowingThreadLinks projectKey={projectKey} marker={selectedItem} />
             </div>
           ) : (
             <PlanningEmptyState
