@@ -1,5 +1,5 @@
 import CultivationSettingsPage from '../pages/CultivationSettingsPage'
-import { X, FileText, Settings, Users, ArrowLeftRight, MoreHorizontal, BookOpen, History, ClipboardCheck, Globe, Save, ChevronLeft, ChevronRight, Check, Focus, Compass, LayoutDashboard, Clock3, Globe2 } from 'lucide-react'
+import { X, FileText, Settings, Users, ArrowLeftRight, MoreHorizontal, BookOpen, History, ClipboardCheck, Globe, Save, ChevronLeft, ChevronRight, Check, Focus, Compass, LayoutDashboard, Clock3, Globe2, Sparkles } from 'lucide-react'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
 import {
@@ -29,6 +29,7 @@ import WorldMapView from '../map/WorldMapView'
 import StoryTimelineView from '../timeline/StoryTimelineView'
 import WorldWorkbenchView from '../world/WorldWorkbenchView'
 import ProjectOverviewPage from '../pages/ProjectOverviewPage'
+import RevisionLearningEditor from '../editor/RevisionLearningEditor'
 import { useProjectStore } from '../../stores/project-store'
 import { registerEditorExitSaveHandler, useEditorStore, type EditorTab } from '../../stores/editor-store'
 import {
@@ -520,6 +521,7 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
     if (type === 'version-history') return <History size={14} />
     if (type === 'review-report') return <ClipboardCheck size={14} />
     if (type === 'project-document') return <FileText size={14} />
+    if (type === 'revision-learning') return <Sparkles size={14} />
     return <FileText size={14} />
   }
 
@@ -794,6 +796,12 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
             key={activeTab.id}
             projectKey={activeTab.projectKey}
             initialChapterFilter={activeTab.knowledgeGapChapterFilter}
+          />
+        )}
+        {activeTab?.type === 'revision-learning' && activeTab.projectKey === currentProject.path && (
+          <RevisionLearningEditor
+            key={activeTab.id}
+            recordId={activeTab.revisionLearningRecordId}
           />
         )}
         {/* AI 建议预览 — 只读对比，统一使用弹出式 Dialog（与 DraftEditor 一致） */}

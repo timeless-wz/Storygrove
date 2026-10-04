@@ -5,6 +5,25 @@ import type { ProseDirectoryAction, ProseOrderEntry, ProseTrashEntry } from './p
  */
 import type { Locale } from '../i18n/types'
 import type { FinalizationSnapshot, FinalizationResult } from './finalization'
+import type {
+  RevisionLearningAfterSnapshotInput,
+  RevisionLearningAttemptFinishInput,
+  RevisionLearningAttemptStartInput,
+  RevisionLearningBindingCasInput,
+  RevisionLearningBindInput,
+  RevisionLearningCreateFromVersionsInput,
+  RevisionLearningEditorSnapshotInput,
+  RevisionLearningPublicationStatus,
+  RevisionLearningPublishInput,
+  RevisionLearningRecord,
+  RevisionLearningRecordSummary,
+  RevisionLearningReviewConfirmInput,
+  RevisionLearningReviewSaveInput,
+  RevisionLearningSaveInput,
+  RevisionLearningSourceDraft,
+  RevisionLearningAttempt,
+  RevisionLearningPublishReceipt,
+} from './revision-learning'
 
 /** Narrow snapshot/receipt actions; no arbitrary filesystem destination. */
 export interface FinalizationChannels {
@@ -1925,8 +1944,36 @@ export interface StoryDataChannels {
   }
 }
 
+export interface RevisionLearningChannels {
+  'revision-learning:list-source-drafts': { args: []; return: RevisionLearningSourceDraft[] }
+  'revision-learning:list': { args: []; return: RevisionLearningRecordSummary[] }
+  'revision-learning:get': { args: [recordId: string]; return: RevisionLearningRecord }
+  'revision-learning:create-from-versions': { args: [input: RevisionLearningCreateFromVersionsInput]; return: RevisionLearningRecord }
+  'revision-learning:record-editor-before': { args: [input: RevisionLearningEditorSnapshotInput]; return: RevisionLearningRecord }
+  'revision-learning:capture-after': { args: [input: RevisionLearningAfterSnapshotInput]; return: RevisionLearningRecord }
+  'revision-learning:reverse-sample': { args: [recordId: string, expectedRevision: number]; return: RevisionLearningRecord }
+  'revision-learning:save-input': { args: [input: RevisionLearningSaveInput]; return: RevisionLearningRecord }
+  'revision-learning:attempt-begin': { args: [input: RevisionLearningAttemptStartInput]; return: RevisionLearningAttempt }
+  'revision-learning:attempt-finish': { args: [input: RevisionLearningAttemptFinishInput]; return: RevisionLearningAttempt }
+  'revision-learning:review-save': { args: [input: RevisionLearningReviewSaveInput]; return: RevisionLearningRecord }
+  'revision-learning:review-confirm': { args: [input: RevisionLearningReviewConfirmInput]; return: RevisionLearningRecord }
+  'revision-learning:publish': {
+    args: [input: RevisionLearningPublishInput]
+    return: { receipt: RevisionLearningPublishReceipt; recovered: boolean }
+  }
+  'revision-learning:bind': {
+    args: [input: RevisionLearningBindInput]
+    return: { bound: boolean; conflict: boolean; currentSkillId: string | null }
+  }
+  'revision-learning:publication-status': { args: [recordId: string]; return: RevisionLearningPublicationStatus }
+  'revision-learning:binding-cas': {
+    args: [input: RevisionLearningBindingCasInput]
+    return: { success: boolean; conflict?: boolean; currentSkillId?: string | null; error?: string }
+  }
+}
+
 // ===== 合并所有频道 =====
-export type AllInvokeChannels = WindowChannels & OfficialHomepageChannels & ModelProviderResourceChannels & ConfigChannels & UpdateChannels & SkinChannels & ProjectChannels & FileChannels & AppDataChannels & LLMChannels & DatabaseChannels & WorldMapImageChannels & KnowledgeBaseChannels & ProjectDocumentChannels & ChapterLifecycleChannels & ImportChannels & MCPChannels & WorkspaceHubChannels & StoryDataChannels & Phase38Channels & FinalizationChannels
+export type AllInvokeChannels = WindowChannels & OfficialHomepageChannels & ModelProviderResourceChannels & ConfigChannels & UpdateChannels & SkinChannels & ProjectChannels & FileChannels & AppDataChannels & LLMChannels & DatabaseChannels & WorldMapImageChannels & KnowledgeBaseChannels & ProjectDocumentChannels & ChapterLifecycleChannels & ImportChannels & MCPChannels & WorkspaceHubChannels & StoryDataChannels & RevisionLearningChannels & Phase38Channels & FinalizationChannels
 export type AllEventChannels = LLMStreamEvents & UpdateStateEvents & WindowEvents & StoryDataEventChannels
 
 /** 提取 invoke 频道名 */

@@ -603,13 +603,13 @@ namespace AiNovelSecureFs {
       return prefix;
     }
 
-    private static void RenameIntoDirectory(IntPtr fileHandle, IntPtr parentDirectory, string targetName) {
+    private static void RenameIntoDirectory(IntPtr fileHandle, IntPtr parentDirectory, string targetName, bool replaceIfExists) {
       byte[] name = System.Text.Encoding.Unicode.GetBytes(targetName);
       int lengthOffset = (int)Marshal.OffsetOf(typeof(RenameInformationHeader), "FileNameLength") + sizeof(uint);
       IntPtr buffer = Marshal.AllocHGlobal(lengthOffset + name.Length);
       try {
         RenameInformationHeader header = new RenameInformationHeader {
-          ReplaceIfExists = 1,
+          ReplaceIfExists = replaceIfExists ? (byte)1 : (byte)0,
           RootDirectory = parentDirectory,
           FileNameLength = checked((uint)name.Length),
         };
@@ -754,7 +754,7 @@ namespace AiNovelSecureFs {
         this.targetName = targetName;
       }
 
-      public void Commit(bool mustAlreadyExist) {
+      public void Commit(bool mustAlreadyExist, bool mustNotAlreadyExist) {
         if (temporaryFile == null || temporaryFile.IsClosed || temporaryFile.IsInvalid) {
           throw new SecureFsException("SECURE_FS_WRITE_FAILED");
         }
@@ -763,7 +763,7 @@ namespace AiNovelSecureFs {
             if (!IsValidHandle(requiredTarget)) throw new SecureFsException("SECURE_FS_WRITE_FAILED");
             RenameExistingIntoDirectory(temporaryFile.DangerousGetHandle(), parentDirectory, targetName);
           } else {
-            RenameIntoDirectory(temporaryFile.DangerousGetHandle(), parentDirectory, targetName);
+            RenameIntoDirectory(temporaryFile.DangerousGetHandle(), parentDirectory, targetName, !mustNotAlreadyExist);
           }
           committed = true;
         } finally {
@@ -789,8 +789,9 @@ namespace AiNovelSecureFs {
       }
     }
 
-    public static AtomicWriteSession BeginAtomicWrite(string rootPath, RootIdentity rootIdentity, string relativePath, byte[] content, bool mustAlreadyExist) {
+    public static AtomicWriteSession BeginAtomicWrite(string rootPath, RootIdentity rootIdentity, string relativePath, byte[] content, bool mustAlreadyExist, bool mustNotAlreadyExist) {
       if (content == null || content.Length > MaxTextBytes) throw new SecureFsException("SECURE_FS_FILE_TOO_LARGE");
+      if (mustAlreadyExist && mustNotAlreadyExist) throw new SecureFsException("SECURE_FS_INVALID_OPERATION");
       string[] segments = RelativeSegments(relativePath);
       if (segments.Length == 0) throw new SecureFsException("SECURE_FS_INVALID_PATH");
       List<IntPtr> directories = OpenDirectoryChain(rootPath, rootIdentity, Prefix(segments), false, true);
@@ -987,10 +988,20 @@ try {
         }
         $mustAlreadyExist = [bool]$request.mustAlreadyExist
       }
+      $mustNotAlreadyExist = $false
+      if ($request.PSObject.Properties.Name -contains 'mustNotAlreadyExist') {
+        if ($request.mustNotAlreadyExist -isnot [bool]) {
+          throw [AiNovelSecureFs.SecureFsException]::new('SECURE_FS_INVALID_OPERATION')
+        }
+        $mustNotAlreadyExist = [bool]$request.mustNotAlreadyExist
+      }
+      if ($mustAlreadyExist -and $mustNotAlreadyExist) {
+        throw [AiNovelSecureFs.SecureFsException]::new('SECURE_FS_INVALID_OPERATION')
+      }
       $content = [Convert]::FromBase64String([string]$request.contentBase64)
       $session = $null
       try {
-        $session = [AiNovelSecureFs.SecureHandleFileSystem]::BeginAtomicWrite($request.rootPath, $rootIdentity, $request.relativePath, $content, $mustAlreadyExist)
+        $session = [AiNovelSecureFs.SecureHandleFileSystem]::BeginAtomicWrite($request.rootPath, $rootIdentity, $request.relativePath, $content, $mustAlreadyExist, $mustNotAlreadyExist)
         Write-HelperResponse ([pscustomobject]@{ ok = $true; phase = 'ready' })
         $commandLine = [Console]::In.ReadLine()
         if ($null -eq $commandLine -or $commandLine.Length -gt 4096) {
@@ -1001,7 +1012,7 @@ try {
           Write-HelperResponse ([pscustomobject]@{ ok = $false; code = 'SECURE_FS_CANCELLED' })
           break
         }
-        $session.Commit($mustAlreadyExist)
+        $session.Commit($mustAlreadyExist, $mustNotAlreadyExist)
         Write-HelperResponse ([pscustomobject]@{ ok = $true })
       } finally {
         if ($null -ne $session) { $session.Dispose() }

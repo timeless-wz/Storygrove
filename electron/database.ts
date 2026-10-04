@@ -18,6 +18,7 @@ import { ensureCharacterActionSchema } from './services/character-action-schema'
 import { ensureOutlineSyncSchema } from './services/outline-sync-schema'
 import { ensureKnowledgeCheckSchema } from './services/knowledge-check-schema'
 import { ensureThreadMarkerLinkSchema } from './services/thread-marker-link-schema'
+import { ensureRevisionLearningSchema } from './services/revision-learning-schema'
 
 const require = createRequire(import.meta.url)
 const Database = require('better-sqlite3') as typeof import('better-sqlite3')
@@ -243,6 +244,8 @@ export function initProjectDatabase(projectPath: string, importSourceSecret?: Bu
   ensureOutlineSyncSchema(projectDb)
   ensureKnowledgeCheckSchema(projectDb)
   ensureThreadMarkerLinkSchema(projectDb)
+  // 作者明确发起的修订学习；running attempt 在重开项目时标成中断，不自动重跑模型。
+  ensureRevisionLearningSchema(projectDb)
 
   // 章节蓝图统一版本：把仅剩 v1 简纲行的章安全迁移为 v2 权威细纲。
   // 幂等（只补 blueprint_details 缺行）；单章失败保留原 v1 行，下次打开重试。

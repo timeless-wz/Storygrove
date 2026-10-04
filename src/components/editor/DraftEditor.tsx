@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import {
-  Search, Upload, Save, FileText, Wrench, Check, Link2, Bookmark,
+  Search, Upload, Save, FileText, Wrench, Check, Link2, Bookmark, Sparkles,
   ChevronLeft, ChevronRight, BookOpen, Layers, GitCompareArrows,
 } from 'lucide-react'
 
@@ -118,6 +118,7 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
     state => state.tabs.find(tab => tab.id === tabId && tab.projectKey === projectKey),
   )
   const currentProject = useProjectStore(s => s.currentProject)
+  const projectSession = captureProjectSession(currentProject)
   const text = useLocaleStore(s => s.text)
   const locale = useLocaleStore(s => s.locale)
   const projectMatches = currentProject?.path === projectKey
@@ -203,6 +204,46 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
       loadForeshadowings()
     })
   }, [loadForeshadowings])
+
+  const handleStartRevisionLearning = async () => {
+    if (!meta?.id || !currentProject || !projectSession || !projectMatches
+      || !isProjectSessionPath(projectSession, projectKey) || isChapterBusy) return
+    setRevisionLearningBusy(true)
+    try {
+      const visibleContent = proseEditorRef.current?.getCurrentMarkdown() ?? currentBodyRef.current
+      let sourceTab = useEditorStore.getState().tabs.find(tab => tab.id === tabId && tab.projectKey === projectKey)
+      if (!sourceTab) throw new Error(text('找不到当前正文标签，无法记录编辑器快照', 'The current prose tab is unavailable, so its editor snapshot cannot be captured.'))
+      if ((sourceTab.content ?? '') !== visibleContent) {
+        useEditorStore.getState().updateTabContent(tabId, visibleContent)
+        sourceTab = useEditorStore.getState().tabs.find(tab => tab.id === tabId && tab.projectKey === projectKey)
+      }
+      if (!sourceTab) throw new Error(text('正文标签已关闭，请重新打开后再试', 'The prose tab closed. Reopen it and try again.'))
+      const record = await ipc.invokeWithProjectSession(
+        projectSession,
+        'revision-learning:record-editor-before',
+        {
+          draftId: meta.id,
+          tabId,
+          editGeneration: sourceTab.contentRevision ?? 0,
+          content: visibleContent,
+        },
+      )
+      if (!isProjectSessionCurrent(projectSession)) return
+      useEditorStore.getState().openFile({
+        id: `revision-learning:${record.id}`,
+        name: text(`修订学习 · 第${meta.displayNumber ?? meta.chapterNumber}章`, `Revision learning · Chapter ${meta.displayNumber ?? meta.chapterNumber}`),
+        type: 'revision-learning',
+        projectKey,
+        chapterNumber: meta.chapterNumber,
+        revisionLearningRecordId: record.id,
+        revisionLearningSourceTabId: tabId,
+      })
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error))
+    } finally {
+      setRevisionLearningBusy(false)
+    }
+  }
 
   const handleToolbarMarkForeshadowing = () => {
     const res = proseEditorRef.current?.getSelectionInfo()
@@ -453,6 +494,7 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
   const isChapterBusy = !!activeChapterRun
 
   const [saving, setSaving] = useState(false)
+  const [revisionLearningBusy, setRevisionLearningBusy] = useState(false)
   const [confirmAction, setConfirmAction] = useState<'review' | null>(null)
   // 审稿维度多选（聚焦 4 类核心问题）
   const REVIEW_DIMS = [
@@ -1077,6 +1119,19 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
                 </Button>
               )}
 
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleStartRevisionLearning}
+                disabled={revisionLearningBusy || isChapterBusy || !meta?.id}
+                className="draft-action"
+                title={text('记录当前编辑器正文，完成修订后再比较并归纳修稿规则', 'Capture the current editor text, then compare it after revision and derive candidate rules')}
+                data-testid="draft-revision-learning"
+              >
+                <Sparkles size={12} />
+                {revisionLearningBusy ? text('记录中…', 'Capturing…') : text('修订学习', 'Learn revisions')}
+              </Button>
+
               {/* 核心操作：AI 审稿 — 主题色描边，把实心位置让给发布 */}
               <Button
                 variant="outline"
@@ -1188,6 +1243,8 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
             positionMemoryKey={editorPositionMemoryKey}
             restorePosition={restorePosition}
             onChange={(nextContent) => {
+              // Vditor input events are the source of truth for the live unsaved body.
+              // eslint-disable-next-line react-hooks/immutability
               currentBodyRef.current = nextContent
               useEditorStore.getState().updateTabContent(tabId, nextContent)
             }}

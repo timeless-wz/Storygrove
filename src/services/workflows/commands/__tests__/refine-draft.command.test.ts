@@ -142,13 +142,17 @@ function stubIpc(
 ): void {
   vi.stubGlobal('window', {
     velaAPI: {
-      invoke: (channel: string, ...args: unknown[]) => (
-        channel === 'prompt:load-global'
-          ? Promise.resolve({ templates: [], diagnostics: [] })
-          : channel === 'fs:check-exists' && String(args[0]).endsWith('/.vela/prompts')
-            ? projectPromptDirectoryExists?.() ?? Promise.resolve(false)
-            : invoke(channel, ...args)
-      ),
+      invoke: async (channel: string, ...args: unknown[]) => {
+        if (channel === 'prompt:load-global') return { templates: [], diagnostics: [] }
+        if (channel === 'fs:check-exists' && String(args[0]).endsWith('/.vela/prompts')) {
+          return projectPromptDirectoryExists?.() ?? false
+        }
+        const result = await invoke(channel, ...args)
+        if (channel === 'db:draft-get-meta' && result === undefined) {
+          return { id: 1, chapterNumber: 1, version: 1, status: 'draft', source: 'write' }
+        }
+        return result
+      },
     },
   })
 }
@@ -211,6 +215,7 @@ function successfulRevisionIpc(options: {
   reviewId?: number
   reviewBaseDraftId?: number
   currentDraftContent?: string
+  blueprintChapterNumber?: number
   revisionResult?: { success: boolean; id?: number; revisionIndex?: number; errorCode?: 'SOURCE_DRAFT_CHANGED'; error?: string }
   blueprintV2Detail?: ChapterBlueprintV2DetailRead | null
   blueprintV2ReadError?: Error
@@ -224,8 +229,20 @@ function successfulRevisionIpc(options: {
       if (options.blueprintV2ReadError) throw options.blueprintV2ReadError
       return options.blueprintV2Detail ?? null
     }
+    if (channel === 'db:blueprint-get') return null
     if (channel === 'db:draft-get-meta') {
-      return { id: 1, chapterNumber: 1, version: 1, status: 'draft', source: 'write' }
+      return {
+        id: 1,
+        chapterNumber: 1,
+        version: 1,
+        status: 'draft',
+        source: 'write',
+        ...((options.blueprintChapterNumber !== undefined
+          || options.blueprintV2Detail !== undefined
+          || options.blueprintV2ReadError)
+          ? { blueprintChapterNumber: options.blueprintChapterNumber ?? 1 }
+          : {}),
+      }
     }
     if (channel === 'db:draft-get-full') {
       return { ...CONFIRMED_SOURCE_DRAFT, content: options.currentDraftContent ?? CONFIRMED_SOURCE_DRAFT.content }
@@ -323,7 +340,7 @@ describe('RefineDraftCommand bounded visible completion', () => {
       revision: 4,
       contentHash: computeBlueprintV2ContentHash(content),
     }
-    stubIpc(successfulRevisionIpc({ blueprintV2Detail: detail }))
+    stubIpc(successfulRevisionIpc({ blueprintV2Detail: detail, blueprintChapterNumber: 1 }))
 
     await command(completeWithLease, source, undefined, {
       purpose: 'V1_PURPOSE_DUPLICATION_SENTINEL',
@@ -343,7 +360,7 @@ describe('RefineDraftCommand bounded visible completion', () => {
 
   it('stops revision when reading v2 fails instead of silently using the v1 brief', async () => {
     const completeWithLease = vi.fn<GenerationRuntimeEnvironment['completeWithLease']>()
-    stubIpc(successfulRevisionIpc({ blueprintV2ReadError: new Error('temporary v2 read failure') }))
+    stubIpc(successfulRevisionIpc({ blueprintV2ReadError: new Error('temporary v2 read failure'), blueprintChapterNumber: 1 }))
 
     await expect(command(completeWithLease, '原稿正文。'.repeat(250)).execute({
       step: {}, context: workflowContext(), callbacks: callbacks(),
@@ -357,6 +374,7 @@ describe('RefineDraftCommand bounded visible completion', () => {
     const markdown = readFileSync(resolve(__dirname, '../../../../../test/fixtures/blueprint-v2/chapter-01.md'), 'utf8')
     const { content } = parseChapterBlueprintMarkdown(markdown)
     stubIpc(successfulRevisionIpc({
+      blueprintChapterNumber: 1,
       blueprintV2Detail: {
         ...content,
         chapterNumber: 2,
@@ -367,7 +385,7 @@ describe('RefineDraftCommand bounded visible completion', () => {
 
     await expect(command(completeWithLease, '原稿正文。'.repeat(250)).execute({
       step: {}, context: workflowContext(), callbacks: callbacks(),
-    })).rejects.toThrow('当前修稿绑定第 1 章')
+    })).rejects.toThrow('当前草稿绑定第 1 章')
 
     expect(completeWithLease).not.toHaveBeenCalled()
   })
@@ -534,7 +552,7 @@ describe('RefineDraftCommand bounded visible completion', () => {
     })).rejects.toThrow('续写未增加新的可见正文')
 
     expect(completeWithLease).toHaveBeenCalledTimes(2)
-    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel !== 'db:blueprint-v2-get'))
+    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel !== 'db:blueprint-v2-get' && channel !== 'db:draft-get-meta'))
       .toEqual([])
     expect(useEditorStore.getState().tabs).toEqual([])
   })
@@ -556,7 +574,7 @@ describe('RefineDraftCommand bounded visible completion', () => {
     })).rejects.toThrow(message)
 
     expect(completeWithLease).toHaveBeenCalledOnce()
-    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel !== 'db:blueprint-v2-get'))
+    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel !== 'db:blueprint-v2-get' && channel !== 'db:draft-get-meta'))
       .toEqual([])
     expect(useEditorStore.getState().tabs).toEqual([])
   })
@@ -579,7 +597,7 @@ describe('RefineDraftCommand bounded visible completion', () => {
       callbacks: callbacks(),
     })).rejects.toThrow()
 
-    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel !== 'db:blueprint-v2-get'))
+    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel !== 'db:blueprint-v2-get' && channel !== 'db:draft-get-meta'))
       .toEqual([])
     expect(useEditorStore.getState().tabs).toEqual([])
   })
@@ -600,7 +618,7 @@ describe('RefineDraftCommand bounded visible completion', () => {
     })).rejects.toThrow('已自动续写 3 次，尚未完整生成')
 
     expect(completeWithLease).toHaveBeenCalledTimes(4)
-    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel !== 'db:blueprint-v2-get'))
+    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel !== 'db:blueprint-v2-get' && channel !== 'db:draft-get-meta'))
       .toEqual([])
   })
 
@@ -620,7 +638,7 @@ describe('RefineDraftCommand bounded visible completion', () => {
       callbacks: callbacks(),
     })).rejects.toThrow('工作流已取消')
 
-    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel !== 'db:blueprint-v2-get'))
+    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel !== 'db:blueprint-v2-get' && channel !== 'db:draft-get-meta'))
       .toEqual([])
   })
 
@@ -650,7 +668,7 @@ describe('RefineDraftCommand bounded visible completion', () => {
       callbacks: callbacks(),
     })).rejects.toThrow('当前项目已切换')
 
-    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel !== 'db:blueprint-v2-get'))
+    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel !== 'db:blueprint-v2-get' && channel !== 'db:draft-get-meta'))
       .toEqual([])
     expect(useEditorStore.getState().tabs).toEqual([])
   })
@@ -661,6 +679,9 @@ describe('RefineDraftCommand bounded visible completion', () => {
     const completeWithLease = vi.fn<GenerationRuntimeEnvironment['completeWithLease']>()
       .mockResolvedValue({ content: revision, finishReason: 'stop' })
     const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'db:draft-get-meta') {
+        return { id: 1, chapterNumber: 1, version: 1, status: 'draft', source: 'write' }
+      }
       if (channel === 'db:blueprint-v2-get') return null
       if (channel === 'db:revision-replace-pending') {
         return { success: false, errorCode: 'SOURCE_DRAFT_CHANGED', error: 'SOURCE_DRAFT_CHANGED' }
@@ -686,8 +707,9 @@ describe('RefineDraftCommand bounded visible completion', () => {
       message: 'The source draft changed during AI refinement. The revision was not saved. Reopen the current draft and run AI refinement again.',
     })
 
-    expect(invoke).toHaveBeenNthCalledWith(1, 'db:blueprint-v2-get', 1, PROJECT_PATH, PROJECT_SESSION)
-    expect(invoke).toHaveBeenNthCalledWith(2, 'db:revision-replace-pending', expect.objectContaining({
+    expect(invoke.mock.calls.filter(([channel]) => channel === 'db:draft-get-meta')).toHaveLength(2)
+    expect(invoke.mock.calls.find(([channel]) => channel === 'db:revision-replace-pending')).toEqual([
+      'db:revision-replace-pending', expect.objectContaining({
         baseDraftId: 1,
         expectedSource: {
           id: 1,
@@ -696,7 +718,8 @@ describe('RefineDraftCommand bounded visible completion', () => {
           status: 'draft',
           content: source,
         },
-      }), PROJECT_PATH, PROJECT_SESSION)
+      }), PROJECT_PATH, PROJECT_SESSION,
+    ])
   })
 
   it('rejects a final stop that is materially shorter than the source before any revision IPC', async () => {
@@ -711,7 +734,7 @@ describe('RefineDraftCommand bounded visible completion', () => {
       callbacks: callbacks(),
     })).rejects.toThrow('修稿结果明显短于原稿')
 
-    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel !== 'db:blueprint-v2-get'))
+    expect(invoke.mock.calls.map(([channel]) => channel).filter(channel => channel !== 'db:blueprint-v2-get' && channel !== 'db:draft-get-meta'))
       .toEqual([])
     expect(useEditorStore.getState().tabs).toEqual([])
   })
@@ -1587,5 +1610,44 @@ describe('ReviewChapterCommand reasoning stage', () => {
     expect(completeWithLease.mock.calls[0]?.[0].reasoningStage).toBe('review')
     expect(completeWithLease.mock.calls[0]?.[0].messages[1]?.content)
       .toContain('【补充写作 Skill：Review craft】')
+  })
+
+  it('injects the same frozen project refinement skill into both revision requests', async () => {
+    const revision = '修订正文。'.repeat(500)
+    const skillContent = 'REVISION_SKILL_SENTINEL: keep actions tied to a clear point of view.'
+    const completeWithLease = vi.fn<GenerationRuntimeEnvironment['completeWithLease']>()
+      .mockResolvedValue({ content: revision, finishReason: 'stop' })
+    stubIpc(successfulRevisionIpc())
+    const context: WorkflowContext = {
+      ...workflowContext(),
+      writingLanguage: 'en-US',
+      writingSkills: Object.freeze({
+        refinement: Object.freeze({
+          skillId: 'project:revision-sample',
+          name: 'Revision sample',
+          stage: 'refinement',
+          source: 'project',
+          writingLanguage: 'en-US',
+          content: skillContent,
+          utf8Bytes: new TextEncoder().encode(skillContent).byteLength,
+        }),
+      }),
+    }
+
+    await command(completeWithLease, CONFIRMED_SOURCE_DRAFT.content).execute({
+      step: {}, context, callbacks: callbacks(),
+    })
+    await reviewCommand(completeWithLease, CONFIRMED_SOURCE_DRAFT.content).execute({
+      step: {}, context, callbacks: callbacks(),
+    })
+
+    expect(completeWithLease).toHaveBeenCalledTimes(2)
+    expect(completeWithLease.mock.calls.map(([request]) => request.purpose))
+      .toEqual(['refine-draft', 'refine-from-review'])
+    for (const [request] of completeWithLease.mock.calls) {
+      expect(request.messages[1]?.content).toContain('[Supplemental writing skill: Revision sample]')
+      expect(request.messages[1]?.content).toContain(skillContent)
+      expect(request.messages[1]?.content).toContain('author facts, the project writing language, and the output contract below always take priority')
+    }
   })
 })

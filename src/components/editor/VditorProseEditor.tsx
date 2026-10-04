@@ -251,6 +251,8 @@ export type ForeshadowingSelectionResult =
 
 export interface VditorProseEditorRef {
   getSelectionInfo: () => ForeshadowingSelectionResult
+  /** Read the live Vditor value before a navigation action captures a snapshot. */
+  getCurrentMarkdown: () => string
   /**
    * 主动把当前光标与滚动位置记到 `positionMemoryKey` 下。
    *
@@ -627,6 +629,8 @@ export default function VditorProseEditor({
     if (position) rememberDraftEditorPosition(memoryKey, position)
   }, [captureEditorPosition])
 
+  const getCurrentMarkdown = useCallback(() => vditorRef.current?.getValue() ?? syncedContentRef.current, [])
+
   /** 待还原的位置请求；就绪前到达时由 Vditor 的 after 回调补做。 */
   const pendingRestoreRef = useRef<VditorRestorePositionRequest | null>(null)
   const appliedRestoreIdRef = useRef<number | null>(null)
@@ -742,9 +746,9 @@ export default function VditorProseEditor({
   // 暴露给父组件的命令式接口。
   useEffect(() => {
     if (editorRef) {
-      editorRef.current = { getSelectionInfo, rememberPosition }
+      editorRef.current = { getSelectionInfo, rememberPosition, getCurrentMarkdown }
     }
-  }, [editorRef, getSelectionInfo, rememberPosition])
+  }, [editorRef, getCurrentMarkdown, getSelectionInfo, rememberPosition])
 
   const updateHighlights = useCallback(() => {
     if (typeof CSS === 'undefined' || !('highlights' in CSS)) return
@@ -1015,6 +1019,7 @@ export default function VditorProseEditor({
     applyRestorePosition,
     emitInput,
     rememberPositionOnUnmount,
+    updateHighlights,
   ])
 
   // 外部内容更新（打开其他章节、保存后归一化、AI 写回）。
