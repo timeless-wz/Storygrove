@@ -1,6 +1,10 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { page } from 'vitest/browser'
+
+import '../../../index.css'
+import '../../../styles/literary-themes.css'
 
 import type { ProjectData } from '../../../shared/ipc-channels'
 import { setActiveProjectSessionContext } from '../../../shared/project-session-context'
@@ -120,6 +124,7 @@ beforeEach(() => {
   })
 
   container = document.createElement('div')
+  container.style.cssText = 'width: 1200px; height: 780px; overflow: hidden;'
   document.body.append(container)
   root = createRoot(container)
 })
@@ -149,6 +154,8 @@ describe('ProjectDocumentEditor', () => {
     // 旧的 CodeMirror 和旧项目文档双栏预览已彻底移除
     expect(container.querySelector('.cm-content')).toBeNull()
     expect(container.querySelector('[data-project-document-preview]')).toBeNull()
+    await page.viewport(1200, 780)
+    await page.screenshot({ path: '../../../../output/playwright/project-document-editor.png' })
   })
 
   it('builds a clickable outline from the markdown headings', async () => {

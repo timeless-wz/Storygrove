@@ -13,6 +13,13 @@ import { countDraftUnits } from '../src/shared/draft-units'
 import { migrateDraftUnitCounts } from './services/draft-unit-migration'
 import { migrateWorldMapAtlas } from './services/world-map-atlas-migration'
 import { ensureWorldWorkbenchSchema } from './services/world-workbench-schema'
+import { ensureKnowledgeGapSchema } from './services/knowledge-gap-schema'
+import { ensureCharacterActionSchema } from './services/character-action-schema'
+import { ensureOutlineSyncSchema } from './services/outline-sync-schema'
+import { ensureKnowledgeCheckSchema } from './services/knowledge-check-schema'
+import { ensureThreadMarkerLinkSchema } from './services/thread-marker-link-schema'
+import { ensureRevisionLearningSchema } from './services/revision-learning-schema'
+import { ensureCreativeContentSchema } from './services/creative-content-schema'
 
 const require = createRequire(import.meta.url)
 const Database = require('better-sqlite3') as typeof import('better-sqlite3')
@@ -231,6 +238,17 @@ export function initProjectDatabase(projectPath: string, importSourceSecret?: Bu
   // 不创建默认世界、不推断旧地图归属、不升级候选状态。
   ensureWorldWorkbenchSchema(projectDb)
 
+  // 信息与揭露 / 人物行动线 / 正文反向修纲 / 检查报告 / 伏笔↔脉络关系
+  // （knowledge-action-outline-sync-contract §9）：全部全新表，幂等 DDL，无旧行迁移。
+  ensureKnowledgeGapSchema(projectDb)
+  ensureCharacterActionSchema(projectDb)
+  ensureOutlineSyncSchema(projectDb)
+  ensureKnowledgeCheckSchema(projectDb)
+  ensureThreadMarkerLinkSchema(projectDb)
+  // 作者明确发起的修订学习；running attempt 在重开项目时标成中断，不自动重跑模型。
+  ensureRevisionLearningSchema(projectDb)
+  ensureCreativeContentSchema(projectDb)
+
   // 章节蓝图统一版本：把仅剩 v1 简纲行的章安全迁移为 v2 权威细纲。
   // 幂等（只补 blueprint_details 缺行）；单章失败保留原 v1 行，下次打开重试。
   try {
@@ -295,6 +313,8 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
       plot_structure TEXT DEFAULT 'three_act',    -- 故事模型
       narrative_pov TEXT DEFAULT 'third_limited', -- 叙事视角
       writing_style TEXT DEFAULT '',              -- 文风描述
+      creative_direction_markdown TEXT NOT NULL DEFAULT '', -- 正式创作方向 Markdown
+      writing_rules_markdown TEXT NOT NULL DEFAULT '',      -- 正式写作规范 Markdown
       reference_works TEXT DEFAULT '',            -- 参考作品
       global_guidance TEXT DEFAULT '',            -- 全局行文指导
       golden_finger TEXT DEFAULT '',              -- 金手指设定
@@ -1825,6 +1845,8 @@ function createTables(db: BetterSqlite3.Database, importSourceSecret?: Buffer) {
   addProjectCoreTextColumn('core_outline', 'synopsis')
   addProjectCoreTextColumn('world_setting', 'worldbuilding')
   addProjectCoreTextColumn('protagonist_profile')
+  addProjectCoreTextColumn('creative_direction_markdown')
+  addProjectCoreTextColumn('writing_rules_markdown')
   addProjectCoreTextColumn('plot_tree_snapshot')
   addProjectCoreTextColumn('external_workspace_path')
   addProjectCoreTextColumn('external_workspace_scanned_at')

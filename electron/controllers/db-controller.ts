@@ -70,6 +70,16 @@ import { LLMHistoryRepository } from '../repositories/llm-repository'
 import { SummaryRepository } from '../repositories/summary-repository'
 import { ConsistencyExemptionRepository } from '../repositories/consistency-exemption-repository'
 import { NarrativeThreadRepository } from '../repositories/narrative-thread-repository'
+import { KnowledgeGapRepository } from '../repositories/knowledge-gap-repository'
+import { CharacterActionRepository } from '../repositories/character-action-repository'
+import { OutlineSyncRepository } from '../repositories/outline-sync-repository'
+import { KnowledgeCheckRepository } from '../repositories/knowledge-check-repository'
+import { ThreadMarkerLinkRepository } from '../repositories/thread-marker-link-repository'
+import type { InfoEntrySaveInput, KnowledgeRecordSaveInput } from '../../src/shared/knowledge-gap'
+import type { CharacterActionSaveInput } from '../../src/shared/character-action'
+import type { OutlineSyncCreateCandidateInput, OutlineSyncCandidateStatus } from '../../src/shared/outline-sync'
+import type { KnowledgeCheckKind, KnowledgeCheckReportInput } from '../../src/shared/knowledge-check'
+import type { ThreadMarkerLinkInput } from '../../src/shared/thread-marker-link'
 import { PlotTreeRepository } from '../repositories/plot-tree-repository'
 import { isPlotTreeSourceRevision } from '../../src/shared/plot-tree'
 import { WorldMapRepository } from '../repositories/world-map-repository'
@@ -125,6 +135,27 @@ import { chapterDraftImportInspectionStore } from '../services/chapter-draft-imp
 import { createHash } from 'node:crypto'
 
 type ProjectDatabaseHandler = (event: unknown, ...args: never[]) => unknown
+
+// 信息与揭露 / 人物行动线 / 正文反向修纲 / 检查报告 / 伏笔↔脉络关系的写通道
+//（knowledge-action-outline-sync-contract §3.3/§4.2/§5.3/§6/§7）。
+const KNOWLEDGE_ACTION_MUTATING_DATABASE_CHANNELS = [
+  'db:info-entry-save',
+  'db:info-entry-delete',
+  'db:knowledge-record-save',
+  'db:knowledge-record-delete',
+  'db:character-action-save',
+  'db:character-action-delete',
+  'db:character-action-promote-to-timeline',
+  'db:outline-sync-mark-pending',
+  'db:outline-sync-clear-pending',
+  'db:outline-sync-create-candidate',
+  'db:outline-sync-discard-candidate',
+  'db:outline-sync-commit',
+  'db:knowledge-check-report-save',
+  'db:knowledge-check-report-delete',
+  'db:thread-marker-link',
+  'db:thread-marker-unlink',
+] as const
 
 const MUTATING_DATABASE_CHANNELS = new Set([
   'db:close',
@@ -272,6 +303,7 @@ const MUTATING_DATABASE_CHANNELS = new Set([
   'db:chapter-canvas-nodes-reposition',
   'db:chapter-canvas-edge-upsert',
   'db:chapter-canvas-edge-delete',
+  ...KNOWLEDGE_ACTION_MUTATING_DATABASE_CHANNELS,
 ])
 
 function registerProjectDatabaseHandler(channel: string, handler: ProjectDatabaseHandler): void {
@@ -2662,6 +2694,183 @@ export function registerDatabaseController() {
       assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
       ChapterCanvasRepository.edgeDelete(chapterNumber, edgeId)
       return { success: true }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+
+  // ============================================================
+  // 14. 信息与揭露 / 人物行动线 / 正文反向修纲 / 检查报告 / 伏笔↔脉络关系
+  //（knowledge-action-outline-sync-contract §3/§4/§5/§6/§7）
+  // ============================================================
+  ipcMain.handle('db:info-entry-list', async (_event, filter, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return KnowledgeGapRepository.listInfoEntries(filter ?? {})
+  })
+  ipcMain.handle('db:info-entry-get', async (_event, id: string, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return KnowledgeGapRepository.getInfoEntry(id)
+  })
+  ipcMain.handle('db:info-entry-save', async (_event, input: InfoEntrySaveInput, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return KnowledgeGapRepository.saveInfoEntry(input)
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+  ipcMain.handle('db:info-entry-delete', async (_event, id: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return KnowledgeGapRepository.deleteInfoEntry(id)
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+  ipcMain.handle('db:info-entry-truth-history', async (_event, id: string, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return KnowledgeGapRepository.listTruthHistory(id)
+  })
+  ipcMain.handle('db:knowledge-record-list', async (_event, query, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return KnowledgeGapRepository.listKnowledgeRecords(query ?? {})
+  })
+  ipcMain.handle('db:knowledge-record-save', async (_event, input: KnowledgeRecordSaveInput, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return KnowledgeGapRepository.saveKnowledgeRecord(input)
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+  ipcMain.handle('db:knowledge-record-delete', async (_event, id: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return KnowledgeGapRepository.deleteKnowledgeRecord(id)
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+  ipcMain.handle('db:character-action-list', async (_event, query, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return CharacterActionRepository.listActions(query ?? {})
+  })
+  ipcMain.handle('db:character-action-save', async (_event, input: CharacterActionSaveInput, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return CharacterActionRepository.saveAction(input)
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+  ipcMain.handle('db:character-action-delete', async (_event, id: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return CharacterActionRepository.deleteAction(id)
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+  ipcMain.handle('db:character-action-promote-to-timeline', async (_event, id: string, characterName: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return CharacterActionRepository.promoteToTimeline({ id, characterName })
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+  ipcMain.handle('db:outline-sync-mark-pending', async (_event, input: { chapterNumber: number; draftId: number; proseHash: string }, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return OutlineSyncRepository.markPending(input)
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+  ipcMain.handle('db:outline-sync-clear-pending', async (_event, chapterNumber: number, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return OutlineSyncRepository.clearPending(chapterNumber)
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+  ipcMain.handle('db:outline-sync-list-pending', async (_event, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return OutlineSyncRepository.listPending()
+  })
+  ipcMain.handle('db:outline-sync-create-candidate', async (_event, input: OutlineSyncCreateCandidateInput, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return OutlineSyncRepository.createCandidate(input)
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+  ipcMain.handle('db:outline-sync-get-candidate', async (_event, id: string, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return OutlineSyncRepository.getCandidate(id)
+  })
+  ipcMain.handle('db:outline-sync-list-candidates', async (_event, query: { chapterNumber?: number; status?: OutlineSyncCandidateStatus }, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return OutlineSyncRepository.listCandidates(query ?? {})
+  })
+  ipcMain.handle('db:outline-sync-discard-candidate', async (_event, id: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return OutlineSyncRepository.discardCandidate(id)
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+  ipcMain.handle('db:outline-sync-commit', async (_event, input: { candidateId: string; acceptedItemIds: string[] }, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return OutlineSyncRepository.commitCandidate(input)
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+  ipcMain.handle('db:outline-sync-affected-preview', async (_event, chapterNumber: number, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return OutlineSyncRepository.affectedPreview(chapterNumber)
+  })
+  ipcMain.handle('db:knowledge-check-report-save', async (_event, report: KnowledgeCheckReportInput, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return { success: true, report: KnowledgeCheckRepository.saveReport(report) }
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+  ipcMain.handle('db:knowledge-check-report-list', async (_event, query: { kind?: KnowledgeCheckKind; scope?: string }, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return KnowledgeCheckRepository.listReports(query ?? {})
+  })
+  ipcMain.handle('db:knowledge-check-report-delete', async (_event, id: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return KnowledgeCheckRepository.deleteReport(id)
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+  ipcMain.handle('db:thread-marker-link-list', async (_event, query: { threadPlanId?: number; foreshadowingId?: string }, expectedProjectPath: string) => {
+    assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+    return ThreadMarkerLinkRepository.listLinks(query ?? {})
+  })
+  ipcMain.handle('db:thread-marker-link', async (_event, input: ThreadMarkerLinkInput, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return ThreadMarkerLinkRepository.link(input)
+    } catch (error) {
+      return { success: false, error: String(error) }
+    }
+  })
+  ipcMain.handle('db:thread-marker-unlink', async (_event, id: string, expectedProjectPath: string) => {
+    try {
+      assertRequiredExpectedProjectPath(getCurrentProjectPath(), expectedProjectPath)
+      return ThreadMarkerLinkRepository.unlink(id)
     } catch (error) {
       return { success: false, error: String(error) }
     }

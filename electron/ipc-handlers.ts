@@ -21,6 +21,8 @@ import { registerExternalFileGrantController } from './controllers/external-file
 import { registerAppDataController } from './controllers/app-data-controller'
 import { registerSkinController } from './controllers/skin-controller'
 import { registerBackupController } from './controllers/backup-controller'
+import { registerRevisionLearningController } from './controllers/revision-learning-controller'
+import { registerCreativeContentController } from './controllers/creative-content-controller'
 import { skinService } from './services/skin-service'
 
 /**
@@ -58,6 +60,8 @@ export function registerIPCHandlers() {
   registerImportController()
   registerWorkspaceHubController()
   registerStoryDataController()
+  registerRevisionLearningController()
+  registerCreativeContentController()
   registerPhase3To8Controller()
   registerBackupController()
 

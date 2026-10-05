@@ -18,8 +18,8 @@ export type SettingsSection = 'llm' | 'embedding' | 'proxy' | 'editor' | 'prompt
 /** 章节创建对话框的预填参数 */
 export type ChapterCreationPrefill = Record<string, unknown> | null
 
-/** 角色档案页的内部视图；默认为概览，完整字段只出现在显式编辑模式里。 */
-export type CharacterProfileView = 'overview' | 'edit' | 'graph'
+/** 角色档案页的内部视图；默认为概览，完整字段只出现在显式编辑模式里。'actions' = 人物行动线（B 任务）。 */
+export type CharacterProfileView = 'overview' | 'edit' | 'graph' | 'actions'
 
 /** 外部跳转对角色档案页的视图请求；requestId 递增以让重复请求也生效。 */
 export interface CharacterViewRequest {

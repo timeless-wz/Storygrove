@@ -24,6 +24,8 @@ import { stripThinkingTags } from '../workflow-utils'
 import type { WorkflowContext } from '../../../stores/workflow-store'
 import type { NovelConfig, ProjectSessionContext } from '../../../shared/ipc-channels'
 import type { ProjectCoreSynopsisExpected } from '../../../../electron/repositories/project-core-repository'
+import { buildCreativeContextBundle } from '../../../shared/creative-content'
+import { buildCreativeCorePromptSources, loadCreativeDomainPromptSources, loadLegacyCreativeSources } from '../../creative-context'
 import type { WritingLanguage } from '../../../shared/writing-language'
 import {
   CHARACTER_ROSTER_SCHEMA_VERSION,
@@ -53,6 +55,8 @@ interface PartialArchData {
   world_building_incomplete?: boolean
   /** 候选赖以生成的输入指纹；项目事实变化后禁止自动续写。 */
   world_building_facts_fingerprint?: string
+  /** 新版候选使用的正式创作资料指纹；旧候选无此字段时仍按旧指纹兼容恢复。 */
+  world_building_sources_fingerprint?: string
   /** 候选创建时正式世界观的指纹；避免恢复时覆盖后来编辑的完整成果。 */
   world_building_db_hash?: string
   /** 候选实际使用的作者步骤指导；恢复时沿用，不读取新输入。 */
@@ -73,6 +77,30 @@ interface PartialArchData {
   synopsis_body_hash?: string
   /** 本批实际使用的作者步骤指导；恢复必须沿用，不读取新输入。 */
   synopsis_step_guidance?: string
+}
+
+function legacyCreativeSourceLabel(
+  sourceField: 'coreOutline' | 'worldSetting' | 'goldenFinger' | 'protagonistProfile' | 'globalGuidance' | 'writingStyle',
+  writingLanguage: WritingLanguage,
+): string {
+  if (writingLanguage !== 'en-US') {
+    return {
+      coreOutline: '旧故事构想 / 核心大纲',
+      worldSetting: '旧背景构想',
+      goldenFinger: '旧主角优势 / 核心卖点',
+      protagonistProfile: '旧主角构想',
+      globalGuidance: '旧全局写作要求',
+      writingStyle: '旧文风配置',
+    }[sourceField]
+  }
+  return {
+    coreOutline: 'Legacy story concept / core outline',
+    worldSetting: 'Legacy background concept',
+    goldenFinger: 'Legacy protagonist ability / selling point',
+    protagonistProfile: 'Legacy protagonist profile',
+    globalGuidance: 'Legacy global writing guidance',
+    writingStyle: 'Legacy writing style',
+  }[sourceField]
 }
 
 const SYNOPSIS_CHECKPOINT_FIELDS = [
@@ -401,7 +429,7 @@ function synopsisInputsFingerprint(
     writingLanguage: expected.writingLanguage,
     plotStructure: expected.plotStructure,
     narrativePov: expected.narrativePov,
-    globalGuidance: expected.globalGuidance,
+    creativeDirectionMarkdown: expected.creativeDirectionMarkdown,
   }
   return synopsisFactsFingerprint([
     JSON.stringify(sourceInputs),
@@ -998,7 +1026,35 @@ export class GenerateConfigCommand extends BaseWorkflowCommand<string> {
     const projectSession = requireWorkflowProjectSession(context)
     const writingLanguage = workflowWritingLanguage(context)
     assertArchitectureProjectSessionCurrent(projectSession, context)
-    const existingConfig = { ...(useProjectStore.getState().currentProject?.novelConfig ?? {}) }
+    const currentConfig = useProjectStore.getState().currentProject?.novelConfig
+    const [core, legacySources, powerSources] = await Promise.all([
+      ipc.invokeWithProjectSession(projectSession, 'db:project-core-get', projectSession.projectPath),
+      loadLegacyCreativeSources(projectSession, projectSession.projectPath),
+      loadCreativeDomainPromptSources(projectSession, projectSession.projectPath, { powerSystem: true, writingLanguage }),
+    ])
+    if (!core) throw new Error(text('无法读取项目正式资料，已停止配置生成。', 'Could not read formal project sources; configuration generation stopped.'))
+    const formalConfig: Partial<NovelConfig> = currentConfig ? {
+      genre: core.genre || currentConfig.genre,
+      subGenre: core.subGenre || currentConfig.subGenre,
+      targetAudience: core.targetAudience || currentConfig.targetAudience,
+      totalChapters: core.totalChapters || currentConfig.totalChapters,
+      wordsPerChapter: core.wordsPerChapter || currentConfig.wordsPerChapter,
+      writingLanguage: core.writingLanguage || currentConfig.writingLanguage,
+      plotStructure: (core.plotStructure as NovelConfig['plotStructure']) || currentConfig.plotStructure,
+      narrativePOV: (core.narrativePov as NovelConfig['narrativePOV']) || currentConfig.narrativePOV,
+      creativeDirectionMarkdown: core.creativeDirectionMarkdown,
+      writingRulesMarkdown: core.writingRulesMarkdown,
+      referenceWorks: core.referenceWorks,
+    } : {}
+    const existingConfig: Partial<NovelConfig> = currentConfig ? {
+      ...formalConfig,
+      coreOutline: currentConfig.coreOutline,
+      worldSetting: currentConfig.worldSetting,
+      goldenFinger: currentConfig.goldenFinger,
+      protagonistProfile: currentConfig.protagonistProfile,
+      globalGuidance: currentConfig.globalGuidance,
+      writingStyle: currentConfig.writingStyle,
+    } : formalConfig
     callbacks.log(text(
       '正在调度配置专家 AI，准备解析您的脑洞...',
       'Preparing the configuration model to structure your story idea...',
@@ -1019,14 +1075,30 @@ export class GenerateConfigCommand extends BaseWorkflowCommand<string> {
       this.wordsPerChapter,
       writingLanguage,
     )
-    const authorConfigContext = Object.keys(existingConfig).length > 0
+    const formalAndPendingSources = buildCreativeContextBundle([
+      ...buildCreativeCorePromptSources(core, legacySources, [
+        'creative-direction', 'writing-rules', 'premise', 'world-setting', 'characters',
+      ], writingLanguage),
+      ...powerSources,
+    ], writingLanguage)
+    const authorConfigContext = Object.keys(formalConfig).length > 0
       ? promptLanguageText(
           writingLanguage,
-          `【作者已有配置】\n以下非空内容和选择是作者权威输入：长文本只能在保留原文的基础上补充，类型、受众、结构与视角选择不得改写。\n${JSON.stringify(existingConfig, null, 2)}`,
-          `[Existing author configuration]\nThe following non-empty content and choices are authoritative. Preserve long-form text and only add useful details; do not change the author's genre, audience, structure, or point-of-view choices.\n${JSON.stringify(existingConfig, null, 2)}`,
+          `【作者已有正式方向与参数】\n保留这里的正式方向、规范与结构化选择。待生成的故事构想字段只是初始输入草稿，不是正式设定。\n${JSON.stringify(formalConfig, null, 2)}`,
+          `[Existing formal direction and parameters]\nPreserve the formal direction, rules, and structured choices below. Generated story-concept fields are initial input drafts, not formal canon.\n${JSON.stringify(formalConfig, null, 2)}`,
         )
       : ''
-    const originalTask = [promptBuilder.build(), authorConfigContext, configJSONContract]
+    const originalTask = [
+      promptBuilder.build(),
+      authorConfigContext,
+      formalAndPendingSources.promptText,
+      promptLanguageText(
+        writingLanguage,
+        '新生成的 coreOutline、worldSetting、goldenFinger、protagonistProfile 和 writingStyle 属于初始构想草稿；保留正式资料的约束，存在差异时标明待作者整理，不得把旧内容静默确认为事实。',
+        'Generated coreOutline, worldSetting, goldenFinger, protagonistProfile, and writingStyle are initial idea drafts. Preserve formal-source constraints and flag differences for author review; do not silently promote legacy text to fact.',
+      ),
+      configJSONContract,
+    ]
       .filter(Boolean)
       .join('\n\n')
 
@@ -1100,8 +1172,8 @@ export class GenerateConfigCommand extends BaseWorkflowCommand<string> {
       const replacement = await this.callLLM(
         promptLanguageText(
           writingLanguage,
-          `只纠正小说配置中的 globalGuidance 字段。写 ${GENERATED_GLOBAL_GUIDANCE_MIN_RULES}–${GENERATED_GLOBAL_GUIDANCE_MAX_RULES} 条跨章节长期有效的简短规则，每条独占一行，总计不超过 ${GENERATED_GLOBAL_GUIDANCE_MAX_CHARS} 字符。不得逐章列大纲、分配章节区间或复述核心大纲。只输出规则正文，不要标题、解释、Markdown 或 JSON。\n\n【已验证的其余小说配置，仅作上下文】\n${JSON.stringify({ ...parsed, globalGuidance: undefined }, null, 2)}`,
-          `Correct only the globalGuidance field in the novel configuration. Write ${GENERATED_GLOBAL_GUIDANCE_MIN_RULES}–${GENERATED_GLOBAL_GUIDANCE_MAX_RULES} short, stable cross-chapter rules, one per line, within ${GENERATED_GLOBAL_GUIDANCE_MAX_CHARS} characters total. Do not enumerate chapters, allocate chapter ranges, or restate the core outline. Output only the rules, with no title, explanation, Markdown, or JSON.\n\n[Validated remaining novel configuration — context only]\n${JSON.stringify({ ...parsed, globalGuidance: undefined }, null, 2)}`,
+          `只纠正初始构想中的 globalGuidance 字段。写 ${GENERATED_GLOBAL_GUIDANCE_MIN_RULES}–${GENERATED_GLOBAL_GUIDANCE_MAX_RULES} 条跨章节长期有效的简短规则，每条独占一行，总计不超过 ${GENERATED_GLOBAL_GUIDANCE_MAX_CHARS} 字符。不得逐章列大纲、分配章节区间或复述核心大纲。只输出规则正文，不要标题、解释、Markdown 或 JSON。\n\n【结构化方向参数】\n${JSON.stringify({ genre: parsed.genre, subGenre: parsed.subGenre, targetAudience: parsed.targetAudience, totalChapters: parsed.totalChapters, wordsPerChapter: parsed.wordsPerChapter }, null, 2)}`,
+          `Correct only the initial-concept globalGuidance field. Write ${GENERATED_GLOBAL_GUIDANCE_MIN_RULES}–${GENERATED_GLOBAL_GUIDANCE_MAX_RULES} short, stable cross-chapter rules, one per line, within ${GENERATED_GLOBAL_GUIDANCE_MAX_CHARS} characters total. Do not enumerate chapters, allocate chapter ranges, or restate the core outline. Output only the rules, with no title, explanation, Markdown, or JSON.\n\n[Structured direction parameters]\n${JSON.stringify({ genre: parsed.genre, subGenre: parsed.subGenre, targetAudience: parsed.targetAudience, totalChapters: parsed.totalChapters, wordsPerChapter: parsed.wordsPerChapter }, null, 2)}`,
         ),
         promptBuilder.getSystemRole(),
         callbacks,
@@ -1183,6 +1255,11 @@ export class GenerateCoreSeedCommand extends BaseWorkflowCommand<string> {
     const { expectedProjectPath } = this.snapshot
     const { novelConfig: config } = this.snapshot
     const modelFacts = localizeNovelConfigFacts(config, writingLanguage)
+    const [core, powerSystem] = await Promise.all([
+      ipc.invokeWithProjectSession(projectSession, 'db:project-core-get', expectedProjectPath),
+      ipc.invokeWithProjectSession(projectSession, 'db:cultivation-read', expectedProjectPath),
+    ])
+    if (!core) throw new Error(text('无法读取项目正式资料，已停止生成故事前提。', 'Could not read formal project sources; premise generation stopped.'))
     callbacks.log(text('生成故事前提...', 'Generating story premise...'))
 
     const template = await resolvePromptTemplate('premise', projectSession, writingLanguage)
@@ -1191,23 +1268,36 @@ export class GenerateCoreSeedCommand extends BaseWorkflowCommand<string> {
       'The story-premise template was not found.',
     ))
 
-    const missingValue = promptLanguageText(writingLanguage, '（未填写）', '(not provided)')
     const promptBuilder = new ArchitecturePromptBuilder(template, writingLanguage)
       .withGenre(modelFacts.genre)
       .withSubGenre(config.subGenre || modelFacts.genre)
-      .withTopic(config.coreOutline || missingValue)
+      .withTopic('')
       .withTargetAudience(modelFacts.targetAudience)
       .withNumberOfChapters(config.totalChapters)
       .withWordNumber(config.wordsPerChapter)
-      .withCoreSetting(config.worldSetting || missingValue)
-      .withGoldenFinger(config.goldenFinger || missingValue)
-      .withProtagonistProfile(config.protagonistProfile || missingValue)
-      .withGlobalGuidance(config.globalGuidance || missingValue)
+      .withCoreSetting('')
+      .withGoldenFinger('')
+      .withProtagonistProfile('')
+      .withGlobalGuidance('')
       .withStepGuidance(((context.data.stepGuidance as Record<string, string>) || {}).premise || '')
-      .withReferenceWorks(config.referenceWorks || '')
+      .withReferenceWorks(core.referenceWorks || '')
 
-    const result = await this.callLLMWithBuilder(
-      promptBuilder,
+    const legacySources = await loadLegacyCreativeSources(projectSession, expectedProjectPath)
+    const creativeContext = buildCreativeContextBundle([
+      ...buildCreativeCorePromptSources(core, legacySources, ['creative-direction', 'premise', 'world-setting', 'characters'], writingLanguage),
+      ...(powerSystem.markdown?.trim() ? [{
+        id: 'cultivation_meta.markdown', label: '力量体系', category: 'power-system' as const,
+        content: powerSystem.markdown, status: 'formal' as const,
+      }] : []),
+      ...(core.premise?.trim() ? [{
+        id: 'project_core.premise', label: '現有故事前提', category: 'premise' as const,
+        content: core.premise, status: 'formal' as const,
+      }] : []),
+    ], writingLanguage)
+
+    const result = await this.callLLM(
+      [promptBuilder.build(), creativeContext.promptText].filter(Boolean).join('\n\n'),
+      promptBuilder.getSystemRole(),
       callbacks,
       { purpose: 'generate-core-seed', reasoningStage: 'planning', writingSkillStage: 'planning' },
       context,
@@ -1312,6 +1402,7 @@ export class GenerateCharactersCommand extends BaseWorkflowCommand<string> {
     const modelFacts = localizeNovelConfigFacts(config, writingLanguage)
 
     const core = await ipc.invokeWithProjectSession(projectSession, 'db:project-core-get', expectedProjectPath)
+    if (!core) throw new Error(text('无法读取项目正式资料，已停止生成人物资料。', 'Could not read formal project sources; character generation stopped.'))
     const premise_result = core?.premise || ''
 
     if (!premise_result || premise_result.includes('待生成') || premise_result.length < 50) {
@@ -1323,26 +1414,55 @@ export class GenerateCharactersCommand extends BaseWorkflowCommand<string> {
 
     callbacks.log(text('生成角色图谱...', 'Generating character graph...'))
 
+    const [powerSystem, roster] = await Promise.all([
+      ipc.invokeWithProjectSession(projectSession, 'db:cultivation-read', expectedProjectPath),
+      ipc.invokeWithProjectSession(projectSession, 'db:character-roster-read', expectedProjectPath),
+    ])
+    if (roster.status !== 'ready' && roster.status !== 'empty') {
+      throw new Error(text('现有人物档案状态待修复，已停止生成人物资料。', 'Existing character profiles need repair; character generation stopped.'))
+    }
     const missingValue = promptLanguageText(writingLanguage, '（未填写）', '(not provided)')
+    const legacySources = await loadLegacyCreativeSources(projectSession, expectedProjectPath)
+    const legacyPendingReferences = legacySources.filter(source => (
+      source.disposition === 'pending'
+      && (
+        (source.sourceField === 'worldSetting' && !core.worldbuilding?.trim())
+        || (source.sourceField === 'globalGuidance' && !core.creativeDirectionMarkdown?.trim())
+        || ((source.sourceField === 'protagonistProfile' || source.sourceField === 'goldenFinger') && roster.entries.length === 0)
+      )
+    )).map(source => ({
+      id: `legacy.${source.sourceField}`,
+      sourceField: source.sourceField,
+      label: legacyCreativeSourceLabel(source.sourceField, writingLanguage),
+      content: source.content,
+      status: promptLanguageText(
+        writingLanguage,
+        '待整理旧内容，仅作参考；与正式资料冲突时以正式资料为准',
+        'Unorganized legacy input, reference only; formal sources take precedence in conflicts.',
+      ),
+    }))
     const manifestContext = {
       premise: premise_result,
       genre: modelFacts.genre,
-      protagonistProfile: config.protagonistProfile || missingValue,
-      globalGuidance: config.globalGuidance || missingValue,
+      worldSetting: core.worldbuilding || missingValue,
+      powerSystem: powerSystem.markdown || missingValue,
+      existingCharacters: roster.renderedMarkdown || missingValue,
+      creativeDirection: core.creativeDirectionMarkdown || missingValue,
+      legacyPendingReferences,
       stepGuidance: ((context.data.stepGuidance as Record<string, string>) || {}).characters || missingValue,
-      referenceWorks: config.referenceWorks || missingValue,
+      referenceWorks: core.referenceWorks || missingValue,
     }
     const manifestContextJson = JSON.stringify(manifestContext)
     const templateVariables = {
       premise: manifestContext.premise,
       genre: manifestContext.genre,
-      protagonist_profile: manifestContext.protagonistProfile,
-      global_guidance: manifestContext.globalGuidance,
+      protagonist_profile: manifestContext.existingCharacters,
+      global_guidance: manifestContext.creativeDirection,
       step_guidance: manifestContext.stepGuidance,
       reference_works: manifestContext.referenceWorks,
       number_of_chapters: String(config.totalChapters),
-      golden_finger: config.goldenFinger || missingValue,
-      world_building: config.worldSetting || missingValue,
+      golden_finger: manifestContext.powerSystem,
+      world_building: manifestContext.worldSetting,
     }
     const creativeSystem = composePromptSystemRole(creativeTemplate, writingLanguage)
     const creativeGuidance = renderPromptTaskGuidance(creativeTemplate, templateVariables, writingLanguage)
@@ -1352,14 +1472,39 @@ export class GenerateCharactersCommand extends BaseWorkflowCommand<string> {
       MIN_CHARACTER_SLOTS,
       MAX_CHARACTER_SLOTS,
     )
-    const manifestPrompt = creativeGuidance
-      ? `${creativeGuidance}\n\n${manifestTask}`
-      : manifestTask
+    const manifestSourceList = [
+      `- project_core.premise（${promptLanguageText(writingLanguage, '故事前提', 'story premise')}）`,
+      ...(core.creativeDirectionMarkdown?.trim() ? [`- project_core.creative_direction_markdown（${promptLanguageText(writingLanguage, '创作方向', 'creative direction')}）`] : []),
+      ...(modelFacts.genre || config.targetAudience || config.totalChapters || config.wordsPerChapter
+        ? [`- project_core ${promptLanguageText(writingLanguage, '结构化创作参数（题材/目标读者/篇幅）', 'structured parameters (genre/audience/length)')}`]
+        : []),
+      ...(core.worldbuilding?.trim() ? [`- project_core.worldbuilding（${promptLanguageText(writingLanguage, '世界设定', 'world setting')}）`] : []),
+      ...(powerSystem.markdown?.trim() || powerSystem.realms.length > 0 ? [`- cultivation_meta（${promptLanguageText(writingLanguage, '力量机制/可选等级表', 'power mechanics / optional levels')}）`] : []),
+      ...(roster.renderedMarkdown?.trim() ? [`- character_roster revision ${roster.revision}（${promptLanguageText(writingLanguage, '已有角色档案', 'existing character profiles')}）`] : []),
+      ...(core.referenceWorks?.trim() ? [`- project_core.reference_works（${promptLanguageText(writingLanguage, '参考与借鉴边界', 'references and adaptation boundaries')}）`] : []),
+      ...legacyPendingReferences.map(source => `- ${source.label} · ${source.id}（${source.status}）`),
+      `- ${promptLanguageText(writingLanguage, '本次作者指导', 'author guidance for this run')}`,
+    ]
+    const usedSourceList = promptLanguageText(
+      writingLanguage,
+      `【本次使用资料】\n${manifestSourceList.join('\n')}`,
+      `[Sources used for this request]\n${manifestSourceList.join('\n')}`,
+    )
+    const manifestPrompt = [
+      creativeGuidance,
+      usedSourceList,
+      manifestTask,
+    ].filter(Boolean).join('\n\n')
     const manifestSection = (sectionName: string, key: keyof typeof manifestContext) => ({
       sectionName,
       messageIndex: 1,
       finalText: JSON.stringify({ [key]: manifestContext[key] }).slice(1, -1),
     })
+    const legacyContextBudgetSection = {
+      sectionName: 'legacy-pending-references',
+      messageIndex: 1,
+      finalText: JSON.stringify({ legacyPendingReferences: manifestContext.legacyPendingReferences }).slice(1, -1),
+    }
     const manifestRaw = await this.callLLMWithBoundedCompletion(
       manifestPrompt,
       manifestSystem,
@@ -1380,8 +1525,11 @@ export class GenerateCharactersCommand extends BaseWorkflowCommand<string> {
             },
             manifestSection('story-premise', 'premise'),
             manifestSection('genre', 'genre'),
-            manifestSection('protagonist-profile', 'protagonistProfile'),
-            manifestSection('global-guidance', 'globalGuidance'),
+            manifestSection('formal-world-setting', 'worldSetting'),
+            manifestSection('formal-power-system', 'powerSystem'),
+            manifestSection('existing-character-records', 'existingCharacters'),
+            manifestSection('creative-direction', 'creativeDirection'),
+            legacyContextBudgetSection,
             manifestSection('step-guidance', 'stepGuidance'),
             manifestSection('reference-works', 'referenceWorks'),
           ],
@@ -1420,9 +1568,7 @@ export class GenerateCharactersCommand extends BaseWorkflowCommand<string> {
           slotIds,
           validatedPrefix: prefix,
         })
-        const detailPrompt = creativeGuidance
-          ? `${creativeGuidance}\n\n${detailTask}`
-          : detailTask
+        const detailPrompt = [creativeGuidance, usedSourceList, detailTask].filter(Boolean).join('\n\n')
         const detailSystem = `${creativeSystem}\n\n${promptCopy.detailSystem}`
         const detailRequestBytes = promptUtf8Bytes(detailSystem) + promptUtf8Bytes(detailPrompt)
         const fixedDetailRequestBytes = detailRequestBytes - promptUtf8Bytes(prefix)
@@ -1446,8 +1592,11 @@ export class GenerateCharactersCommand extends BaseWorkflowCommand<string> {
               },
               manifestSection('story-premise', 'premise'),
               manifestSection('genre', 'genre'),
-              manifestSection('protagonist-profile', 'protagonistProfile'),
-              manifestSection('global-guidance', 'globalGuidance'),
+              manifestSection('formal-world-setting', 'worldSetting'),
+              manifestSection('formal-power-system', 'powerSystem'),
+              manifestSection('existing-character-records', 'existingCharacters'),
+              manifestSection('creative-direction', 'creativeDirection'),
+              legacyContextBudgetSection,
               manifestSection('step-guidance', 'stepGuidance'),
               manifestSection('reference-works', 'referenceWorks'),
               {
@@ -1671,6 +1820,7 @@ export class GenerateWorldBuildingCommand extends BaseWorkflowCommand<string> {
     const modelFacts = localizeNovelConfigFacts(config, writingLanguage)
 
     const core = await ipc.invokeWithProjectSession(projectSession, 'db:project-core-get', expectedProjectPath)
+    if (!core) throw new Error(text('无法读取项目正式资料，已停止生成世界设定。', 'Could not read formal project sources; world-setting generation stopped.'))
     const premise_result = core?.premise || ''
 
     if (!premise_result || premise_result.includes('待生成') || premise_result.length < 50) {
@@ -1691,7 +1841,14 @@ export class GenerateWorldBuildingCommand extends BaseWorkflowCommand<string> {
       'The worldbuilding template is missing.',
     ))
 
-    const missingValue = promptLanguageText(writingLanguage, '（未填写）', '(not provided)')
+    const [legacySources, domainSources] = await Promise.all([
+      loadLegacyCreativeSources(projectSession, expectedProjectPath),
+      loadCreativeDomainPromptSources(projectSession, expectedProjectPath, { powerSystem: true, writingLanguage }),
+    ])
+    const creativeContext = buildCreativeContextBundle([
+      ...buildCreativeCorePromptSources(core, legacySources, ['creative-direction', 'premise', 'world-setting'], writingLanguage),
+      ...domainSources,
+    ], writingLanguage)
     const requestedStepGuidance = ((context.data.stepGuidance as Record<string, string>) || {}).worldbuilding || ''
     const partial = (context.data.partial as PartialArchData) || await loadPartialData(expectedProjectPath, projectSession)
     context.data.partial = partial
@@ -1721,28 +1878,39 @@ export class GenerateWorldBuildingCommand extends BaseWorkflowCommand<string> {
       }
     }
 
+    // Keep the original fingerprint recipe for already-saved candidates. Store
+    // the new formal-source fingerprint separately so old checkpoints remain
+    // resumable while new ones detect edits to their actual prompt sources.
     const factsFingerprint = synopsisFactsFingerprint([
       premise_result,
       JSON.stringify(config),
       stepGuidance,
       JSON.stringify(template),
     ])
+    const sourcesFingerprint = synopsisFactsFingerprint([creativeContext.promptText])
     if (resumeRequested && partial.world_building_facts_fingerprint !== factsFingerprint) {
       throw new Error(text(
         '故事前提、小说配置或世界观模板自候选保存后已变化，旧候选不能续到新上下文；候选仍可查看或复制。',
         'The premise, novel configuration, or worldbuilding template changed after the candidate was saved, so the old candidate cannot be continued into the new context. The candidate remains available to view or copy.',
       ))
     }
+    if (resumeRequested && partial.world_building_sources_fingerprint
+      && partial.world_building_sources_fingerprint !== sourcesFingerprint) {
+      throw new Error(text(
+        '正式创作资料自候选保存后已变化，旧候选不能续到新资料；候选仍可查看或复制。',
+        'Formal creative sources changed after the candidate was saved, so it cannot be resumed with the new sources. The candidate remains available to view or copy.',
+      ))
+    }
 
     const promptBuilder = new ArchitecturePromptBuilder(template, writingLanguage)
-      .withCoreSeed(premise_result)
+      .withCoreSeed('')
       .withGenre(modelFacts.genre)
-      .withCoreSetting(config.worldSetting || missingValue)
-      .withGoldenFinger(config.goldenFinger || missingValue)
-      .withProtagonistProfile(config.protagonistProfile || missingValue)
-      .withGlobalGuidance(config.globalGuidance || missingValue)
+      .withCoreSetting('')
+      .withGoldenFinger('')
+      .withProtagonistProfile('')
+      .withGlobalGuidance('')
       .withStepGuidance(stepGuidance)
-    const taskPrompt = promptBuilder.build()
+    const taskPrompt = [promptBuilder.build(), creativeContext.promptText].filter(Boolean).join('\n\n')
     const systemPrompt = promptBuilder.getSystemRole()
     const llmOptions = {
       purpose: 'generate-world-building',
@@ -1770,6 +1938,7 @@ export class GenerateWorldBuildingCommand extends BaseWorkflowCommand<string> {
             context,
             persistedCandidate,
             factsFingerprint,
+            sourcesFingerprint,
             expectedDbHash,
             stepGuidance,
           )
@@ -1809,6 +1978,7 @@ export class GenerateWorldBuildingCommand extends BaseWorkflowCommand<string> {
           context,
           persistedCandidate,
           factsFingerprint,
+          sourcesFingerprint,
           expectedDbHash,
           stepGuidance,
         )
@@ -1833,6 +2003,21 @@ export class GenerateWorldBuildingCommand extends BaseWorkflowCommand<string> {
     )
     this.assertNotCancelled(context)
     assertArchitectureProjectSessionCurrent(projectSession, context)
+    const [latestLegacySources, latestDomainSources] = await Promise.all([
+      loadLegacyCreativeSources(projectSession, expectedProjectPath),
+      loadCreativeDomainPromptSources(projectSession, expectedProjectPath, { powerSystem: true, writingLanguage }),
+    ])
+    this.assertNotCancelled(context)
+    assertArchitectureProjectSessionCurrent(projectSession, context)
+    const latestCreativeContext = latestCore ? buildCreativeContextBundle([
+      ...buildCreativeCorePromptSources(
+        latestCore,
+        latestLegacySources,
+        ['creative-direction', 'premise', 'world-setting'],
+        writingLanguage,
+      ),
+      ...latestDomainSources,
+    ], writingLanguage) : null
     const latestProject = useProjectStore.getState().currentProject
     const latestFactsFingerprint = latestProject && latestTemplate
       ? synopsisFactsFingerprint([
@@ -1846,6 +2031,8 @@ export class GenerateWorldBuildingCommand extends BaseWorkflowCommand<string> {
       latestCore?.worldbuilding || '',
     ]) !== expectedDbHash
     const sourceFactsChanged = latestFactsFingerprint !== factsFingerprint
+      || !latestCreativeContext
+      || synopsisFactsFingerprint([latestCreativeContext.promptText]) !== sourcesFingerprint
     if (formalWorldBuildingChanged || sourceFactsChanged) {
       await this.persistWorldBuildingCandidate(
         projectSession,
@@ -1853,6 +2040,7 @@ export class GenerateWorldBuildingCommand extends BaseWorkflowCommand<string> {
         context,
         result,
         factsFingerprint,
+        sourcesFingerprint,
         expectedDbHash,
         stepGuidance,
       )
@@ -1880,6 +2068,7 @@ export class GenerateWorldBuildingCommand extends BaseWorkflowCommand<string> {
     delete partial.world_building_partial_result
     delete partial.world_building_incomplete
     delete partial.world_building_facts_fingerprint
+    delete partial.world_building_sources_fingerprint
     delete partial.world_building_db_hash
     delete partial.world_building_step_guidance
     this.assertNotCancelled(context)
@@ -1905,6 +2094,7 @@ export class GenerateWorldBuildingCommand extends BaseWorkflowCommand<string> {
     context: WorkflowContext,
     candidate: string,
     factsFingerprint: string,
+    sourcesFingerprint: string,
     dbHash: string,
     stepGuidance: string,
   ): Promise<void> {
@@ -1914,6 +2104,7 @@ export class GenerateWorldBuildingCommand extends BaseWorkflowCommand<string> {
     partial.world_building_partial_result = candidate
     partial.world_building_incomplete = true
     partial.world_building_facts_fingerprint = factsFingerprint
+    partial.world_building_sources_fingerprint = sourcesFingerprint
     partial.world_building_db_hash = dbHash
     partial.world_building_step_guidance = stepGuidance
     await savePartialData(
@@ -1963,6 +2154,7 @@ export class GeneratePlotArchitectureCommand extends BaseWorkflowCommand<string>
     const modelFacts = localizeNovelConfigFacts(config, writingLanguage)
 
     const core = await ipc.invokeWithProjectSession(projectSession, 'db:project-core-get', expectedProjectPath)
+    if (!core) throw new Error(text('无法读取项目正式资料，已停止生成全书总纲。', 'Could not read formal project sources; whole-book outline generation stopped.'))
     const premise = core?.premise || ''
     const char_dyn = core?.charactersArch || ''
     const world_b = core?.worldbuilding || ''
@@ -1987,7 +2179,7 @@ export class GeneratePlotArchitectureCommand extends BaseWorkflowCommand<string>
     ))
 
     const sourceExpected: ProjectCoreSynopsisExpected = {
-      synopsis: core?.synopsis || '',
+      synopsis: core.synopsis || '',
       premise,
       charactersArch: char_dyn,
       worldbuilding: world_b,
@@ -1997,8 +2189,13 @@ export class GeneratePlotArchitectureCommand extends BaseWorkflowCommand<string>
       writingLanguage,
       plotStructure: config.plotStructure || '',
       narrativePov: config.narrativePOV || '',
-      globalGuidance: config.globalGuidance || '',
+      creativeDirectionMarkdown: core.creativeDirectionMarkdown || '',
     }
+    const legacySources = await loadLegacyCreativeSources(projectSession, expectedProjectPath)
+    const creativeDirectionContext = buildCreativeContextBundle(
+      buildCreativeCorePromptSources(core, legacySources, ['creative-direction'], writingLanguage),
+      writingLanguage,
+    )
     const requestedStepGuidance = ((context.data.stepGuidance as Record<string, string>) || {}).synopsis || ''
 
     const resumeRequested = this.options.resumeSynopsis === true
@@ -2181,7 +2378,7 @@ export class GeneratePlotArchitectureCommand extends BaseWorkflowCommand<string>
       .withWordNumber(config.wordsPerChapter)
       .withPlotStructureGuide(guide)
       .withNarrativePov(pov)
-      .withGlobalGuidance(config.globalGuidance || promptLanguageText(writingLanguage, '（未填写）', '(not provided)'))
+      .withGlobalGuidance('')
       .withStepGuidance(effectiveStepGuidance)
 
     if (mode === 'resume') {
@@ -2207,6 +2404,7 @@ export class GeneratePlotArchitectureCommand extends BaseWorkflowCommand<string>
 
     const taskPrompt = [
       promptBuilder.build(),
+      creativeDirectionContext.promptText,
       synopsisBatchInstruction(writingLanguage, from, to, totalChapters),
     ].filter(Boolean).join('\n\n')
 

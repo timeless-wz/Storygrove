@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Sparkles, Circle, RefreshCw, FileText, BookOpen, AlertTriangle, FolderTree, Eye, Copy, ArrowUpRight, Users, Workflow } from 'lucide-react'
+import { Sparkles, Circle, RefreshCw, FileText, BookOpen, AlertTriangle, FolderTree, Eye, Copy, ArrowUpRight, Users, Workflow, MapPin, Lightbulb, History } from 'lucide-react'
 import { useProjectStore } from '../../stores/project-store'
 import { useWorkflowStore } from '../../stores/workflow-store'
 import { useLayoutStore } from '../../stores/layout-store'
@@ -11,7 +11,12 @@ import ArchitectureConfirmDialog from '../dialogs/ArchitectureConfirmDialog'
 import { Button } from '../ui/Button'
 import { EmptyState } from '../ui/EmptyState'
 import { ipc } from '../../services/ipc-client'
-import { openBuiltinEditor } from '../panels/sidebar/sidebar-file-openers'
+import {
+  openBuiltinEditor,
+  openCreativeMaterialsView,
+  openCultivationSettings,
+  openLocationsEditor,
+} from '../panels/sidebar/sidebar-file-openers'
 import { getCharacterRosterRepairPresentation } from './character-roster-repair-state'
 
 import { launchCreativeWorkflow } from '../../services/workflows/creative-workflow-launcher'
@@ -53,14 +58,97 @@ const ARCH_FILES: Array<{
     { key: 'synopsis', fileName: 'synopsis.md', labelZh: '全书总纲', labelEn: 'Book outline', iconName: 'map', descZh: '故事主线、总体转折、高潮结局与各卷任务', descEn: 'Main story, major turns, ending, and each volume’s role' },
   ]
 
-/** The overview links to five existing sources; it never creates a second editable copy. */
+/** The overview links to authoritative business pages; it never stores a second copy. */
 const OVERVIEW_ENTRIES = [
-  { key: 'config', labelZh: '创作方向', labelEn: 'Creative direction', iconName: 'book-open' },
+  { key: 'creative-direction', labelZh: '创作方向', labelEn: 'Creative direction', iconName: 'book-open' },
+  { key: 'writing-rules', labelZh: '写作规范', labelEn: 'Writing rules', iconName: 'file-text' },
   { key: 'premise', labelZh: '故事前提', labelEn: 'Story premise', iconName: 'target' },
-  { key: 'characters', labelZh: '角色档案', labelEn: 'Character profiles', iconName: 'users' },
-  { key: 'worldbuilding', labelZh: '世界观总纲', labelEn: 'Worldbuilding overview', iconName: 'globe' },
-  { key: 'synopsis', labelZh: '全书总纲', labelEn: 'Book outline', iconName: 'map' },
+  { key: 'worldbuilding', labelZh: '世界设定', labelEn: 'World setting', iconName: 'globe' },
+  { key: 'power-system', labelZh: '力量体系', labelEn: 'Power system', iconName: 'sparkles' },
+  { key: 'locations', labelZh: '地点与区域', labelEn: 'Locations and regions', iconName: 'map-pin' },
+  { key: 'characters', labelZh: '人物与关系', labelEn: 'Characters and relationships', iconName: 'users' },
+  { key: 'plot-planning', labelZh: '剧情规划', labelEn: 'Plot planning', iconName: 'map' },
+  { key: 'information-reveal', labelZh: '信息与揭露', labelEn: 'Information and reveals', iconName: 'eye' },
+  { key: 'materials', labelZh: '素材与候选', labelEn: 'Materials and candidates', iconName: 'lightbulb' },
+  { key: 'retired', labelZh: '废案', labelEn: 'Retired ideas', iconName: 'archive' },
+  { key: 'issues', labelZh: '未解决问题', labelEn: 'Open issues', iconName: 'alert-triangle' },
+  { key: 'legacy', labelZh: '待整理旧内容', labelEn: 'Unorganized legacy content', iconName: 'history' },
 ] as const
+
+const OVERVIEW_GROUPS = [
+  { key: 'foundation', zh: '创作基础', en: 'Creative foundations', entries: ['creative-direction', 'writing-rules', 'premise'] },
+  { key: 'setting', zh: '故事资料', en: 'Story reference', entries: ['worldbuilding', 'power-system', 'locations', 'characters'] },
+  { key: 'planning', zh: '剧情规划', en: 'Story planning', entries: ['plot-planning', 'information-reveal'] },
+  { key: 'materials', zh: '资料整理', en: 'Material organization', entries: ['materials', 'retired', 'issues', 'legacy'] },
+] as const
+
+type OverviewEntryKey = typeof OVERVIEW_ENTRIES[number]['key']
+
+const OVERVIEW_PURPOSES: Record<OverviewEntryKey, { zh: string; en: string }> = {
+  'creative-direction': {
+    zh: '作品定位、目标读者、阅读体验、创作原则、参考边界与写作参数。',
+    en: 'Positioning, audience, reading experience, creative principles, references, and writing parameters.',
+  },
+  'writing-rules': {
+    zh: '在正文层面维护视角、文风、对话、描写、节奏、禁忌与自检规则。',
+    en: 'Maintain POV, style, dialogue, description, pacing, restrictions, and prose checks.',
+  },
+  premise: {
+    zh: '维护核心故事、主要冲突与故事钩子。',
+    en: 'Maintain the central story, its main conflict, and its hook.',
+  },
+  worldbuilding: {
+    zh: '维护世界之间的总体设定与全书共同规则。',
+    en: 'Maintain the overall setting across worlds and the rules they share.',
+  },
+  'power-system': {
+    zh: '维护多人共用的力量来源、成长规则、限制与代价。',
+    en: 'Maintain shared power sources, growth rules, limits, and costs.',
+  },
+  locations: {
+    zh: '逐条维护世界、区域、地点、资源、危险和空间关系；地图可选。',
+    en: 'Maintain worlds, regions, places, resources, dangers, and spatial relations; maps are optional.',
+  },
+  characters: {
+    zh: '身份、目标、背景、个人能力和关系只在人物档案维护。',
+    en: 'Maintain identity, goals, background, personal abilities, and relationships in character profiles.',
+  },
+  'plot-planning': {
+    zh: '全书总纲、分卷大纲和逐章细纲统一在章节蓝图中维护。',
+    en: 'Maintain the book, volume, and chapter outlines in Chapter Blueprints.',
+  },
+  'information-reveal': {
+    zh: '维护作者真相、确定状态、人物与读者知情以及揭露计划。',
+    en: 'Track author truth, certainty, character and reader knowledge, and reveal plans.',
+  },
+  materials: {
+    zh: '保存尚未采用或正在评估的素材；候选不会自动注入正文生成。',
+    en: 'Save unadopted or in-review ideas; candidates are not injected as facts.',
+  },
+  retired: {
+    zh: '记录废止方案和原因，供 AI 避免重新采用。',
+    en: 'Record retired ideas and reasons so AI can avoid reusing them.',
+  },
+  issues: {
+    zh: '记录未解决漏洞、风险和处理状态，供审查引用。',
+    en: 'Track unresolved gaps, risks, and resolution status for review.',
+  },
+  legacy: {
+    zh: '查看并整理旧配置原文；确认归位前只作参考。',
+    en: 'Review legacy configuration; it remains reference-only until organized.',
+  },
+}
+
+function OverviewEntryIcon({ entry }: { entry: typeof OVERVIEW_ENTRIES[number] }) {
+  switch (entry.key) {
+    case 'locations': return <MapPin size={16} />
+    case 'materials': return <Lightbulb size={16} />
+    case 'information-reveal': return <Eye size={16} />
+    case 'issues': return <AlertTriangle size={16} />
+    case 'legacy': return <History size={16} />
+    default: return renderIcon(entry.iconName, 16)
+  }
+}
 
 /** 续批按钮默认的每批章数上限（可在弹窗内调整，避免一次请求剩余全部章节）。 */
 const CONTINUATION_BATCH_SPAN = 20
@@ -95,8 +183,9 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
     )) ?? null
   })
   const [archStatus, setArchStatus] = useState<Record<string, boolean>>({})
-  const [wordCounts, setWordCounts] = useState<Record<string, number>>({})
+  const [characterCounts, setCharacterCounts] = useState<Record<string, number>>({})
   const [documentHasContent, setDocumentHasContent] = useState<Record<string, boolean>>({})
+  const [failedEntries, setFailedEntries] = useState<Record<string, boolean>>({})
   const [synopsisIncomplete, setSynopsisIncomplete] = useState(false)
   const [synopsisRecoveryFailed, setSynopsisRecoveryFailed] = useState(false)
   const [synopsisCoveredTo, setSynopsisCoveredTo] = useState<number>(0)
@@ -123,8 +212,9 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
     if (!projectMatches || !projectSession || !isProjectSessionPath(projectSession, projectKey)) {
       archStatusRequestGate.current.begin()
       setArchStatus({})
-      setWordCounts({})
+      setCharacterCounts({})
       setDocumentHasContent({})
+      setFailedEntries({})
       setSynopsisIncomplete(false)
       setSynopsisRecoveryFailed(false)
       setSynopsisCoveredTo(0)
@@ -142,6 +232,19 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
       'db:project-core-get',
       projectPath,
     )
+    const settled = <T,>(promise: Promise<T>) => promise.then(
+      value => ({ value, failed: false }),
+      () => ({ value: null as T | null, failed: true }),
+    )
+    const [powerResult, locationsResult, informationResult, materialsResult, retiredResult, issuesResult, legacyResult] = await Promise.all([
+      settled(ipc.invokeWithProjectSession(projectSession, 'db:cultivation-read', projectPath)),
+      settled(ipc.invokeWithProjectSession(projectSession, 'db:map-get-all', projectPath)),
+      settled(ipc.invokeWithProjectSession(projectSession, 'db:info-entry-list', undefined, projectPath)),
+      settled(ipc.invokeWithProjectSession(projectSession, 'db:creative-material-list', { entryKind: 'material' }, projectPath)),
+      settled(ipc.invokeWithProjectSession(projectSession, 'db:creative-material-list', { entryKind: 'retired' }, projectPath)),
+      settled(ipc.invokeWithProjectSession(projectSession, 'db:creative-material-list', { entryKind: 'issue' }, projectPath)),
+      settled(ipc.invokeWithProjectSession(projectSession, 'db:creative-legacy-list', projectPath)),
+    ])
     // 情节大纲状态：中断可断点续写；或部分覆盖可分批续写（covered_to < total）
     let interrupted = false
     let recoveryFailed = false
@@ -192,6 +295,14 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
     const premise = String(core?.premise ?? '')
     const worldbuilding = String(core?.worldbuilding ?? '')
     const synopsis = String(core?.synopsis ?? '')
+    const creativeDirectionLength = [
+      core?.creativeDirectionMarkdown,
+      core?.genre || currentProject?.novelConfig?.genre,
+      core?.subGenre || currentProject?.novelConfig?.subGenre,
+      core?.targetAudience || currentProject?.novelConfig?.targetAudience,
+      core?.referenceWorks || currentProject?.novelConfig?.referenceWorks,
+    ].reduce((total, value) => total + String(value ?? '').length, 0)
+    const writingRulesLength = String(core?.writingRulesMarkdown ?? '').length
     const status: Record<string, boolean> = {
       premise: (core?.premise?.length ?? 0) > 50,
       characters: rosterSnapshot?.status === 'ready',
@@ -199,23 +310,44 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
       synopsis: (core?.synopsis?.length ?? 0) > 50,
     }
     const counts: Record<string, number> = {
+      'creative-direction': creativeDirectionLength,
+      'writing-rules': writingRulesLength,
       premise: premise.length,
       characters: status.characters ? (rosterSnapshot?.renderedMarkdown.length ?? 0) : 0,
       worldbuilding: worldbuilding.length,
       synopsis: synopsis.length,
     }
     const contentPresence = {
+      'creative-direction': creativeDirectionLength > 0,
+      'writing-rules': Boolean(core?.writingRulesMarkdown?.trim()),
       premise: premise.trim().length > 0,
       worldbuilding: worldbuilding.trim().length > 0,
-      synopsis: synopsis.trim().length > 0,
+      'power-system': Boolean(powerResult.value?.markdown?.trim() || powerResult.value?.realms?.length),
+      locations: Boolean(locationsResult.value?.nodes?.length),
+      'plot-planning': synopsis.trim().length > 0,
+      'information-reveal': Boolean(informationResult.value?.length),
+      materials: Boolean(materialsResult.value?.length),
+      retired: Boolean(retiredResult.value?.length),
+      issues: Boolean(issuesResult.value?.length),
+      legacy: Boolean(legacyResult.value?.some(source => source.disposition === 'pending')),
+    }
+    const failedPresence = {
+      'power-system': powerResult.failed,
+      locations: locationsResult.failed,
+      'information-reveal': informationResult.failed,
+      materials: materialsResult.failed,
+      retired: retiredResult.failed,
+      issues: issuesResult.failed,
+      legacy: legacyResult.failed,
     }
     if (
       !archStatusRequestGate.current.isLatest(requestId)
       || !isProjectSessionCurrent(projectSession)
     ) return
     setArchStatus(status)
-    setWordCounts(counts)
+    setCharacterCounts(counts)
     setDocumentHasContent(contentPresence)
+    setFailedEntries(failedPresence)
     setSynopsisIncomplete(interrupted && Boolean(status.synopsis))
     setSynopsisRecoveryFailed(recoveryFailed && Boolean(status.synopsis))
     setSynopsisCoveredTo(coveredTo)
@@ -442,20 +574,57 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
   const roleStatus = rosterSnapshot?.status === 'empty'
     ? text('名单尚未建立', 'Roster not yet established')
     : rosterPresentation?.label ?? text('名单未就绪', 'Roster not ready')
-  const creativeDirectionSummary = [
-    novelConfig?.genre?.trim() && [novelConfig.genre.trim(), novelConfig.subGenre?.trim()].filter(Boolean).join(' · '),
-    novelConfig?.targetAudience?.trim(),
-    Number(novelConfig?.totalChapters) > 0 && text(`${novelConfig!.totalChapters} 章`, `${novelConfig!.totalChapters} chapters`),
-    Number(novelConfig?.wordsPerChapter) > 0 && text(`每章 ${novelConfig!.wordsPerChapter.toLocaleString()} 字`, `${novelConfig!.wordsPerChapter.toLocaleString()} words/chapter`),
-  ].filter((value): value is string => typeof value === 'string' && value.length > 0)
+  const creativeDirectionSummary = {
+    type: [novelConfig?.genre?.trim(), novelConfig?.subGenre?.trim()].filter(Boolean).join(' · '),
+    audience: novelConfig?.targetAudience?.trim() ?? '',
+    chapters: Number(novelConfig?.totalChapters) > 0 ? Number(novelConfig?.totalChapters) : 0,
+    wordsPerChapter: Number(novelConfig?.wordsPerChapter) > 0 ? Number(novelConfig?.wordsPerChapter) : 0,
+  }
+  const hasCreativeDirectionSummary = Boolean(
+    creativeDirectionSummary.type
+    || creativeDirectionSummary.audience
+    || creativeDirectionSummary.chapters
+    || creativeDirectionSummary.wordsPerChapter,
+  )
 
   const openOverviewEntry = (key: typeof OVERVIEW_ENTRIES[number]['key']) => {
-    if (key === 'config') {
+    if (key === 'creative-direction' || key === 'writing-rules') {
       openBuiltinEditor('config', text('创作方向', 'Creative direction'), 'config')
+      const sectionId = key === 'writing-rules' ? 'novel-config-writing' : 'novel-config-ideas'
+      window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+        document.getElementById(sectionId)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+      }))
       return
     }
     if (key === 'characters') {
       useLayoutStore.getState().openCharacterProfile('edit')
+      return
+    }
+    if (key === 'power-system') {
+      openCultivationSettings(text('力量体系', 'Power system'))
+      return
+    }
+    if (key === 'locations') {
+      openLocationsEditor(text('地点与区域', 'Locations and regions'))
+      return
+    }
+    if (key === 'information-reveal') {
+      openBuiltinEditor('knowledge-gap', text('信息与揭露', 'Information and reveals'), 'knowledge-gap')
+      return
+    }
+    if (key === 'plot-planning') {
+      openBuiltinEditor('chapter-card-editor', text('章节蓝图', 'Chapter blueprints'), 'chapter-card', undefined, undefined, undefined, { kind: 'book' })
+      return
+    }
+    if (key === 'materials' || key === 'retired' || key === 'issues' || key === 'legacy') {
+      const view = key === 'retired' ? 'retired' : key === 'issues' ? 'issues' : key === 'legacy' ? 'legacy' : 'materials'
+      const labels = {
+        materials: text('素材与候选', 'Materials and candidates'),
+        retired: text('废案', 'Retired ideas'),
+        issues: text('未解决问题', 'Open issues'),
+        legacy: text('待整理旧内容', 'Unorganized legacy content'),
+      }
+      openCreativeMaterialsView(view, labels[key])
       return
     }
     const file = ARCH_FILES.find(candidate => candidate.key === key)
@@ -481,8 +650,8 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
             </h1>
             <p className="world-building-overview__description">
               {text(
-                '维护创作方向、故事前提、人物、世界与全书剧情；全书总纲在章节蓝图中与卷纲、章纲共同维护。',
-                'Maintain creative direction, premise, characters, world, and plot. The book outline lives with volume and chapter plans in Chapter Blueprints.',
+                '查看创作资料状态，进入对应页面维护。',
+                'Check your creative materials and open their dedicated editors.',
               )}
             </p>
           </div>
@@ -549,155 +718,182 @@ export default function WorldBuildingEditor({ projectKey }: { projectKey: string
             {latestArchitectureTerminalRun.error || text('请查看任务日志。', 'Check the task log for details.')}
           </div>
         )}
-        <section className="world-building-overview__grid" aria-label={text('基础设定内容入口', 'Basic settings content entries')}>
-          {OVERVIEW_ENTRIES.map(entry => {
-            const documentKey = entry.key === 'premise' || entry.key === 'worldbuilding' || entry.key === 'synopsis'
-              ? entry.key
-              : null
-            const hasContent = documentKey ? Boolean(documentHasContent[documentKey]) : false
-            const characterEntry = entry.key === 'characters'
-            const worldBuildingEntry = entry.key === 'worldbuilding'
-            const synopsisEntry = entry.key === 'synopsis'
-            const isWorldBuildingCandidate = worldBuildingEntry && Boolean(worldBuildingCandidate)
-            const synopsisNeedsRecovery = synopsisEntry && synopsisRecoveryFailed
-            const title = text(entry.labelZh, entry.labelEn)
-            const purpose = entry.key === 'config'
-              ? text('作品参数、核心构想与持续写作要求。', 'Project parameters, core ideas, and ongoing writing guidance.')
-              : entry.key === 'premise'
-                ? text('维护核心故事、主要冲突与故事钩子。', 'Maintain the central story, its main conflict, and its hook.')
-                : entry.key === 'characters'
-                  ? text('维护具体人物资料；角色图谱只从角色档案投影。', 'Maintain character profiles; the graph is a read-only projection of these records.')
-                  : worldBuildingEntry
-                  ? text('维护世界之间的总体设定与全书共同规则。', 'Maintain the overall setting across worlds and the rules they share.')
-                    : text('维护全书剧情发展与章节安排。', 'Maintain the full plot and its chapter structure.')
-            const statusLabel = loading && documentKey
-              ? text('正在读取', 'Loading')
-              : entry.key === 'config'
-                ? text('查看与编辑', 'View and edit')
-                : characterEntry
-                  ? roleStatus
-                  : hasContent
-                    ? synopsisNeedsRecovery
-                      ? text('有内容 · 检查点不可恢复', 'Has content · checkpoint unavailable')
-                      : synopsisEntry && synopsisIncomplete
-                        ? text('有内容 · 已存部分', 'Has content · partial saved')
-                        : text('有内容', 'Has content')
-                    : text('待填写', 'Needs content')
-            const wordCount = documentKey ? (wordCounts[documentKey] ?? 0) : 0
-            const characterCountLabel = rosterCount === undefined
-              ? null
-              : text(`${rosterCount} 个角色`, `${rosterCount} characters`)
+        <section className="world-building-overview__groups" aria-label={text('基础设定内容入口', 'Basic settings content entries')}>
+          {OVERVIEW_GROUPS.map(group => {
+            const groupEntries = OVERVIEW_ENTRIES.filter(entry => (group.entries as readonly string[]).includes(entry.key))
 
             return (
-              <article
-                key={entry.key}
-                data-overview-entry={entry.key}
-                className={`world-building-overview__card${isWorldBuildingCandidate || synopsisNeedsRecovery ? ' world-building-overview__card--attention' : ''}`}
-              >
-                <button
-                  type="button"
-                  className="world-building-overview__card-main"
-                  onClick={() => openOverviewEntry(entry.key)}
-                  aria-label={text(`打开${title}编辑`, `Open ${title} for editing`)}
-                  aria-describedby={`basic-settings-${entry.key}-purpose basic-settings-${entry.key}-status`}
-                >
-                  <span className="world-building-overview__card-heading">
-                    <span className="world-building-overview__icon" aria-hidden="true">
-                      {renderIcon(entry.iconName, 17)}
-                    </span>
-                    <span className="world-building-overview__card-title">{title}</span>
-                    <ArrowUpRight size={15} className="world-building-overview__open-icon" aria-hidden="true" />
-                  </span>
-                  <span id={`basic-settings-${entry.key}-purpose`} className="world-building-overview__purpose">
-                    {purpose}
-                  </span>
-                  <span className="world-building-overview__card-meta">
-                    <span
-                      id={`basic-settings-${entry.key}-status`}
-                      className={`world-building-overview__status${hasContent ? ' world-building-overview__status--present' : ''}`}
-                    >
-                      {hasContent && <FileText size={12} aria-hidden="true" />}
-                      {characterEntry && <Users size={12} aria-hidden="true" />}
-                      {statusLabel}
-                    </span>
-                    {documentKey && !loading && wordCount > 0 && (
-                      <span className="world-building-overview__count">
-                        {wordCount.toLocaleString()} {text('字符', 'characters')}
-                      </span>
-                    )}
-                    {characterEntry && characterCountLabel && (
-                      <span className="world-building-overview__count">{characterCountLabel}</span>
-                    )}
-                    {entry.key === 'config' && creativeDirectionSummary.length > 0 && (
-                      <span className="world-building-overview__summary">
-                        {creativeDirectionSummary.map((item, index) => (
-                          <span key={`${index}-${item}`} className="world-building-overview__summary-item">{item}</span>
-                        ))}
-                      </span>
-                    )}
-                  </span>
-                  <span className="world-building-overview__open-label">
-                    {text('打开编辑', 'Open editor')}
-                  </span>
-                </button>
+              <section key={group.key} className="world-building-overview__group" aria-labelledby={`overview-group-${group.key}`}>
+                <h2 id={`overview-group-${group.key}`} className="world-building-overview__group-title">
+                  {text(group.zh, group.en)}
+                </h2>
+                <div className="world-building-overview__entries">
+                  {groupEntries.map(entry => {
+                    const documentKey = entry.key === 'characters' ? null : entry.key
+                    const hasContent = documentKey ? Boolean(documentHasContent[documentKey]) : false
+                    const characterEntry = entry.key === 'characters'
+                    const worldBuildingEntry = entry.key === 'worldbuilding'
+                    const synopsisEntry = entry.key === 'plot-planning'
+                    const isWorldBuildingCandidate = worldBuildingEntry && Boolean(worldBuildingCandidate)
+                    const synopsisNeedsRecovery = synopsisEntry && synopsisRecoveryFailed
+                    const title = text(entry.labelZh, entry.labelEn)
+                    const purpose = OVERVIEW_PURPOSES[entry.key]
+                    const statusLabel = loading && documentKey
+                      ? text('正在读取', 'Loading')
+                      : failedEntries[entry.key]
+                        ? text('读取失败', 'Could not read')
+                        : characterEntry
+                          ? roleStatus
+                          : hasContent
+                            ? synopsisNeedsRecovery
+                              ? text('有内容 · 检查点不可恢复', 'Has content · checkpoint unavailable')
+                              : synopsisEntry && synopsisIncomplete
+                                ? text('有内容 · 已存部分', 'Has content · partial saved')
+                                : text('有内容', 'Has content')
+                            : text('待填写', 'Needs content')
+                    const characterCount = documentKey ? (characterCounts[documentKey] ?? 0) : 0
+                    const characterCountLabel = rosterCount === undefined
+                      ? null
+                      : text(`${rosterCount} 个角色`, `${rosterCount} characters`)
 
-                {worldBuildingEntry && (
-                  <div className="world-building-overview__card-secondary">
-                    <p>{text('总纲维护共同规则，世界管理维护具体世界及组成。', 'The overview holds shared rules; World management holds specific worlds and their records.')}</p>
-                    <Button variant="ghost" size="sm" onClick={openWorldManagement}>
-                      {text('管理各个世界', 'Manage worlds')}
-                      <ArrowUpRight size={12} />
-                    </Button>
-                  </div>
-                )}
+                    return (
+                      <article
+                        key={entry.key}
+                        data-overview-entry={entry.key}
+                        className={`world-building-overview__card${isWorldBuildingCandidate || synopsisNeedsRecovery ? ' world-building-overview__card--attention' : ''}`}
+                      >
+                        <button
+                          type="button"
+                          className="world-building-overview__card-main"
+                          onClick={() => openOverviewEntry(entry.key)}
+                          aria-label={text(`打开${title}编辑`, `Open ${title} for editing`)}
+                          aria-describedby={`basic-settings-${entry.key}-purpose basic-settings-${entry.key}-status`}
+                        >
+                          <span className="world-building-overview__card-heading">
+                            <span className="world-building-overview__icon" aria-hidden="true">
+                              <OverviewEntryIcon entry={entry} />
+                            </span>
+                            <span className="world-building-overview__card-title">{title}</span>
+                            <ArrowUpRight size={14} className="world-building-overview__open-icon" aria-hidden="true" />
+                          </span>
+                          <span id={`basic-settings-${entry.key}-purpose`} className="world-building-overview__purpose">
+                            {text(purpose.zh, purpose.en)}
+                          </span>
+                          {entry.key === 'creative-direction' && hasCreativeDirectionSummary && (
+                            <span className="world-building-overview__summary">
+                              {(creativeDirectionSummary.type || creativeDirectionSummary.audience) && (
+                                <span className="world-building-overview__summary-context">
+                                  {creativeDirectionSummary.type && (
+                                    <span className="world-building-overview__summary-value">
+                                      <span className="world-building-overview__summary-label">{text('类型', 'Type')}</span>
+                                      {creativeDirectionSummary.type}
+                                    </span>
+                                  )}
+                                  {creativeDirectionSummary.audience && (
+                                    <span className="world-building-overview__summary-value">
+                                      <span className="world-building-overview__summary-label">{text('读者', 'Readers')}</span>
+                                      {creativeDirectionSummary.audience}
+                                    </span>
+                                  )}
+                                </span>
+                              )}
+                              {(creativeDirectionSummary.chapters > 0 || creativeDirectionSummary.wordsPerChapter > 0) && (
+                                <span className="world-building-overview__summary-scale">
+                                  {creativeDirectionSummary.chapters > 0 && text(`${creativeDirectionSummary.chapters} 章`, `${creativeDirectionSummary.chapters} chapters`)}
+                                  {creativeDirectionSummary.chapters > 0 && creativeDirectionSummary.wordsPerChapter > 0 && ' × '}
+                                  {creativeDirectionSummary.wordsPerChapter > 0 && text(`每章 ${creativeDirectionSummary.wordsPerChapter.toLocaleString()} 字`, `${creativeDirectionSummary.wordsPerChapter.toLocaleString()} words/chapter`)}
+                                </span>
+                              )}
+                            </span>
+                          )}
+                          <span className="world-building-overview__card-meta">
+                            <span
+                              id={`basic-settings-${entry.key}-status`}
+                              className={`world-building-overview__status${hasContent ? ' world-building-overview__status--present' : ''}${failedEntries[entry.key] ? ' world-building-overview__status--error' : ''}`}
+                            >
+                              {hasContent && <FileText size={12} aria-hidden="true" />}
+                              {characterEntry && <Users size={12} aria-hidden="true" />}
+                              {failedEntries[entry.key] && <AlertTriangle size={12} aria-hidden="true" />}
+                              {statusLabel}
+                            </span>
+                            {documentKey && !loading && characterCount > 0 && (
+                              <>
+                                <span className="world-building-overview__meta-separator" aria-hidden="true">·</span>
+                                <span className="world-building-overview__count">
+                                  {characterCount.toLocaleString()} {text('字符', 'characters')}
+                                </span>
+                              </>
+                            )}
+                            {characterEntry && characterCountLabel && (
+                              <>
+                                <span className="world-building-overview__meta-separator" aria-hidden="true">·</span>
+                                <span className="world-building-overview__count">{characterCountLabel}</span>
+                              </>
+                            )}
+                          </span>
+                        </button>
 
-                {isWorldBuildingCandidate && (
-                  <div className="world-building-overview__recovery">
-                    <div className="world-building-overview__recovery-title">
-                      {text('未完成候选 · 未写入正式内容', 'Incomplete candidate · not written to formal content')}
-                    </div>
-                    <div className="world-building-overview__recovery-actions">
-                      <Button variant="ghost" size="sm" onClick={() => setShowWorldBuildingCandidate(value => !value)}>
-                        <Eye size={12} />
-                        {showWorldBuildingCandidate ? text('收起候选', 'Hide candidate') : text('查看候选', 'View candidate')}
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => void copyWorldBuildingCandidate()}>
-                        <Copy size={12} />
-                        {text('复制', 'Copy')}
-                      </Button>
-                      <Button size="sm" onClick={handleResumeWorldBuilding}>
-                        <RefreshCw size={12} />
-                        {text('断点续写', 'Resume')}
-                      </Button>
-                    </div>
-                  </div>
-                )}
+                        {worldBuildingEntry && (
+                          <div className="world-building-overview__card-secondary">
+                            <p>{text('总纲维护共同规则，世界管理维护具体世界及组成。', 'The overview holds shared rules; World management holds specific worlds and their records.')}</p>
+                            <Button variant="ghost" size="sm" onClick={openWorldManagement}>
+                              {text('管理各个世界', 'Manage worlds')}
+                              <ArrowUpRight size={12} />
+                            </Button>
+                          </div>
+                        )}
 
-                {synopsisEntry && synopsisIncomplete && !loading && (
-                  <div className="world-building-overview__recovery-actions">
-                    <Button size="sm" onClick={handleResumeSynopsis}>
-                      <RefreshCw size={12} />
-                      {text('兼容模式：断点续写', 'Legacy mode: resume outline')}
-                    </Button>
-                  </div>
-                )}
-                {synopsisEntry && !synopsisIncomplete && !synopsisRecoveryFailed
-                  && synopsisCoveredTo > 0 && synopsisCoveredTo < synopsisTotalChapters && !loading && (
-                  <div className="world-building-overview__recovery-actions">
-                    <Button variant="ghost" size="sm" onClick={() => void handleContinueOutlineBatch()}>
-                      <RefreshCw size={12} />
-                      {text(`兼容模式：按章续批（第 ${synopsisCoveredTo + 1} 章起）`, `Legacy chapter-range mode: continue (ch. ${synopsisCoveredTo + 1}+)`)}
-                    </Button>
-                  </div>
-                )}
+                        {isWorldBuildingCandidate && (
+                          <div className="world-building-overview__recovery">
+                            <div className="world-building-overview__recovery-title">
+                              {text('未完成候选 · 未写入正式内容', 'Incomplete candidate · not written to formal content')}
+                            </div>
+                            <div className="world-building-overview__recovery-actions">
+                              <Button variant="ghost" size="sm" onClick={() => setShowWorldBuildingCandidate(value => !value)}>
+                                <Eye size={12} />
+                                {showWorldBuildingCandidate ? text('收起候选', 'Hide candidate') : text('查看候选', 'View candidate')}
+                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => void copyWorldBuildingCandidate()}>
+                                <Copy size={12} />
+                                {text('复制', 'Copy')}
+                              </Button>
+                              <Button size="sm" onClick={handleResumeWorldBuilding}>
+                                <RefreshCw size={12} />
+                                {text('断点续写', 'Resume')}
+                              </Button>
+                            </div>
+                          </div>
+                        )}
 
-                {isWorldBuildingCandidate && showWorldBuildingCandidate && (
-                  <div role="status" className="world-building-overview__candidate-preview">
-                    <strong>{text('世界观未完成候选（不会自动写入正式世界观）', 'Incomplete worldbuilding candidate (not written to formal worldbuilding)')}</strong>
-                    <pre>{worldBuildingCandidate}</pre>
-                  </div>
-                )}
-              </article>
+                        {synopsisEntry && synopsisIncomplete && !loading && (
+                          <div className="world-building-overview__recovery-actions">
+                            <Button size="sm" onClick={handleResumeSynopsis}>
+                              <RefreshCw size={12} />
+                              {text('兼容模式：断点续写', 'Legacy mode: resume outline')}
+                            </Button>
+                          </div>
+                        )}
+                        {synopsisEntry && !synopsisIncomplete && !synopsisRecoveryFailed
+                          && synopsisCoveredTo > 0 && synopsisCoveredTo < synopsisTotalChapters && !loading && (
+                            <div className="world-building-overview__recovery-actions">
+                              <Button variant="ghost" size="sm" onClick={() => void handleContinueOutlineBatch()}>
+                                <RefreshCw size={12} />
+                                {text(`兼容模式：按章续批（第 ${synopsisCoveredTo + 1} 章起）`, `Legacy chapter-range mode: continue (ch. ${synopsisCoveredTo + 1}+)`)}
+                              </Button>
+                            </div>
+                          )}
+
+                        {isWorldBuildingCandidate && showWorldBuildingCandidate && (
+                          <div role="status" className="world-building-overview__candidate-preview">
+                            <strong>{text('世界观未完成候选（不会自动写入正式世界观）', 'Incomplete worldbuilding candidate (not written to formal worldbuilding)')}</strong>
+                            <pre>{worldBuildingCandidate}</pre>
+                          </div>
+                        )}
+                      </article>
+                    )
+                  })}
+                </div>
+              </section>
             )
           })}
         </section>

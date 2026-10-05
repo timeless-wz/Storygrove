@@ -29,6 +29,7 @@ import type {
 } from '../../../generation/generation-harness'
 import { EN_US_BUILTIN_PROMPTS } from '../../../prompt-language'
 import { BUILTIN_PROMPTS } from '../../../prompt-templates'
+import { withWorkflowCreativeContextIpcDefaults } from '../../../../../test/workflow-creative-context-ipc'
 import {
   DRAFT_GENERATION_BUDGET,
   GenerateDraftCommand,
@@ -488,7 +489,7 @@ describe('GenerateDraftCommand generation runtime boundary', () => {
     })
     vi.stubGlobal('window', {
       velaAPI: {
-        invoke,
+        invoke: withWorkflowCreativeContextIpcDefaults(invoke),
         on: vi.fn(),
         once: vi.fn(),
         send: vi.fn(),
@@ -1737,7 +1738,7 @@ describe('GenerateDraftCommand generation runtime boundary', () => {
     }
   })
 
-  it('injects guidance and style once while retaining the remaining author configuration', async () => {
+  it('injects pending guidance and style once while preferring the formal premise and retaining legacy fields', async () => {
     let observedTask: GenerationTask | undefined
     const runtime = fakeRuntime((_attempt, task) => {
       observedTask = task
@@ -1759,7 +1760,8 @@ describe('GenerateDraftCommand generation runtime boundary', () => {
     const completePrompt = observedTask?.messages.map(message => message.content).join('\n') ?? ''
     expect(completePrompt.match(new RegExp(globalGuidance, 'g'))).toHaveLength(1)
     expect(completePrompt.match(new RegExp(writingStyle, 'g'))).toHaveLength(1)
-    expect(completePrompt).toContain(coreOutline)
+    expect(completePrompt).not.toContain(coreOutline)
+    expect(useProjectStore.getState().currentProject?.novelConfig.coreOutline).toBe(coreOutline)
   })
 
   it.each(['## ', ''])('bounds an explicit long chapter outline with heading prefix %j while retaining author facts', async (headingPrefix) => {
@@ -1807,7 +1809,9 @@ ${headingPrefix}第3章：潮门
     expect(longPrompt).toContain('当前章关键事实：顾舟必须在退潮前拿回潮汐钟')
     expect(longPrompt).toContain('全局尾部关键事实：任何人不得提前知道潮门来源')
     expect(longPrompt).toContain('世界观尾部关键事实：顾舟不会游泳')
-    expect(longPrompt).toContain('作者核心事实：顾舟必须查清潮门来源')
+    expect(longPrompt).not.toContain('作者核心事实：顾舟必须查清潮门来源')
+    expect(useProjectStore.getState().currentProject?.novelConfig.coreOutline)
+      .toBe('作者核心事实：顾舟必须查清潮门来源。')
     expect(longPrompt).not.toContain('第一章非当前内容开始')
     expect(longPrompt).not.toContain('第三章非当前内容开始')
     expect(longPrompt.length).toBe(shortPrompt.length)
@@ -1881,7 +1885,7 @@ ${headingPrefix}第3章：潮门
       .toBe(authorGuidance)
   })
 
-  it('keeps every authored configuration fact in initial drafting and every continuation', async () => {
+  it('uses only relevant legacy sources in initial drafting and continuations without truncating their Markdown', async () => {
     const longField = (name: string) => [
       `${name}_BEGIN。`,
       '保留稳定的作者事实。'.repeat(75),
@@ -1914,10 +1918,13 @@ ${headingPrefix}第3章：潮门
     ))
     expect(requestPrompts).toHaveLength(3)
     for (const prompt of requestPrompts) {
-      for (const name of ['GUIDANCE', 'STYLE', 'OUTLINE', 'WORLD', 'ADVANTAGE', 'PROTAGONIST']) {
+      for (const name of ['GUIDANCE', 'STYLE', 'WORLD']) {
         expect(prompt).toContain(`${name}_BEGIN`)
         expect(prompt).toContain(`${name}_PARTIAL_SHOULD_NOT_APPEAR`)
         expect(prompt).toContain(`${name}_AFTER_LIMIT`)
+      }
+      for (const name of ['OUTLINE', 'ADVANTAGE', 'PROTAGONIST']) {
+        expect(prompt).not.toContain(`${name}_BEGIN`)
       }
     }
     expect(useProjectStore.getState().currentProject?.novelConfig).toMatchObject(authoredConfig)

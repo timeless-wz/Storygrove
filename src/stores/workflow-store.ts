@@ -124,6 +124,7 @@ export type WorkflowType =
   | 'config_generation'       // 智能配置生成
   | 'post_process'            // 后处理任务（角色卡提取等）
   | 'novel_import'            // 导入已有小说（逆向推演全流程）
+  | 'revision_learning'      // 从作者修订样本归纳修稿规则
 
 /** 工作流步骤执行器 */
 export type StepExecutor = (
@@ -559,7 +560,9 @@ export const useWorkflowStore = create<WorkflowState>()((set, get) => ({
 
     let writingSkills: FrozenWritingSkillSnapshot = Object.freeze({})
     try {
-      writingSkills = await freezeWritingSkillsSnapshot(projectSession, writingLanguage)
+      if (definition.type !== 'revision_learning') {
+        writingSkills = await freezeWritingSkillsSnapshot(projectSession, writingLanguage)
+      }
     } catch (error) {
       const failure = uiText(
         uiLocale,

@@ -141,11 +141,12 @@ export async function openArchFile(filePath: string, name: string): Promise<void
 export function openBuiltinEditor(
   id: string,
   name: string,
-  type: 'chapter-card' | 'character' | 'world-building' | 'narrative-thread' | 'world-map' | 'story-timeline' | 'world' | 'overview' | 'config' | 'foreshadowing',
+  type: 'chapter-card' | 'character' | 'world-building' | 'narrative-thread' | 'world-map' | 'story-timeline' | 'world' | 'overview' | 'config' | 'foreshadowing' | 'knowledge-gap',
   narrativeThreadView?: 'plot-tree' | 'canvas' | 'plans',
   chapterNumber?: number,
   chapterView?: 'blueprint' | 'canvas',
   blueprintPlanningSelection?: BlueprintPlanningSelection,
+  knowledgeGapChapterFilter?: number,
 ): void {
   const projectKey = useProjectStore.getState().currentProject?.path
   useEditorStore.getState().openFile({
@@ -155,12 +156,49 @@ export function openBuiltinEditor(
     ...(type === 'narrative-thread'
       ? { narrativeThreadView: narrativeThreadView ?? 'plans' }
       : {}),
+    ...(type === 'knowledge-gap' && knowledgeGapChapterFilter !== undefined
+      ? { knowledgeGapChapterFilter }
+      : {}),
     ...(type === 'chapter-card' && chapterNumber !== undefined ? { chapterNumber } : {}),
     ...(type === 'chapter-card' && chapterView !== undefined ? { chapterView } : {}),
     ...(type === 'chapter-card' && blueprintPlanningSelection !== undefined
       ? { blueprintPlanningSelection }
       : {}),
     ...(projectKey ? { projectKey } : {}),
+  })
+}
+
+/** Open a purpose-filtered materials/issues view while keeping each stable tab project-scoped. */
+export function openCreativeMaterialsView(
+  view: 'materials' | 'retired' | 'issues' | 'legacy',
+  name: string,
+): void {
+  const projectKey = useProjectStore.getState().currentProject?.path
+  if (!projectKey) return
+  useEditorStore.getState().openFile({
+    id: `creative-materials-${view}`,
+    name,
+    type: 'creative-materials',
+    creativeMaterialsView: view,
+    projectKey,
+  })
+}
+
+/** Open the authoritative location records backed by the existing map-node table. */
+export function openLocationsEditor(name: string): void {
+  const projectKey = useProjectStore.getState().currentProject?.path
+  if (!projectKey) return
+  useEditorStore.getState().openFile({
+    id: 'locations-editor', name, type: 'locations', projectKey,
+  })
+}
+
+/** Open the shared power-system entry, including its optional level table. */
+export function openCultivationSettings(name: string): void {
+  const projectKey = useProjectStore.getState().currentProject?.path
+  if (!projectKey) return
+  useEditorStore.getState().openFile({
+    id: 'cultivation-settings', name, type: 'cultivation', projectKey,
   })
 }
 

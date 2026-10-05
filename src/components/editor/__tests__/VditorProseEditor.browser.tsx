@@ -1,6 +1,7 @@
 import { act, StrictMode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import Vditor from 'vditor'
 
 import VditorProseEditor, { type VditorProseEditorProps, type VditorProseEditorRef } from '../VditorProseEditor'
 import { useLocaleStore } from '../../../stores/locale-store'
@@ -77,6 +78,53 @@ async function waitForReady(): Promise<void> {
 async function render(props: VditorProseEditorProps): Promise<void> {
   await act(async () => {
     root.render(<VditorProseEditor {...props} />)
+  })
+  await waitForReady()
+}
+
+async function renderWithPreReadyContentUpdate(
+  originalContent: string,
+  updatedContent: string,
+  jumpTarget: NonNullable<VditorProseEditorProps['jumpTarget']>,
+): Promise<void> {
+  const nativeSetTimeout = window.setTimeout.bind(window)
+  const createVditorTimer: { release?: () => void } = {}
+  let creationReleased = false
+  const setTimeoutSpy = vi.spyOn(window, 'setTimeout').mockImplementation((handler, timeout, ...args) => {
+    if (
+      !createVditorTimer.release
+      && timeout === 0
+      && typeof handler === 'function'
+      && handler.toString().includes('createVditor')
+    ) {
+      createVditorTimer.release = () => {
+        if (creationReleased) return
+        creationReleased = true
+        nativeSetTimeout(handler, timeout, ...args)
+      }
+      return nativeSetTimeout(() => {}, timeout, ...args) as unknown as NodeJS.Timeout
+    }
+    return nativeSetTimeout(handler, timeout, ...args) as unknown as NodeJS.Timeout
+  })
+
+  try {
+    await act(async () => {
+      root.render(<VditorProseEditor content={originalContent} editable onChange={vi.fn()} jumpTarget={jumpTarget} />)
+    })
+    expect(createVditorTimer.release).toBeTypeOf('function')
+    expect(hostElement().getAttribute('data-vditor-ready')).not.toBe('true')
+
+    await act(async () => {
+      root.render(<VditorProseEditor content={updatedContent} editable onChange={vi.fn()} jumpTarget={jumpTarget} />)
+    })
+    expect(hostElement().getAttribute('data-vditor-ready')).not.toBe('true')
+  } finally {
+    setTimeoutSpy.mockRestore()
+  }
+
+  createVditorTimer.release?.()
+  await act(async () => {
+    await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()))
   })
   await waitForReady()
 }
@@ -244,6 +292,22 @@ describe('Vditor prose editor', () => {
     expect(String(onSave.mock.calls[0]?.[0])).toContain('林岚走进了房间。')
   })
 
+  it('does not invoke the save callback from a read-only editor', async () => {
+    const onSave = vi.fn()
+    await render({ content: '只读文档。', editable: false, onChange: vi.fn(), onSave })
+
+    await act(async () => {
+      proseElement().dispatchEvent(new KeyboardEvent('keydown', {
+        key: 's',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }))
+    })
+
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
   it('keeps the prose truly read-only when editable is false', async () => {
     const onChange = vi.fn()
     await render({ content: '第 1 章已经定稿。', editable: false, onChange })
@@ -322,14 +386,26 @@ describe('Vditor prose editor', () => {
     await vi.waitFor(() => expect(onChange).toHaveBeenCalledTimes(1))
     const emitted = String(onChange.mock.calls[0]?.[0])
     expect(emitted).toContain('新的段落。')
+    const proseBeforeEcho = proseElement()
+    const selectionBeforeEcho = window.getSelection()
+    const cursorNodeBeforeEcho = selectionBeforeEcho?.anchorNode ?? null
+    const cursorOffsetBeforeEcho = selectionBeforeEcho?.anchorOffset ?? -1
+    expect(cursorNodeBeforeEcho && proseBeforeEcho.contains(cursorNodeBeforeEcho)).toBe(true)
 
     // 外层把作者输入回写为 content 时，不应再触发一次编辑器写入或 onChange。
+    const setValue = vi.spyOn(Vditor.prototype, 'setValue')
+    setValue.mockClear()
     await act(async () => {
       root.render(<VditorProseEditor content={emitted} editable onChange={onChange} />)
     })
 
+    // Vditor.setValue resets its native undo history; an equal controlled echo must skip it.
+    expect(setValue).not.toHaveBeenCalled()
     expect(onChange).toHaveBeenCalledTimes(1)
     expect(proseElement().textContent).toContain('新的段落。')
+    expect(window.getSelection()?.anchorNode).toBe(cursorNodeBeforeEcho)
+    expect(window.getSelection()?.anchorOffset).toBe(cursorOffsetBeforeEcho)
+
   })
 
   it('destroys the Vditor instance on unmount', async () => {
@@ -472,31 +548,205 @@ describe('Vditor prose editor', () => {
     })
   })
 
-  it('supports jumpTarget to scroll to target heading', async () => {
-    const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {})
-    try {
-      await render({
-        content: '# 序幕\n\n正文...\n\n## 终局\n\n最终段落...',
-        editable: true,
-        onChange: vi.fn(),
-      })
+  it('retains a pre-ready heading jump and scrolls only the active editor panel', async () => {
+    const scrollSpy = vi.spyOn(HTMLElement.prototype, 'scrollTo').mockImplementation(() => {})
+    const content = '# 序幕\n\n正文...\n\n## 终局\n\n最终段落...'
+    await render({
+      content,
+      editable: true,
+      onChange: vi.fn(),
+      jumpTarget: { index: 1, line: 3, text: '终局', requestId: 1 },
+    })
 
-      await act(async () => {
-        root.render(
-          <VditorProseEditor
-            content="# 序幕\n\n正文...\n\n## 终局\n\n最终段落..."
-            editable
-            jumpTarget={{ index: 1, text: '终局', requestId: 1 }}
-          />,
-        )
-      })
+    const activePanel = container.querySelector('.vditor-ir')
+    expect(activePanel).not.toBeNull()
+    await vi.waitFor(() => expect(scrollSpy).toHaveBeenCalled())
+    expect(scrollSpy.mock.contexts).toContain(activePanel)
+    expect(container.querySelector('.vditor-wysiwyg')?.scrollTop ?? 0).toBe(0)
+  })
 
-      await vi.waitFor(() => {
-        expect(scrollSpy).toHaveBeenCalledWith({ block: 'start', behavior: 'smooth' })
-      })
-    } finally {
-      scrollSpy.mockRestore()
-    }
+  it('resolves a queued jump by exact heading text after earlier headings change before readiness', async () => {
+    const original = '# 目标章节\n\n正文'
+    const updated = '# 其他标题\n\n## 目标章节\n\n正文'
+    const jumpTarget = { line: 0, index: 0, text: '目标章节', requestId: 31 }
+    const scrollSpy = vi.spyOn(HTMLElement.prototype, 'scrollTo').mockImplementation(() => {})
+
+    await renderWithPreReadyContentUpdate(original, updated, jumpTarget)
+
+    const activePanel = container.querySelector('.vditor-ir')
+    expect(activePanel).not.toBeNull()
+    const targetHeading = Array.from(container.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6'))
+      .find(heading => heading.textContent?.includes('目标章节'))
+    expect(targetHeading).toBeDefined()
+    const expectedTop = activePanel!.scrollTop
+      + targetHeading!.getBoundingClientRect().top
+      - activePanel!.getBoundingClientRect().top
+      - 40
+    const panelScrollOptions = scrollSpy.mock.calls
+      .filter((_, callIndex) => scrollSpy.mock.contexts[callIndex] === activePanel)
+      .map(call => call[0] as unknown as ScrollToOptions)
+    // The old line and index both point at “其他标题”; exact text must win.
+    expect(panelScrollOptions).toContainEqual(expect.objectContaining({ top: expectedTop, behavior: 'smooth' }))
+  })
+
+  it('keeps a renamed heading jump when line and full-sequence index still agree', async () => {
+    const original = '# 旧标题\n\n正文'
+    const updated = '# 改名后的标题\n\n正文'
+    const jumpTarget = { line: 0, index: 0, text: '旧标题', requestId: 32 }
+    const scrollSpy = vi.spyOn(HTMLElement.prototype, 'scrollTo').mockImplementation(() => {})
+
+    await renderWithPreReadyContentUpdate(original, updated, jumpTarget)
+
+    const activePanel = container.querySelector('.vditor-ir')
+    expect(activePanel).not.toBeNull()
+    const targetHeading = Array.from(container.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6'))
+      .find(heading => heading.textContent?.includes('改名后的标题'))
+    expect(targetHeading).toBeDefined()
+    const expectedTop = activePanel!.scrollTop
+      + targetHeading!.getBoundingClientRect().top
+      - activePanel!.getBoundingClientRect().top
+      - 40
+    const panelScrollOptions = scrollSpy.mock.calls
+      .filter((_, callIndex) => scrollSpy.mock.contexts[callIndex] === activePanel)
+      .map(call => call[0] as unknown as ScrollToOptions)
+    expect(panelScrollOptions).toContainEqual(expect.objectContaining({ top: expectedTop, behavior: 'smooth' }))
+  })
+
+  it('reports the active heading from the complete Markdown heading sequence as the panel scrolls', async () => {
+    const onActiveHeadingChange = vi.fn()
+    await render({
+      content: '# 序幕\n\n正文\n\n## 第二幕\n\n### 隐藏的小节\n\n正文\n\n## 终局',
+      editable: true,
+      onChange: vi.fn(),
+      onActiveHeadingChange,
+    })
+
+    const panel = container.querySelector<HTMLElement>('.vditor-ir')
+    const headings = Array.from(container.querySelectorAll<HTMLElement>('.vditor-ir h1, .vditor-ir h2, .vditor-ir h3'))
+    expect(panel).not.toBeNull()
+    expect(headings).toHaveLength(4)
+
+    const panelRect = { top: 100, left: 0, right: 500, bottom: 600, width: 500, height: 500, x: 0, y: 100, toJSON: () => ({}) } as DOMRect
+    vi.spyOn(panel!, 'getBoundingClientRect').mockReturnValue(panelRect)
+    const headingTops = [40, 139, 260, 360]
+    headings.forEach((heading, index) => {
+      vi.spyOn(heading, 'getBoundingClientRect').mockReturnValue({
+        top: headingTops[index], left: 0, right: 200, bottom: headingTops[index] + 24,
+        width: 200, height: 24, x: 0, y: headingTops[index], toJSON: () => ({}),
+      } as DOMRect)
+    })
+
+    await act(async () => {
+      panel!.dispatchEvent(new Event('scroll', { bubbles: true }))
+    })
+    await vi.waitFor(() => {
+      expect(onActiveHeadingChange).toHaveBeenCalledWith(expect.objectContaining({ index: 1, text: '第二幕' }))
+    })
+
+    headingTops[2] = 130
+    vi.spyOn(headings[2], 'getBoundingClientRect').mockReturnValue({
+      top: 130, left: 0, right: 200, bottom: 154, width: 200, height: 24, x: 0, y: 130, toJSON: () => ({}),
+    } as DOMRect)
+    await act(async () => {
+      panel!.dispatchEvent(new Event('scroll', { bubbles: true }))
+    })
+    await vi.waitFor(() => {
+      expect(onActiveHeadingChange).toHaveBeenCalledWith(expect.objectContaining({ index: 2, text: '隐藏的小节' }))
+    })
+  })
+
+  it('uses the exact source line and measured textarea layout for source-mode jumps', async () => {
+    const content = '# 序幕\r\n\r\n' + '一段很长的文字'.repeat(60) + '\r\n\r\n## 目标章节\r\n\r\n正文'
+    await render({ content, editable: true, onChange: vi.fn() })
+    await switchMode('sv')
+
+    const textarea = container.querySelector<HTMLTextAreaElement>('textarea.vditor-sv')
+    expect(textarea).not.toBeNull()
+    Object.defineProperty(textarea!, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ top: 30, left: 0, right: 340, bottom: 430, width: 340, height: 400, x: 0, y: 30, toJSON: () => ({}) }),
+    })
+    Object.defineProperty(textarea!, 'clientWidth', { configurable: true, value: 340 })
+    const scrollSpy = vi.spyOn(textarea!, 'scrollTo').mockImplementation(() => {})
+    const targetOffset = textarea!.value.indexOf('## 目标章节')
+    const targetLine = textarea!.value.slice(0, targetOffset).split(/\r\n|\r|\n/).length - 1
+
+    await act(async () => {
+      root.render(
+        <VditorProseEditor
+          content={content}
+          editable
+          onChange={vi.fn()}
+          jumpTarget={{ index: 1, line: targetLine, text: '目标章节', requestId: 2 }}
+        />,
+      )
+    })
+
+    // The request still targets the original exact Markdown offset in source mode.
+    expect(textarea!.selectionStart).toBe(targetOffset)
+    expect(scrollSpy).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'smooth' }))
+    const firstScrollOptions = scrollSpy.mock.calls[0]?.[0] as unknown as ScrollToOptions | undefined
+    expect(firstScrollOptions).toEqual(expect.objectContaining({ top: expect.any(Number) }))
+    expect(firstScrollOptions?.top).toBeGreaterThan(0)
+  })
+
+  it('re-resolves a source-mode jump after earlier headings change', async () => {
+    const original = '# 序幕\n\n过场\n\n## 终局\n\n正文'
+    const updated = '# 序幕\n\n## 新插入的章节\n\n过场\n\n## 终局\n\n正文'
+    const staleLine = original.split('\n').indexOf('## 终局')
+    await render({ content: original, editable: true, onChange: vi.fn() })
+    await switchMode('sv')
+
+    await act(async () => {
+      root.render(
+        <VditorProseEditor
+          content={updated}
+          editable
+          onChange={vi.fn()}
+          jumpTarget={{ index: 1, line: staleLine, text: '终局', requestId: 9 }}
+        />,
+      )
+    })
+
+    const textarea = container.querySelector<HTMLTextAreaElement>('textarea.vditor-sv')
+    expect(textarea?.value).toBe(updated)
+    expect(textarea?.selectionStart).toBe(updated.indexOf('## 终局'))
+  })
+
+  it('keeps the intended duplicate heading after an earlier heading is inserted', async () => {
+    const updated = '# 序幕\n\n## 重复标题\n\n## 中段\n\n## 新插入\n\n## 重复标题\n\n正文'
+    await render({ content: updated, editable: true, onChange: vi.fn() })
+    await switchMode('sv')
+
+    const jumpTarget = { line: 6, index: 3, text: '重复标题', requestId: 33 }
+    await act(async () => {
+      root.render(
+        <VditorProseEditor
+          content={updated}
+          editable
+          onChange={vi.fn()}
+          jumpTarget={jumpTarget}
+        />,
+      )
+    })
+
+    const textarea = container.querySelector<HTMLTextAreaElement>('textarea.vditor-sv')
+    const targetOffset = updated.lastIndexOf('## 重复标题')
+    expect(textarea?.selectionStart).toBe(targetOffset)
+  })
+
+  it('does not jump when duplicate heading candidates are equally plausible', async () => {
+    const content = '# 序幕\n\n## 重复标题\n\n## 中段\n\n## 重复标题\n\n正文'
+    const jumpTarget = { line: 4, index: 2, text: '重复标题', requestId: 34 }
+    const scrollSpy = vi.spyOn(HTMLElement.prototype, 'scrollTo').mockImplementation(() => {})
+
+    await render({ content, editable: true, onChange: vi.fn(), jumpTarget })
+
+    const activePanel = container.querySelector('.vditor-ir')
+    const panelScrollCalls = scrollSpy.mock.contexts
+      .filter(context => context === activePanel)
+    // The stale coordinates sit exactly between two same-title candidates.
+    expect(panelScrollCalls).toHaveLength(0)
   })
 
   it('registers CSS.highlights for foreshadowing colors and updates dynamically when status toggles', async () => {

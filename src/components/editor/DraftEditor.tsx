@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import {
-  Search, Upload, Save, FileText, Wrench, Check, Link2, Bookmark,
-  ChevronLeft, ChevronRight, BookOpen, Layers,
+  Search, Upload, Save, FileText, Wrench, Check, Link2, Bookmark, Sparkles,
+  ChevronLeft, ChevronRight, BookOpen, Layers, GitCompareArrows,
 } from 'lucide-react'
 
 import { useProjectStore } from '../../stores/project-store'
@@ -29,6 +29,9 @@ import {
 import { getReviewsForVersion } from '../../services/draft-index'
 import { ipc } from '../../services/ipc-client'
 import { requireIpcSuccess } from '../../services/ipc-result'
+import { markOutlineSyncPending } from '../../services/knowledge-gap-client'
+import { computeProseContentHash } from '../../shared/prose-anchor'
+import OutlineSyncReviewDialog from './outline-sync/OutlineSyncReviewDialog'
 import { publishChapterSnapshot, retryFinalizationPublication } from '../../services/finalization-client'
 import { captureFinalizationSnapshot } from '../../services/finalization-snapshot'
 
@@ -115,12 +118,15 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
     state => state.tabs.find(tab => tab.id === tabId && tab.projectKey === projectKey),
   )
   const currentProject = useProjectStore(s => s.currentProject)
+  const projectSession = captureProjectSession(currentProject)
   const text = useLocaleStore(s => s.text)
   const locale = useLocaleStore(s => s.locale)
   const projectMatches = currentProject?.path === projectKey
   const tabDraftStatus = editorTab?.draftStatus
   const [reviewCount, setReviewCount] = useState(0)
   const [bindingDialogOpen, setBindingDialogOpen] = useState(false)
+  /** 正文反向修纲（细纲对照）对话框；使用显式绑定定位目标章。 */
+  const [outlineSyncOpen, setOutlineSyncOpen] = useState(false)
   /**
    * 绑定变更计数。
    *
@@ -198,6 +204,46 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
       loadForeshadowings()
     })
   }, [loadForeshadowings])
+
+  const handleStartRevisionLearning = async () => {
+    if (!meta?.id || !currentProject || !projectSession || !projectMatches
+      || !isProjectSessionPath(projectSession, projectKey) || isChapterBusy) return
+    setRevisionLearningBusy(true)
+    try {
+      const visibleContent = proseEditorRef.current?.getCurrentMarkdown() ?? currentBodyRef.current
+      let sourceTab = useEditorStore.getState().tabs.find(tab => tab.id === tabId && tab.projectKey === projectKey)
+      if (!sourceTab) throw new Error(text('找不到当前正文标签，无法记录编辑器快照', 'The current prose tab is unavailable, so its editor snapshot cannot be captured.'))
+      if ((sourceTab.content ?? '') !== visibleContent) {
+        useEditorStore.getState().updateTabContent(tabId, visibleContent)
+        sourceTab = useEditorStore.getState().tabs.find(tab => tab.id === tabId && tab.projectKey === projectKey)
+      }
+      if (!sourceTab) throw new Error(text('正文标签已关闭，请重新打开后再试', 'The prose tab closed. Reopen it and try again.'))
+      const record = await ipc.invokeWithProjectSession(
+        projectSession,
+        'revision-learning:record-editor-before',
+        {
+          draftId: meta.id,
+          tabId,
+          editGeneration: sourceTab.contentRevision ?? 0,
+          content: visibleContent,
+        },
+      )
+      if (!isProjectSessionCurrent(projectSession)) return
+      useEditorStore.getState().openFile({
+        id: `revision-learning:${record.id}`,
+        name: text(`修订学习 · 第${meta.displayNumber ?? meta.chapterNumber}章`, `Revision learning · Chapter ${meta.displayNumber ?? meta.chapterNumber}`),
+        type: 'revision-learning',
+        projectKey,
+        chapterNumber: meta.chapterNumber,
+        revisionLearningRecordId: record.id,
+        revisionLearningSourceTabId: tabId,
+      })
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error))
+    } finally {
+      setRevisionLearningBusy(false)
+    }
+  }
 
   const handleToolbarMarkForeshadowing = () => {
     const res = proseEditorRef.current?.getSelectionInfo()
@@ -448,6 +494,7 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
   const isChapterBusy = !!activeChapterRun
 
   const [saving, setSaving] = useState(false)
+  const [revisionLearningBusy, setRevisionLearningBusy] = useState(false)
   const [confirmAction, setConfirmAction] = useState<'review' | null>(null)
   // 审稿维度多选（聚焦 4 类核心问题）
   const REVIEW_DIMS = [
@@ -518,6 +565,15 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
           projectSession.projectPath,
         )
         if (!result.success) throw new Error(result.error || text('草稿保存失败', 'Could not save the draft'))
+        // 正文已保存 → 标记「细纲待核对」（仅显式绑定蓝图时；只写标记，不自动调用 AI）。
+        const syncChapter = meta?.blueprintChapterNumber
+        if (syncChapter && Number.isSafeInteger(syncChapter)) {
+          void markOutlineSyncPending(projectSession, {
+            chapterNumber: syncChapter,
+            draftId,
+            proseHash: computeProseContentHash(saveSnapshot.content),
+          }).catch(() => { /* 标记失败不阻断保存流程 */ })
+        }
         // 真实保存完成 → 记录“上次创作位置”（只写导航辅助，不动权威数据）。
         const resumeChapterNumber = targetTab.chapterNumber ?? meta?.chapterNumber
         if (Number.isSafeInteger(resumeChapterNumber) && (resumeChapterNumber as number) > 0) {
@@ -925,6 +981,28 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
                   <Link2 size={12} />
                   <span className="draft-action-label">{text('绑定蓝图', 'Link blueprint')}</span>
                 </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    if (!meta?.blueprintChapterNumber) {
+                      toast.info(text(
+                        '本章尚未绑定章节蓝图；请先绑定蓝图，再对照同步（不按正文章号猜蓝图）。',
+                        'This draft has no blueprint binding; bind one first. The blueprint is never guessed from the chapter number.',
+                      ))
+                      setBindingDialogOpen(true)
+                      return
+                    }
+                    setOutlineSyncOpen(true)
+                  }}
+                  className="draft-action draft-action--quiet"
+                  aria-label={text('检查并同步细纲', 'Check & sync outline')}
+                  data-testid="draft-outline-sync"
+                  title={text('对照正文与细纲，逐项确认后回写正式细纲', 'Compare prose with the outline; the formal outline changes only after per-item confirmation')}
+                >
+                  <GitCompareArrows size={12} />
+                  <span className="draft-action-label">{text('检查并同步细纲', 'Check & sync outline')}</span>
+                </Button>
                 {reviewCount > 0 && (
                   <Button
                     variant="outline"
@@ -1041,6 +1119,19 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
                 </Button>
               )}
 
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleStartRevisionLearning}
+                disabled={revisionLearningBusy || isChapterBusy || !meta?.id}
+                className="draft-action"
+                title={text('记录当前编辑器正文，完成修订后再比较并归纳修稿规则', 'Capture the current editor text, then compare it after revision and derive candidate rules')}
+                data-testid="draft-revision-learning"
+              >
+                <Sparkles size={12} />
+                {revisionLearningBusy ? text('记录中…', 'Capturing…') : text('修订学习', 'Learn revisions')}
+              </Button>
+
               {/* 核心操作：AI 审稿 — 主题色描边，把实心位置让给发布 */}
               <Button
                 variant="outline"
@@ -1152,6 +1243,8 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
             positionMemoryKey={editorPositionMemoryKey}
             restorePosition={restorePosition}
             onChange={(nextContent) => {
+              // Vditor input events are the source of truth for the live unsaved body.
+              // eslint-disable-next-line react-hooks/immutability
               currentBodyRef.current = nextContent
               useEditorStore.getState().updateTabContent(tabId, nextContent)
             }}
@@ -1247,6 +1340,16 @@ function DraftEditorSession({ tabId, filePath, content, projectKey }: Props) {
           label: text(`第${meta.chapterNumber}章`, `Chapter ${meta.chapterNumber}`),
         } : null}
       />
+
+      {/* 正文反向修纲：对照并经作者确认后回写正式 v2 细纲 */}
+      {meta?.blueprintChapterNumber && (
+        <OutlineSyncReviewDialog
+          projectKey={projectKey}
+          chapterNumber={meta.blueprintChapterNumber}
+          open={outlineSyncOpen}
+          onClose={() => setOutlineSyncOpen(false)}
+        />
+      )}
 
       {/* 标记为伏笔轻量对话框 */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>

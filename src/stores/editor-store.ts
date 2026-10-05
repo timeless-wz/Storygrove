@@ -14,7 +14,9 @@ export interface EditorTabSaveSnapshot {
 export interface EditorTab {
   id: string
   name: string
-  type: 'chapter-directory' | 'chapter' | 'outline' | 'character' | 'config' | 'diff' | 'chapter-card' | 'world-building' | 'arch-file' | 'version-history' | 'review-report' | 'narrative-thread' | 'world-map' | 'story-timeline' | 'world' | 'overview' | 'project-document' | 'foreshadowing' | 'cultivation'
+  type: 'chapter-directory' | 'chapter' | 'outline' | 'character' | 'config' | 'diff' | 'chapter-card' | 'world-building' | 'arch-file' | 'version-history' | 'review-report' | 'narrative-thread' | 'world-map' | 'story-timeline' | 'world' | 'overview' | 'project-document' | 'foreshadowing' | 'cultivation' | 'knowledge-gap' | 'revision-learning' | 'creative-materials' | 'locations'
+  /** 信息与揭露页打开时预选的章节过滤（章节细纲/正文侧快捷入口使用）。 */
+  knowledgeGapChapterFilter?: number
   proseDirectoryKind?: 'draft' | 'manuscript'
   filePath?: string
   content?: string
@@ -56,6 +58,12 @@ export interface EditorTab {
   reportPath?: string
   /** 原始 AI 审稿报告的数据库标识；人工确认快照与审稿修稿均以此为来源。 */
   reviewId?: number
+  /** 修订学习记录身份；页面会从项目 SQLite 重新读取完整快照。 */
+  revisionLearningRecordId?: string
+  /** 编辑器快照来源标签，打开修订学习页时用于记录后稿。 */
+  revisionLearningSourceTabId?: string
+  /** Filtered business view for authored materials, retired ideas, or open issues. */
+  creativeMaterialsView?: 'materials' | 'retired' | 'issues' | 'legacy'
   /** 叙事线编辑器本次打开的视图。 */
   narrativeThreadView?: 'plot-tree' | 'canvas' | 'plans'
   /** 重复打开同一叙事线 Tab 时递增，确保本次视图请求生效。 */
@@ -148,6 +156,10 @@ const PROJECT_SCOPED_BUILTIN_TYPES = new Set<EditorTab['type']>([
   'overview',
   'project-document',
   'foreshadowing',
+  'knowledge-gap',
+  'revision-learning',
+  'creative-materials',
+  'locations',
 ])
 
 const BUILTIN_TAB_ID_ALIASES: Partial<Record<EditorTab['type'], readonly string[]>> = {

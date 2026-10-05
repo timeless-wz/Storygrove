@@ -13,6 +13,9 @@ import {
   workflowWritingLanguage,
 } from '../workflow-project-session'
 import { promptLanguageText } from '../../prompt-language'
+import { buildCreativeContextBundle } from '../../../shared/creative-content'
+import { buildCreativeCorePromptSources, loadCharacterProfilePromptSource, loadCreativeDomainPromptSources, loadLegacyCreativeSources } from '../../creative-context'
+import { buildKnowledgeGapMaterial } from './knowledge-material'
 import { assertMateriallyCompleteRevision } from './refinement-completeness'
 import { countDraftUnits } from '../../../shared/draft-units'
 import { throwIfSourceDraftChanged } from '../source-draft-changed'
@@ -82,12 +85,40 @@ export class RefineDraftCommand extends BaseWorkflowCommand<string> {
     const draft = this.params.draftContent
     if (!draft) throw new Error(text('无草稿内容', 'There is no draft content to revise.'))
 
+    const core = await ipc.invokeWithProjectSession(projectSession, 'db:project-core-get', context.projectPath)
+    if (!core) throw new Error(text('无法读取项目正式资料，已停止修稿。', 'Could not read the formal project sources; revision stopped.'))
+    const [legacySources, domainSources, characterSource, information] = await Promise.all([
+      loadLegacyCreativeSources(projectSession, context.projectPath),
+      loadCreativeDomainPromptSources(projectSession, context.projectPath, {
+        powerSystem: true,
+        locations: true,
+        relevanceText: `${draft}\n${this.params.chapterInfo.title}\n${this.params.chapterInfo.keyEvents ?? ''}`,
+      }),
+      loadCharacterProfilePromptSource(projectSession, context.projectPath, this.params.chapterInfo.characters),
+      buildKnowledgeGapMaterial(projectSession, this.params.chapterNumber, this.params.chapterInfo.characters),
+    ])
+    const creativeContext = buildCreativeContextBundle([
+      ...buildCreativeCorePromptSources(core, legacySources, [
+        'creative-direction', 'writing-rules', 'premise', 'world-setting', 'characters',
+      ], writingLanguage),
+      ...(characterSource ? [characterSource] : []),
+      ...domainSources,
+      ...(information ? [{
+        id: 'information-reveal.chapter-projection',
+        label: '本章信息与揭露投影',
+        category: 'information-reveal' as const,
+        content: information.text,
+        status: 'formal' as const,
+        note: '作者真相、人物认知、读者证据已按本章范围分别标记',
+      }] : []),
+    ], writingLanguage, { includeSourceList: false })
+
     callbacks.log(text('正在精修章节...', 'Refining the chapter...'))
 
     const template = await resolvePromptTemplate('refine_chapter', projectSession, writingLanguage)
     if (!template) throw new Error(text('未找到修稿模板', 'The revision prompt template was not found.'))
 
-    const mergedGuidance = this.params.mergedGuidance || novelConfig.globalGuidance || ''
+    const mergedGuidance = this.params.mergedGuidance || ''
     const userPromptBlock = this.params.userRefinePrompt?.trim()
       ? promptLanguageText(
           writingLanguage,
@@ -155,11 +186,27 @@ export class RefineDraftCommand extends BaseWorkflowCommand<string> {
       .withGlobalSummary(this.params.shortSummary || '')
       .withShortSummary(this.params.shortSummary || '')
       .withWordNumber(blueprintWordBudget ?? novelConfig.wordsPerChapter)
-      .withWritingStyle(novelConfig.writingStyle || '')
+      .withWritingStyle('')
       .withUserRefinePrompt(userPromptBlock)
 
+    const usedSources = [
+      ...creativeContext.sources.map(source => `- ${source.label} · ${source.id}（${source.status}）`),
+      `- 当前草稿 v${this.params.sourceDraft?.version ?? initialDraftMeta.version}（修稿对象）`,
+      ...(boundBlueprintChapterNumber !== undefined
+        ? [`- 绑定章纲第${boundBlueprintChapterNumber}章${detail ? ` · revision ${detail.revision} / ${detail.contentHash}` : ''}（计划）`]
+        : []),
+      ...(volumeMaterial?.outline ? ['- 绑定卷纲与相关章纲摘要（计划）'] : []),
+      ...(information ? ['- 本章适用的信息与揭露记录 · info_entries / knowledge_records'] : []),
+      ...(this.params.userRefinePrompt?.trim() ? ['- 作者本次修稿指令'] : []),
+    ]
+    const sourceList = promptLanguageText(
+      writingLanguage,
+      `【本次使用资料】\n${usedSources.join('\n')}`,
+      `[Sources used for this request]\n${usedSources.join('\n')}`,
+    )
+
     const refined = await this.callLLMWithBoundedCompletion(
-      [promptBuilder.build(), volumePlanningText, blueprintV2Text].filter(Boolean).join('\n\n'),
+      [sourceList, creativeContext.promptText, promptBuilder.build(), volumePlanningText, blueprintV2Text].filter(Boolean).join('\n\n'),
       promptBuilder.getSystemRole(),
       callbacks,
       { mode: 'append-visible-text', maxContinuations: 3 },

@@ -10,7 +10,7 @@ import { useLLMStore } from '../../../stores/llm-store'
 import { useLayoutStore } from '../../../stores/layout-store'
 import { useLocaleStore } from '../../../stores/locale-store'
 import { useProjectStore } from '../../../stores/project-store'
-import { useWorkflowStore, type WorkflowDefinition } from '../../../stores/workflow-store'
+import { useWorkflowStore } from '../../../stores/workflow-store'
 import '../../../index.css'
 import NovelConfigEditor from '../NovelConfigEditor'
 
@@ -40,6 +40,8 @@ const BASE_CONFIG: NovelConfig = {
   globalGuidance: '原全局要求',
   writingStyle: '原文风',
   referenceWorks: '原参考作品',
+  creativeDirectionMarkdown: '已有创作方向',
+  writingRulesMarkdown: '已有写作规范',
 }
 
 const originalProjectState = useProjectStore.getState()
@@ -142,206 +144,109 @@ afterEach(async () => {
   vi.restoreAllMocks()
 })
 
+async function setMarkdownEditor(index: number, markdown: string): Promise<void> {
+  const hosts = container.querySelectorAll<HTMLElement>('[data-vditor-prose-editor="true"]')
+  await vi.waitFor(() => expect(hosts.length).toBe(3))
+  const host = hosts.item(index)
+  await vi.waitFor(() => expect(host.getAttribute('data-vditor-ready')).toBe('true'))
+  const sourceMode = host.querySelector<HTMLButtonElement>('.vditor-toolbar button[data-mode="sv"]')
+  expect(sourceMode).not.toBeNull()
+  await act(async () => sourceMode?.click())
+  const textarea = host.querySelector<HTMLTextAreaElement>('textarea.vditor-sv')
+  expect(textarea).not.toBeNull()
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+    setter?.call(textarea, markdown)
+    textarea?.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+}
+
 describe('NovelConfigEditor page sections', () => {
-  it('keeps all fields independent across section navigation and the collapsed advanced options, then saves the same config keys', async () => {
+  it('edits and saves creative direction, references, prose rules, and compact writing parameters independently', async () => {
     await renderEditor()
 
-    await expect.element(page.getByRole('heading', { name: '创作方向' })).toBeVisible()
-    await expect.element(page.getByText(/核心构想中的故事、背景、主角优势和主角构想仍会用于 AI 生成与正文写作/)).toBeVisible()
+    await expect.element(page.getByRole('heading', { name: '创作方向', exact: true }).first()).toBeVisible()
     await expect.element(page.getByRole('navigation', { name: '创作方向分区' })).toBeVisible()
-    await expect.element(page.getByRole('link', { name: '基础信息' })).toBeVisible()
-    await expect.element(page.getByRole('link', { name: '核心构想' })).toBeVisible()
-    await expect.element(page.getByRole('link', { name: '写作要求' })).toBeVisible()
-    await expect.element(page.getByRole('button', { name: 'AI 填充配置' })).toBeVisible()
-    await page.screenshot({ path: '../../../../screenshots/creative-direction-core-ideas.png' })
-    await page.viewport(1280, 1000)
-    await act(async () => {
-      await page.getByRole('link', { name: '核心构想' }).click()
-    })
-    await page.screenshot({ path: '../../../../screenshots/creative-direction-core-ideas-fields.png' })
+    await expect.element(page.getByRole('link', { name: '定位与参数' })).toBeVisible()
+    await expect.element(page.getByRole('link', { name: '创作原则' })).toBeVisible()
+    await expect.element(page.getByRole('link', { name: '写作规范' })).toBeVisible()
+    await expect.element(page.getByRole('button', { name: '生成初始构想' })).toBeVisible()
+    expect(container.querySelector<HTMLDetailsElement>('details.novel-config-page__advanced')?.open).toBe(false)
+    expect(container.querySelectorAll('[data-vditor-prose-editor="true"]')).toHaveLength(3)
+    expect(container.querySelectorAll('[data-document-layout="business-field"]')).toHaveLength(3)
+    expect(container.querySelectorAll('[data-heading-toc="enabled"]')).toHaveLength(2)
+    expect(container.querySelectorAll('[data-heading-toc="disabled"]')).toHaveLength(1)
 
-    const advanced = container.querySelector<HTMLDetailsElement>('.novel-config-page__advanced')
-    expect(advanced?.open).toBe(false)
-
+    const direction = '# 阅读体验\n\n- 让读者感到辽阔\n- 保持人物选择有代价'
+    const references = '| 作品 | 借鉴 |\n| --- | --- |\n| 参考文本甲 | 叙事节奏；不复用情节 |'
+    const rules = '> 叙述视角跟随当前场景人物。\n\n正文使用简体中文，避免替人物补充未确认的真相。'
+    await setMarkdownEditor(0, direction)
+    await setMarkdownEditor(1, references)
+    await act(async () => page.getByRole('link', { name: '写作规范' }).click())
+    await setMarkdownEditor(2, rules)
     await act(async () => {
-      await page.getByRole('link', { name: '核心构想' }).click()
-      await page.getByRole('textbox', { name: '故事构想' }).fill('新故事构想')
-      await page.getByRole('textbox', { name: '背景构想' }).fill('新背景构想')
-      await page.getByRole('textbox', { name: '主角优势 / 核心卖点' }).fill('新主角优势')
-      await page.getByRole('textbox', { name: '主角构想' }).fill('新主角构想')
-      await page.getByRole('link', { name: '写作要求' }).click()
-      await page.getByRole('textbox', { name: '全局写作要求' }).fill('新的独立全局要求')
-      await page.getByRole('textbox', { name: '文风配置' }).fill('新的独立文风')
-      await page.getByRole('textbox', { name: '参考作品' }).fill('新的独立参考作品')
-      await page.getByText('高级选项', { exact: true }).click()
+      await page.getByRole('combobox', { name: '叙述视角' }).selectOptions('first_person')
+      const advanced = container.querySelectorAll<HTMLDetailsElement>('details.novel-config-page__advanced')[1]
+      advanced?.querySelector('summary')?.click()
       await page.getByRole('combobox', { name: '情节组织方式' }).selectOptions('freeform')
-      await page.getByRole('spinbutton', { name: '沉寂提醒阈值（章）' }).fill('12')
     })
 
-    expect(advanced?.open).toBe(true)
-    const expectedConfig: NovelConfig = {
-      ...BASE_CONFIG,
-      coreOutline: '新故事构想',
-      worldSetting: '新背景构想',
-      goldenFinger: '新主角优势',
-      protagonistProfile: '新主角构想',
-      globalGuidance: '新的独立全局要求',
-      writingStyle: '新的独立文风',
-      referenceWorks: '新的独立参考作品',
-      plotStructure: 'freeform',
-      narrativeThreadDormantChapterThreshold: 12,
-    }
-    expect(useProjectStore.getState().currentProject?.novelConfig).toEqual(expectedConfig)
+    const current = useProjectStore.getState().currentProject?.novelConfig
+    expect(current?.creativeDirectionMarkdown).toContain('阅读体验')
+    expect(current?.referenceWorks).toContain('参考文本甲')
+    expect(current?.writingRulesMarkdown).toContain('未确认的真相')
+    expect(current?.narrativePOV).toBe('first_person')
+    expect(current?.totalChapters).toBe(80)
+    expect(current?.wordsPerChapter).toBe(3200)
+    expect(container.textContent).toContain('目标字数：256,000 字')
+    expect(container.querySelector('input[aria-label="沉寂提醒阈值（章）"]')).toBeNull()
 
     await act(async () => page.getByRole('button', { name: '保存', exact: true }).click())
-    await vi.waitFor(() => expect(savedProjectData?.novelConfig).toEqual(expectedConfig))
-    expect(useEditorStore.getState().draftLedgers.config).toBe(JSON.stringify({ version: 1, projects: [] }))
+    const saved = savedProjectData?.novelConfig
+    expect(saved?.creativeDirectionMarkdown).toContain('让读者感到辽阔')
+    expect(saved?.referenceWorks).toContain('不复用情节')
+    expect(saved?.writingRulesMarkdown).toContain('简体中文')
+    expect(saved?.narrativePOV).toBe('first_person')
+    expect(saved?.plotStructure).toBe('freeform')
+    expect(saved?.coreOutline).toBe(BASE_CONFIG.coreOutline)
+    expect(saved?.worldSetting).toBe(BASE_CONFIG.worldSetting)
   })
 
-  it('keeps a single field generation visibly running until its tracked workflow reaches a terminal state', async () => {
-    useLLMStore.setState({ defaultModelId: 'model-field-test' })
-    let finishRun!: () => void
-    const startWorkflow = vi.fn((_definition: WorkflowDefinition) => {
-      const runId = 'creative-direction-field-run'
-      const step = {
-        id: 'creative-direction-field-step',
-        name: '故事构想',
-        description: 'only this field',
-        status: 'running',
-        logs: [],
-      }
-      const run = {
-        id: runId,
-        projectPath: PROJECT_PATH,
-        projectSession: PROJECT_SESSION,
-        generationModelId: 'model-field-test',
-        writingLanguage: 'zh-CN',
-        uiLocale: 'zh-CN',
-        type: 'config_generation',
-        title: '创作方向：故事构想',
-        status: 'running',
-        steps: [step],
-        currentStepIndex: 0,
-        createdAt: new Date().toISOString(),
-        resourceKeys: ['novel-config'],
-      }
-      act(() => useWorkflowStore.setState({ activeRuns: [run] as never }))
-      return new Promise<string>((resolve) => {
-        finishRun = () => {
-          useProjectStore.setState(state => ({
-            currentProject: state.currentProject
-              ? { ...state.currentProject, novelConfig: { ...state.currentProject.novelConfig, coreOutline: '工作流生成的构想' } }
-              : null,
-          }))
-          useWorkflowStore.setState({
-            activeRuns: [],
-            history: [{
-              ...run,
-              status: 'completed',
-              steps: [{ ...step, status: 'completed', progress: 100, result: '工作流生成的构想' }],
-            }] as never,
-          })
-          resolve(runId)
-        }
-      })
-    })
-    useWorkflowStore.setState({ startWorkflow: startWorkflow as never })
+  it('keeps old config text in its traceable legacy entry and opens the dedicated organizer', async () => {
     await renderEditor()
-
-    await act(async () => {
-      await page.getByRole('button', { name: 'AI 生成' }).first().click()
-    })
-
-    await vi.waitFor(() => expect(startWorkflow).toHaveBeenCalledOnce())
-    const definition = startWorkflow.mock.calls[0]![0]
-    expect(definition).toMatchObject({
-      type: 'config_generation',
-      title: '创作方向：故事构想',
-      projectPath: PROJECT_PATH,
-      projectSession: PROJECT_SESSION,
-      generationModelId: 'model-field-test',
-      resourceKeys: ['novel-config'],
-      steps: [{ name: '故事构想' }],
-    })
-    expect(definition.steps).toHaveLength(1)
-    await expect.element(page.getByRole('button', { name: '生成中...' })).toBeDisabled()
-    expect(useProjectStore.getState().currentProject?.novelConfig.coreOutline).toBe('原故事构想')
-
-    await act(async () => finishRun())
-    await expect.element(page.getByRole('textbox', { name: '故事构想' })).toHaveValue('工作流生成的构想')
-    await expect.element(page.getByRole('button', { name: 'AI 生成' }).first()).toBeEnabled()
+    expect(container.querySelector('textarea[aria-label="故事构想"]')).toBeNull()
+    const legacy = container.querySelector<HTMLDetailsElement>('#novel-config-legacy')!
+    expect(legacy.open).toBe(false)
+    await act(async () => legacy.querySelector('summary')?.click())
+    await expect.element(page.getByText(/旧故事构想、背景构想、主角优势/)).toBeVisible()
+    await act(async () => page.getByRole('button', { name: '查看待整理旧内容' }).click())
+    expect(useEditorStore.getState().tabs.some(tab => (
+      tab.type === 'creative-materials' && tab.creativeMaterialsView === 'legacy'
+    ))).toBe(true)
   })
 
-  it('explains in English that all four idea fields still inform generation and prose', async () => {
+  it('shows the new section and responsibility labels in English', async () => {
     useLocaleStore.setState({ locale: 'en-US', initialized: true })
     await renderEditor()
 
-    await expect.element(page.getByRole('heading', { name: 'Core ideas' })).toBeVisible()
-    await expect.element(page.getByText(/continue to inform AI generation and prose writing/)).toBeVisible()
-    await expect.element(page.getByText(/Changes do not automatically sync the story premise/)).toBeVisible()
+    await expect.element(page.getByRole('heading', { name: 'Creative direction', exact: true }).first()).toBeVisible()
+    await expect.element(page.getByRole('heading', { name: 'Reading experience and creative principles' })).toBeVisible()
+    await expect.element(page.getByRole('heading', { name: 'Writing rules' })).toBeVisible()
+    await expect.element(page.getByText(/Story facts, characters, world rules, and plot plans live in their dedicated pages/)).toBeVisible()
   })
 
-  it('saves the project config before opening the original worldbuilding overview tab', async () => {
-    await renderEditor()
-    await act(async () => {
-      await page.getByRole('textbox', { name: '背景构想' }).fill('保存后去世界观总纲')
-      await page.getByRole('button', { name: '打开世界观总纲' }).click()
-    })
-
-    await vi.waitFor(() => expect(useEditorStore.getState().tabs.some(tab => (
-      tab.type === 'arch-file' && tab.filePath === 'vela://core/worldbuilding'
-    ))).toBe(true))
-    expect(savedProjectData?.novelConfig).toMatchObject({
-      worldSetting: '保存后去世界观总纲',
-      coreOutline: BASE_CONFIG.coreOutline,
-      protagonistProfile: BASE_CONFIG.protagonistProfile,
-      globalGuidance: BASE_CONFIG.globalGuidance,
-      writingStyle: BASE_CONFIG.writingStyle,
-      referenceWorks: BASE_CONFIG.referenceWorks,
-      creativeStrategy: BASE_CONFIG.creativeStrategy,
-    })
-    const worldbuildingTab = useEditorStore.getState().tabs.find(tab => (
-      tab.type === 'arch-file' && tab.filePath === 'vela://core/worldbuilding'
-    ))
-    expect(worldbuildingTab).toMatchObject({
-      content: '正式世界观总纲',
-      projectKey: PROJECT_PATH,
-    })
-    expect(invoke.mock.calls.map(call => call[0])).toEqual(['project:save', 'db:project-core-get'])
-    expect(useProjectStore.getState().currentProject?.novelConfig.worldSetting).toBe('保存后去世界观总纲')
-  })
-
-  it('saves the protagonist concept before opening the existing character profile in edit view', async () => {
-    await renderEditor()
-    await act(async () => {
-      await page.getByRole('textbox', { name: '主角构想' }).fill('保存后去角色档案')
-      await page.getByRole('button', { name: '打开角色档案' }).click()
-    })
-
-    await vi.waitFor(() => expect(savedProjectData?.novelConfig.protagonistProfile).toBe('保存后去角色档案'))
-    expect(useLayoutStore.getState().sidebarView).toBe('characters')
-    expect(useLayoutStore.getState().characterViewRequest?.view).toBe('edit')
-    expect(useEditorStore.getState().tabs.some(tab => tab.type === 'character')).toBe(false)
-    expect(useProjectStore.getState().currentProject?.novelConfig.protagonistProfile).toBe('保存后去角色档案')
-  })
-
-  it('stays on the current page and keeps input when saving before a linked page fails', async () => {
-    const currentProject = makeProject()
+  it('keeps newly entered Markdown visible when saving fails', async () => {
     const failedSave = vi.fn(async () => false)
-    useProjectStore.setState({ currentProject, saveProject: failedSave as never })
+    useProjectStore.setState({ currentProject: makeProject(), saveProject: failedSave as never })
     useWorkflowStore.setState({ globalLogs: [] })
     await renderEditor()
+    await setMarkdownEditor(2, '失败后保留的正文规范')
 
-    await act(async () => {
-      await page.getByRole('textbox', { name: '背景构想' }).fill('保存失败后保留的草稿')
-      await page.getByRole('button', { name: '打开世界观总纲' }).click()
-    })
-
+    await act(async () => page.getByRole('button', { name: '保存', exact: true }).click())
     await vi.waitFor(() => expect(useWorkflowStore.getState().globalLogs.at(-1)?.message).toContain('保存失败'))
     expect(failedSave).toHaveBeenCalledOnce()
     expect(useEditorStore.getState().activeTabId).toBe(CONFIG_TAB_ID)
-    expect(useEditorStore.getState().tabs.some(tab => tab.type === 'arch-file')).toBe(false)
-    expect(useProjectStore.getState().currentProject?.novelConfig.worldSetting).toBe('保存失败后保留的草稿')
-    await expect.element(page.getByRole('textbox', { name: '背景构想' })).toHaveValue('保存失败后保留的草稿')
+    expect(useProjectStore.getState().currentProject?.novelConfig.writingRulesMarkdown).toContain('失败后保留的正文规范')
+    expect(container.querySelectorAll('[data-vditor-prose-editor="true"]')[2]?.querySelector<HTMLTextAreaElement>('textarea.vditor-sv')?.value).toContain('失败后保留的正文规范')
   })
 })

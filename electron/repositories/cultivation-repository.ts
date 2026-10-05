@@ -15,11 +15,11 @@ export class CultivationRepository {
     const db = getProjectDb()
     if (!db) throw new Error('项目数据库未打开')
     ensureCultivationSchema(db)
-    const { revision } = db.prepare('SELECT revision FROM cultivation_meta WHERE id=1').get() as { revision: number }
+    const { revision, markdown } = db.prepare('SELECT revision, markdown FROM cultivation_meta WHERE id=1').get() as { revision: number; markdown: string }
     const realms = db.prepare('SELECT * FROM cultivation_realms ORDER BY position').all() as { id: string; name: string; level_id: string }[]
     return { revision, realms: realms.map(realm => ({ id: realm.id, name: realm.name, levelId: realm.level_id,
       stages: db.prepare('SELECT id,name FROM cultivation_levels WHERE realm_id=? AND name IS NOT NULL ORDER BY position').all(realm.id) as { id: string; name: string }[],
-    })) }
+    })), markdown: markdown ?? '' }
   }
 
   static save(request: CultivationSaveRequest): CultivationSaveResult {
@@ -28,8 +28,10 @@ export class CultivationRepository {
     ensureCultivationSchema(db)
     validateCultivationRealms(request?.realms)
     if (!request.resolutions || typeof request.resolutions !== 'object' || Array.isArray(request.resolutions)) throw new Error('Invalid impact resolutions / 影响处理格式无效')
+    if (request.markdown !== undefined && (typeof request.markdown !== 'string' || request.markdown.length > 1_000_000)) throw new Error('力量体系 Markdown 无效')
     return db.transaction(() => {
       const before = this.read()
+      const markdown = request.markdown ?? before.markdown ?? ''
       if (before.revision !== request.expectedRevision) throw new Error('等级设置已更新，请重新加载 / Cultivation settings changed; reload')
       const roster = CharacterRosterRepository.read()
       if (roster.revision !== request.expectedRosterRevision) throw new Error('角色已更新，请重新加载 / Characters changed; reload')
@@ -70,7 +72,7 @@ export class CultivationRepository {
         if (!valid.has(row.id)) db.prepare('DELETE FROM cultivation_levels WHERE id=?').run(row.id)
       }
       for (const realm of before.realms) if (!request.realms.some(next => next.id === realm.id)) db.prepare('DELETE FROM cultivation_realms WHERE id=?').run(realm.id)
-      db.prepare('UPDATE cultivation_meta SET revision=revision+1 WHERE id=1').run()
+      db.prepare('UPDATE cultivation_meta SET revision=revision+1, markdown=? WHERE id=1').run(markdown)
       return { system: this.read(), roster: receipt.snapshot }
     })()
   }

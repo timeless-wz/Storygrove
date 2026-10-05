@@ -120,18 +120,18 @@ export async function saveWritingSkillBinding(
   }
   const current = await loadWritingSkillBindings(projectSession)
   if (signal?.aborted) throw new Error('Writing skill binding was cancelled before commit')
-  const bindings = { ...current.bindings }
-  if (skillId) bindings[stage] = skillId
-  else delete bindings[stage]
+  const expectedCurrentSkillId = current.bindings[stage] ?? null
   markSideEffectStarted?.()
   const result = await ipc.invokeWithProjectSession(
     projectSession,
-    'fs:write-file',
-    bindingPath(projectSession.projectPath),
-    `${JSON.stringify({ version: 1, bindings }, null, 2)}\n`,
-    projectSession.projectPath,
+    'revision-learning:binding-cas',
+    { stage, skillId, expectedCurrentSkillId },
   )
-  if (!result.success) throw new Error(result.error || 'Could not save writing skill bindings')
+  if (!result.success) {
+    throw new Error(result.conflict
+      ? '写作 Skill 绑定已被其他窗口修改，请重新加载后再试'
+      : result.error || 'Could not save writing skill bindings')
+  }
 }
 
 export async function freezeWritingSkill(

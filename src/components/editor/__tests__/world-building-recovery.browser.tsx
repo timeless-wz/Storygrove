@@ -34,7 +34,13 @@ const originalLayoutState = useLayoutStore.getState()
 let container: HTMLDivElement
 let root: Root
 let partialFile: Record<string, unknown>
-let coreContent: { premise: string; worldbuilding: string; synopsis: string; totalChapters: number }
+let coreContent: {
+  premise: string
+  worldbuilding: string
+  synopsis: string
+  totalChapters: number
+  [key: string]: unknown
+}
 let rosterSnapshot: Record<string, unknown>
 let previousBodyMargin: string
 let previousDocumentClassName: string
@@ -92,6 +98,9 @@ beforeEach(() => {
         if (channel === 'db:project-core-get') {
           return structuredClone(coreContent)
         }
+        if (channel === 'db:cultivation-read') return { revision: 0, realms: [], markdown: '' }
+        if (channel === 'db:map-get-all') return { maps: [], nodes: [], connections: [] }
+        if (channel === 'db:info-entry-list' || channel === 'db:creative-material-list' || channel === 'db:creative-legacy-list') return []
         if (channel === 'fs:read-json') return { success: true, data: structuredClone(partialFile) }
         if (channel === 'db:character-roster-read') {
           return structuredClone(rosterSnapshot)
@@ -136,7 +145,7 @@ afterEach(async () => {
 })
 
 describe('WorldBuildingEditor 基础设定总览', () => {
-  it('显示五个原事实源，状态按实际内容呈现；打开批量选择器不启动生成', async () => {
+  it('显示全部专用资料入口，状态按实际内容呈现；打开批量选择器不启动生成', async () => {
     coreContent.premise = '短'
     await act(async () => root.render(<WorldBuildingEditor projectKey={projectPath} />))
     await act(async () => {
@@ -144,12 +153,17 @@ describe('WorldBuildingEditor 基础设定总览', () => {
     })
 
     expect(container.textContent).toContain('基础设定总览')
-    expect(container.querySelectorAll('[data-overview-entry]')).toHaveLength(5)
+    expect(container.querySelectorAll('[data-overview-entry]')).toHaveLength(13)
     expect(container.textContent).toContain('创作方向')
     expect(container.textContent).toContain('故事前提')
-    expect(container.textContent).toContain('角色档案')
-    expect(container.textContent).toContain('世界观总纲')
+    expect(container.textContent).toContain('人物与关系')
+    expect(container.textContent).toContain('世界设定')
     expect(container.textContent).toContain('全书总纲')
+    expect(container.textContent).toContain('写作规范')
+    expect(container.textContent).toContain('力量体系')
+    expect(container.textContent).toContain('地点与区域')
+    expect(container.textContent).toContain('素材与候选')
+    expect(container.textContent).toContain('待整理旧内容')
     expect(container.querySelector('[data-overview-entry="premise"]')?.textContent).toContain('有内容')
     expect(container.querySelector('[data-overview-entry="worldbuilding"]')?.textContent).toContain('待填写')
     expect(container.querySelector('[data-overview-entry="characters"]')?.textContent).toContain('名单尚未建立')
@@ -233,7 +247,7 @@ describe('WorldBuildingEditor 基础设定总览', () => {
     })
     await act(async () => root.render(<WorldBuildingEditor projectKey={projectPath} />))
     await act(async () => {
-      await vi.waitFor(() => expect(container.querySelectorAll('[data-overview-entry]')).toHaveLength(5))
+      await vi.waitFor(() => expect(container.querySelectorAll('[data-overview-entry]')).toHaveLength(13))
     })
 
     const clickEntry = async (key: string) => {
@@ -242,12 +256,14 @@ describe('WorldBuildingEditor 基础设定总览', () => {
       await act(async () => button?.click())
     }
 
-    await clickEntry('config')
+    await clickEntry('creative-direction')
     expect(useEditorStore.getState().tabs.find(tab => tab.type === 'config')).toMatchObject({
       id: configTabId,
       name: '创作方向',
       dirty: true,
     })
+    await clickEntry('writing-rules')
+    expect(useEditorStore.getState().tabs.filter(tab => tab.type === 'config')).toHaveLength(1)
     await clickEntry('premise')
     await act(async () => {
       await vi.waitFor(() => expect(useEditorStore.getState().tabs.some(tab => tab.filePath === 'vela://core/premise')).toBe(true))
@@ -263,7 +279,7 @@ describe('WorldBuildingEditor 基础设定总览', () => {
     await act(async () => {
       await vi.waitFor(() => expect(useEditorStore.getState().tabs.some(tab => tab.filePath === 'vela://core/worldbuilding')).toBe(true))
     })
-    await clickEntry('synopsis')
+    await clickEntry('plot-planning')
     await act(async () => {
       await vi.waitFor(() => expect(useEditorStore.getState().tabs.some(tab => tab.type === 'chapter-card')).toBe(true))
     })
@@ -271,6 +287,14 @@ describe('WorldBuildingEditor 基础设定总览', () => {
       .toEqual({ kind: 'book' })
     await clickEntry('characters')
     expect(useLayoutStore.getState().characterViewRequest?.view).toBe('edit')
+    await clickEntry('power-system')
+    expect(useEditorStore.getState().tabs.some(tab => tab.type === 'cultivation')).toBe(true)
+    await clickEntry('locations')
+    expect(useEditorStore.getState().tabs.some(tab => tab.type === 'locations')).toBe(true)
+    await clickEntry('information-reveal')
+    expect(useEditorStore.getState().tabs.some(tab => tab.type === 'knowledge-gap')).toBe(true)
+    await clickEntry('materials')
+    expect(useEditorStore.getState().tabs.some(tab => tab.type === 'creative-materials')).toBe(true)
 
     const manageWorlds = Array.from(container.querySelectorAll('button'))
       .find(button => button.textContent?.includes('管理各个世界'))
@@ -319,6 +343,7 @@ describe('WorldBuildingEditor 基础设定总览', () => {
   })
 
   it('已打开页面会在架构工作流失败终态后刷新并显示候选入口', async () => {
+    await page.viewport(1280, 1400)
     await act(async () => root.render(<WorldBuildingEditor projectKey={projectPath} />))
     await act(async () => {
       await vi.waitFor(() => expect(container.textContent).toContain('基础设定总览'))
@@ -358,26 +383,73 @@ describe('WorldBuildingEditor 基础设定总览', () => {
     await act(async () => viewButton?.click())
     expect(container.textContent).toContain('不会自动写入正式世界观')
     expect(container.textContent).toContain('倒悬古城依靠记忆结晶运转')
+    await act(async () => {
+      document.querySelectorAll<HTMLButtonElement>('#vela-toast-root .vela-feedback-close').forEach(button => button.click())
+    })
+    await page.screenshot({ path: '../../../../output/playwright/basic-settings-overview-candidate.png' })
   })
 
   it('renders responsive English and dark-theme content, preserving keyboard focus and long summaries', async () => {
+    coreContent = {
+      ...coreContent,
+      creativeDirectionMarkdown: '作品定位：以人物选择推动奇幻悬疑故事。',
+      writingRulesMarkdown: '正文规范：保持贴近主角的有限视角，避免替人物解释情绪。'.repeat(12),
+      genre: '东方奇幻',
+      targetAudience: '成年读者',
+      referenceWorks: '参考作品仅借鉴悬念节奏，不复用设定。',
+      worldbuilding: '世界共同规则：记忆晶体可以记录，但不能恢复完整人生。',
+      synopsis: '全书总纲：主角追查记忆税的来源，并选择公开真相。',
+    }
     rosterSnapshot = {
       status: 'ready',
       revision: 4,
       entries: [{ name: '闻灯', role: 'protagonist' }, { name: '长夜', role: 'supporting' }],
       renderedMarkdown: '闻灯\n长夜',
     }
-    await page.viewport(1280, 820)
+    await page.viewport(1280, 1150)
     await act(async () => root.render(<WorldBuildingEditor projectKey={projectPath} />))
     await act(async () => {
-      await vi.waitFor(() => expect(container.querySelector('[data-overview-entry="characters"]')?.textContent).toContain('2 个角色'))
+      await vi.waitFor(() => {
+        expect(container.querySelector('[data-overview-entry="characters"]')?.textContent).toContain('2 个角色')
+        expect(container.querySelector('[data-overview-entry="creative-direction"] .world-building-overview__status')?.textContent).toContain('有内容')
+        expect(container.querySelector('[data-overview-entry="writing-rules"] .world-building-overview__status')?.textContent).toContain('有内容')
+      })
     })
+    expect(container.querySelectorAll('.world-building-overview__group')).toHaveLength(4)
+    expect(Array.from(container.querySelectorAll('.world-building-overview__group')).map(group => group.querySelector('h2')?.textContent))
+      .toEqual(['创作基础', '故事资料', '剧情规划', '资料整理'])
+    expect(container.querySelector('[data-overview-entry="creative-direction"] .world-building-overview__status')?.textContent).not.toContain('查看与编辑')
+    const entryGrid = container.querySelector<HTMLElement>('.world-building-overview__entries')!
+    const visibleColumnCount = () => getComputedStyle(entryGrid).gridTemplateColumns.split(' ').filter(Boolean).length
+    expect(visibleColumnCount()).toBe(3)
     await act(async () => {
       document.querySelectorAll<HTMLButtonElement>('#vela-toast-root .vela-feedback-close').forEach(button => button.click())
     })
-    await page.screenshot({ path: '../../../../screenshots/basic-settings-overview.png' })
+    await page.screenshot({ path: '../../../../output/playwright/basic-settings-overview.png' })
+
+    await page.viewport(1280, 640)
+    const scrollArea = container.querySelector<HTMLElement>('.world-building-overview__body')!
+    const header = container.querySelector<HTMLElement>('.world-building-overview__header')!
+    const headerTop = header.getBoundingClientRect().top
+    expect(scrollArea.scrollHeight).toBeGreaterThan(scrollArea.clientHeight)
+    scrollArea.scrollTop = scrollArea.scrollHeight
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+    expect(scrollArea.scrollTop).toBeGreaterThan(0)
+    expect(header.getBoundingClientRect().top).toBe(headerTop)
+    const lastEntry = container.querySelector<HTMLElement>('[data-overview-entry="legacy"]')!
+    expect(lastEntry.getBoundingClientRect().bottom).toBeLessThanOrEqual(scrollArea.getBoundingClientRect().bottom + 1)
+    await page.viewport(1280, 1150)
 
     const lightPanelToken = getComputedStyle(container).getPropertyValue('--color-panel').trim()
+    const lightAccentToken = getComputedStyle(container).getPropertyValue('--color-accent').trim()
+    document.documentElement.setAttribute('data-theme', 'verdant')
+    container.dataset.theme = 'verdant'
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+    expect(getComputedStyle(container).getPropertyValue('--color-accent').trim()).not.toBe(lightAccentToken)
+    await page.screenshot({ path: '../../../../output/playwright/basic-settings-overview-verdant.png' })
+
+    document.documentElement.removeAttribute('data-theme')
+    container.dataset.theme = 'light'
     await act(async () => { await useLocaleStore.getState().setLocale('en-US') })
     document.documentElement.classList.add('dark')
     container.classList.add('dark')
@@ -386,6 +458,7 @@ describe('WorldBuildingEditor 基础设定总览', () => {
     expect(container.textContent).toContain('Basic settings overview')
     expect(container.textContent).toContain('View AI workflow')
     expect(getComputedStyle(container).getPropertyValue('--color-panel').trim()).not.toBe(lightPanelToken)
+    await page.screenshot({ path: '../../../../output/playwright/basic-settings-overview-dark.png' })
 
     const config = useProjectStore.getState().currentProject!
     useProjectStore.setState({
@@ -397,15 +470,19 @@ describe('WorldBuildingEditor 基础设定总览', () => {
         },
       },
     })
+    await page.viewport(820, 850)
+    await act(async () => { await Promise.resolve() })
+    expect(visibleColumnCount()).toBe(2)
+    await page.viewport(560, 850)
+    await act(async () => { await Promise.resolve() })
+    expect(visibleColumnCount()).toBe(1)
     await page.viewport(380, 850)
     await act(async () => { await Promise.resolve() })
-    const grid = container.querySelector<HTMLElement>('.world-building-overview__grid')!
-    expect(getComputedStyle(grid).gridTemplateColumns.split(' ').length).toBe(1)
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(380)
-    const longSummary = container.querySelector<HTMLElement>('[data-overview-entry="config"] .world-building-overview__summary-item')!
+    const longSummary = container.querySelector<HTMLElement>('[data-overview-entry="creative-direction"] .world-building-overview__summary-value')!
     expect(longSummary.scrollWidth).toBeLessThanOrEqual(longSummary.clientWidth)
 
-    const firstCard = container.querySelector<HTMLButtonElement>('[data-overview-entry="config"] .world-building-overview__card-main')!
+    const firstCard = container.querySelector<HTMLButtonElement>('[data-overview-entry="creative-direction"] .world-building-overview__card-main')!
     firstCard.focus()
     expect(document.activeElement).toBe(firstCard)
     expect(getComputedStyle(firstCard).outlineStyle).not.toBe('none')

@@ -554,6 +554,16 @@ static void WriteAtomically(
     return;
   }
   BOOL mustAlreadyExist = required ? [required boolValue] : NO;
+  id mustNotExistValue = request[@"mustNotAlreadyExist"];
+  if (mustNotExistValue && !IsJsonBoolean(mustNotExistValue)) {
+    WriteResponse(Failure(@"SECURE_FS_INVALID_OPERATION"));
+    return;
+  }
+  BOOL mustNotAlreadyExist = mustNotExistValue ? [mustNotExistValue boolValue] : NO;
+  if (mustAlreadyExist && mustNotAlreadyExist) {
+    WriteResponse(Failure(@"SECURE_FS_INVALID_OPERATION"));
+    return;
+  }
   NSData *content = nil;
   if (!DecodeContent(encoded, &content, &errorCode)) {
     WriteResponse(Failure(errorCode));
@@ -621,13 +631,17 @@ static void WriteAtomically(
     }
   }
 
-  if (renameat(parent, temporaryName.fileSystemRepresentation, parent, leaf.fileSystemRepresentation) < 0) {
+  int renameResult = mustNotAlreadyExist
+    ? linkat(parent, temporaryName.fileSystemRepresentation, parent, leaf.fileSystemRepresentation, 0)
+    : renameat(parent, temporaryName.fileSystemRepresentation, parent, leaf.fileSystemRepresentation);
+  if (renameResult < 0) {
     unlinkat(parent, temporaryName.fileSystemRepresentation, 0);
     if (existing >= 0) close(existing);
     close(parent);
     WriteResponse(Failure(kWriteFailed));
     return;
   }
+  if (mustNotAlreadyExist) unlinkat(parent, temporaryName.fileSystemRepresentation, 0);
   if (existing >= 0) close(existing);
   close(parent);
   WriteResponse(Success());

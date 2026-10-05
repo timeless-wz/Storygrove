@@ -53,7 +53,7 @@ afterEach(() => { db.close(); rmSync(folder, { recursive: true, force: true }) }
 describe('project cultivation transactions', () => {
   it('migrates repeatedly without defaults or parsing free text', () => {
     ensureCultivationSchema(db); ensureCultivationSchema(db)
-    expect(CultivationRepository.read()).toEqual({ revision: 0, realms: [] })
+    expect(CultivationRepository.read()).toEqual({ revision: 0, markdown: '', realms: [] })
     expect(CharacterRepository.getByName('甲')?.cultivationLevelId).toBeUndefined()
     expect(CharacterRepository.getByName('甲')?.currentState?.powerLevel).toBe('旧修为原文')
   })

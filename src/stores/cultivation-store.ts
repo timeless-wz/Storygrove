@@ -8,7 +8,7 @@ import { useCharacterStore } from './character-store'
 import { useEditorStore } from './editor-store'
 import { parseProjectEditorDraftLedger, recordProjectEditorEdit, rebaseProjectEditorDraft, persistProjectEditorDraftLedger, settleProjectEditorSave } from './project-editor-draft-ledger'
 
-const TAB = { id: 'cultivation-settings', type: 'cultivation' as const, name: '修炼体系' }
+const TAB = { id: 'cultivation-settings', type: 'cultivation' as const, name: '力量体系' }
 let loadSequence = 0
 function ledger() { return parseProjectEditorDraftLedger<CultivationRealm[]>(useEditorStore.getState().draftLedgers[TAB.id]) }
 function persist(value: ReturnType<typeof ledger>) { persistProjectEditorDraftLedger(useEditorStore.getState(), TAB, value) }
@@ -18,6 +18,7 @@ interface CultivationState {
   session: ProjectSessionContext | null
   system: CultivationSystem | null
   realms: CultivationRealm[]
+  markdown: string
   roster: CharacterRosterSnapshot | null
   dirty: boolean
   loading: boolean
@@ -26,16 +27,17 @@ interface CultivationState {
   conflicted: boolean
   load: (session: ProjectSessionContext) => Promise<void>
   edit: (realms: CultivationRealm[]) => void
+  editMarkdown: (markdown: string) => void
   discard: () => void
   save: (resolutions: Record<string, string | null>) => Promise<boolean>
 }
 export const useCultivationStore = create<CultivationState>((set, get) => ({
-  session: null, system: null, realms: [], roster: null, dirty: false, loading: false, saving: false, error: null, conflicted: false,
+  session: null, system: null, realms: [], markdown: '', roster: null, dirty: false, loading: false, saving: false, error: null, conflicted: false,
   load: async session => {
     if (!current(session)) return
     if (sameProjectSessionContext(get().session, session) && (get().loading || get().saving || get().system)) return
     const sequence = ++loadSequence
-    set({ session, system: null, realms: [], roster: null, dirty: false, loading: true, saving: false, error: null, conflicted: false })
+    set({ session, system: null, realms: [], markdown: '', roster: null, dirty: false, loading: true, saving: false, error: null, conflicted: false })
     try {
       const [system, roster] = await Promise.all([
         ipc.invokeWithProjectSession(session, 'db:cultivation-read', session.projectPath),
@@ -50,7 +52,8 @@ export const useCultivationStore = create<CultivationState>((set, get) => ({
       // Preserve the original base on conflict, so reopening cannot bypass conflict review.
       if (conflicted && existingDraft) restored.ledger.projects = restored.ledger.projects.map(entry => entry.projectKey === session.projectPath ? existingDraft : entry)
       persist(restored.ledger)
-      set({ system, realms: restored.value, roster, dirty: JSON.stringify(system.realms) !== JSON.stringify(restored.value), loading: false, conflicted,
+      const markdown = typeof system.markdown === 'string' ? system.markdown : ''
+      set({ system, realms: restored.value, markdown, roster, dirty: JSON.stringify(system.realms) !== JSON.stringify(restored.value), loading: false, conflicted,
         error: conflicted ? '等级配置已在其他会话更新；草稿已保留。请检查草稿后放弃修改，重新读取当前配置。 / Settings changed in another session; draft retained. Review and discard the draft to use the current configuration.' : null })
     } catch (error) {
       if (current(session) && sequence === loadSequence) set({ error: String(error), loading: false })
@@ -60,13 +63,18 @@ export const useCultivationStore = create<CultivationState>((set, get) => ({
     const state = get()
     if (!current(state.session) || !state.system || state.loading || state.saving) return
     persist(recordProjectEditorEdit(ledger(), state.session!.projectPath, state.realms, realms))
-    set({ realms, dirty: JSON.stringify(realms) !== JSON.stringify(state.system.realms), error: state.conflicted ? state.error : null })
+    set({ realms, dirty: JSON.stringify(realms) !== JSON.stringify(state.system.realms) || state.markdown !== (state.system.markdown ?? ''), error: state.conflicted ? state.error : null })
+  },
+  editMarkdown: markdown => {
+    const state = get()
+    if (!current(state.session) || !state.system || state.loading || state.saving) return
+    set({ markdown, dirty: JSON.stringify(state.realms) !== JSON.stringify(state.system.realms) || markdown !== (state.system.markdown ?? ''), error: state.conflicted ? state.error : null })
   },
   discard: () => {
     const state = get()
     if (!current(state.session) || !state.system || state.saving) return
     persist(settleProjectEditorSave(ledger(), state.session!.projectPath, state.system.realms, state.system.realms))
-    set({ realms: state.system.realms, dirty: false, error: null, conflicted: false })
+    set({ realms: state.system.realms, markdown: state.system.markdown ?? '', dirty: false, error: null, conflicted: false })
   },
   save: async resolutions => {
     const state = get()
@@ -78,13 +86,13 @@ export const useCultivationStore = create<CultivationState>((set, get) => ({
       const roster = await ipc.invokeWithProjectSession(session!, 'db:character-roster-read', session!.projectPath)
       if (!current(session)) return false
       const response = await ipc.invokeWithProjectSession(session!, 'db:cultivation-save', {
-        expectedRevision: state.system.revision, expectedRosterRevision: roster.revision, realms: state.realms, resolutions,
+        expectedRevision: state.system.revision, expectedRosterRevision: roster.revision, realms: state.realms, markdown: state.markdown, resolutions,
       }, session!.projectPath)
       if (!current(session)) return false
       if (!response.success || !response.result) throw new Error(response.error ?? 'Could not save cultivation settings')
       useCharacterStore.getState().acceptCultivationSnapshot(response.result.roster, session!, new Set(cultivationLevels(response.result.system.realms).map(level => level.id)))
       persist(settleProjectEditorSave(ledger(), session!.projectPath, response.result.system.realms, response.result.system.realms))
-      set({ system: response.result.system, realms: response.result.system.realms, roster: response.result.roster, dirty: false, saving: false })
+      set({ system: response.result.system, realms: response.result.system.realms, markdown: response.result.system.markdown ?? state.markdown, roster: response.result.roster, dirty: false, saving: false })
       return true
     } catch (error) {
       if (current(session)) set({ saving: false, error: String(error) })

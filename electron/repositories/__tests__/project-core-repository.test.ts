@@ -29,7 +29,7 @@ const expectedSynopsisSource = {
   writingLanguage: 'zh-CN' as const,
   plotStructure: 'three_act',
   narrativePov: 'third_limited',
-  globalGuidance: 'Keep the reveal private.',
+  creativeDirectionMarkdown: 'Keep the reveal private.',
 }
 
 describe('ProjectCoreRepository synopsis compare-and-set', () => {
@@ -50,7 +50,7 @@ describe('ProjectCoreRepository synopsis compare-and-set', () => {
         writing_language TEXT,
         plot_structure TEXT,
         narrative_pov TEXT,
-        global_guidance TEXT,
+        creative_direction_markdown TEXT,
         updated_at TEXT
       );
     `)
@@ -58,7 +58,7 @@ describe('ProjectCoreRepository synopsis compare-and-set', () => {
       INSERT INTO project_core (
         id, synopsis, premise, characters_arch, worldbuilding, genre,
         total_chapters, words_per_chapter, writing_language, plot_structure,
-        narrative_pov, global_guidance, updated_at
+        narrative_pov, creative_direction_markdown, updated_at
       ) VALUES ('main', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'before')
     `).run(
       expectedSynopsisSource.synopsis,
@@ -71,7 +71,7 @@ describe('ProjectCoreRepository synopsis compare-and-set', () => {
       expectedSynopsisSource.writingLanguage,
       expectedSynopsisSource.plotStructure,
       expectedSynopsisSource.narrativePov,
-      expectedSynopsisSource.globalGuidance,
+      expectedSynopsisSource.creativeDirectionMarkdown,
     )
     vi.mocked(getProjectDb).mockReturnValue(db)
   })
@@ -108,7 +108,7 @@ describe('ProjectCoreRepository synopsis compare-and-set', () => {
     ['writing_language', 'en-US'],
     ['plot_structure', 'multi_thread'],
     ['narrative_pov', 'first_person'],
-    ['global_guidance', 'Reveal everything.'],
+    ['creative_direction_markdown', 'Reveal everything.'],
   ])('does not overwrite a synopsis after %s changes', (column, changedValue) => {
     db.prepare(`UPDATE project_core SET ${column} = ? WHERE id = 'main'`).run(changedValue)
 

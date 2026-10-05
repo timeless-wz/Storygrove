@@ -148,7 +148,8 @@ describe('ProjectTree information architecture', () => {
     const worldSetup = setting.querySelector('[data-group-level="2"][data-group-id="worldSetup"]')!
     expect(setting.querySelectorAll('[data-arch-file-key="premise"]')).toHaveLength(1)
     expect(plan.querySelectorAll('[data-arch-file-key="synopsis"]')).toHaveLength(0)
-    expect(plan.textContent).toContain('Book outline')
+    expect(plan.textContent).toContain('Chapter blueprints')
+    expect(plan.textContent).not.toContain('Book outline')
     expect(plan.textContent).not.toContain('Map atlas')
     expect(plan.textContent).not.toContain('World records')
     expect(container.textContent).not.toContain('Story architecture')
@@ -179,7 +180,7 @@ describe('ProjectTree information architecture', () => {
     expect(text).not.toContain('Generate story setup')
     expect(text).toContain('World management')
     expect(text).toContain('Map atlas')
-    expect(text).toContain('Cultivation system')
+    expect(text).toContain('Power system')
     expect(text).toContain('Project documents')
     expect(text).toContain('Sources & review')
     expect(text).toContain('Knowledge retrieval')

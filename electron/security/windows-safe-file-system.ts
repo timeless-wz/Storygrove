@@ -35,6 +35,8 @@ export interface AtomicWriteConstraints {
    * closed when it cannot preserve that invariant.
    */
   mustAlreadyExist?: boolean
+  /** Require the destination to remain absent through the atomic commit. */
+  mustNotAlreadyExist?: boolean
 }
 
 export interface SecureFileSystem {
@@ -73,6 +75,7 @@ interface HelperRequest {
   rootIdentity: SecureRootIdentity
   contentBase64?: string
   mustAlreadyExist?: boolean
+  mustNotAlreadyExist?: boolean
   maxBytes?: number
 }
 
@@ -639,7 +642,9 @@ export function createSecureFileSystem(
         rootIdentity: safeCapability.rootIdentity,
         contentBase64: buffer.toString('base64'),
         mustAlreadyExist: constraints?.mustAlreadyExist === true,
+        mustNotAlreadyExist: constraints?.mustNotAlreadyExist === true,
       }
+      if (request.mustAlreadyExist && request.mustNotAlreadyExist) throw secureError('SECURE_FS_INVALID_OPERATION')
       if (usingTestInvoke) {
         const response = await invoke(request)
         if (!response.ok) responseError(response)

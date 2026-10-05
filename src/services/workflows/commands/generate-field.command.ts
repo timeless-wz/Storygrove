@@ -20,6 +20,8 @@ import {
   preserveAuthorText,
 } from '../novel-config-expansion'
 import { GENERATABLE_FIELD_LABELS, type GeneratableField } from '../novel-config-field-labels'
+import { buildCreativeContextBundle, type CreativeContentCategory } from '../../../shared/creative-content'
+import { loadCreativeCorePromptSources, loadCreativeDomainPromptSources } from '../../creative-context'
 
 export { GENERATABLE_FIELD_LABELS } from '../novel-config-field-labels'
 export type { GeneratableField } from '../novel-config-field-labels'
@@ -78,7 +80,21 @@ export class GenerateFieldCommand extends BaseWorkflowCommand<string> {
 
     callbacks.log(workflowUiText(context, `正在为「${label}」生成内容...`, `Generating “${label}”...`))
 
-    // 构建上下文摘要（已填写的字段作为参考）
+    // 旧 NovelConfig 字段只作为初始构想的输出目标；上下文只从正式入口和结构化参数读取。
+    const [coreSources, domainSources] = await Promise.all([
+      loadCreativeCorePromptSources(
+        projectSession,
+        projectSession.projectPath,
+        this.formalSourceCategories(),
+      ),
+      loadCreativeDomainPromptSources(projectSession, projectSession.projectPath, {
+        powerSystem: this.fieldKey === 'worldSetting' || this.fieldKey === 'goldenFinger',
+      }),
+    ])
+    const creativeContext = buildCreativeContextBundle(
+      [...coreSources, ...domainSources],
+      writingLanguage,
+    )
     const contextSummary = this.buildContext(config, writingLanguage)
     // 构建针对性 prompt
     const template = await resolvePromptTemplate(
@@ -87,11 +103,20 @@ export class GenerateFieldCommand extends BaseWorkflowCommand<string> {
       writingLanguage,
     )
     if (!template) throw new Error(workflowUiText(context, '未找到字段生成提示词', 'Field-generation prompt is unavailable'))
-    const prompt = renderPrompt(template, {
+    const renderedPrompt = renderPrompt(template, {
       existing_config: contextSummary,
       field_label: promptLanguageText(writingLanguage, labelPair[0], labelPair[1]),
       field_requirements: this.fieldRequirements(config, writingLanguage),
     }, writingLanguage)
+    const prompt = [
+      promptLanguageText(
+        writingLanguage,
+        '【用途】本次生成结果写入折叠的初始构想字段，供后续整理，不是正式设定。请服从下列已保存正式资料；存在冲突时明确指出，不要覆盖或重新解释正式内容。',
+        '[Purpose] This output is saved as an initial idea for later organization, not as formal canon. Follow the saved formal sources below; surface conflicts instead of overwriting or reinterpreting them.',
+      ),
+      creativeContext.promptText,
+      renderedPrompt,
+    ].filter(Boolean).join('\n\n')
     const systemPrompt = composePromptSystemRole(template, writingLanguage)
 
     const requestFieldCompletion = async (requestPrompt: string, purpose: string): Promise<string> => {
@@ -220,6 +245,17 @@ export class GenerateFieldCommand extends BaseWorkflowCommand<string> {
     return expandedResult
   }
 
+  private formalSourceCategories(): CreativeContentCategory[] {
+    switch (this.fieldKey) {
+      case 'coreOutline': return ['creative-direction', 'premise', 'world-setting', 'characters']
+      case 'worldSetting': return ['creative-direction', 'premise', 'world-setting']
+      case 'goldenFinger': return ['creative-direction', 'premise', 'world-setting', 'characters', 'power-system']
+      case 'protagonistProfile': return ['creative-direction', 'premise', 'world-setting', 'characters']
+      case 'globalGuidance':
+      case 'writingStyle': return ['creative-direction', 'writing-rules']
+    }
+  }
+
   /** 构建已有配置的上下文摘要 */
   private buildContext(config: NovelConfig, writingLanguage: WritingLanguage): string {
     const parts: string[] = []
@@ -231,20 +267,12 @@ export class GenerateFieldCommand extends BaseWorkflowCommand<string> {
     if (config.targetAudience) parts.push(line('目标受众', 'Target audience', config.targetAudience))
     if (config.totalChapters) parts.push(line('总章数', 'Total chapters', config.totalChapters))
     if (config.wordsPerChapter) parts.push(line('每章目标字数', 'Target words per chapter', config.wordsPerChapter))
-    if (config.coreOutline?.trim())
-      parts.push(line('故事构想', 'Story concept', config.coreOutline))
-    if (config.worldSetting?.trim())
-      parts.push(line('背景构想', 'Background concept', config.worldSetting))
-    if (config.goldenFinger?.trim())
-      parts.push(line('金手指体系', 'Special advantage', config.goldenFinger))
-    if (config.protagonistProfile?.trim())
-      parts.push(line('主角构想', 'Protagonist concept', config.protagonistProfile))
-    if (config.globalGuidance?.trim())
-      parts.push(line('全局写作要求', 'Global writing guidance', config.globalGuidance))
+    if (config.creativeDirectionMarkdown?.trim())
+      parts.push(line('正式创作方向', 'Formal creative direction', config.creativeDirectionMarkdown))
+    if (config.writingRulesMarkdown?.trim())
+      parts.push(line('正式写作规范', 'Formal writing rules', config.writingRulesMarkdown))
     if (config.referenceWorks?.trim())
-      parts.push(line('参考作品', 'Reference works', config.referenceWorks))
-    if (config.writingStyle?.trim())
-      parts.push(line('文风描述', 'Writing style', config.writingStyle))
+      parts.push(line('正式参考作品与借鉴边界', 'Formal references and borrowing boundaries', config.referenceWorks))
     return parts.length > 0
       ? parts.join('\n')
       : promptLanguageText(writingLanguage, '（尚未填写任何配置）', '(No configuration has been provided yet.)')

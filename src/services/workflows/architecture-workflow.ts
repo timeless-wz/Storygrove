@@ -28,6 +28,7 @@ export interface PartialArchData {
   world_building_partial_result?: string
   world_building_incomplete?: boolean
   world_building_facts_fingerprint?: string
+  world_building_sources_fingerprint?: string
   world_building_db_hash?: string
   world_building_step_guidance?: string
   synopsis_result?: string

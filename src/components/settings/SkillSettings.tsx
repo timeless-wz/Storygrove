@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Download, Link2, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react'
+import { AlertTriangle, Download, History, Link2, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react'
 import type { ProjectSessionContext } from '../../shared/ipc-channels'
 import { projectSessionContextFromProject } from '../../shared/project-session-context'
 import {
@@ -9,6 +9,8 @@ import {
 } from '../../shared/writing-skills'
 import { useLocaleStore } from '../../stores/locale-store'
 import { useProjectStore } from '../../stores/project-store'
+import { useEditorStore } from '../../stores/editor-store'
+import { useLayoutStore } from '../../stores/layout-store'
 import { ipc } from '../../services/ipc-client'
 import { skillRegistry, type LoadedSkill } from '../../services/agent/skill-registry'
 import {
@@ -216,9 +218,29 @@ export default function SkillSettings() {
   }
 
   const compatibleSkills = skills.filter(skill => skill.writingSkill.compatible)
+  const openRevisionLearningHistory = () => {
+    if (!project?.path) return
+    useEditorStore.getState().openFile({
+      id: 'revision-learning-history',
+      name: text('修订学习', 'Revision learning'),
+      type: 'revision-learning',
+      projectKey: project.path,
+    })
+    useLayoutStore.getState().closeSettings()
+  }
 
   return (
     <div className="space-y-5">
+      <section className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border)] pb-4">
+        <div>
+          <h3 className="text-sm font-semibold text-[var(--color-text)]">{text('从真实修订积累修稿技能', 'Learn refinement skills from real revisions')}</h3>
+          <p className="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">{text('比较已保存版本或编辑器快照，审阅候选规则后再发布到当前项目。', 'Compare saved versions or editor snapshots, review candidate rules, then publish them to the current project.')}</p>
+        </div>
+        <Button variant="outline" onClick={openRevisionLearningHistory} disabled={!projectSession}>
+          <History size={14} />{text('修订学习记录', 'Revision learning records')}
+        </Button>
+      </section>
+
       <section className="space-y-2" aria-labelledby="writing-skill-source-title">
         <div>
           <h3 id="writing-skill-source-title" className="text-sm font-semibold text-[var(--color-text)]">

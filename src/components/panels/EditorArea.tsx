@@ -1,5 +1,5 @@
 import CultivationSettingsPage from '../pages/CultivationSettingsPage'
-import { X, FileText, Settings, Users, ArrowLeftRight, MoreHorizontal, BookOpen, History, ClipboardCheck, Globe, Save, ChevronLeft, ChevronRight, Check, Focus, Compass, LayoutDashboard, Clock3, Globe2 } from 'lucide-react'
+import { X, FileText, Settings, Users, ArrowLeftRight, MoreHorizontal, BookOpen, History, ClipboardCheck, Globe, Save, ChevronLeft, ChevronRight, Check, Focus, Compass, LayoutDashboard, Clock3, Globe2, Sparkles } from 'lucide-react'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { ContextMenu, type ContextMenuEntry } from '../ui/ContextMenu'
 import {
@@ -14,12 +14,15 @@ import ChapterCardEditor from '../editor/ChapterCardEditor'
 import WorldBuildingEditor from '../editor/WorldBuildingEditor'
 import ArchFileViewer from '../editor/ArchFileViewer'
 import ProjectDocumentEditor from '../editor/ProjectDocumentEditor'
+import CreativeMaterialsEditor from '../editor/CreativeMaterialsEditor'
+import LocationManagementEditor from '../editor/LocationManagementEditor'
 import DraftEditor from '../editor/DraftEditor'
 import ChapterOutlineSidebar from '../editor/ChapterOutlineSidebar'
 import VersionHistory from '../editor/VersionHistory'
 import ReviewReport from '../editor/ReviewReport'
 import NarrativeThreadEditor from '../editor/NarrativeThreadEditor'
 import ForeshadowingManagementView from '../editor/ForeshadowingManagementView'
+import KnowledgeGapView from '../planning/knowledge-gap/KnowledgeGapView'
 import ThreeWayMerge from '../editor/ThreeWayMerge'  // 保留引用以防其他入口使用
 import WelcomePage from '../pages/WelcomePage'
 import KnowledgeOverview from '../pages/KnowledgeOverview'
@@ -28,6 +31,7 @@ import WorldMapView from '../map/WorldMapView'
 import StoryTimelineView from '../timeline/StoryTimelineView'
 import WorldWorkbenchView from '../world/WorldWorkbenchView'
 import ProjectOverviewPage from '../pages/ProjectOverviewPage'
+import RevisionLearningEditor from '../editor/RevisionLearningEditor'
 import { useProjectStore } from '../../stores/project-store'
 import { registerEditorExitSaveHandler, useEditorStore, type EditorTab } from '../../stores/editor-store'
 import {
@@ -519,6 +523,7 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
     if (type === 'version-history') return <History size={14} />
     if (type === 'review-report') return <ClipboardCheck size={14} />
     if (type === 'project-document') return <FileText size={14} />
+    if (type === 'revision-learning') return <Sparkles size={14} />
     return <FileText size={14} />
   }
 
@@ -700,7 +705,25 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
             }}
           />
         )}
-        {activeTab?.type === 'cultivation' && activeTab.projectKey === currentProject.path && <CultivationSettingsPage key={activeTab.id} projectKey={activeTab.projectKey} />}
+        {activeTab?.type === 'cultivation' && activeTab.projectKey === currentProject.path && <CultivationSettingsPage key={activeTab.id} tabId={activeTab.id} projectKey={activeTab.projectKey} initialContent={activeTab.content ?? ''} initialDirty={!!activeTab.dirty} />}
+        {activeTab?.type === 'creative-materials' && activeTab.projectKey === currentProject.path && (
+          <CreativeMaterialsEditor
+            key={activeTab.id}
+            tabId={activeTab.id}
+            projectKey={activeTab.projectKey}
+            initialView={activeTab.creativeMaterialsView ?? 'materials'}
+            initialEntryId={activeTab.filePath}
+            initialContent={activeTab.content ?? ''}
+          />
+        )}
+        {activeTab?.type === 'locations' && activeTab.projectKey === currentProject.path && (
+          <LocationManagementEditor
+            key={activeTab.id}
+            tabId={activeTab.id}
+            projectKey={activeTab.projectKey}
+            initialContent={activeTab.content ?? ''}
+          />
+        )}
         {activeTab?.type === 'config' && activeTab.projectKey && (
           <NovelConfigEditor key={activeTab.id} projectKey={activeTab.projectKey} />
         )}
@@ -787,6 +810,19 @@ export default function EditorArea({ onNewProject }: EditorAreaProps) {
         )}
         {activeTab?.type === 'foreshadowing' && activeTab.projectKey === currentProject.path && (
           <ForeshadowingManagementView key={activeTab.id} projectKey={activeTab.projectKey} />
+        )}
+        {activeTab?.type === 'knowledge-gap' && activeTab.projectKey === currentProject.path && (
+          <KnowledgeGapView
+            key={activeTab.id}
+            projectKey={activeTab.projectKey}
+            initialChapterFilter={activeTab.knowledgeGapChapterFilter}
+          />
+        )}
+        {activeTab?.type === 'revision-learning' && activeTab.projectKey === currentProject.path && (
+          <RevisionLearningEditor
+            key={activeTab.id}
+            recordId={activeTab.revisionLearningRecordId}
+          />
         )}
         {/* AI 建议预览 — 只读对比，统一使用弹出式 Dialog（与 DraftEditor 一致） */}
         <Dialog

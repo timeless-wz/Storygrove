@@ -105,6 +105,45 @@ describe('bounded secure text reads', () => {
       expect.objectContaining({ operation: 'read', maxBytes: binary.length }),
     ])
   })
+
+  it('passes an exclusive-create requirement to the secure atomic-write helper', async () => {
+    const fixture = fixtureRoot()
+    const selectedRoot = path.join(fixture, 'selected')
+    const requests: Array<Record<string, unknown>> = []
+    fs.mkdirSync(selectedRoot)
+    const safeFileSystem = createWindowsSafeFileSystem({
+      invoke: async request => {
+        requests.push({ ...request })
+        return { ok: true }
+      },
+    })
+
+    await safeFileSystem.writeTextAtomically(
+      capability(selectedRoot, 'new-skill/SKILL.md'),
+      'skill body',
+      undefined,
+      { mustNotAlreadyExist: true },
+    )
+
+    expect(requests).toEqual([
+      expect.objectContaining({ operation: 'write', relativePath: 'new-skill\\SKILL.md', mustNotAlreadyExist: true }),
+    ])
+  })
+
+  it('rejects contradictory atomic-write constraints before invoking the helper', async () => {
+    const fixture = fixtureRoot()
+    const selectedRoot = path.join(fixture, 'selected')
+    fs.mkdirSync(selectedRoot)
+    const invoke = async () => ({ ok: true })
+    const safeFileSystem = createWindowsSafeFileSystem({ invoke })
+
+    await expect(safeFileSystem.writeTextAtomically(
+      capability(selectedRoot, 'chapter.txt'),
+      'new content',
+      undefined,
+      { mustAlreadyExist: true, mustNotAlreadyExist: true },
+    )).rejects.toThrow('SECURE_FS_INVALID_OPERATION')
+  })
 })
 
 describe('Darwin handle-bound secure file system', () => {

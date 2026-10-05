@@ -32,6 +32,8 @@ import {
   confirmCurrentProjectSession,
   openArchFile,
   openBuiltinEditor,
+  openCreativeMaterialsView,
+  openLocationsEditor,
 } from './sidebar-file-openers'
 import { renderIcon } from './sidebar-icons'
 import { showSidebarMenu } from './sidebar-menu'
@@ -257,7 +259,7 @@ export default function ProjectTree() {
     projectKey: currentProject.path,
   })
   const openCultivationEditor = () => useEditorStore.getState().openFile({
-    id: 'cultivation-settings', name: text('修炼体系', 'Cultivation system'),
+    id: 'cultivation-settings', name: text('力量体系', 'Power system'),
     type: 'cultivation', projectKey: currentProject.path,
   })
 
@@ -409,6 +411,27 @@ export default function ProjectTree() {
           />
         </SidebarMenuItem>
         <SidebarMenuItem>
+          <LeafItem
+            iconName="map"
+            label={text('地点与区域', 'Locations and regions')}
+            desc={text('地点正文独立保存，地图和空间关系为可选视图', 'Authoritative location notes save independently; maps are optional views')}
+            badge={mapNodes.length > 0 ? text(`${mapNodes.length} 处`, `${mapNodes.length} places`) : undefined}
+            onClick={() => openLocationsEditor(text('地点与区域', 'Locations and regions'))}
+          />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <LeafItem iconName="sparkles" label={text('素材与候选', 'Materials and candidates')} desc={text('按用途与采用状态管理尚未进入正式设定的资料', 'Manage ideas by purpose and adoption state')} onClick={() => openCreativeMaterialsView('materials', text('素材与候选', 'Materials and candidates'))} />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <LeafItem iconName="archive" label={text('废案', 'Retired ideas')} desc={text('记录已废止方案及原因，作为明确的禁用约束', 'Record retired plans and reasons as explicit prohibitions')} onClick={() => openCreativeMaterialsView('retired', text('废案', 'Retired ideas'))} />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <LeafItem iconName="archive" label={text('问题记录', 'Open issues')} desc={text('记录待解决漏洞、风险与处理状态', 'Track unresolved gaps, risks, and resolution state')} onClick={() => openCreativeMaterialsView('issues', text('问题记录', 'Open issues'))} />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <LeafItem iconName="archive" label={text('待整理旧内容', 'Unorganized legacy content')} desc={text('查看旧配置原文并显式确认是否已归位', 'Review old configuration text and confirm its organization status')} onClick={() => openCreativeMaterialsView('legacy', text('待整理旧内容', 'Unorganized legacy content'))} />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
           <ProjectTreeCollapsibleGroup
             id="worldSetup"
             level={2}
@@ -447,8 +470,8 @@ export default function ProjectTree() {
             <SidebarMenuItem>
               <LeafItem
                 iconName="bar-chart-3"
-                label={text('修炼体系', 'Cultivation system')}
-                desc={text('项目级境界体系、等级顺序与角色绑定', 'Project realms, level order, and character bindings')}
+                label={text('力量体系', 'Power system')}
+                desc={text('通用能力机制与可选等级结构；适配非修仙题材', 'Shared power rules and optional level structures for any genre')}
                 onClick={openCultivationEditor}
               />
             </SidebarMenuItem>
@@ -528,6 +551,17 @@ export default function ProjectTree() {
               'Prose-anchored foreshadowing markers with setup, deepening, and payoff tracking',
             )}
             onClick={openForeshadowing}
+          />
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <LeafItem
+            iconName="book-open"
+            label={text('信息与揭露', 'Info & Revelation')}
+            desc={text(
+              '信息条目、人物知情与读者记录：区分实际真相、误解隐瞒与揭露时机',
+              'Info entries, character knowledge, and reader records: truth vs misconception, concealment, and reveal timing',
+            )}
+            onClick={() => openBuiltinEditor('knowledge-gap', text('信息与揭露', 'Info & Revelation'), 'knowledge-gap')}
           />
         </SidebarMenuItem>
       </ProjectTreeCollapsibleGroup>

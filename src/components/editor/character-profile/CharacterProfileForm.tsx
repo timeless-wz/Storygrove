@@ -16,7 +16,10 @@ import {
 } from '../../../shared/character-profile-presentation'
 import CharacterRelationshipsField from './CharacterRelationshipsField'
 import type { CharacterSharedRelationship } from '../../../shared/character-relationship'
+import { createBusinessFieldDocumentIdentity } from '../../../shared/document-editing'
 import { characterRoleColors } from '../../characters/character-role-colors'
+import { useProjectStore } from '../../../stores/project-store'
+import DocumentEditingSurface from '../DocumentEditingSurface'
 
 type CharacterEditableField = Exclude<keyof CharacterCard, 'name'>
 
@@ -45,6 +48,7 @@ export default function CharacterProfileForm({
   onUpdateField,
 }: CharacterProfileFormProps) {
   const text = useLocaleStore(state => state.text)
+  const projectId = useProjectStore(state => state.currentProject?.id) ?? 'inactive-project'
   const roleLabel = (role: CharacterCard['role']) => {
     const { zhCN, enUS } = getCharacterRoleLabels(role)
     return text(zhCN, enUS)
@@ -217,37 +221,22 @@ export default function CharacterProfileForm({
         <div className="space-y-3">
           <div>
             <Label htmlFor="character-profile-background">{text('背景故事', 'Background')}</Label>
-            <Textarea
-              id="character-profile-background"
-              aria-label={text('背景故事', 'Background')}
-              value={card.background}
-              onChange={(event) => onUpdateField('background', event.target.value)}
-              rows={4}
-              placeholder={text('输入背景出身、过往经历、关键过往事件...', 'Describe background story, origins, history...')}
-            />
+            <div id="character-profile-background" className="h-[300px] min-h-[220px] min-w-0 rounded-lg border border-[var(--color-border)] overflow-hidden">
+              <DocumentEditingSurface documentIdentity={createBusinessFieldDocumentIdentity({ projectId, entityType: 'character', entityId: characterId, fieldId: 'background' })} layout="business-field" showHeadingToc content={card.background} onChange={value => onUpdateField('background', value)} placeholder={text('背景出身、过往经历、关键事件。可粘贴完整 Markdown。', 'Origins, past events, and key history. Full Markdown is supported.')} />
+            </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <Label htmlFor="character-profile-abilities">{text('能力/技能', 'Abilities / skills')}</Label>
-              <Textarea
-                id="character-profile-abilities"
-                aria-label={text('能力/技能', 'Abilities and skills')}
-                value={card.abilities}
-                onChange={(event) => onUpdateField('abilities', event.target.value)}
-                rows={3}
-                placeholder={text('输入功法、技能、超能力或专长...', 'Describe abilities, martial arts, skills...')}
-              />
+              <div id="character-profile-abilities" className="h-[280px] min-h-[200px] min-w-0 rounded-lg border border-[var(--color-border)] overflow-hidden">
+                <DocumentEditingSurface documentIdentity={createBusinessFieldDocumentIdentity({ projectId, entityType: 'character', entityId: characterId, fieldId: 'abilities' })} layout="business-field" content={card.abilities} onChange={value => onUpdateField('abilities', value)} placeholder={text('记录这个人物独有的能力、成长条件、限制与代价；多人共用的机制放到力量体系。', 'Record this character’s abilities, growth, limits, and costs. Shared mechanics belong in the power system.')} />
+              </div>
             </div>
             <div>
               <Label htmlFor="character-profile-notes">{text('备注', 'Notes')}</Label>
-              <Textarea
-                id="character-profile-notes"
-                aria-label={text('备注', 'Notes')}
-                value={card.notes}
-                onChange={(event) => onUpdateField('notes', event.target.value)}
-                rows={3}
-                placeholder={text('作者私人创作备忘、伏笔、隐藏线索...', 'Author notes, foreshadowing, hints...')}
-              />
+              <div id="character-profile-notes" className="h-[280px] min-h-[200px] min-w-0 rounded-lg border border-[var(--color-border)] overflow-hidden">
+                <DocumentEditingSurface documentIdentity={createBusinessFieldDocumentIdentity({ projectId, entityType: 'character', entityId: characterId, fieldId: 'notes' })} layout="business-field" content={card.notes} onChange={value => onUpdateField('notes', value)} placeholder={text('作者备忘、待确认设想与出处。不要把未来剧情计划写成已发生的人物事实。', 'Author notes, pending ideas, and provenance. Keep future plot plans separate from established character facts.')} />
+              </div>
             </div>
           </div>
         </div>

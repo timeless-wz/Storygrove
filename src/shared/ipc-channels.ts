@@ -5,6 +5,25 @@ import type { ProseDirectoryAction, ProseOrderEntry, ProseTrashEntry } from './p
  */
 import type { Locale } from '../i18n/types'
 import type { FinalizationSnapshot, FinalizationResult } from './finalization'
+import type {
+  RevisionLearningAfterSnapshotInput,
+  RevisionLearningAttemptFinishInput,
+  RevisionLearningAttemptStartInput,
+  RevisionLearningBindingCasInput,
+  RevisionLearningBindInput,
+  RevisionLearningCreateFromVersionsInput,
+  RevisionLearningEditorSnapshotInput,
+  RevisionLearningPublicationStatus,
+  RevisionLearningPublishInput,
+  RevisionLearningRecord,
+  RevisionLearningRecordSummary,
+  RevisionLearningReviewConfirmInput,
+  RevisionLearningReviewSaveInput,
+  RevisionLearningSaveInput,
+  RevisionLearningSourceDraft,
+  RevisionLearningAttempt,
+  RevisionLearningPublishReceipt,
+} from './revision-learning'
 
 /** Narrow snapshot/receipt actions; no arbitrary filesystem destination. */
 export interface FinalizationChannels {
@@ -47,6 +66,35 @@ import type {
   NarrativeThreadPlanRecord,
   NarrativeThreadView,
 } from './narrative-thread'
+import type {
+  InfoEntry,
+  InfoEntrySaveInput,
+  InfoTruthStatus,
+  InfoTruthVersion,
+  KnowledgeRecord,
+  KnowledgeRecordSaveInput,
+} from './knowledge-gap'
+import type { CharacterActionSaveInput, CharacterActionView } from './character-action'
+import type {
+  KnowledgeCheckKind,
+  KnowledgeCheckReport,
+  KnowledgeCheckReportInput,
+} from './knowledge-check'
+import type { ThreadMarkerLink, ThreadMarkerLinkInput } from './thread-marker-link'
+import type {
+  CreativeLegacyOrganizationInput,
+  CreativeMaterialEntry,
+  CreativeMaterialKind,
+  CreativeMaterialSaveInput,
+  CreativeMaterialStatus,
+  LegacyCreativeSource,
+} from './creative-content'
+import type {
+  OutlineSyncAffected,
+  OutlineSyncCandidate,
+  OutlineSyncCandidateStatus,
+  OutlineSyncCreateCandidateInput,
+} from './outline-sync'
 import type { PlotTreeSnapshot, PlotTreeSourceBundle } from './plot-tree'
 import type {
   PlotCanvasSummary,
@@ -717,6 +765,10 @@ export interface NovelConfig {
   globalGuidance: string
   writingStyle?: string
   referenceWorks?: string
+  /** Formal, author-maintained creative direction Markdown. */
+  creativeDirectionMarkdown?: string
+  /** Formal, author-maintained prose execution rules Markdown. */
+  writingRulesMarkdown?: string
 }
 
 export interface FileNode {
@@ -984,6 +1036,22 @@ export interface DatabaseChannels {
   'db:project-core-get': {
     args: [expectedProjectPath: string]
     return: ProjectCoreData | null
+  }
+  'db:creative-legacy-list': {
+    args: [expectedProjectPath: string]
+    return: LegacyCreativeSource[]
+  }
+  'db:creative-legacy-organize': {
+    args: [input: CreativeLegacyOrganizationInput, expectedProjectPath: string]
+    return: { success: boolean; error?: string }
+  }
+  'db:creative-material-list': {
+    args: [filter: { entryKind?: CreativeMaterialKind; status?: CreativeMaterialStatus } | undefined, expectedProjectPath: string]
+    return: CreativeMaterialEntry[]
+  }
+  'db:creative-material-save': {
+    args: [input: CreativeMaterialSaveInput, expectedProjectPath: string]
+    return: { success: boolean; entry?: CreativeMaterialEntry; error?: string }
   }
   'db:project-core-update': {
     args: [data: Partial<ProjectCoreData> & { expectedSynopsisHash?: string }, expectedProjectPath: string]
@@ -1521,6 +1589,54 @@ export interface DatabaseChannels {
   'db:chapter-canvas-nodes-reposition': { args: [chapterNumber: number, positions: Array<{ nodeId: string; x: number; y: number }>, expectedProjectPath: string]; return: { success: boolean; error?: string } }
   'db:chapter-canvas-edge-upsert': { args: [input: ChapterCanvasEdgeUpsertPayload, expectedProjectPath: string]; return: { success: boolean; edge?: ChapterCanvasEdgeData; error?: string } }
   'db:chapter-canvas-edge-delete': { args: [chapterNumber: number, edgeId: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+
+  // 14. 信息与揭露 / 人物行动线 / 正文反向修纲 / 检查报告 / 伏笔↔脉络关系
+  //（knowledge-action-outline-sync-contract §3/§4/§5/§6/§7）
+  'db:info-entry-list': { args: [filter: { truthStatus?: InfoTruthStatus; query?: string; chapterNumber?: number } | undefined, expectedProjectPath: string]; return: InfoEntry[] }
+  'db:info-entry-get': { args: [id: string, expectedProjectPath: string]; return: InfoEntry | null }
+  'db:info-entry-save': {
+    args: [input: InfoEntrySaveInput, expectedProjectPath: string]
+    return: { success: boolean; id?: string; revision?: number; conflict?: boolean; currentRevision?: number; knowledgeRecordsAffected?: number; error?: string }
+  }
+  'db:info-entry-delete': { args: [id: string, expectedProjectPath: string]; return: { success: boolean; deletedRecords?: number; error?: string } }
+  'db:info-entry-truth-history': { args: [id: string, expectedProjectPath: string]; return: InfoTruthVersion[] }
+  'db:knowledge-record-list': { args: [query: { infoId?: string; characterId?: string; chapterNumber?: number } | undefined, expectedProjectPath: string]; return: KnowledgeRecord[] }
+  'db:knowledge-record-save': {
+    args: [input: KnowledgeRecordSaveInput, expectedProjectPath: string]
+    return: { success: boolean; id?: string; revision?: number; conflict?: boolean; currentRevision?: number; error?: string }
+  }
+  'db:knowledge-record-delete': { args: [id: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:character-action-list': { args: [query: { characterId?: string; chapterNumber?: number } | undefined, expectedProjectPath: string]; return: CharacterActionView[] }
+  'db:character-action-save': {
+    args: [input: CharacterActionSaveInput, expectedProjectPath: string]
+    return: { success: boolean; id?: string; revision?: number; conflict?: boolean; currentRevision?: number; error?: string }
+  }
+  'db:character-action-delete': { args: [id: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:character-action-promote-to-timeline': {
+    args: [id: string, characterName: string, expectedProjectPath: string]
+    return: { success: boolean; eventId?: string; alreadyLinked?: boolean; error?: string }
+  }
+  'db:outline-sync-mark-pending': { args: [input: { chapterNumber: number; draftId: number; proseHash: string }, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:outline-sync-clear-pending': { args: [chapterNumber: number, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:outline-sync-list-pending': { args: [expectedProjectPath: string]; return: Array<{ chapterNumber: number; draftId: number; proseHash: string; markedAt: string }> }
+  'db:outline-sync-create-candidate': {
+    args: [input: OutlineSyncCreateCandidateInput, expectedProjectPath: string]
+    return: { success: boolean; candidate?: OutlineSyncCandidate; rejectedItems?: Array<{ id: string; reason: string }>; error?: string }
+  }
+  'db:outline-sync-get-candidate': { args: [id: string, expectedProjectPath: string]; return: OutlineSyncCandidate | null }
+  'db:outline-sync-list-candidates': { args: [query: { chapterNumber?: number; status?: OutlineSyncCandidateStatus } | undefined, expectedProjectPath: string]; return: OutlineSyncCandidate[] }
+  'db:outline-sync-discard-candidate': { args: [id: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:outline-sync-commit': {
+    args: [input: { candidateId: string; acceptedItemIds: string[] }, expectedProjectPath: string]
+    return: { success: boolean; revision?: number; contentHash?: string; committed?: boolean; alreadyCommitted?: boolean; needsRecompare?: boolean; reason?: string; affected?: OutlineSyncAffected; error?: string }
+  }
+  'db:outline-sync-affected-preview': { args: [chapterNumber: number, expectedProjectPath: string]; return: OutlineSyncAffected }
+  'db:knowledge-check-report-save': { args: [report: KnowledgeCheckReportInput, expectedProjectPath: string]; return: { success: boolean; report?: KnowledgeCheckReport; error?: string } }
+  'db:knowledge-check-report-list': { args: [query: { kind?: KnowledgeCheckKind; scope?: string } | undefined, expectedProjectPath: string]; return: KnowledgeCheckReport[] }
+  'db:knowledge-check-report-delete': { args: [id: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
+  'db:thread-marker-link-list': { args: [query: { threadPlanId?: number; foreshadowingId?: string } | undefined, expectedProjectPath: string]; return: ThreadMarkerLink[] }
+  'db:thread-marker-link': { args: [input: ThreadMarkerLinkInput, expectedProjectPath: string]; return: { success: boolean; link?: ThreadMarkerLink; error?: string } }
+  'db:thread-marker-unlink': { args: [id: string, expectedProjectPath: string]; return: { success: boolean; error?: string } }
 }
 
 export interface WorldMapImageChannels {
@@ -1856,8 +1972,36 @@ export interface StoryDataChannels {
   }
 }
 
+export interface RevisionLearningChannels {
+  'revision-learning:list-source-drafts': { args: []; return: RevisionLearningSourceDraft[] }
+  'revision-learning:list': { args: []; return: RevisionLearningRecordSummary[] }
+  'revision-learning:get': { args: [recordId: string]; return: RevisionLearningRecord }
+  'revision-learning:create-from-versions': { args: [input: RevisionLearningCreateFromVersionsInput]; return: RevisionLearningRecord }
+  'revision-learning:record-editor-before': { args: [input: RevisionLearningEditorSnapshotInput]; return: RevisionLearningRecord }
+  'revision-learning:capture-after': { args: [input: RevisionLearningAfterSnapshotInput]; return: RevisionLearningRecord }
+  'revision-learning:reverse-sample': { args: [recordId: string, expectedRevision: number]; return: RevisionLearningRecord }
+  'revision-learning:save-input': { args: [input: RevisionLearningSaveInput]; return: RevisionLearningRecord }
+  'revision-learning:attempt-begin': { args: [input: RevisionLearningAttemptStartInput]; return: RevisionLearningAttempt }
+  'revision-learning:attempt-finish': { args: [input: RevisionLearningAttemptFinishInput]; return: RevisionLearningAttempt }
+  'revision-learning:review-save': { args: [input: RevisionLearningReviewSaveInput]; return: RevisionLearningRecord }
+  'revision-learning:review-confirm': { args: [input: RevisionLearningReviewConfirmInput]; return: RevisionLearningRecord }
+  'revision-learning:publish': {
+    args: [input: RevisionLearningPublishInput]
+    return: { receipt: RevisionLearningPublishReceipt; recovered: boolean }
+  }
+  'revision-learning:bind': {
+    args: [input: RevisionLearningBindInput]
+    return: { bound: boolean; conflict: boolean; currentSkillId: string | null }
+  }
+  'revision-learning:publication-status': { args: [recordId: string]; return: RevisionLearningPublicationStatus }
+  'revision-learning:binding-cas': {
+    args: [input: RevisionLearningBindingCasInput]
+    return: { success: boolean; conflict?: boolean; currentSkillId?: string | null; error?: string }
+  }
+}
+
 // ===== 合并所有频道 =====
-export type AllInvokeChannels = WindowChannels & OfficialHomepageChannels & ModelProviderResourceChannels & ConfigChannels & UpdateChannels & SkinChannels & ProjectChannels & FileChannels & AppDataChannels & LLMChannels & DatabaseChannels & WorldMapImageChannels & KnowledgeBaseChannels & ProjectDocumentChannels & ChapterLifecycleChannels & ImportChannels & MCPChannels & WorkspaceHubChannels & StoryDataChannels & Phase38Channels & FinalizationChannels
+export type AllInvokeChannels = WindowChannels & OfficialHomepageChannels & ModelProviderResourceChannels & ConfigChannels & UpdateChannels & SkinChannels & ProjectChannels & FileChannels & AppDataChannels & LLMChannels & DatabaseChannels & WorldMapImageChannels & KnowledgeBaseChannels & ProjectDocumentChannels & ChapterLifecycleChannels & ImportChannels & MCPChannels & WorkspaceHubChannels & StoryDataChannels & RevisionLearningChannels & Phase38Channels & FinalizationChannels
 export type AllEventChannels = LLMStreamEvents & UpdateStateEvents & WindowEvents & StoryDataEventChannels
 
 /** 提取 invoke 频道名 */

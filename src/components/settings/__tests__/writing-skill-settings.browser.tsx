@@ -19,7 +19,7 @@ function ipcResult(channel: string) {
   if (channel === 'fs:list-dir') return []
   if (channel === 'fs:check-exists') return false
   if (channel === 'fs:read-file') return { success: false, content: '', error: 'missing' }
-  if (channel === 'fs:write-file') return { success: true }
+  if (channel === 'revision-learning:binding-cas') return { success: true, currentSkillId: 'builtin:natural-prose-refinement' }
   if (channel === 'config:set') return { success: true }
   if (channel === 'skills:inspect-github') return {
     success: true,
@@ -105,10 +105,8 @@ describe('writing skill settings', () => {
         .selectOptions('builtin:natural-prose-refinement')
     })
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith(
-      'fs:write-file',
-      'C:/novels/skill-project/.vela/writing-skills.json',
-      expect.stringContaining('builtin:natural-prose-refinement'),
-      'C:/novels/skill-project',
+      'revision-learning:binding-cas',
+      { stage: 'refinement', skillId: 'builtin:natural-prose-refinement', expectedCurrentSkillId: null },
       expect.objectContaining({ projectId: 'skill-project', leaseId: 'skill-project-lease' }),
     ))
   })

@@ -24,7 +24,9 @@ import type {
   BlueprintRangeCommitReceipt,
 } from '../../../electron/repositories/blueprint-repository'
 import { stripThinkingTags } from './workflow-utils'
-import { requireWorkflowProjectSession } from './workflow-project-session'
+import { requireWorkflowProjectSession, workflowWritingLanguage } from './workflow-project-session'
+import { buildCreativeContextBundle } from '../../shared/creative-content'
+import { buildCreativeCorePromptSources, loadLegacyCreativeSources } from '../creative-context'
 
 // ==========================================
 // 1. 结构与类型导出 (保留对外的向后兼容)
@@ -47,7 +49,7 @@ export interface DirectoryWorkflowProjectSnapshot {
   novelConfig: Readonly<{
     totalChapters: number
     wordsPerChapter?: number
-    globalGuidance?: string
+    creativeDirectionMarkdown?: string
     genre?: string
   }>
 }
@@ -381,7 +383,7 @@ export function createDirectoryWorkflow(
     novelConfig: {
       totalChapters: projectAtStart.novelConfig.totalChapters,
       wordsPerChapter: projectAtStart.novelConfig.wordsPerChapter,
-      globalGuidance: projectAtStart.novelConfig.globalGuidance,
+      creativeDirectionMarkdown: projectAtStart.novelConfig.creativeDirectionMarkdown,
       genre: projectAtStart.novelConfig.genre,
     },
   }
@@ -434,6 +436,11 @@ export function createDirectoryWorkflow(
           ))
 
           context.data.architecture = parts.join('\n\n---\n\n')
+          const legacySources = await loadLegacyCreativeSources(projectSession, expectedProjectPath)
+          context.data.creativeDirectionContext = buildCreativeContextBundle(
+            buildCreativeCorePromptSources(core, legacySources, ['creative-direction'], workflowWritingLanguage(context)),
+            workflowWritingLanguage(context),
+          ).promptText
           // 注入节奏指导到 context，供 Command 读取
           if (params.pacingGuidance) context.data.pacingGuidance = params.pacingGuidance
           if (params.mode === 'append') {

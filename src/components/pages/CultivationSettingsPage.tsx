@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, Trash2 } from 'lucide-react'
 import { useCultivationStore } from '../../stores/cultivation-store'
 import { useProjectStore } from '../../stores/project-store'
 import { registerEditorExitSaveHandler } from '../../stores/editor-store'
+import { useEditorStore } from '../../stores/editor-store'
 import { useLocaleStore } from '../../stores/locale-store'
 import { cultivationLevels, CULTIVATION_PRESETS, type CultivationRealm } from '../../shared/cultivation'
+import { createBusinessFieldDocumentIdentity } from '../../shared/document-editing'
 import { getActiveProjectSessionContext, projectSessionContextFromProject, sameProjectSessionContext } from '../../shared/project-session-context'
 import { randomUUID } from '../../utils/id'
 import { ipc } from '../../services/ipc-client'
@@ -12,6 +14,7 @@ import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
 import { NativeSelect } from '../ui/NativeSelect'
 import { confirm } from '../ui/Confirm'
+import DocumentEditingSurface from '../editor/DocumentEditingSurface'
 
 function move<T>(items: T[], index: number, offset: number): T[] {
   const result = [...items]
@@ -20,9 +23,15 @@ function move<T>(items: T[], index: number, offset: number): T[] {
   return result
 }
 
-export default function CultivationSettingsPage({ projectKey }: { projectKey: string }) {
+export default function CultivationSettingsPage({ projectKey, tabId, initialContent, initialDirty }: { projectKey: string; tabId: string; initialContent: string; initialDirty: boolean }) {
   const text = useLocaleStore(state => state.text)
   const project = useProjectStore(state => state.currentProject)
+  const documentIdentity = createBusinessFieldDocumentIdentity({
+    projectId: project?.id ?? `inactive:${projectKey}`,
+    entityType: 'project-settings',
+    entityId: 'cultivation',
+    fieldId: 'markdown',
+  })
   const session = projectSessionContextFromProject(project)
   const store = useCultivationStore()
   const [selected, setSelected] = useState('')
@@ -31,6 +40,7 @@ export default function CultivationSettingsPage({ projectKey }: { projectKey: st
   const [resolutions, setResolutions] = useState<Record<string, string | null>>({})
   const [result, setResult] = useState('')
   const [checking, setChecking] = useState(false)
+  const restoredMarkdown = useRef(false)
   const ready = session?.projectPath === projectKey && sameProjectSessionContext(session, store.session) && !!store.system && !store.loading
   const levels = cultivationLevels(store.realms)
   const realm = store.realms.find(entry => entry.id === selected)
@@ -38,6 +48,11 @@ export default function CultivationSettingsPage({ projectKey }: { projectKey: st
   useEffect(() => { if (session?.projectPath === projectKey) void store.load(session) }, [session?.leaseId, projectKey])
   useEffect(() => { if (!store.realms.some(entry => entry.id === selected)) setSelected(store.realms[0]?.id ?? '') }, [store.realms, selected])
   useEffect(() => { setImpact(null); setResolutions({}); setResult('') }, [session?.leaseId])
+  useEffect(() => {
+    if (!ready || restoredMarkdown.current || !initialDirty) return
+    restoredMarkdown.current = true
+    store.editMarkdown(initialContent)
+  }, [ready, initialContent, initialDirty, store.editMarkdown])
   const edit = (realms: CultivationRealm[]) => { store.edit(realms); setResult('') }
   const updateRealm = (next: CultivationRealm) => edit(store.realms.map(entry => entry.id === next.id ? next : entry))
   const applyPreset = async (names: readonly string[]) => {
@@ -60,28 +75,39 @@ export default function CultivationSettingsPage({ projectKey }: { projectKey: st
       const ids = new Set(levels.map(level => level.id))
       const affected = roster.entries.filter(entry => entry.cultivationLevelId && !ids.has(entry.cultivationLevelId)).map(entry => ({ name: entry.name, levelId: entry.cultivationLevelId! }))
       if (affected.length) { setImpact(affected); setResolutions({}); return }
-      if (await store.save({})) setResult(text('修炼体系已保存', 'Cultivation system saved'))
+      const markdownSnapshot = store.markdown
+      useEditorStore.getState().syncTabContent(tabId, markdownSnapshot)
+      const currentTab = useEditorStore.getState().tabs.find(tab => tab.id === tabId)
+      const snapshot = { content: markdownSnapshot, contentRevision: currentTab?.contentRevision ?? 0 }
+      if (await store.save({})) {
+        useEditorStore.getState().settleTabSave(tabId, snapshot)
+        setResult(text('力量体系已保存', 'Power system saved'))
+      }
     } catch (error) { if (sameProjectSessionContext(session, getActiveProjectSessionContext())) setResult(String(error)) }
     finally { setChecking(false) }
   }
-  useEffect(() => { registerEditorExitSaveHandler({ type: 'cultivation', projectKey, save: async () => { await save() } }) })
+  useEffect(() => registerEditorExitSaveHandler({ tabId, type: 'cultivation', projectKey, save: async () => { await save() } }), [tabId, projectKey, save])
   useEffect(() => {
     const handler = (event: KeyboardEvent) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void save() } }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   })
   return <div className="h-full overflow-auto text-[var(--color-text)]" data-testid="cultivation-settings">
-    <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-5">
+    <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-5">
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <div><h2 className="text-lg font-semibold">{text('修炼体系', 'Cultivation system')}</h2><p className="text-xs text-[var(--color-text-secondary)] mt-1">{text('当前项目独立使用这一套等级。数字是顺序，不是经验值。', 'This project uses one independent system. Numbers indicate order, not experience.')}</p></div>
+        <div><h2 className="text-lg font-semibold">{text('力量体系', 'Power system')}</h2><p className="text-xs text-[var(--color-text-secondary)] mt-1">{text('在这里维护力量来源、能力机制、成长条件、限制与代价。等级表为可选结构，适配非修仙题材。', 'Define sources, mechanics, growth, limits, and costs here. The optional level table works for any genre.')}</p></div>
         <div className="flex flex-wrap items-center gap-2"><span role="status" className="text-xs">{!ready ? text('尚未读取', 'Not loaded') : store.dirty ? text('未保存', 'Unsaved') : text('已保存', 'Saved')}</span>
-          <Button variant="outline" disabled={locked || !store.dirty} onClick={() => { store.discard(); setResult('') }}>{text('放弃修改', 'Discard changes')}</Button>
-          <Button disabled={locked || !store.dirty || store.conflicted} onClick={() => void save()}>{store.saving || checking ? text('保存中…', 'Saving…') : text('保存修炼体系', 'Save cultivation system')}</Button></div>
+          <Button variant="outline" disabled={locked || !store.dirty} onClick={() => { store.discard(); useEditorStore.getState().markTabSaved(tabId, store.system?.markdown ?? ''); setResult('') }}>{text('放弃修改', 'Discard changes')}</Button>
+          <Button disabled={locked || !store.dirty || store.conflicted} onClick={() => void save()}>{store.saving || checking ? text('保存中…', 'Saving…') : text('保存力量体系', 'Save power system')}</Button></div>
       </header>
       {store.error && <p role="alert" className="text-sm text-[var(--color-error)] whitespace-pre-wrap">{store.error}</p>}
       {result && <p role="status" className="text-sm whitespace-pre-wrap">{result}</p>}
       {!ready ? <p>{text('正在读取项目等级…', 'Loading project levels…')}</p> : <>
-        {!store.realms.length && <p className="rounded-lg border border-[var(--color-border)] p-4 text-sm">{text('尚未设置修炼体系。新增大境界，开始创建自己的体系。', 'No cultivation system configured. Add a realm to create your own system.')}</p>}
+        <section className="min-h-[320px] h-[42vh] max-h-[560px] flex flex-col rounded-xl border border-[var(--color-border)] overflow-hidden">
+          <h3 className="shrink-0 px-3 py-2 text-sm font-semibold">{text('正式机制说明', 'Formal rules')}</h3>
+          <div className="flex-1 min-h-0 border-t border-[var(--color-border)]"><DocumentEditingSurface documentIdentity={documentIdentity} layout="long-document" showHeadingToc content={store.markdown} editable={!locked} onChange={markdown => { store.editMarkdown(markdown); useEditorStore.getState().updateTabContent(tabId, markdown) }} onSave={() => save()} placeholder={text('力量来自哪里？怎样成长？能力有哪些限制、代价与通用边界？可直接粘贴 Markdown。', 'Where does power come from? How does it grow? Describe limits, costs, and shared rules in Markdown.')} className="h-full min-h-0" /></div>
+        </section>
+        {!store.realms.length && <p className="rounded-lg border border-[var(--color-border)] p-4 text-sm">{text('尚未设置等级结构。需要时再新增等级；没有等级结构也可以保存力量机制。', 'No level structure yet. Add levels only if useful; power rules can be saved without them.')}</p>}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           <section className="min-w-0 space-y-3"><h3 className="text-sm font-semibold">{text('大境界', 'Realms')}</h3>
             {store.realms.map((entry, index) => <div key={entry.id} className={`rounded-lg border border-[var(--color-border)] p-2 space-y-2 ${selected === entry.id ? 'bg-[var(--color-hover)]' : ''}`}>

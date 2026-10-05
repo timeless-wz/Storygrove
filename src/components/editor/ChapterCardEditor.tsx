@@ -11,6 +11,8 @@ import { useWorldMapStore } from '../../stores/world-map-store'
 import { WORLD_MAP_NODE_TYPE_LABELS, getWorldMapName } from '../../shared/world-map'
 import { ipc } from '../../services/ipc-client'
 import { clearProjectData } from '../../services/project-clear-service'
+import OutlineSyncReviewDialog from './outline-sync/OutlineSyncReviewDialog'
+import { openBuiltinEditor } from '../panels/sidebar/sidebar-file-openers'
 import type { ProjectSessionContext } from '../../shared/ipc-channels'
 import type {
   BlueprintPlanningCandidateRecord,
@@ -257,6 +259,8 @@ export default function ChapterCardEditor({
   const addLog = useWorkflowStore.getState().addLog
   const [blueprints, setBlueprints] = useState<ChapterBlueprint[]>([])
   const [volumes, setVolumes] = useState<BlueprintVolumeData[]>([])
+  /** 正文反向修纲（对照关联正文）对话框。 */
+  const [outlineSyncOpen, setOutlineSyncOpen] = useState(false)
   const [, setSelectedVolumeId] = useState(DEFAULT_VOLUME_ID)
   const [collapsedVolumeIds, setCollapsedVolumeIds] = useState<Set<string>>(() => new Set())
   const [selectedIdx, setSelectedIdx] = useState<number>(0)
@@ -2644,6 +2648,26 @@ export default function ChapterCardEditor({
                       ? text('打开正文草稿', 'Open draft')
                       : text('新建正文草稿', 'New draft')}
                   </Button>}
+                  <Button variant="outline" size="sm" onClick={() => setOutlineSyncOpen(true)} data-testid="blueprint-v2-sync-prose" title={text('对照关联正文，逐项确认后回写本细纲', 'Compare with the linked prose; the outline changes after per-item confirmation')}>
+                    {text('对照关联正文', 'Compare with prose')}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    title={text('查看本章相关的信息条目与知情记录', 'View info entries and knowledge records related to this chapter')}
+                    onClick={() => openBuiltinEditor(
+                      'knowledge-gap',
+                      text('信息与揭露', 'Info & Revelation'),
+                      'knowledge-gap',
+                      undefined,
+                      undefined,
+                      undefined,
+                      undefined,
+                      selected.chapterNumber,
+                    )}
+                  >
+                    {text('本章信息', 'Chapter info')}
+                  </Button>
                   <Button variant="outline" size="sm" onClick={() => setV2ImportOpen(true)} data-testid="blueprint-v2-import">
                     {text('导入 Markdown', 'Import Markdown')}
                   </Button>
@@ -2663,6 +2687,12 @@ export default function ChapterCardEditor({
                     {v2Saving ? text('保存中...', 'Saving...') : v2Dirty ? text('保存细纲', 'Save outline') : text('已同步', 'Synced')}
                   </Button>
                 </div>
+                <OutlineSyncReviewDialog
+                  projectKey={projectKey}
+                  chapterNumber={selected.chapterNumber}
+                  open={outlineSyncOpen}
+                  onClose={() => setOutlineSyncOpen(false)}
+                />
               </div>
 
               {v2ConflictRevision !== null && (

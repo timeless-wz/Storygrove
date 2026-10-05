@@ -594,11 +594,20 @@ function settingSection(
         body: snapshot.core?.premise?.trim() || empty,
       }
     case 'worldview': {
-      const parts = [snapshot.core?.worldSetting?.trim(), snapshot.core?.worldbuilding?.trim()]
-        .filter((value): value is string => Boolean(value))
+      const formal = snapshot.core?.worldbuilding?.trim() || ''
+      const legacy = snapshot.core?.worldSetting?.trim() || ''
+      const parts = [
+        ...(formal ? [`## ${textFor(locale, '正式世界设定', 'Formal world setting')}\n\n${formal}`] : []),
+        ...(legacy && legacy !== formal
+          ? [`## ${textFor(locale, '待整理旧背景构想 · 仅供追溯', 'Unorganized legacy background · provenance only')}\n\n${legacy}`]
+          : []),
+        ...(legacy && legacy === formal
+          ? [`> ${textFor(locale, '旧背景构想与正式世界设定内容相同，未重复输出正文。', 'The legacy background matches the formal world setting; its body is not repeated.')}`]
+          : []),
+      ]
       return {
         title: textFor(locale, '世界观', 'Worldview'),
-        body: parts.length ? [...new Set(parts)].join('\n\n') : empty,
+        body: parts.length ? parts.join('\n\n') : empty,
       }
     }
     case 'character-graph': {

@@ -18,6 +18,7 @@ const PROJECT_SESSION = Object.freeze({
 const SOURCE = '生成修订时的源稿 A。'
 const CURRENT = `${SOURCE}作者后来保存的 B。`
 const REVISION = 'AI 基于 A 生成的修订稿。'
+const LIVE_EDITOR_ADDITION = '编辑器里尚未保存的新段落。'
 
 let root: Root
 let container: HTMLDivElement
@@ -46,7 +47,7 @@ beforeEach(async () => {
         updatedAt: '',
       }
     }
-    if (channel === 'db:blueprint-get-all' || channel === 'db:review-list') return []
+    if (channel === 'db:blueprint-get-all' || channel === 'db:review-list' || channel === 'db:foreshadowing-list-by-draft') return []
     if (channel === 'db:blueprint-list-summary' || channel === 'db:map-get-all') return []
     if (channel === 'db:draft-list') return [{ id: 7, version: 1 }]
     if (channel === 'db:revision-get-pending') {
@@ -97,6 +98,7 @@ beforeEach(async () => {
       }
     }
     if (channel === 'db:draft-get-full') return { id: 7, content: CURRENT }
+    if (channel === 'revision-learning:record-editor-before') return { id: 'record-99' }
     throw new Error(`Unexpected IPC channel: ${channel}`)
   })
   Object.defineProperty(window, 'velaAPI', {
@@ -163,6 +165,41 @@ afterEach(async () => {
 })
 
 describe('DraftEditor revision source binding', () => {
+  it('captures the live Vditor buffer as the revision-learning source before navigation', async () => {
+    await act(async () => {
+      await vi.waitFor(() => expect(container.querySelector('[data-vditor-ready="true"]')).not.toBeNull())
+    })
+    await act(async () => {
+      const prose = container.querySelector('.vditor-ir pre.vditor-reset') as HTMLElement
+      prose.focus()
+      const range = document.createRange()
+      range.selectNodeContents(prose.lastElementChild ?? prose)
+      range.collapse(false)
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(range)
+      document.execCommand('insertText', false, LIVE_EDITOR_ADDITION)
+    })
+
+    await act(async () => {
+      await vi.waitFor(() => expect(useEditorStore.getState().tabs[0]?.content).toContain(LIVE_EDITOR_ADDITION))
+    })
+    const liveContent = useEditorStore.getState().tabs[0]?.content
+    expect(liveContent).toContain(LIVE_EDITOR_ADDITION)
+
+    await act(async () => page.getByRole('button', { name: '修订学习' }).click())
+    await act(async () => {
+      await vi.waitFor(() => expect(invoke.mock.calls.some(([channel]) => channel === 'revision-learning:record-editor-before')).toBe(true))
+    })
+
+    const capture = invoke.mock.calls.find(([channel]) => channel === 'revision-learning:record-editor-before')
+    expect(capture?.[1]).toMatchObject({ draftId: 7, tabId: 'draft-7', content: liveContent })
+    expect((capture?.[1] as { editGeneration?: number }).editGeneration).toBeGreaterThan(0)
+    expect(useEditorStore.getState().tabs.some(tab => (
+      tab.type === 'revision-learning' && tab.revisionLearningRecordId === 'record-99'
+    ))).toBe(true)
+  })
+
   it('does not expose pending revision merge UI and never auto-merges revisions into draft prose', async () => {
     // 即使底层存在历史未合并修订记录，DraftEditor 严格不渲染“待合并”入口或自动改写正文
     expect(container.textContent).not.toContain('待合并')
@@ -222,7 +259,7 @@ describe('DraftEditor revision source binding', () => {
         }
       }
       if (channel === 'db:draft-list') return [{ id: 7, version: 1 }, { id: 8, version: 1 }]
-      if (channel === 'db:blueprint-get-all' || channel === 'db:blueprint-list-summary' || channel === 'db:review-list' || channel === 'db:revision-get-pending' || channel === 'db:map-get-all') return []
+      if (channel === 'db:blueprint-get-all' || channel === 'db:blueprint-list-summary' || channel === 'db:review-list' || channel === 'db:revision-get-pending' || channel === 'db:map-get-all' || channel === 'db:foreshadowing-list-by-draft') return []
       if (channel === 'db:draft-update-content') return { success: true }
       throw new Error(`Unexpected IPC channel: ${channel}`)
     })

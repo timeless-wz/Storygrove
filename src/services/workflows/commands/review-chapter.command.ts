@@ -33,6 +33,14 @@ import {
   loadBlueprintVolumeWritingMaterial,
   type BlueprintVolumeWritingMaterial,
 } from './blueprint-volume-writing'
+import { buildCreativeContextBundle } from '../../../shared/creative-content'
+import {
+  buildCreativeCorePromptSources,
+  loadCharacterProfilePromptSource,
+  loadCreativeDomainPromptSources,
+  loadLegacyCreativeSources,
+} from '../../creative-context'
+import { buildKnowledgeGapMaterial } from './knowledge-material'
 
 
 export interface ReviewChapterParams {
@@ -220,7 +228,6 @@ export class ReviewChapterCommand extends BaseWorkflowCommand<string> {
       projectSession,
       projectSessionContextFromProject(project),
     )) throw new Error(text('当前项目已切换，审稿已停止', 'The project changed, so the review stopped.'))
-    const novelConfig = Object.freeze({ ...project.novelConfig })
 
     const draft = this.params.draftContent
     if (!draft) throw new Error(text('无草稿内容', 'There is no draft content to review.'))
@@ -323,21 +330,42 @@ export class ReviewChapterCommand extends BaseWorkflowCommand<string> {
     }
 
     const characterState = await this.readCharacterStates(context.projectPath, projectSession, writingLanguage)
-    const worldBuilding = await this.readWorldBuilding(context.projectPath, projectSession, writingLanguage)
-    const globalGuidance = novelConfig.globalGuidance?.trim() || promptLanguageText(
-      writingLanguage,
-      '（无作者全局创作指导）',
-      '(no author global creative guidance)',
-    )
+    const core = await ipc.invokeWithProjectSession(projectSession, 'db:project-core-get', context.projectPath)
+    if (!core) throw new Error(text('无法读取项目正式资料，已停止审稿。', 'Could not read formal project sources; review stopped.'))
+    const [legacySources, domainSources, characterSource, information] = await Promise.all([
+      loadLegacyCreativeSources(projectSession, context.projectPath),
+      loadCreativeDomainPromptSources(projectSession, context.projectPath, {
+        powerSystem: true,
+        locations: true,
+        relevanceText: `${draft}\n${boundBlueprint?.keyEvents ?? ''}`,
+      }),
+      loadCharacterProfilePromptSource(projectSession, context.projectPath, boundBlueprint?.characters ?? []),
+      buildKnowledgeGapMaterial(projectSession, this.params.chapterNumber, boundBlueprint?.characters ?? []),
+    ])
+    const creativeContext = buildCreativeContextBundle([
+      ...buildCreativeCorePromptSources(core, legacySources, [
+        'creative-direction', 'writing-rules', 'premise', 'world-setting', 'characters',
+      ], writingLanguage),
+      ...(characterSource ? [characterSource] : []),
+      ...domainSources,
+      ...(information ? [{
+        id: 'information-reveal.review-projection',
+        label: '审稿范围内的信息与揭露记录',
+        category: 'information-reveal' as const,
+        content: information.text,
+        status: 'formal' as const,
+        note: '真相、人物认知、读者证据按各自状态区分',
+      }] : []),
+    ], writingLanguage, { includeSourceList: false })
     const authorGuidanceSection = promptLanguageText(
       writingLanguage,
-      `【作者全局创作指导｜约束而非已发生事实】\n${globalGuidance}`,
-      `[Author global creative guidance | constraint, not established history]\n${globalGuidance}`,
+      `【正式创作资料】\n${creativeContext.promptText || '（尚无对应正式资料）'}`,
+      `[Formal creative sources]\n${creativeContext.promptText || '(no formal source is available for these categories)'}`,
     )
     const authorConfigSection = promptLanguageText(
       writingLanguage,
-      `【作者确认项目配置｜约束而非已发生事实】\n${JSON.stringify(novelConfig, null, 2)}`,
-      `[Author-confirmed project configuration | constraint, not established history]\n${JSON.stringify(novelConfig, null, 2)}`,
+      `【项目篇幅参数】\n默认每章字数：${String(project.novelConfig.wordsPerChapter ?? '未指定')}；预计总章数：${String(project.novelConfig.totalChapters ?? '未指定')}。这些是生成约束，不是故事事实。`,
+      `[Project length parameters]\nDefault chapter length: ${String(project.novelConfig.wordsPerChapter ?? 'unspecified')}; planned total chapters: ${String(project.novelConfig.totalChapters ?? 'unspecified')}. These are generation constraints, not story facts.`,
     )
     let planningMaterial = formatReviewPlanningMaterial([], writingLanguage)
     let frozenGoals: ReturnType<typeof freezeChapterGoals> | null = null
@@ -387,9 +415,23 @@ export class ReviewChapterCommand extends BaseWorkflowCommand<string> {
       .withChapterContent(draft)
       .withCharacterStates(characterState)
       .withGlobalSummary(contextSummary)
-      .withWorldBuilding(worldBuilding)
+      .withWorldBuilding('')
       .withReviewFocus(this.params.reviewFocus || '')
+    const usedSources = [
+      ...creativeContext.sources.map(source => `- ${source.label} · ${source.id}（${source.status}）`),
+      `- 第${this.params.chapterNumber}章当前草稿 · draft ${sourceSnapshot.id} v${sourceSnapshot.version}`,
+      ...(contextSummary.includes('continuity projection unavailable') || contextSummary.includes('连续性投影暂时不可用')
+        ? ['- 定稿连续性投影读取失败，提示已明确加入本次请求']
+        : ['- 既有定稿连续性投影 · finalized continuity']),
+      ...(boundBlueprintChapterNumber !== undefined
+        ? [`- 草稿明确绑定第${boundBlueprintChapterNumber}章蓝图${blueprintV2Detail ? ` · v2 r${blueprintV2Detail.revision} ${blueprintV2Detail.contentHash}` : ''}（计划）`]
+        : ['- 草稿未绑定蓝图，未按显示章号推测']),
+      ...(volumeWritingMaterial?.outline ? ['- 绑定卷纲与相关章纲（计划）'] : []),
+      ...(information ? ['- 信息与揭露 · info_entries / knowledge_records'] : []),
+      ...(this.params.reviewFocus?.trim() ? ['- 作者审查目标'] : []),
+    ]
     const reviewPrompt = [
+      promptLanguageText(writingLanguage, `【本次使用资料】\n${usedSources.join('\n')}`, `[Sources used for this request]\n${usedSources.join('\n')}`),
       promptBuilder.build(),
       authorGuidanceSection,
       authorConfigSection,
@@ -641,12 +683,4 @@ export class ReviewChapterCommand extends BaseWorkflowCommand<string> {
     } catch { return promptLanguageText(writingLanguage, '（读取失败）', '(unavailable)') }
   }
 
-  private async readWorldBuilding(
-    projectPath: string,
-    projectSession: ProjectSessionContext,
-    writingLanguage: NonNullable<CommandExecuteParams['context']['writingLanguage']>,
-  ): Promise<string> {
-    const core = await ipc.invokeWithProjectSession(projectSession, 'db:project-core-get', projectPath)
-    return core?.worldbuilding || promptLanguageText(writingLanguage, '（暂无）', '(none)')
-  }
 }

@@ -29,6 +29,8 @@ export interface ProjectCoreRow {
     plot_structure: string
     narrative_pov: string
     writing_style: string
+    creative_direction_markdown: string
+    writing_rules_markdown: string
     reference_works: string
     global_guidance: string
     golden_finger: string
@@ -58,6 +60,8 @@ export interface ProjectCoreData {
     plotStructure: string
     narrativePov: string
     writingStyle: string
+    creativeDirectionMarkdown: string
+    writingRulesMarkdown: string
     referenceWorks: string
     globalGuidance: string
     goldenFinger: string
@@ -82,7 +86,7 @@ export type ProjectCoreSynopsisExpected = Pick<ProjectCoreData,
     | 'writingLanguage'
     | 'plotStructure'
     | 'narrativePov'
-    | 'globalGuidance'
+    | 'creativeDirectionMarkdown'
 >
 
 export interface ProjectCoreSynopsisCommitRequest {
@@ -123,6 +127,8 @@ function rowToData(row: ProjectCoreRow): ProjectCoreData {
         plotStructure: row.plot_structure,
         narrativePov: row.narrative_pov,
         writingStyle: row.writing_style,
+        creativeDirectionMarkdown: row.creative_direction_markdown ?? '',
+        writingRulesMarkdown: row.writing_rules_markdown ?? '',
         referenceWorks: row.reference_works,
         globalGuidance: row.global_guidance,
         goldenFinger: row.golden_finger,
@@ -202,6 +208,8 @@ export class ProjectCoreRepository {
             plotStructure: 'plot_structure',
             narrativePov: 'narrative_pov',
             writingStyle: 'writing_style',
+            creativeDirectionMarkdown: 'creative_direction_markdown',
+            writingRulesMarkdown: 'writing_rules_markdown',
             referenceWorks: 'reference_works',
             globalGuidance: 'global_guidance',
             goldenFinger: 'golden_finger',
@@ -264,7 +272,7 @@ export class ProjectCoreRepository {
             AND CASE WHEN writing_language = 'en-US' THEN 'en-US' ELSE 'zh-CN' END = ?
             AND plot_structure = ?
             AND narrative_pov = ?
-            AND global_guidance = ?
+            AND creative_direction_markdown = ?
         `).run(
             request.synopsis,
             expected.synopsis,
@@ -277,7 +285,7 @@ export class ProjectCoreRepository {
             expected.writingLanguage,
             expected.plotStructure,
             expected.narrativePov,
-            expected.globalGuidance,
+            expected.creativeDirectionMarkdown,
         )
         return result.changes === 1
     }

@@ -1,6 +1,7 @@
 import { BaseWorkflowCommand, CommandExecuteParams, type WorkflowGenerationRuntimeDependencies } from './base-command'
 import { useProjectStore } from '../../../stores/project-store'
 import { resolvePromptTemplate } from '../../prompt-templates'
+import { promptLanguageText } from '../../prompt-language'
 import { ChapterPromptBuilder } from '../../prompts/prompt-builder'
 import { ipc } from '../../ipc-client'
 import { requireIpcSuccess } from '../../ipc-result'
@@ -22,6 +23,9 @@ import {
   serializeHumanConfirmedReviewSnapshot,
   type HumanConfirmedReviewSnapshot,
 } from '../../../shared/human-confirmed-review'
+import { buildCreativeContextBundle } from '../../../shared/creative-content'
+import { buildCreativeCorePromptSources, loadCreativeDomainPromptSources, loadLegacyCreativeSources } from '../../creative-context'
+import { buildKnowledgeGapMaterial } from './knowledge-material'
 
 
 export interface RefineFromReviewParams {
@@ -238,16 +242,41 @@ export class RefineFromReviewCommand extends BaseWorkflowCommand<string> {
     if (!template) throw new Error(text('未找到审稿修复模板', 'The review-based revision template was not found.'))
 
     const confirmedReviewBrief = renderHumanConfirmedReviewBrief(confirmedReview, writingLanguage)
+    const sourceDraft = confirmedReview.sourceDraft
+    const core = await ipc.invokeWithProjectSession(projectSession, 'db:project-core-get', context.projectPath)
+    if (!core) throw new Error(text('无法读取项目正式资料，已停止审稿修稿。', 'Could not read formal project sources; review-based revision stopped.'))
+    const [legacySources, domainSources, information] = await Promise.all([
+      loadLegacyCreativeSources(projectSession, context.projectPath),
+      loadCreativeDomainPromptSources(projectSession, context.projectPath, {
+        powerSystem: true,
+        locations: true,
+        relevanceText: `${this.params.draftContent}\n${confirmedReviewBrief}`,
+      }),
+      buildKnowledgeGapMaterial(projectSession, sourceDraft?.chapterNumber ?? this.params.chapterNumber, []),
+    ])
+    const creativeContext = buildCreativeContextBundle([
+      ...buildCreativeCorePromptSources(core, legacySources, [
+        'creative-direction', 'writing-rules', 'premise', 'world-setting', 'characters',
+      ], writingLanguage),
+      ...domainSources,
+      ...(information ? [{
+        id: 'information-reveal.review-projection',
+        label: '审稿范围内的信息与揭露记录',
+        category: 'information-reveal' as const,
+        content: information.text,
+        status: 'formal' as const,
+        note: '真相、人物认知、读者证据按各自状态区分',
+      }] : []),
+    ], writingLanguage, { includeSourceList: false })
 
     const promptBuilder = new ChapterPromptBuilder(template, writingLanguage)
       .withReviewReport(confirmedReviewBrief)
       .withDraftContent(this.params.draftContent)
-      .withGlobalGuidance(novelConfig.globalGuidance || '')
+      .withGlobalGuidance('')
       // The brief already contains the confirmed author guidance. Do not let
       // a transient UI field bypass the persisted confirmation snapshot.
       .withUserRefinePrompt('')
 
-    const sourceDraft = confirmedReview.sourceDraft
     const currentDraft = sourceDraft
       ? await ipc.invokeWithProjectSession(
           projectSession,
@@ -273,7 +302,25 @@ export class RefineFromReviewCommand extends BaseWorkflowCommand<string> {
     }
 
     const refined = await this.callLLMWithBoundedCompletion(
-      promptBuilder.build(),
+      [
+        promptLanguageText(
+          writingLanguage,
+          `【本次使用资料】\n${[
+            ...creativeContext.sources.map(source => `- ${source.label} · ${source.id}（${source.status}）`),
+            `- 已确认审稿清单 · review ${reviewSourceId}`,
+            `- 当前草稿第${this.params.chapterNumber}章（修稿对象）`,
+            ...(information ? ['- 信息与揭露 · info_entries / knowledge_records'] : []),
+          ].join('\n')}`,
+          `[Sources used for this request]\n${[
+            ...creativeContext.sources.map(source => `- ${source.label} · ${source.id} (${source.status})`),
+            `- Human-confirmed review checklist · review ${reviewSourceId}`,
+            `- Current Chapter ${this.params.chapterNumber} draft (revision target)`,
+            ...(information ? ['- Information and reveal records · info_entries / knowledge_records'] : []),
+          ].join('\n')}`,
+        ),
+        creativeContext.promptText,
+        promptBuilder.build(),
+      ].filter(Boolean).join('\n\n'),
       promptBuilder.getSystemRole(),
       callbacks,
       { mode: 'append-visible-text', maxContinuations: 3 },

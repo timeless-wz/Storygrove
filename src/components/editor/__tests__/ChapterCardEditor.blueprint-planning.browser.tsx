@@ -1,6 +1,6 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { page } from 'vitest/browser'
+import { page, userEvent } from 'vitest/browser'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ProjectData } from '../../../shared/ipc-channels'
@@ -28,6 +28,22 @@ const originalLocale = useLocaleStore.getState()
 
 let root: Root | undefined
 let container: HTMLDivElement | undefined
+
+async function typeAtEndOfMarkdown(scopeSelector: string, text: string): Promise<void> {
+  const scope = container?.querySelector<HTMLElement>(scopeSelector)
+  const prose = scope?.querySelector<HTMLElement>('.vditor-ir pre.vditor-reset')
+  expect(scope).not.toBeNull()
+  expect(prose).not.toBeNull()
+  await act(async () => {
+    prose!.focus()
+    const range = document.createRange()
+    range.selectNodeContents(prose!.lastElementChild ?? prose!)
+    range.collapse(false)
+    window.getSelection()?.removeAllRanges()
+    window.getSelection()?.addRange(range)
+    await userEvent.keyboard(text)
+  })
+}
 
 function makeProject(): ProjectData {
   return {
@@ -244,12 +260,24 @@ describe('ChapterCardEditor three-level planning workspace', () => {
     comparison?.scrollIntoView({ block: 'center' })
     await page.screenshot({ path: '../../../../screenshots/blueprint-planning-volume-candidate.png' })
 
-    const volumeEditor = page.getByRole('textbox', { name: '本卷卷纲 Markdown 正文' })
-    await act(async () => volumeEditor.fill(`${volumeMarkdown}\n\n本地并发编辑保留。`))
+    await vi.waitFor(() => expect(container?.querySelector('[data-testid="blueprint-volume-outline-markdown"] [data-vditor-prose-editor="true"][data-vditor-ready="true"]')).toBeTruthy())
+    expect(container?.querySelector('[data-testid="blueprint-volume-outline-markdown"] [data-document-layout="long-document"][data-heading-toc="enabled"]')).toBeTruthy()
+    await typeAtEndOfMarkdown('[data-testid="blueprint-volume-outline-markdown"]', ' 本地并发编辑保留。')
+    await typeAtEndOfMarkdown('[data-testid="blueprint-volume-outline-markdown"]', '\n\n## 当前未保存的卷纲标题')
+    expect(container?.querySelector('[data-testid="blueprint-volume-outline-markdown"] .vditor-ir pre.vditor-reset')?.textContent)
+      .toContain('本地并发编辑保留')
+    expect(Array.from(container?.querySelectorAll('[data-testid="blueprint-volume-outline-markdown"] .vditor-ir h2') ?? [])
+      .some(heading => heading.textContent?.includes('当前未保存的卷纲标题'))).toBe(true)
+    expect(container?.querySelector('[data-testid="blueprint-volume-outline-markdown"] [data-heading-toc="enabled"]')).not.toBeNull()
+    await act(async () => {
+      await vi.waitFor(() => expect(
+        (container?.querySelector('[data-testid="blueprint-volume-outline-save"]') as HTMLButtonElement | null)?.disabled,
+      ).toBe(false), { timeout: 5_000 })
+    })
     await act(async () => page.getByTestId('blueprint-volume-outline-save').click())
     await vi.waitFor(() => expect(container?.querySelector('[role="alert"]')?.textContent)
       .toContain('本地编辑仍保留'))
-    expect((container?.querySelector('[data-testid="blueprint-volume-outline-markdown"]') as HTMLTextAreaElement).value)
+    expect(container?.querySelector('[data-testid="blueprint-volume-outline-markdown"] .vditor-ir pre.vditor-reset')?.textContent)
       .toContain('本地并发编辑保留')
     container?.querySelector<HTMLElement>('[role="alert"]')?.scrollIntoView({ block: 'center' })
     await page.screenshot({ path: '../../../../screenshots/blueprint-planning-volume-conflict.png' })
@@ -267,8 +295,17 @@ describe('ChapterCardEditor three-level planning workspace', () => {
     const bookButton = container?.querySelector<HTMLButtonElement>('[data-testid="blueprint-planning-select-book"]')
     await act(async () => bookButton?.click())
     await vi.waitFor(() => expect(container?.querySelector('[data-testid="blueprint-book-outline-editor"]')).toBeTruthy())
-    expect((container?.querySelector('[data-testid="blueprint-book-outline-markdown"]') as HTMLTextAreaElement).value)
+    await vi.waitFor(() => expect(container?.querySelector('[data-testid="blueprint-book-outline-markdown"] [data-vditor-prose-editor="true"][data-vditor-ready="true"]')).toBeTruthy())
+    expect(container?.querySelector('[data-testid="blueprint-book-outline-markdown"] [data-document-layout="long-document"][data-heading-toc="enabled"]')).toBeTruthy()
+    expect(container?.querySelector('[data-testid="blueprint-book-outline-markdown"] .vditor-ir pre.vditor-reset')?.textContent)
       .toContain('林澈受命核查失名档案')
+    await typeAtEndOfMarkdown('[data-testid="blueprint-book-outline-markdown"]', '\n\n## 当前未保存的全书总纲标题\n\n总纲新增目录标题。')
+    expect(Array.from(container?.querySelectorAll('[data-testid="blueprint-book-outline-markdown"] .vditor-ir h2') ?? [])
+      .some(heading => heading.textContent?.includes('当前未保存的全书总纲标题'))).toBe(true)
+    await vi.waitFor(() => expect(
+      Array.from(container?.querySelectorAll('[data-testid="blueprint-book-outline-markdown"] .document-editing-surface__heading') ?? [])
+        .some(heading => heading.textContent?.includes('当前未保存的全书总纲标题')),
+    ).toBe(true), { timeout: 5_000 })
     container?.querySelector<HTMLElement>('[data-testid="blueprint-book-outline-editor"]')?.scrollIntoView({ block: 'start' })
     const dismissButton = document.querySelector<HTMLButtonElement>(
       '#vela-toast-root button[aria-label="关闭提示"], #vela-toast-root button[aria-label="Dismiss notification"], '
