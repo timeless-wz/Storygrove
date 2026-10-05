@@ -1,6 +1,7 @@
 import { act, StrictMode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import Vditor from 'vditor'
 
 import VditorProseEditor, { type VditorProseEditorProps, type VditorProseEditorRef } from '../VditorProseEditor'
 import { useLocaleStore } from '../../../stores/locale-store'
@@ -345,10 +346,14 @@ describe('Vditor prose editor', () => {
     expect(cursorNodeBeforeEcho && proseBeforeEcho.contains(cursorNodeBeforeEcho)).toBe(true)
 
     // 外层把作者输入回写为 content 时，不应再触发一次编辑器写入或 onChange。
+    const setValue = vi.spyOn(Vditor.prototype, 'setValue')
+    setValue.mockClear()
     await act(async () => {
       root.render(<VditorProseEditor content={emitted} editable onChange={onChange} />)
     })
 
+    // Vditor.setValue resets its native undo history; an equal controlled echo must skip it.
+    expect(setValue).not.toHaveBeenCalled()
     expect(onChange).toHaveBeenCalledTimes(1)
     expect(proseElement().textContent).toContain('新的段落。')
     expect(window.getSelection()?.anchorNode).toBe(cursorNodeBeforeEcho)
