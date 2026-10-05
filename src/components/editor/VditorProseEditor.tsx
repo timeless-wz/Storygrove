@@ -375,31 +375,49 @@ function findMarkdownHeadingIndex(
   headings: MarkdownHeading[],
   target: NonNullable<VditorProseEditorProps['jumpTarget']>,
 ): number {
+  const targetText = target.text ? normalizedHeadingText(target.text) : ''
+  const lineIndex = target.line === undefined
+    ? -1
+    : headings.findIndex(heading => heading.line === target.line)
+  const indexed = target.index === undefined ? undefined : headings[target.index]
+
+  // Line plus the full-sequence index identifies the same slot even if its
+  // title was renamed after the navigation request was queued.
+  if (lineIndex >= 0 && lineIndex === target.index) return lineIndex
+
   if (target.line !== undefined) {
-    const lineIndex = headings.findIndex(heading => heading.line === target.line)
-    if (lineIndex >= 0) return lineIndex
+    if (lineIndex >= 0 && (!targetText || normalizedHeadingText(headings[lineIndex].text) === targetText)) {
+      return lineIndex
+    }
   }
 
   if (target.index !== undefined) {
-    const indexed = headings[target.index]
-    if (!target.text || (indexed && normalizedHeadingText(indexed.text) === normalizedHeadingText(target.text))) {
+    if (!targetText || (indexed && normalizedHeadingText(indexed.text) === targetText)) {
       if (indexed) return target.index
     }
   }
 
-  if (target.text) {
+  if (targetText) {
     const matches = headings
       .map((heading, index) => ({ heading, index }))
-      .filter(item => normalizedHeadingText(item.heading.text) === normalizedHeadingText(target.text!))
+      .filter(item => normalizedHeadingText(item.heading.text) === targetText)
     if (matches.length === 1) return matches[0].index
-    if (target.index !== undefined) {
-      const sameIndex = matches.find(item => item.index === target.index)
-      if (sameIndex) return sameIndex.index
-      const following = matches.find(item => item.index > target.index!)
-      if (following) return following.index
+    if (matches.length > 1) {
+      return [...matches].sort((left, right) => {
+        const indexDistance = (target.index === undefined ? 0 : Math.abs(left.index - target.index))
+          - (target.index === undefined ? 0 : Math.abs(right.index - target.index))
+        if (indexDistance !== 0) return indexDistance
+        return (target.line === undefined ? 0 : Math.abs(left.heading.line - target.line))
+          - (target.line === undefined ? 0 : Math.abs(right.heading.line - target.line))
+      })[0].index
     }
   }
 
+  // If the title disappeared, keep the structural target when one side of
+  // the source location survived; never jump to a different heading solely
+  // because it happened to occupy the old line before checking the title.
+  if (lineIndex >= 0) return lineIndex
+  if (indexed) return target.index!
   return -1
 }
 
@@ -939,7 +957,7 @@ export default function VditorProseEditor({
     if (mode === 'sv') {
       const textarea = host.querySelector<HTMLTextAreaElement>('textarea.vditor-sv')
       if (!textarea || textarea.style.display === 'none') return
-      const requestedLine = request.line ?? heading?.line
+      const requestedLine = heading?.line ?? request.line
       if (requestedLine === undefined) return
       const lineCount = textarea.value.split(/\r\n|\r|\n/).length
       const targetLine = Math.min(Math.max(0, requestedLine), lineCount - 1)

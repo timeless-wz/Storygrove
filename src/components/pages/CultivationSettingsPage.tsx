@@ -6,6 +6,7 @@ import { registerEditorExitSaveHandler } from '../../stores/editor-store'
 import { useEditorStore } from '../../stores/editor-store'
 import { useLocaleStore } from '../../stores/locale-store'
 import { cultivationLevels, CULTIVATION_PRESETS, type CultivationRealm } from '../../shared/cultivation'
+import { createBusinessFieldDocumentIdentity } from '../../shared/document-editing'
 import { getActiveProjectSessionContext, projectSessionContextFromProject, sameProjectSessionContext } from '../../shared/project-session-context'
 import { randomUUID } from '../../utils/id'
 import { ipc } from '../../services/ipc-client'
@@ -13,7 +14,7 @@ import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
 import { NativeSelect } from '../ui/NativeSelect'
 import { confirm } from '../ui/Confirm'
-import VditorProseEditor from '../editor/VditorProseEditor'
+import DocumentEditingSurface from '../editor/DocumentEditingSurface'
 
 function move<T>(items: T[], index: number, offset: number): T[] {
   const result = [...items]
@@ -25,6 +26,12 @@ function move<T>(items: T[], index: number, offset: number): T[] {
 export default function CultivationSettingsPage({ projectKey, tabId, initialContent, initialDirty }: { projectKey: string; tabId: string; initialContent: string; initialDirty: boolean }) {
   const text = useLocaleStore(state => state.text)
   const project = useProjectStore(state => state.currentProject)
+  const documentIdentity = createBusinessFieldDocumentIdentity({
+    projectId: project?.id ?? `inactive:${projectKey}`,
+    entityType: 'project-settings',
+    entityId: 'cultivation',
+    fieldId: 'markdown',
+  })
   const session = projectSessionContextFromProject(project)
   const store = useCultivationStore()
   const [selected, setSelected] = useState('')
@@ -98,7 +105,7 @@ export default function CultivationSettingsPage({ projectKey, tabId, initialCont
       {!ready ? <p>{text('正在读取项目等级…', 'Loading project levels…')}</p> : <>
         <section className="min-h-[320px] h-[42vh] max-h-[560px] flex flex-col rounded-xl border border-[var(--color-border)] overflow-hidden">
           <h3 className="shrink-0 px-3 py-2 text-sm font-semibold">{text('正式机制说明', 'Formal rules')}</h3>
-          <div className="flex-1 min-h-0 border-t border-[var(--color-border)]"><VditorProseEditor content={store.markdown} editable={!locked} onChange={markdown => { store.editMarkdown(markdown); useEditorStore.getState().updateTabContent(tabId, markdown) }} onSave={() => save()} placeholder={text('力量来自哪里？怎样成长？能力有哪些限制、代价与通用边界？可直接粘贴 Markdown。', 'Where does power come from? How does it grow? Describe limits, costs, and shared rules in Markdown.')} /></div>
+          <div className="flex-1 min-h-0 border-t border-[var(--color-border)]"><DocumentEditingSurface documentIdentity={documentIdentity} layout="long-document" showHeadingToc content={store.markdown} editable={!locked} onChange={markdown => { store.editMarkdown(markdown); useEditorStore.getState().updateTabContent(tabId, markdown) }} onSave={() => save()} placeholder={text('力量来自哪里？怎样成长？能力有哪些限制、代价与通用边界？可直接粘贴 Markdown。', 'Where does power come from? How does it grow? Describe limits, costs, and shared rules in Markdown.')} className="h-full min-h-0" /></div>
         </section>
         {!store.realms.length && <p className="rounded-lg border border-[var(--color-border)] p-4 text-sm">{text('尚未设置等级结构。需要时再新增等级；没有等级结构也可以保存力量机制。', 'No level structure yet. Add levels only if useful; power rules can be saved without them.')}</p>}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">

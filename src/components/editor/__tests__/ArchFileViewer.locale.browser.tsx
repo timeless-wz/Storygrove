@@ -1,6 +1,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { page } from 'vitest/browser'
 
 import { setActiveProjectSessionContext } from '../../../shared/project-session-context'
 import type { ProjectData } from '../../../shared/ipc-channels'
@@ -54,6 +55,7 @@ beforeEach(() => {
     },
   })
   container = document.createElement('div')
+  container.style.cssText = 'width: 1280px; height: 800px; overflow: hidden;'
   document.body.append(container)
   root = createRoot(container)
 })
@@ -93,6 +95,11 @@ describe('ArchFileViewer locale', () => {
       await vi.waitFor(() => {
         expect(container.querySelector('.vditor-ir pre.vditor-reset')?.getAttribute('contenteditable')).toBe('true')
       })
+    }
+    if (key === 'premise' || key === 'worldbuilding') {
+      await vi.waitFor(() => expect(container.querySelector('[data-vditor-ready="true"]')).not.toBeNull())
+      await page.viewport(1280, 800)
+      await page.screenshot({ path: `../../../../output/playwright/arch-${key}.png` })
     }
     await act(async () => useLocaleStore.getState().setLocale('en-US'))
     expect(container.textContent).toContain(labelEn)

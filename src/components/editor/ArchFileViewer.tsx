@@ -12,7 +12,8 @@ import { CORE_FIELD_MAP, parseCoreField } from '../../services/vela-protocol'
 import { appErrorMessage } from '../../i18n/app-errors'
 import { toast } from '../ui/Toast'
 import { CharacterCardImportButton } from '../characters/CharacterCardImportButton'
-import VditorProseEditor from './VditorProseEditor'
+import DocumentEditingSurface from './DocumentEditingSurface'
+import { createBusinessFieldDocumentIdentity } from '../../shared/document-editing'
 import { useProjectStore } from '../../stores/project-store'
 import { useLocaleStore } from '../../stores/locale-store'
 import { launchCreativeWorkflow } from '../../services/workflows/creative-workflow-launcher'
@@ -101,6 +102,12 @@ function ArchFileViewerSession({
   const text = useLocaleStore(s => s.text)
   const currentProjectKey = currentProject?.path
   const projectMatches = isArchProjectCurrent(projectKey, currentProjectKey)
+  const documentIdentity = createBusinessFieldDocumentIdentity({
+    projectId: projectMatches && currentProject?.id ? currentProject.id : `inactive:${projectKey}`,
+    entityType: 'architecture-file',
+    entityId: filePath,
+    fieldId: 'markdown',
+  })
 
   // 磁盘上的内容（已保存的基准）
   const savedContentRef = useRef(initialSavedContent)
@@ -607,16 +614,20 @@ function ArchFileViewerSession({
 
       {/* Vditor 编辑器，隐藏底部栏（信息已整合到上方工具栏） */}
       <div className="flex-1 overflow-hidden">
-        <VditorProseEditor
+        <DocumentEditingSurface
+          documentIdentity={documentIdentity}
+          layout="long-document"
           content={editorContent}
           editable={!isCharacterProjection}
           onChange={isCharacterProjection ? undefined : handleChange}
           onSave={isCharacterProjection ? undefined : handleSave}
           onCharCountChange={setCharCount}
+          showHeadingToc
           placeholder={text(
             '尚未生成内容，点击右上角「AI 生成」或直接在此编辑...',
             'No content yet. Click “AI Generate” in the top-right or start editing here...',
           )}
+          className="h-full min-h-0"
         />
       </div>
 

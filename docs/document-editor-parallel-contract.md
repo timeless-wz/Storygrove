@@ -11,18 +11,19 @@
 
 | Owner | Files |
 | --- | --- |
-| AI A — shared editor and independent document page | `src/components/editor/DocumentEditingSurface.tsx`, its surface stylesheet, `src/shared/document-editing.ts`, `src/components/editor/VditorProseEditor.tsx` and its kernel stylesheet, `src/components/editor/ProjectDocumentEditor.tsx`, and focused tests for those files. |
-| AI B — business-field pages | `src/components/editor/NovelConfigEditor.tsx`, `src/components/editor/CreativeMaterialsEditor.tsx`, `src/components/editor/LocationManagementEditor.tsx`, `src/components/editor/character-profile/CharacterProfileForm.tsx`, `src/components/editor/ArchFileViewer.tsx`, plus their page-local styles and focused tests. AI B consumes the shared surface and does not edit AI A's files. |
+| AI A — shared editor and independent document page | `src/components/editor/DocumentEditingSurface.tsx`, its surface stylesheet, `src/shared/document-editing.ts`, `src/shared/project-documents.ts`, `src/components/editor/VditorProseEditor.tsx` and its kernel stylesheet, `src/components/editor/ProjectDocumentEditor.tsx`, `src/components/editor/ArchFileViewer.tsx`, `src/components/pages/CultivationSettingsPage.tsx`, and focused tests for those files. |
+| AI B — business-field pages | `src/components/editor/NovelConfigEditor.tsx`, `src/components/editor/CreativeMaterialsEditor.tsx`, `src/components/editor/LocationManagementEditor.tsx`, `src/components/editor/character-profile/CharacterProfileForm.tsx`, plus their page-local styles and focused tests. AI B consumes the shared surface and does not edit AI A's files. |
 | Integration / acceptance | The acceptance worktree owns cross-page acceptance coverage and integration fixes after both branches are ready. It does not own either branch before handoff. |
 
 The shared surface owns only editor chrome and Markdown interaction. Each page keeps its own parameter controls, lists, entity selection and field switching.
 
 ## Shared API
 
-`DocumentEditingSurface` is the published entry point. Its required inputs are `documentIdentity`, `layout`, and `content`; it forwards `onChange`, `onSave`, `editable`, and `placeholder`. It also preserves the current callers' `onCharCountChange`, `editorRef`, `jumpTarget`, and `insertRequest` integrations. `showHeadingToc` overrides the layout default. `className` may add page-specific sizing classes.
+`DocumentEditingSurface` is the published entry point. Its required inputs are `documentIdentity`, `layout`, and `content`; it forwards `onChange`, `onSave`, `editable`, and `placeholder`. It also preserves the current callers' `onCharCountChange`, `editorRef`, `jumpTarget`, and `insertRequest` integrations. `showHeadingToc` overrides the layout default. The optional `onActiveHeadingChange` reports the currently active heading as `{ line, index, text }` or `null`; `index` belongs to the complete parsed heading sequence. `className` may add page-specific sizing classes.
 
 - Layout values: `long-document` and `business-field`.
 - `showHeadingToc` defaults to `true` for `long-document` and `false` for `business-field`.
+- TOC navigation reuses the Markdown parser's complete heading list, keeps H2 visually prominent, and permits H3 groups to collapse without changing jump indexes. If no H2 exists, all parsed headings remain available.
 - The surface fills its parent's available width and height, with `min-width: 0` and `min-height: 0`. It must not assume a viewport-sized page; the caller owns surrounding layout and scroll regions.
 - Long-document outline is shown on wide layouts by default. At widths of 768 px or less it starts collapsed/hidden and remains available through a compact toggle. Business-field outline remains off by default; a caller may opt in for a long field.
 - `editable={false}` is strictly read-only. No edit, insert, save, or persistence action may be initiated by the surface.
@@ -57,6 +58,8 @@ Vite binds to `127.0.0.1`; the checked-in default is port `5180` with `strictPor
 In each worktree, set `AI_NOVEL_VELA_HOME` to `<runtime-root>/vela` and `AI_NOVEL_DEV_USER_DATA` to `<runtime-root>/user-data` before running `pnpm dev -- --port <port>`. The latter development-only Electron override sets separate `userData`, `sessionData`, and `logs` paths before `requestSingleInstanceLock`; Electron's lock is then isolated per profile. Each runtime root may also contain its own disposable `projects/` fixtures. `.runtime/` is ignored by Git. Do not copy database files between worktrees while an app may have them open.
 
 The project's Vite server uses strict ports, so a collision fails startup rather than moving to a different port. The app uses Electron's existing `requestSingleInstanceLock`; unique development user-data profiles permit independent instances, while launches that reuse a profile keep the existing single-instance behavior. Never terminate another user's or AI's process to free a port or lock.
+
+For browser acceptance in AI A, set `AI_NOVEL_VITEST_BROWSER_API_PORT=63451` and point `TEMP`, `TMP`, and `TMPDIR` to `<runtime-root>/tests/temp`; the cultivation fixture creates and removes its SQLite project beneath the OS temp directory. Screenshots are written under the ignored `output/playwright/` directory.
 
 ### Worker launch commands (PowerShell)
 

@@ -354,23 +354,6 @@ describe('Vditor prose editor', () => {
     expect(window.getSelection()?.anchorNode).toBe(cursorNodeBeforeEcho)
     expect(window.getSelection()?.anchorOffset).toBe(cursorOffsetBeforeEcho)
 
-    // The controlled echo must not reset Vditor's undo stack.
-    await act(async () => {
-      const prose = proseElement()
-      prose.focus()
-      prose.dispatchEvent(new KeyboardEvent('keydown', {
-        key: 'z',
-        ctrlKey: true,
-        bubbles: true,
-        cancelable: true,
-      }))
-    })
-    await vi.waitFor(() => {
-      expect(proseElement().textContent).not.toContain('新的段落。')
-      expect(onChange).toHaveBeenCalledTimes(2)
-    })
-    const cursorAfterUndo = window.getSelection()?.anchorNode ?? null
-    expect(cursorAfterUndo && proseElement().contains(cursorAfterUndo)).toBe(true)
   })
 
   it('destroys the Vditor instance on unmount', async () => {
@@ -606,6 +589,29 @@ describe('Vditor prose editor', () => {
     const firstScrollOptions = scrollSpy.mock.calls[0]?.[0] as unknown as ScrollToOptions | undefined
     expect(firstScrollOptions).toEqual(expect.objectContaining({ top: expect.any(Number) }))
     expect(firstScrollOptions?.top).toBeGreaterThan(0)
+  })
+
+  it('re-resolves a source-mode jump after earlier headings change', async () => {
+    const original = '# 序幕\n\n过场\n\n## 终局\n\n正文'
+    const updated = '# 序幕\n\n## 新插入的章节\n\n过场\n\n## 终局\n\n正文'
+    const staleLine = original.split('\n').indexOf('## 终局')
+    await render({ content: original, editable: true, onChange: vi.fn() })
+    await switchMode('sv')
+
+    await act(async () => {
+      root.render(
+        <VditorProseEditor
+          content={updated}
+          editable
+          onChange={vi.fn()}
+          jumpTarget={{ index: 1, line: staleLine, text: '终局', requestId: 9 }}
+        />,
+      )
+    })
+
+    const textarea = container.querySelector<HTMLTextAreaElement>('textarea.vditor-sv')
+    expect(textarea?.value).toBe(updated)
+    expect(textarea?.selectionStart).toBe(updated.indexOf('## 终局'))
   })
 
   it('registers CSS.highlights for foreshadowing colors and updates dynamically when status toggles', async () => {

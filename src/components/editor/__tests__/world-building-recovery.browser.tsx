@@ -386,7 +386,7 @@ describe('WorldBuildingEditor 基础设定总览', () => {
     await act(async () => {
       document.querySelectorAll<HTMLButtonElement>('#vela-toast-root .vela-feedback-close').forEach(button => button.click())
     })
-    await page.screenshot({ path: '../../../../screenshots/basic-settings-overview-candidate.png' })
+    await page.screenshot({ path: '../../../../output/playwright/basic-settings-overview-candidate.png' })
   })
 
   it('renders responsive English and dark-theme content, preserving keyboard focus and long summaries', async () => {
@@ -425,7 +425,7 @@ describe('WorldBuildingEditor 基础设定总览', () => {
     await act(async () => {
       document.querySelectorAll<HTMLButtonElement>('#vela-toast-root .vela-feedback-close').forEach(button => button.click())
     })
-    await page.screenshot({ path: '../../../../screenshots/basic-settings-overview.png' })
+    await page.screenshot({ path: '../../../../output/playwright/basic-settings-overview.png' })
 
     await page.viewport(1280, 640)
     const scrollArea = container.querySelector<HTMLElement>('.world-building-overview__body')!
@@ -446,7 +446,7 @@ describe('WorldBuildingEditor 基础设定总览', () => {
     container.dataset.theme = 'verdant'
     await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
     expect(getComputedStyle(container).getPropertyValue('--color-accent').trim()).not.toBe(lightAccentToken)
-    await page.screenshot({ path: '../../../../screenshots/basic-settings-overview-verdant.png' })
+    await page.screenshot({ path: '../../../../output/playwright/basic-settings-overview-verdant.png' })
 
     document.documentElement.removeAttribute('data-theme')
     container.dataset.theme = 'light'
@@ -458,7 +458,7 @@ describe('WorldBuildingEditor 基础设定总览', () => {
     expect(container.textContent).toContain('Basic settings overview')
     expect(container.textContent).toContain('View AI workflow')
     expect(getComputedStyle(container).getPropertyValue('--color-panel').trim()).not.toBe(lightPanelToken)
-    await page.screenshot({ path: '../../../../screenshots/basic-settings-overview-dark.png' })
+    await page.screenshot({ path: '../../../../output/playwright/basic-settings-overview-dark.png' })
 
     const config = useProjectStore.getState().currentProject!
     useProjectStore.setState({
