@@ -302,7 +302,10 @@ describe('ChapterCardEditor three-level planning workspace', () => {
     await typeAtEndOfMarkdown('[data-testid="blueprint-book-outline-markdown"]', '\n\n## 当前未保存的全书总纲标题\n\n总纲新增目录标题。')
     expect(Array.from(container?.querySelectorAll('[data-testid="blueprint-book-outline-markdown"] .vditor-ir h2') ?? [])
       .some(heading => heading.textContent?.includes('当前未保存的全书总纲标题'))).toBe(true)
-    expect(container?.querySelector('[data-testid="blueprint-book-outline-markdown"] [data-heading-toc="enabled"]')).not.toBeNull()
+    await vi.waitFor(() => expect(
+      Array.from(container?.querySelectorAll('[data-testid="blueprint-book-outline-markdown"] .document-editing-surface__heading') ?? [])
+        .some(heading => heading.textContent?.includes('当前未保存的全书总纲标题')),
+    ).toBe(true), { timeout: 5_000 })
     container?.querySelector<HTMLElement>('[data-testid="blueprint-book-outline-editor"]')?.scrollIntoView({ block: 'start' })
     const dismissButton = document.querySelector<HTMLButtonElement>(
       '#vela-toast-root button[aria-label="关闭提示"], #vela-toast-root button[aria-label="Dismiss notification"], '

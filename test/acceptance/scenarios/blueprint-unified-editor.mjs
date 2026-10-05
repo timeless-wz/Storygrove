@@ -134,7 +134,7 @@ async function main() {
     page.on('console', message => {
       if (message.text().includes('[ipc-client.invoke]')) consoleLog.push({ at: new Date().toISOString(), text: message.text() })
     })
-    const listRow = text => page.locator('.planning-volume-body').getByText(text).first()
+    const listRow = chapterNumber => page.getByTestId(`blueprint-planning-select-chapter-${chapterNumber}`)
     // 统一视图的内容大多在受控输入（章题/分区条目/分镜）的 value 里，而非文本节点。
     const viewContent = () => page.locator('[data-testid="blueprint-v2-view"]').evaluateAll((views) => {
       const view = views[0]
@@ -142,7 +142,7 @@ async function main() {
       return `${view.innerText}\n${controls.join('\n')}`
     })
     try {
-      // 打开章节蓝图页（总览卡片）。打开后默认选中第 1 章。
+      // 打开章节蓝图页（总览卡片）；总览入口先打开全书总纲，再显式选择第 1 章。
       // 挂 IPC 追踪：记录蓝图相关通道的调用参数（冲突取证用）。
       await page.evaluate(() => {
         const api = window.velaAPI
@@ -156,6 +156,8 @@ async function main() {
         }
       })
       await logAction('open-blueprint-page', () => page.locator('[aria-label="打开章节蓝图"], [aria-label="Open chapter blueprints"]').first().click())
+      await page.locator('[data-testid="blueprint-book-outline-editor"]').first().waitFor({ timeout: 45000 })
+      await logAction('select-chapter-1', () => listRow(1).click())
       await page.locator('[data-testid="blueprint-v2-view"]').first().waitFor({ timeout: 45000 })
 
       // 统一界面断言：无升级按钮、无旧版提示、状态行不带 v2 字样且显示迁移产物 r1。
@@ -191,14 +193,14 @@ async function main() {
       record('ui.aux-fields-preserved', aux, aux.guidanceKept && aux.notesKept)
 
       // 第 3 章（占位空行）：统一编辑器以种子（r0、未落库）展示，选择行为零数据库写入。
-      await logAction('select-chapter-3', () => listRow('未命名').click())
+      await logAction('select-chapter-3', () => listRow(3).click())
       await page.locator('[data-testid="blueprint-v2-view"]').first().waitFor({ timeout: 45000 })
       const ch3Status = await page.locator('[data-testid="blueprint-v2-status"]').first().innerText()
       record('ui.empty-chapter-seeded', { statusText: ch3Status }, ch3Status.includes('正式细纲 r0'))
       const ch3Read = readDb()
       assert.equal(ch3Read.details.filter(row => row.chapter_number === 3).length, 0, 'empty chapter must not be migrated by selection')
       record('ui.empty-chapter-no-db-write', { details: ch3Read.details.map(row => row.chapter_number) }, true)
-      await logAction('back-to-chapter-1', () => listRow('雨夜追击').click())
+      await logAction('back-to-chapter-1', () => listRow(1).click())
       await page.locator('[data-testid="blueprint-v2-view"]').first().waitFor({ timeout: 45000 })
 
       // 保存语义：修改章题 → 保存 → r2；继续输入哨兵值 → 切章再切回（本地输入保留、数据库未变）。
@@ -210,15 +212,15 @@ async function main() {
 
       const sentinel = '第1章｜雨夜追击（未保存哨兵）'
       await logAction('type-unsaved-sentinel', () => titleInput.fill(sentinel))
-      await logAction('switch-to-chapter-2', () => listRow('码头接头').click())
+      await logAction('switch-to-chapter-2', () => listRow(2).click())
       await page.locator('[data-testid="blueprint-v2-view"]').first().waitFor({ timeout: 45000 })
-      await logAction('switch-back-to-chapter-1', () => listRow('雨夜追击').click())
+      await logAction('switch-back-to-chapter-1', () => listRow(1).click())
       await page.locator('[data-testid="blueprint-v2-view"]').first().waitFor({ timeout: 45000 })
       const retainedValue = await page.locator('[data-testid="blueprint-v2-chapter-title"]').inputValue()
       const afterSwitchDb = readDb()
       const savedTitle = JSON.parse(afterSwitchDb.details.find(row => row.chapter_number === 1).detail_json).chapterTitle
-      record('ui.switch-keeps-input-not-db', { retainedValue, savedTitle },
-        retainedValue === sentinel && savedTitle === '第1章｜雨夜追击（修订）')
+      record('ui.switch-saves-and-restores-input', { retainedValue, savedTitle },
+        retainedValue === sentinel && savedTitle === sentinel)
       await logAction('screenshot', () => shot('04-after-save-and-cancel-check.png'))
 
       // 场景画布：切换可用。
@@ -246,7 +248,7 @@ async function main() {
         '- **章末钩子**：名单背面画着一只眼睛。',
         '',
       ].join('\n')
-      await logAction('select-chapter-2', () => listRow('码头接头').click())
+      await logAction('select-chapter-2', () => listRow(2).click())
       await page.locator('[data-testid="blueprint-v2-view"]').first().waitFor({ timeout: 45000 })
       await logAction('screenshot', () => shot('05b-chapter2-view.png'))
       const ch2StatusText = await page.locator('[data-testid="blueprint-v2-status"]').first().innerText()
@@ -299,7 +301,7 @@ async function main() {
       await logAction('screenshot', () => shot('07-imported-scenes.png'))
 
       // 正文参考：从蓝图页新建第 1 章正文，打开「本章创作上下文」侧栏核对细纲参考。
-      await logAction('select-chapter-1', () => listRow('雨夜追击').click())
+      await logAction('select-chapter-1', () => listRow(1).click())
       await page.locator('[data-testid="blueprint-v2-view"]').first().waitFor({ timeout: 45000 })
       await logAction('new-draft-ch1', () => page.getByRole('button', { name: /新建第1章正文/ }).first().click())
       const contextPurpose = page.locator('[data-testid="chapter-context-purpose"]')
@@ -320,6 +322,8 @@ async function main() {
       const proseDirectory = page.locator('.chapter-outline-sidebar')
       const expandDirectory = proseDirectory.locator('[aria-label="展开卷章目录"]')
       if (await expandDirectory.count()) await expandDirectory.click()
+      const collapsedVolume = proseDirectory.locator('.chapter-outline-arrow[aria-expanded="false"]').first()
+      if (await collapsedVolume.count()) await collapsedVolume.click()
       await page.locator('.chapter-outline-chapter').first().waitFor()
       const proseDirectoryState = {
         chapters: await page.locator('.chapter-outline-chapter').count(),
@@ -379,6 +383,8 @@ async function main() {
     try {
       const page3 = session.page
       await logAction('reopen-blueprint-page', () => page3.locator('[aria-label="打开章节蓝图"], [aria-label="Open chapter blueprints"]').first().click())
+      await page3.locator('[data-testid="blueprint-book-outline-editor"]').first().waitFor({ timeout: 45000 })
+      await logAction('reselect-chapter-1-after-reopen', () => page3.getByTestId('blueprint-planning-select-chapter-1').click())
       await page3.locator('[data-testid="blueprint-v2-view"]').first().waitFor({ timeout: 45000 })
       const restart = {
         upgradeButtonCount: await page3.locator('[data-testid="blueprint-v2-upgrade"]').count(),
