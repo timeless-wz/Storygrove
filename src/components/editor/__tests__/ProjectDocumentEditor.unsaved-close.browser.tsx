@@ -2,6 +2,9 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import '../../../index.css'
+import '../../../styles/literary-themes.css'
+
 import type { ProjectData } from '../../../shared/ipc-channels'
 import { setActiveProjectSessionContext } from '../../../shared/project-session-context'
 import { useEditorStore } from '../../../stores/editor-store'
