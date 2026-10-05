@@ -338,6 +338,11 @@ describe('Vditor prose editor', () => {
     await vi.waitFor(() => expect(onChange).toHaveBeenCalledTimes(1))
     const emitted = String(onChange.mock.calls[0]?.[0])
     expect(emitted).toContain('新的段落。')
+    const proseBeforeEcho = proseElement()
+    const selectionBeforeEcho = window.getSelection()
+    const cursorNodeBeforeEcho = selectionBeforeEcho?.anchorNode ?? null
+    const cursorOffsetBeforeEcho = selectionBeforeEcho?.anchorOffset ?? -1
+    expect(cursorNodeBeforeEcho && proseBeforeEcho.contains(cursorNodeBeforeEcho)).toBe(true)
 
     // 外层把作者输入回写为 content 时，不应再触发一次编辑器写入或 onChange。
     await act(async () => {
@@ -346,6 +351,26 @@ describe('Vditor prose editor', () => {
 
     expect(onChange).toHaveBeenCalledTimes(1)
     expect(proseElement().textContent).toContain('新的段落。')
+    expect(window.getSelection()?.anchorNode).toBe(cursorNodeBeforeEcho)
+    expect(window.getSelection()?.anchorOffset).toBe(cursorOffsetBeforeEcho)
+
+    // The controlled echo must not reset Vditor's undo stack.
+    await act(async () => {
+      const prose = proseElement()
+      prose.focus()
+      prose.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'z',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }))
+    })
+    await vi.waitFor(() => {
+      expect(proseElement().textContent).not.toContain('新的段落。')
+      expect(onChange).toHaveBeenCalledTimes(2)
+    })
+    const cursorAfterUndo = window.getSelection()?.anchorNode ?? null
+    expect(cursorAfterUndo && proseElement().contains(cursorAfterUndo)).toBe(true)
   })
 
   it('destroys the Vditor instance on unmount', async () => {
