@@ -244,6 +244,22 @@ describe('Vditor prose editor', () => {
     expect(String(onSave.mock.calls[0]?.[0])).toContain('林岚走进了房间。')
   })
 
+  it('does not invoke the save callback from a read-only editor', async () => {
+    const onSave = vi.fn()
+    await render({ content: '只读文档。', editable: false, onChange: vi.fn(), onSave })
+
+    await act(async () => {
+      proseElement().dispatchEvent(new KeyboardEvent('keydown', {
+        key: 's',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }))
+    })
+
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
   it('keeps the prose truly read-only when editable is false', async () => {
     const onChange = vi.fn()
     await render({ content: '第 1 章已经定稿。', editable: false, onChange })
@@ -472,31 +488,99 @@ describe('Vditor prose editor', () => {
     })
   })
 
-  it('supports jumpTarget to scroll to target heading', async () => {
-    const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {})
-    try {
-      await render({
-        content: '# 序幕\n\n正文...\n\n## 终局\n\n最终段落...',
-        editable: true,
-        onChange: vi.fn(),
-      })
+  it('retains a pre-ready heading jump and scrolls only the active editor panel', async () => {
+    const scrollSpy = vi.spyOn(HTMLElement.prototype, 'scrollTo').mockImplementation(() => {})
+    const content = '# 序幕\n\n正文...\n\n## 终局\n\n最终段落...'
+    await render({
+      content,
+      editable: true,
+      onChange: vi.fn(),
+      jumpTarget: { index: 1, line: 3, text: '终局', requestId: 1 },
+    })
 
-      await act(async () => {
-        root.render(
-          <VditorProseEditor
-            content="# 序幕\n\n正文...\n\n## 终局\n\n最终段落..."
-            editable
-            jumpTarget={{ index: 1, text: '终局', requestId: 1 }}
-          />,
-        )
-      })
+    const activePanel = container.querySelector('.vditor-ir')
+    expect(activePanel).not.toBeNull()
+    await vi.waitFor(() => expect(scrollSpy).toHaveBeenCalled())
+    expect(scrollSpy.mock.contexts).toContain(activePanel)
+    expect(container.querySelector('.vditor-wysiwyg')?.scrollTop ?? 0).toBe(0)
+  })
 
-      await vi.waitFor(() => {
-        expect(scrollSpy).toHaveBeenCalledWith({ block: 'start', behavior: 'smooth' })
-      })
-    } finally {
-      scrollSpy.mockRestore()
-    }
+  it('reports the active heading from the complete Markdown heading sequence as the panel scrolls', async () => {
+    const onActiveHeadingChange = vi.fn()
+    await render({
+      content: '# 序幕\n\n正文\n\n## 第二幕\n\n### 隐藏的小节\n\n正文\n\n## 终局',
+      editable: true,
+      onChange: vi.fn(),
+      onActiveHeadingChange,
+    })
+
+    const panel = container.querySelector<HTMLElement>('.vditor-ir')
+    const headings = Array.from(container.querySelectorAll<HTMLElement>('.vditor-ir h1, .vditor-ir h2, .vditor-ir h3'))
+    expect(panel).not.toBeNull()
+    expect(headings).toHaveLength(4)
+
+    const panelRect = { top: 100, left: 0, right: 500, bottom: 600, width: 500, height: 500, x: 0, y: 100, toJSON: () => ({}) } as DOMRect
+    vi.spyOn(panel!, 'getBoundingClientRect').mockReturnValue(panelRect)
+    const headingTops = [40, 139, 260, 360]
+    headings.forEach((heading, index) => {
+      vi.spyOn(heading, 'getBoundingClientRect').mockReturnValue({
+        top: headingTops[index], left: 0, right: 200, bottom: headingTops[index] + 24,
+        width: 200, height: 24, x: 0, y: headingTops[index], toJSON: () => ({}),
+      } as DOMRect)
+    })
+
+    await act(async () => {
+      panel!.dispatchEvent(new Event('scroll', { bubbles: true }))
+    })
+    await vi.waitFor(() => {
+      expect(onActiveHeadingChange).toHaveBeenCalledWith(expect.objectContaining({ index: 1, text: '第二幕' }))
+    })
+
+    headingTops[2] = 130
+    vi.spyOn(headings[2], 'getBoundingClientRect').mockReturnValue({
+      top: 130, left: 0, right: 200, bottom: 154, width: 200, height: 24, x: 0, y: 130, toJSON: () => ({}),
+    } as DOMRect)
+    await act(async () => {
+      panel!.dispatchEvent(new Event('scroll', { bubbles: true }))
+    })
+    await vi.waitFor(() => {
+      expect(onActiveHeadingChange).toHaveBeenCalledWith(expect.objectContaining({ index: 2, text: '隐藏的小节' }))
+    })
+  })
+
+  it('uses the exact source line and measured textarea layout for source-mode jumps', async () => {
+    const content = '# 序幕\r\n\r\n' + '一段很长的文字'.repeat(60) + '\r\n\r\n## 目标章节\r\n\r\n正文'
+    await render({ content, editable: true, onChange: vi.fn() })
+    await switchMode('sv')
+
+    const textarea = container.querySelector<HTMLTextAreaElement>('textarea.vditor-sv')
+    expect(textarea).not.toBeNull()
+    Object.defineProperty(textarea!, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ top: 30, left: 0, right: 340, bottom: 430, width: 340, height: 400, x: 0, y: 30, toJSON: () => ({}) }),
+    })
+    Object.defineProperty(textarea!, 'clientWidth', { configurable: true, value: 340 })
+    const scrollSpy = vi.spyOn(textarea!, 'scrollTo').mockImplementation(() => {})
+    const targetOffset = textarea!.value.indexOf('## 目标章节')
+    const targetLine = textarea!.value.slice(0, targetOffset).split(/\r\n|\r|\n/).length - 1
+
+    await act(async () => {
+      root.render(
+        <VditorProseEditor
+          content={content}
+          editable
+          onChange={vi.fn()}
+          jumpTarget={{ index: 1, line: targetLine, text: '目标章节', requestId: 2 }}
+        />,
+      )
+    })
+
+    // The request still targets the original exact Markdown offset in source mode.
+    expect(textarea!.selectionStart).toBe(targetOffset)
+    expect(scrollSpy).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'smooth' }))
+    const firstScrollOptions = scrollSpy.mock.calls[0]?.[0] as unknown as ScrollToOptions | undefined
+    expect(firstScrollOptions).toEqual(expect.objectContaining({ top: expect.any(Number) }))
+    expect(firstScrollOptions?.top).toBeGreaterThan(0)
   })
 
   it('registers CSS.highlights for foreshadowing colors and updates dynamically when status toggles', async () => {

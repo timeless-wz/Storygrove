@@ -24,6 +24,7 @@ import './foreshadowing.css'
 
 import { locateForeshadowingInText } from '../../services/foreshadowing-locator'
 import type { ForeshadowingRecord } from '../../shared/foreshadowing'
+import { analyzeProjectDocumentMarkdown, type MarkdownHeading } from '../../shared/project-documents'
 import {
   rememberDraftEditorPosition,
   rememberDraftEditorPositionIfAbsent,
@@ -237,6 +238,194 @@ function applyHeadingToEditor(
   }
 }
 
+export interface VditorActiveHeading {
+  /** Index in the complete Markdown heading sequence (including collapsed sections). */
+  index: number
+  line: number
+  text: string
+}
+
+function normalizedHeadingText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+function mapRenderedHeadings(
+  editorElement: HTMLElement,
+  markdownHeadings: MarkdownHeading[],
+): Array<{ heading: MarkdownHeading; index: number; element: HTMLElement }> {
+  const rendered = Array.from(editorElement.querySelectorAll<HTMLElement>(
+    'h1, h2, h3, h4, h5, h6',
+  ))
+  const mapped: Array<{ heading: MarkdownHeading; index: number; element: HTMLElement }> = []
+  let nextRenderedIndex = 0
+
+  for (let index = 0; index < markdownHeadings.length; index += 1) {
+    const heading = markdownHeadings[index]
+    const expectedText = normalizedHeadingText(heading.text)
+    let foundIndex = -1
+    for (let renderedIndex = nextRenderedIndex; renderedIndex < rendered.length; renderedIndex += 1) {
+      const element = rendered[renderedIndex]
+      const level = Number(element.tagName.slice(1))
+      if (level === heading.level && normalizedHeadingText(element.textContent ?? '') === expectedText) {
+        foundIndex = renderedIndex
+        break
+      }
+    }
+
+    // Vditor may represent a heading's inline Markdown differently in DOM text.
+    // Keep the complete source sequence index when the level still aligns.
+    if (foundIndex < 0 && rendered[index] && Number(rendered[index].tagName.slice(1)) === heading.level) {
+      foundIndex = index
+    }
+    if (foundIndex < 0) continue
+
+    mapped.push({ heading, index, element: rendered[foundIndex] })
+    nextRenderedIndex = foundIndex + 1
+  }
+
+  return mapped
+}
+
+/** Measure source line positions with the textarea's own font and wrap width. */
+function measureTextareaLineTops(textarea: HTMLTextAreaElement, targetLines: number[]): Map<number, number> {
+  const result = new Map<number, number>()
+  const lines = textarea.value.split(/\r\n|\r|\n/)
+  const requestedLines = Array.from(new Set(targetLines))
+    .filter(line => Number.isInteger(line) && line >= 0 && line < lines.length)
+  if (requestedLines.length === 0 || typeof window === 'undefined' || !document.body) return result
+
+  const bounds = textarea.getBoundingClientRect()
+  const width = bounds.width || textarea.clientWidth
+  if (width <= 0) return result
+
+  const computed = window.getComputedStyle(textarea)
+  const mirror = document.createElement('div')
+  mirror.setAttribute('aria-hidden', 'true')
+  Object.assign(mirror.style, {
+    position: 'fixed',
+    left: '-100000px',
+    top: '0',
+    display: 'block',
+    visibility: 'hidden',
+    pointerEvents: 'none',
+    boxSizing: 'border-box',
+    width: `${width}px`,
+    height: 'auto',
+    minHeight: '0',
+    maxHeight: 'none',
+    overflow: 'visible',
+    resize: 'none',
+    whiteSpace: computed.whiteSpace || 'pre-wrap',
+    overflowWrap: computed.overflowWrap || 'break-word',
+    wordBreak: computed.wordBreak || 'normal',
+    fontFamily: computed.fontFamily,
+    fontSize: computed.fontSize,
+    fontStyle: computed.fontStyle,
+    fontWeight: computed.fontWeight,
+    fontVariant: computed.fontVariant,
+    lineHeight: computed.lineHeight,
+    letterSpacing: computed.letterSpacing,
+    wordSpacing: computed.wordSpacing,
+    textIndent: computed.textIndent,
+    textAlign: computed.textAlign,
+    textTransform: computed.textTransform,
+    tabSize: computed.tabSize,
+    direction: computed.direction,
+    padding: computed.padding,
+    border: computed.border,
+  })
+
+  const markers = new Map<number, HTMLSpanElement>()
+  const requested = new Set(requestedLines)
+  for (let line = 0; line < lines.length; line += 1) {
+    if (requested.has(line)) {
+      const marker = document.createElement('span')
+      marker.textContent = '\u200b'
+      markers.set(line, marker)
+      mirror.appendChild(marker)
+    }
+    mirror.appendChild(document.createTextNode(lines[line]))
+    if (line < lines.length - 1) mirror.appendChild(document.createTextNode('\n'))
+  }
+
+  document.body.appendChild(mirror)
+  const mirrorTop = mirror.getBoundingClientRect().top
+  for (const [line, marker] of markers) {
+    result.set(line, marker.getBoundingClientRect().top - mirrorTop)
+  }
+  mirror.remove()
+
+  return result
+}
+
+function sourceLineStartOffset(value: string, line: number): number {
+  if (line <= 0) return 0
+  const parts = value.split(/(\r\n|\r|\n)/)
+  let offset = 0
+  for (let currentLine = 0; currentLine < line; currentLine += 1) {
+    const textIndex = currentLine * 2
+    offset += parts[textIndex]?.length ?? 0
+    offset += parts[textIndex + 1]?.length ?? 0
+    if (textIndex + 1 >= parts.length) break
+  }
+  return Math.min(offset, value.length)
+}
+
+function findMarkdownHeadingIndex(
+  headings: MarkdownHeading[],
+  target: NonNullable<VditorProseEditorProps['jumpTarget']>,
+): number {
+  if (target.line !== undefined) {
+    const lineIndex = headings.findIndex(heading => heading.line === target.line)
+    if (lineIndex >= 0) return lineIndex
+  }
+
+  if (target.index !== undefined) {
+    const indexed = headings[target.index]
+    if (!target.text || (indexed && normalizedHeadingText(indexed.text) === normalizedHeadingText(target.text))) {
+      if (indexed) return target.index
+    }
+  }
+
+  if (target.text) {
+    const matches = headings
+      .map((heading, index) => ({ heading, index }))
+      .filter(item => normalizedHeadingText(item.heading.text) === normalizedHeadingText(target.text!))
+    if (matches.length === 1) return matches[0].index
+    if (target.index !== undefined) {
+      const sameIndex = matches.find(item => item.index === target.index)
+      if (sameIndex) return sameIndex.index
+      const following = matches.find(item => item.index > target.index!)
+      if (following) return following.index
+    }
+  }
+
+  return -1
+}
+
+function scrollWithinEditor(container: HTMLElement, top: number): void {
+  const safeTop = Math.max(0, top)
+  if (typeof container.scrollTo === 'function') {
+    container.scrollTo({ top: safeTop, behavior: 'smooth' })
+  } else {
+    container.scrollTop = safeTop
+  }
+}
+
+function scrollElementWithinContainer(
+  container: HTMLElement,
+  target: HTMLElement,
+  alignment: 'start' | 'center' = 'start',
+): void {
+  const containerRect = container.getBoundingClientRect()
+  const targetRect = target.getBoundingClientRect()
+  const comfortableTop = alignment === 'center'
+    ? Math.max(40, (container.clientHeight - targetRect.height) / 2)
+    : 40
+  const nextTop = container.scrollTop + targetRect.top - containerRect.top - comfortableTop
+  scrollWithinEditor(container, nextTop)
+}
+
 export interface ForeshadowingSelectionInfo {
   selectedText: string
   startOffset: number
@@ -278,6 +467,8 @@ export interface VditorProseEditorProps {
    * 目录点击不会在每次渲染时重复触发滚动。
    */
   jumpTarget?: { line?: number; index?: number; text?: string; requestId: number } | null
+  /** Current heading under the editor scroll position; index follows the full Markdown heading sequence. */
+  onActiveHeadingChange?: (heading: VditorActiveHeading | null) => void
   /**
    * 外部请求在光标处插入文本（例如插入图片引用）；只在 requestId 变化时执行一次。
    */
@@ -309,6 +500,7 @@ export default function VditorProseEditor({
   onCharCountChange,
   className,
   jumpTarget,
+  onActiveHeadingChange,
   insertRequest,
   positionMemoryKey,
   restorePosition,
@@ -336,6 +528,7 @@ export default function VditorProseEditor({
   const onChangeRef = useRef(onChange)
   const onSaveRef = useRef(onSave)
   const onCharCountRef = useRef(onCharCountChange)
+  const onActiveHeadingChangeRef = useRef(onActiveHeadingChange)
   const editableRef = useRef(editable)
   const placeholderTextRef = useRef(placeholder)
   const uploadNoticeRef = useRef('')
@@ -343,6 +536,7 @@ export default function VditorProseEditor({
     onChangeRef.current = onChange
     onSaveRef.current = onSave
     onCharCountRef.current = onCharCountChange
+    onActiveHeadingChangeRef.current = onActiveHeadingChange
     editableRef.current = editable
     placeholderTextRef.current = placeholder
     uploadNoticeRef.current = text('图片导入功能待接入', 'Image import is not connected yet')
@@ -543,12 +737,14 @@ export default function VditorProseEditor({
     return host.querySelector<HTMLElement>(selector)
   }, [])
 
-  /** 当前可见模式的正文可编辑元素。 */
-  const findActiveEditorElement = useCallback((host: HTMLElement): HTMLElement | null => (
-    host.querySelector<HTMLElement>(
-      '.vditor-ir:not([style*="display: none"]) pre.vditor-reset, .vditor-wysiwyg:not([style*="display: none"]) pre.vditor-reset',
-    )
-  ), [])
+  /** 当前模式的正文节点，跳转与测量都只作用于当前编辑面板。 */
+  const findActiveEditorElement = useCallback((host: HTMLElement, mode: DraftEditorMode): HTMLElement | null => {
+    if (mode === 'sv') return null
+    const selector = mode === 'wysiwyg'
+      ? '.vditor-wysiwyg:not([style*="display: none"]) pre.vditor-reset'
+      : '.vditor-ir:not([style*="display: none"]) pre.vditor-reset'
+    return host.querySelector<HTMLElement>(selector)
+  }, [])
 
   /**
    * 记录作者离开时的光标与滚动位置。
@@ -576,7 +772,7 @@ export default function VditorProseEditor({
       return { mode, blockIndex: -1, offsetInBlock: 0, blockText: '', sourceOffset, scrollTop }
     }
 
-    const editorEl = findActiveEditorElement(host)
+    const editorEl = findActiveEditorElement(host, mode)
     if (!editorEl) return null
     // 失焦后 window.getSelection() 可能已经被清空，此时退回最后一次记录的选区。
     const selection = window.getSelection()
@@ -630,6 +826,150 @@ export default function VditorProseEditor({
   }, [captureEditorPosition])
 
   const getCurrentMarkdown = useCallback(() => vditorRef.current?.getValue() ?? syncedContentRef.current, [])
+  const pendingJumpRef = useRef<NonNullable<VditorProseEditorProps['jumpTarget']> | null>(null)
+  const lastReceivedJumpRequestRef = useRef<number | null>(null)
+  const lastAppliedJumpRequestRef = useRef<number | null>(null)
+  const activeHeadingSignatureRef = useRef<string | null | undefined>(undefined)
+  const activeHeadingRafRef = useRef<number | null>(null)
+  const sourceHeadingOffsetsRef = useRef<{
+    textarea: HTMLTextAreaElement
+    value: string
+    width: number
+    offsets: Map<number, number>
+  } | null>(null)
+
+  const reportActiveHeading = useCallback((heading: VditorActiveHeading | null) => {
+    const signature = heading ? JSON.stringify([heading.line, heading.index, heading.text]) : null
+    if (activeHeadingSignatureRef.current === signature) return
+    activeHeadingSignatureRef.current = signature
+    onActiveHeadingChangeRef.current?.(heading)
+  }, [])
+
+  const getCurrentMode = useCallback((): DraftEditorMode => {
+    const internal = vditorRef.current as unknown as { vditor?: { currentMode?: DraftEditorMode } }
+    return internal?.vditor?.currentMode ?? 'ir'
+  }, [])
+
+  const syncActiveHeading = useCallback(() => {
+    const host = hostRef.current
+    if (!host || !readyRef.current) return
+
+    const mode = getCurrentMode()
+    const scroller = findScrollContainer(host, mode)
+    const markdownHeadings = analyzeProjectDocumentMarkdown(getCurrentMarkdown()).headings
+    if (!scroller || markdownHeadings.length === 0) {
+      reportActiveHeading(null)
+      return
+    }
+
+    let activeHeading: MarkdownHeading | null = null
+    let activeIndex = -1
+    if (mode === 'sv') {
+      const textarea = host.querySelector<HTMLTextAreaElement>('textarea.vditor-sv')
+      if (!textarea || textarea.style.display === 'none') return
+
+      const bounds = textarea.getBoundingClientRect()
+      const width = bounds.width || textarea.clientWidth
+      let offsets = sourceHeadingOffsetsRef.current?.offsets
+      const cached = sourceHeadingOffsetsRef.current
+      if (!cached || cached.textarea !== textarea || cached.value !== textarea.value || cached.width !== width) {
+        offsets = measureTextareaLineTops(textarea, markdownHeadings.map(heading => heading.line))
+        sourceHeadingOffsetsRef.current = { textarea, value: textarea.value, width, offsets }
+      }
+
+      const computed = window.getComputedStyle(textarea)
+      const paddingTop = Number.parseFloat(computed.paddingTop) || 0
+      const lineHeightValue = Number.parseFloat(computed.lineHeight)
+      const fontSize = Number.parseFloat(computed.fontSize) || 16
+      const lineHeight = Number.isFinite(lineHeightValue) ? lineHeightValue : fontSize * 1.5
+      const viewportLine = textarea.scrollTop + textarea.clientTop + paddingTop + lineHeight
+      for (let index = 0; index < markdownHeadings.length; index += 1) {
+        const top = offsets?.get(markdownHeadings[index].line)
+        if (top === undefined) continue
+        if (top <= viewportLine) {
+          activeHeading = markdownHeadings[index]
+          activeIndex = index
+        } else {
+          break
+        }
+      }
+    } else {
+      const editorElement = findActiveEditorElement(host, mode)
+      if (!editorElement) return
+      const renderedHeadings = mapRenderedHeadings(editorElement, markdownHeadings)
+      const scrollerTop = scroller.getBoundingClientRect().top
+      const activeHeadingTop = scrollerTop + 40
+      for (const renderedHeading of renderedHeadings) {
+        if (renderedHeading.element.getBoundingClientRect().top <= activeHeadingTop) {
+          activeHeading = renderedHeading.heading
+          activeIndex = renderedHeading.index
+        } else {
+          break
+        }
+      }
+    }
+
+    reportActiveHeading(activeHeading && activeIndex >= 0
+      ? { line: activeHeading.line, index: activeIndex, text: activeHeading.text }
+      : null)
+  }, [findActiveEditorElement, findScrollContainer, getCurrentMarkdown, getCurrentMode, reportActiveHeading])
+
+  const scheduleActiveHeadingSync = useCallback(() => {
+    if (activeHeadingRafRef.current !== null) cancelAnimationFrame(activeHeadingRafRef.current)
+    activeHeadingRafRef.current = requestAnimationFrame(() => {
+      activeHeadingRafRef.current = null
+      syncActiveHeading()
+    })
+  }, [syncActiveHeading])
+
+  const applyPendingJumpTarget = useCallback(() => {
+    const request = pendingJumpRef.current
+    if (!request || lastAppliedJumpRequestRef.current === request.requestId) return
+    const host = hostRef.current
+    if (!host || !readyRef.current) return
+
+    const mode = getCurrentMode()
+    const scroller = findScrollContainer(host, mode)
+    if (!scroller) return
+    const markdown = getCurrentMarkdown()
+    const markdownHeadings = analyzeProjectDocumentMarkdown(markdown).headings
+    const headingIndex = findMarkdownHeadingIndex(markdownHeadings, request)
+    const heading = headingIndex >= 0 ? markdownHeadings[headingIndex] : undefined
+
+    if (mode === 'sv') {
+      const textarea = host.querySelector<HTMLTextAreaElement>('textarea.vditor-sv')
+      if (!textarea || textarea.style.display === 'none') return
+      const requestedLine = request.line ?? heading?.line
+      if (requestedLine === undefined) return
+      const lineCount = textarea.value.split(/\r\n|\r|\n/).length
+      const targetLine = Math.min(Math.max(0, requestedLine), lineCount - 1)
+      const offset = sourceLineStartOffset(textarea.value, targetLine)
+      textarea.focus()
+      textarea.setSelectionRange(offset, offset)
+      lastSvRangeRef.current = { start: offset, end: offset }
+
+      // setSelectionRange scrolls the target into view; mirror measurement then
+      // moves it below the editor chrome without estimating a fixed source line height.
+      const measuredTop = measureTextareaLineTops(textarea, [targetLine]).get(targetLine)
+      if (measuredTop !== undefined) scrollWithinEditor(textarea, measuredTop - 40)
+    } else {
+      const editorElement = findActiveEditorElement(host, mode)
+      if (!editorElement) return
+      const renderedHeadings = mapRenderedHeadings(editorElement, markdownHeadings)
+      let target = renderedHeadings.find(item => item.index === headingIndex)
+      if (!target && request.text) {
+        target = renderedHeadings.find(item => (
+          normalizedHeadingText(item.heading.text) === normalizedHeadingText(request.text!)
+        ))
+      }
+      if (!target) return
+      scrollElementWithinContainer(scroller, target.element)
+    }
+
+    lastAppliedJumpRequestRef.current = request.requestId
+    pendingJumpRef.current = null
+    scheduleActiveHeadingSync()
+  }, [findActiveEditorElement, findScrollContainer, getCurrentMarkdown, getCurrentMode, scheduleActiveHeadingSync])
 
   /** 待还原的位置请求；就绪前到达时由 Vditor 的 after 回调补做。 */
   const pendingRestoreRef = useRef<VditorRestorePositionRequest | null>(null)
@@ -669,7 +1009,7 @@ export default function VditorProseEditor({
       return
     }
 
-    const editorEl = findActiveEditorElement(host)
+    const editorEl = findActiveEditorElement(host, request.mode)
     if (!editorEl) {
       restoreScrollOnly()
       return
@@ -728,13 +1068,10 @@ export default function VditorProseEditor({
       selection.addRange(range)
     }
     lastRangeRef.current = range.cloneRange()
-    // 把落点带进视野；死记滚动距离在段落被改动后会指到别处。
-    const resolvedElement = resolved as HTMLElement
-    if (typeof resolvedElement.scrollIntoView === 'function') {
-      resolvedElement.scrollIntoView({ block: 'center' })
-    } else {
-      restoreScrollOnly()
-    }
+    // 只滚动当前编辑模式的正文面板，避免 scrollIntoView 连带移动应用外层。
+    const scroller = findScrollContainer(host, request.mode)
+    if (scroller) scrollElementWithinContainer(scroller, resolved as HTMLElement, 'center')
+    else restoreScrollOnly()
   }, [findActiveEditorElement, findScrollContainer])
 
   // 请求可能在编辑器就绪前到达：先存起来，就绪后由 after() 补做。
@@ -742,6 +1079,38 @@ export default function VditorProseEditor({
     pendingRestoreRef.current = restorePosition ?? null
     applyRestorePosition()
   }, [applyRestorePosition, restorePosition])
+
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+
+    const handleScroll = () => scheduleActiveHeadingSync()
+    const handleModeSwitch = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null
+      if (!target?.closest('.vditor-toolbar button[data-mode]')) return
+      window.setTimeout(scheduleActiveHeadingSync, 0)
+    }
+
+    host.addEventListener('scroll', handleScroll, true)
+    host.addEventListener('input', handleScroll, true)
+    host.addEventListener('click', handleModeSwitch, true)
+    window.addEventListener('resize', handleScroll)
+    const resizeObserver = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(handleScroll)
+    resizeObserver?.observe(host)
+    return () => {
+      host.removeEventListener('scroll', handleScroll, true)
+      host.removeEventListener('input', handleScroll, true)
+      host.removeEventListener('click', handleModeSwitch, true)
+      window.removeEventListener('resize', handleScroll)
+      resizeObserver?.disconnect()
+      if (activeHeadingRafRef.current !== null) {
+        cancelAnimationFrame(activeHeadingRafRef.current)
+        activeHeadingRafRef.current = null
+      }
+    }
+  }, [scheduleActiveHeadingSync])
 
   // 暴露给父组件的命令式接口。
   useEffect(() => {
@@ -902,7 +1271,8 @@ export default function VditorProseEditor({
     onCharCountRef.current?.(countDraftUnits(markdown))
     onChangeRef.current?.(markdown)
     updateHighlights()
-  }, [updateHighlights])
+    scheduleActiveHeadingSync()
+  }, [scheduleActiveHeadingSync, updateHighlights])
 
   /** 外部内容变化：只有确实不同才写回编辑器。 */
   const applyExternalContent = useCallback(() => {
@@ -915,7 +1285,8 @@ export default function VditorProseEditor({
     vditor.setValue(next)
     onCharCountRef.current?.(countDraftUnits(next))
     updateHighlights()
-  }, [updateHighlights])
+    scheduleActiveHeadingSync()
+  }, [scheduleActiveHeadingSync, updateHighlights])
 
   /** 只读时除 Vditor 自带的 disabled() 外，再拦住输入、粘贴与拖放，但放行模式切换。 */
   const applyEditableState = useCallback(() => {
@@ -993,6 +1364,9 @@ export default function VditorProseEditor({
           updateHighlights()
           // 还原请求可能早于就绪到达（跳回正文时组件刚重新挂载）。
           applyRestorePosition()
+          // 目录跳转可能在语言包/Vditor 初始化前到达，保留到此刻再执行。
+          applyPendingJumpTarget()
+          scheduleActiveHeadingSync()
         },
       })
       if (disposed) {
@@ -1016,9 +1390,11 @@ export default function VditorProseEditor({
   }, [
     applyEditableState,
     applyExternalContent,
+    applyPendingJumpTarget,
     applyRestorePosition,
     emitInput,
     rememberPositionOnUnmount,
+    scheduleActiveHeadingSync,
     updateHighlights,
   ])
 
@@ -1033,53 +1409,17 @@ export default function VditorProseEditor({
     applyEditableState()
   }, [applyEditableState, editable])
 
-  // 外部目录跳转：只在 requestId 变化时执行一次。
-  const lastJumpRequestRef = useRef<number | null>(null)
+  // 外部目录跳转：就绪前只排队，不丢掉请求。
   useEffect(() => {
-    if (!jumpTarget) return
-    if (lastJumpRequestRef.current === jumpTarget.requestId) return
-    const vditor = vditorRef.current
-    const host = hostRef.current
-    if (!vditor || !host || !readyRef.current) return
-
-    lastJumpRequestRef.current = jumpTarget.requestId
-
-    const internal = vditor as unknown as { vditor?: { currentMode?: 'ir' | 'wysiwyg' | 'sv' } }
-    const currentMode = internal.vditor?.currentMode ?? 'ir'
-
-    if (currentMode === 'sv') {
-      const textarea = host.querySelector<HTMLTextAreaElement>('textarea.vditor-sv')
-      if (textarea && jumpTarget.line !== undefined) {
-        const lines = textarea.value.split('\n')
-        const targetLine = Math.min(Math.max(0, jumpTarget.line), lines.length - 1)
-        let charPos = 0
-        for (let i = 0; i < targetLine; i++) {
-          charPos += lines[i].length + 1
-        }
-        textarea.focus()
-        textarea.setSelectionRange(charPos, charPos)
-        const approxLineHeight = 22
-        textarea.scrollTop = Math.max(0, targetLine * approxLineHeight - 40)
-      }
+    if (!jumpTarget) {
+      pendingJumpRef.current = null
       return
     }
-
-    const selector = currentMode === 'wysiwyg'
-      ? '.vditor-wysiwyg h1, .vditor-wysiwyg h2, .vditor-wysiwyg h3, .vditor-wysiwyg h4, .vditor-wysiwyg h5, .vditor-wysiwyg h6'
-      : '.vditor-ir h1, .vditor-ir h2, .vditor-ir h3, .vditor-ir h4, .vditor-ir h5, .vditor-ir h6'
-    const headingElements = Array.from(host.querySelectorAll<HTMLElement>(selector))
-
-    let targetElement: HTMLElement | undefined
-    if (jumpTarget.index !== undefined && headingElements[jumpTarget.index]) {
-      targetElement = headingElements[jumpTarget.index]
-    } else if (jumpTarget.text) {
-      targetElement = headingElements.find(el => el.textContent?.trim().includes(jumpTarget.text!.trim()))
-    }
-
-    if (targetElement) {
-      targetElement.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
-    }
-  }, [jumpTarget])
+    if (lastReceivedJumpRequestRef.current === jumpTarget.requestId) return
+    lastReceivedJumpRequestRef.current = jumpTarget.requestId
+    pendingJumpRef.current = jumpTarget
+    applyPendingJumpTarget()
+  }, [applyPendingJumpTarget, jumpTarget])
 
   // 外部插入：只在 requestId 变化时执行一次，插入在当前光标位置后把光标停在插入内容之后。
   const lastInsertRequestRef = useRef<number | null>(null)
@@ -1151,6 +1491,7 @@ export default function VditorProseEditor({
       // Ctrl/Cmd + S 保存
       if (event.key.toLowerCase() === 's') {
         event.preventDefault()
+        if (!editableRef.current) return
         onSaveRef.current?.(vditor ? vditor.getValue() : pendingContentRef.current)
         return
       }
