@@ -25,7 +25,10 @@ import {
   type BlueprintChapterPlanning,
   type ChapterBlueprintV2Content,
 } from '../../shared/blueprint-v2'
+import { analyzeProjectDocumentMarkdown } from '../../shared/project-documents'
 import { useLocaleStore } from '../../stores/locale-store'
+import { useProjectStore } from '../../stores/project-store'
+import { createBusinessFieldDocumentIdentity } from '../../shared/document-editing'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
 import { Label } from '../ui/Label'
@@ -33,6 +36,8 @@ import { NativeSelect } from '../ui/NativeSelect'
 import { Textarea } from '../ui/Textarea'
 import { confirm } from '../ui/Confirm'
 import { cn } from '../../lib/utils'
+import { captureProjectSession } from '../project-session-gate'
+import DocumentEditingSurface from './DocumentEditingSurface'
 import './chapter-blueprint-v2.css'
 
 const SECTION_ICONS: Record<BlueprintV2SectionId, string> = {
@@ -56,6 +61,14 @@ function textareaRows(markdown: string, min = 3, max = 22): number {
   return Math.max(min, Math.min(max, lines + 1))
 }
 
+function shouldShowMarkdownOutline(markdown: string): boolean {
+  return analyzeProjectDocumentMarkdown(markdown).headings.length > 1
+}
+
+function isLongMarkdownField(markdown: string): boolean {
+  return markdown.length >= 600 || markdown.split('\n').length >= 12
+}
+
 export interface BlueprintV2EditorProps {
   content: ChapterBlueprintV2Content
   onChange(next: ChapterBlueprintV2Content): void
@@ -64,6 +77,10 @@ export interface BlueprintV2EditorProps {
 
 export default function BlueprintV2Editor({ content, onChange }: BlueprintV2EditorProps) {
   const text = useLocaleStore(s => s.text)
+  const currentProject = useProjectStore(s => s.currentProject)
+  const documentProjectId = captureProjectSession(currentProject)?.projectId
+    ?? currentProject?.id
+    ?? `inactive:${currentProject?.path ?? 'blueprint-v2'}`
 
   const scenes = useMemo(() => getBlueprintV2Scenes(content), [content])
   const missingCanonicalSections = BLUEPRINT_V2_CANONICAL_SECTIONS.filter(entry => (
@@ -211,6 +228,12 @@ export default function BlueprintV2Editor({ content, onChange }: BlueprintV2Edit
       </section>
       {content.sections.map((section, sectionIndex) => {
         if (section.kind === 'custom') {
+          const documentIdentity = createBusinessFieldDocumentIdentity({
+            projectId: documentProjectId,
+            entityType: 'blueprint-v2-custom-section',
+            entityId: `chapter-${content.chapterNumber}:${section.id}`,
+            fieldId: 'body',
+          })
           return (
             <section key={section.id + sectionIndex} className="blueprint-v2__section blueprint-v2__section--custom" data-testid="blueprint-v2-custom-section">
               <header className="blueprint-v2__section-header">
@@ -219,12 +242,16 @@ export default function BlueprintV2Editor({ content, onChange }: BlueprintV2Edit
                 </span>
                 <span className="blueprint-v2__section-tag">{text('未归类', 'Unclassified')}</span>
               </header>
-              <Textarea
-                value={section.body}
-                rows={textareaRows(section.body, 4)}
-                onChange={event => patchCustomBody(sectionIndex, event.target.value)}
-                aria-label={text(`分区「${section.title}」正文`, `Body of section “${section.title}”`)}
-              />
+              <div className={cn('blueprint-v2__long-markdown-editor', isLongMarkdownField(section.body) && 'blueprint-v2__long-markdown-editor--long')} data-testid="blueprint-v2-custom-body-editor" data-document-identity={documentIdentity}>
+                <DocumentEditingSurface
+                  documentIdentity={documentIdentity}
+                  layout="business-field"
+                  showHeadingToc={shouldShowMarkdownOutline(section.body)}
+                  content={section.body}
+                  onChange={body => patchCustomBody(sectionIndex, body)}
+                  placeholder={text(`分区「${section.title}」正文`, `Body of section “${section.title}”`)}
+                />
+              </div>
             </section>
           )
         }
@@ -261,6 +288,12 @@ export default function BlueprintV2Editor({ content, onChange }: BlueprintV2Edit
               {section.items.map(item => {
                 if (item.kind === 'scene') {
                   const order = sectionScenes.findIndex(scene => scene.id === item.id) + 1
+                  const documentIdentity = createBusinessFieldDocumentIdentity({
+                    projectId: documentProjectId,
+                    entityType: 'blueprint-v2-scene',
+                    entityId: `chapter-${content.chapterNumber}:${item.id}`,
+                    fieldId: 'markdown',
+                  })
                   return (
                     <article
                       key={item.id}
@@ -336,16 +369,19 @@ export default function BlueprintV2Editor({ content, onChange }: BlueprintV2Edit
                           </Button>
                         </div>
                       </div>
-                      <Textarea
-                        value={item.markdown}
-                        rows={textareaRows(item.markdown, 4)}
-                        onChange={event => patchItem(sectionIndex, item.id, current => (
-                          current.kind === 'scene' ? { ...current, markdown: event.target.value } : current
-                        ))}
-                        className="blueprint-v2__scene-markdown"
-                        aria-label={text('分镜正文（Markdown）', 'Scene body (Markdown)')}
-                        placeholder={text('分镜正文：时空环境、动作细节、对白……小标题与嵌套列表会逐字保留。', 'Scene body: setting, action, dialogue… sub-headings and nested lists are kept verbatim.')}
-                      />
+                      <div className={cn('blueprint-v2__long-markdown-editor', isLongMarkdownField(item.markdown) && 'blueprint-v2__long-markdown-editor--long')} data-testid={`blueprint-v2-scene-markdown-${item.id}`} data-document-identity={documentIdentity}>
+                        <DocumentEditingSurface
+                          documentIdentity={documentIdentity}
+                          layout="business-field"
+                          showHeadingToc={shouldShowMarkdownOutline(item.markdown)}
+                          content={item.markdown}
+                          onChange={markdown => patchItem(sectionIndex, item.id, current => (
+                            current.kind === 'scene' ? { ...current, markdown } : current
+                          ))}
+                          placeholder={text('分镜正文：时空环境、动作细节、对白……小标题与嵌套列表会逐字保留。', 'Scene body: setting, action, dialogue… sub-headings and nested lists are kept verbatim.')}
+                          className="blueprint-v2__scene-markdown"
+                        />
+                      </div>
                     </article>
                   )
                 }

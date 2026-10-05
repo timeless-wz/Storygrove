@@ -219,15 +219,15 @@
   padding: 7px;
 }
 
-.blueprint-planning-editor__markdown {
+.blueprint-planning-editor__document {
   width: 100%;
-  min-height: 48vh;
-  resize: vertical;
+  height: clamp(420px, 58vh, 780px);
+  min-height: 360px;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
   border-radius: 10px;
-  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.7;
-  tab-size: 2;
+  background: var(--color-bg);
 }
 
 .blueprint-planning-editor__counts {
@@ -361,7 +361,7 @@
   .blueprint-planning-editor { padding: 13px 11px 28px; }
   .blueprint-planning-editor__header { flex-direction: column; }
   .blueprint-planning-editor__revision { align-items: flex-start; }
-  .blueprint-planning-editor__markdown { min-height: 40vh; }
+  .blueprint-planning-editor__document { height: clamp(360px, 58vh, 720px); }
   .blueprint-planning-checks__columns { grid-template-columns: 1fr; }
   .blueprint-planning-editor__guidance { grid-template-columns: 1fr; }
   .blueprint-planning-editor__workflow-inputs { grid-template-columns: 1fr; }

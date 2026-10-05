@@ -244,6 +244,32 @@
   line-height: 1.6;
 }
 
+.blueprint-v2__long-markdown-editor {
+  width: 100%;
+  min-width: 0;
+  min-height: 210px;
+  height: 230px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+}
+
+.blueprint-v2__long-markdown-editor--long {
+  min-height: 270px;
+  height: min(38vh, 420px);
+}
+
+.blueprint-v2__long-markdown-editor .document-editing-surface {
+  height: 100%;
+  min-height: 0;
+}
+
+.blueprint-v2__scene-markdown .vditor-ir pre.vditor-reset {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .blueprint-v2__item {
   display: flex;
   flex-direction: column;
