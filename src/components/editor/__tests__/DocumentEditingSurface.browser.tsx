@@ -249,4 +249,78 @@ describe('DocumentEditingSurface', () => {
     expect(toggle?.getAttribute('aria-expanded')).toBe('true')
     expect(panel.querySelector<HTMLElement>('aside.document-editing-surface__outline')?.hidden).toBe(false)
   })
+
+  it('shows a full-width editor under a right floating outline and leaves no rail when closed', async () => {
+    const content = Array.from({ length: 42 }, (_, index) => '## 第' + (index + 1) + '节').join('\n\n')
+    await renderSurface({
+      documentIdentity: 'project/test/document/floating-outline.md',
+      layout: 'long-document',
+      outlineControl: 'floating',
+      appearance: 'full-bleed',
+      content,
+    })
+
+    const surface = panel.querySelector<HTMLElement>('.document-editing-surface')!
+    const editor = surface.querySelector<HTMLElement>('.document-editing-surface__editor')!
+    const editorHost = surface.querySelector<HTMLElement>('.vditor-prose-host')!
+    const editable = surface.querySelector<HTMLElement>('.vditor-ir pre.vditor-reset')!
+    const toggle = surface.querySelector<HTMLButtonElement>('.document-editing-surface__page-outline-control button')!
+    const editorWidth = editor.getBoundingClientRect().width
+    expect(surface.dataset.editorAppearance).toBe('full-bleed')
+    expect(getComputedStyle(surface).backgroundColor)
+      .toBe(getComputedStyle(editorHost).backgroundColor)
+    expect(getComputedStyle(editable).maxWidth).toBe('none')
+    expect(getComputedStyle(editable).borderRadius).toBe('0px')
+    expect(getComputedStyle(editable).boxShadow).toBe('none')
+    expect(getComputedStyle(surface.querySelector<HTMLElement>('.vditor-ir')!).overflowY).toBe('auto')
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+
+    await act(async () => toggle.click())
+    const outline = surface.querySelector<HTMLElement>('aside.document-editing-surface__outline')!
+    const nav = outline.querySelector<HTMLElement>('nav[aria-label="文档目录"]')!
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(outline.hidden).toBe(false)
+    expect(getComputedStyle(outline).position).toBe('absolute')
+    expect(nav.scrollHeight).toBeGreaterThan(nav.clientHeight)
+    expect(editor.getBoundingClientRect().width).toBe(editorWidth)
+    expect(surface.querySelector('.vditor-prose-host')).toBe(editorHost)
+    expect(nav.querySelectorAll('.document-editing-surface__heading')).toHaveLength(42)
+
+    const close = outline.querySelector<HTMLButtonElement>('button[aria-label="关闭文档目录"]')!
+    await act(async () => close.click())
+    expect(outline.hidden).toBe(true)
+    expect(outline.getBoundingClientRect().width).toBe(0)
+    expect(surface.querySelector('.document-editing-surface__outline.is-open')).toBeNull()
+    expect(editor.getBoundingClientRect().width).toBe(editorWidth)
+    expect(document.activeElement).toBe(toggle)
+
+    await act(async () => toggle.click())
+    await act(async () => {
+      outline.querySelector<HTMLButtonElement>('nav button')?.focus()
+      await userEvent.keyboard('{Escape}')
+    })
+    expect(outline.hidden).toBe(true)
+    expect(document.activeElement).toBe(toggle)
+    expect(editor.getBoundingClientRect().width).toBe(editorWidth)
+  })
+
+  it('opens an empty floating outline without changing an untitled document', async () => {
+    const onChange = vi.fn()
+    await renderSurface({
+      documentIdentity: 'project/test/document/floating-empty.md',
+      layout: 'long-document',
+      outlineControl: 'floating',
+      appearance: 'full-bleed',
+      content: '这份文档目前没有标题。',
+      onChange,
+    })
+    const toggle = panel.querySelector<HTMLButtonElement>('.document-editing-surface__page-outline-control button')!
+    await act(async () => toggle.click())
+    const nav = panel.querySelector<HTMLElement>('nav[aria-label="文档目录"]')!
+    expect(nav.textContent).toContain('使用 # 至 ###### 添加标题后即可生成目录。')
+    expect(outlineHeadings()).toHaveLength(0)
+    expect(onChange).not.toHaveBeenCalled()
+    expect(panel.querySelector('.vditor-ir pre.vditor-reset')?.textContent).toContain('这份文档目前没有标题。')
+  })
+
 })

@@ -1,0 +1,32 @@
+.creative-materials-editor {
+  container-name: creative-materials-page;
+  container-type: inline-size;
+}
+
+@container creative-materials-page (max-width: 760px) {
+  .creative-materials-editor__workspace {
+    flex-direction: column;
+  }
+
+  .creative-materials-editor__list {
+    width: 100%;
+    max-height: 10rem;
+    flex: 0 0 auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .creative-materials-editor__title-field {
+    flex: 1 1 12rem;
+  }
+
+  .creative-materials-editor__entry-controls > select {
+    width: auto;
+    min-width: 0;
+    flex: 1 1 8rem;
+  }
+
+  .creative-materials-editor__provenance {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

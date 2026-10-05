@@ -1,5 +1,5 @@
-import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight, List } from 'lucide-react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { ChevronDown, ChevronRight, List, X } from 'lucide-react'
 
 import { analyzeProjectDocumentMarkdown } from '../../shared/project-documents'
 import { useLocaleStore } from '../../stores/locale-store'
@@ -8,6 +8,8 @@ import VditorProseEditor, { type VditorProseEditorProps } from './VditorProseEdi
 import './document-editing-surface.css'
 
 export type DocumentEditingLayout = 'long-document' | 'business-field'
+export type DocumentEditingOutlineControl = 'sidebar' | 'page' | 'floating'
+export type DocumentEditingAppearance = 'paper' | 'plain' | 'full-bleed'
 
 export interface DocumentEditingSurfaceProps {
   id?: string
@@ -25,9 +27,9 @@ export interface DocumentEditingSurfaceProps {
   /** Defaults on for long documents; business-field mode always hides it. */
   showToolbar?: boolean
   /** Page toggle keeps a long-document outline collapsed until requested. */
-  outlineControl?: 'sidebar' | 'page'
-  /** Plain removes the paper layer while retaining long-document behavior. */
-  appearance?: 'paper' | 'plain'
+  outlineControl?: DocumentEditingOutlineControl
+  /** Selects the paper, plain, or full-width long-document treatment. */
+  appearance?: DocumentEditingAppearance
   /** Reports the heading currently at the editor's reading position. */
   onActiveHeadingChange?: VditorProseEditorProps['onActiveHeadingChange']
   /** Kept for existing page-level character counters. */
@@ -70,6 +72,7 @@ function DocumentEditingSurfaceSession({
 }: DocumentEditingSurfaceProps) {
   const text = useLocaleStore(s => s.text)
   const rootRef = useRef<HTMLDivElement>(null)
+  const outlineToggleRef = useRef<HTMLButtonElement>(null)
   const navId = useId()
   const headingTocEnabled = layout !== 'business-field' && (showHeadingToc ?? layout === 'long-document')
   const toolbarEnabled = layout !== 'business-field' && (showToolbar ?? true)
@@ -98,6 +101,26 @@ function DocumentEditingSurfaceSession({
   const [activeJumpTarget, setActiveJumpTarget] = useState<VditorProseEditorProps['jumpTarget']>(null)
   const [activeHeading, setActiveHeading] = useState<{ line: number; index: number; text: string } | null>(null)
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set())
+  const previousOutlineOpenRef = useRef(false)
+
+  useLayoutEffect(() => {
+    if (outlineControl === 'floating' && previousOutlineOpenRef.current && !isOutlineOpen) {
+      outlineToggleRef.current?.focus()
+    }
+    previousOutlineOpenRef.current = isOutlineOpen
+  }, [isOutlineOpen, outlineControl])
+
+  useEffect(() => {
+    if (outlineControl !== 'floating' || !isOutlineOpen) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      setOutlineOpen(false)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [isOutlineOpen, outlineControl])
 
   const headingGroupIds = useMemo(() => {
     return headings.map((heading, index) => {
@@ -205,9 +228,11 @@ function DocumentEditingSurfaceSession({
       role={ariaLabel ? 'group' : undefined}
       aria-label={ariaLabel}
     >
-      {outlineControl === 'page' && headingTocEnabled && headings.length > 0 && (
+      {outlineControl !== 'sidebar' && headingTocEnabled
+        && (outlineControl === 'floating' || headings.length > 0) && (
         <div className="document-editing-surface__page-outline-control">
           <button
+            ref={outlineControl === 'floating' ? outlineToggleRef : undefined}
             type="button"
             className="document-editing-surface__outline-toggle"
             aria-expanded={isOutlineOpen}
@@ -215,7 +240,9 @@ function DocumentEditingSurfaceSession({
             onClick={() => setOutlineOpen(open => !open)}
           >
             <List size={14} aria-hidden="true" />
-            <span>{isOutlineOpen ? text('收起目录', 'Hide outline') : text('目录', 'Outline')}</span>
+            <span>{outlineControl === 'page'
+              ? isOutlineOpen ? text('收起目录', 'Hide outline') : text('目录', 'Outline')
+              : text('目录', 'Outline')}</span>
           </button>
         </div>
       )}
@@ -224,19 +251,36 @@ function DocumentEditingSurfaceSession({
           <aside
             className={cn('document-editing-surface__outline', isOutlineOpen && 'is-open')}
             data-outline-panel={isOutlineOpen ? 'open' : 'collapsed'}
-            hidden={outlineControl === 'page' && !isOutlineOpen}
+            hidden={outlineControl !== 'sidebar' && !isOutlineOpen}
           >
-            {outlineControl === 'sidebar' && <div className="document-editing-surface__outline-header">
-              {outlineOpen && <span className="document-editing-surface__outline-title">{text('文档目录', 'Document outline')}</span>}
-              <button
-                type="button"
-                className="document-editing-surface__outline-toggle"
-                aria-expanded={outlineOpen}
-                aria-controls={navId}
-                aria-label={outlineOpen ? text('收起文档目录', 'Collapse document outline') : text('展开文档目录', 'Expand document outline')}
-                title={outlineOpen ? text('收起文档目录', 'Collapse document outline') : text('展开文档目录', 'Expand document outline')}
-                onClick={() => setOutlineOpen(open => !open)}
-              ><List size={14} aria-hidden="true" /></button>
+            {outlineControl !== 'page' && <div className={cn(
+              'document-editing-surface__outline-header',
+              outlineControl === 'floating' && 'document-editing-surface__outline-header--floating',
+            )}>
+              {outlineControl === 'sidebar' && outlineOpen
+                ? <span className="document-editing-surface__outline-title">{text('文档目录', 'Document outline')}</span>
+                : outlineControl === 'floating'
+                  ? <span className="document-editing-surface__outline-title">{text('文档目录', 'Document outline')}</span>
+                  : null}
+              {outlineControl === 'sidebar' ? (
+                <button
+                  type="button"
+                  className="document-editing-surface__outline-toggle"
+                  aria-expanded={outlineOpen}
+                  aria-controls={navId}
+                  aria-label={outlineOpen ? text('收起文档目录', 'Collapse document outline') : text('展开文档目录', 'Expand document outline')}
+                  title={outlineOpen ? text('收起文档目录', 'Collapse document outline') : text('展开文档目录', 'Expand document outline')}
+                  onClick={() => setOutlineOpen(open => !open)}
+                ><List size={14} aria-hidden="true" /></button>
+              ) : (
+                <button
+                  type="button"
+                  className="document-editing-surface__outline-toggle"
+                  aria-label={text('关闭文档目录', 'Close document outline')}
+                  title={text('关闭文档目录', 'Close document outline')}
+                  onClick={() => setOutlineOpen(false)}
+                ><X size={14} aria-hidden="true" /></button>
+              )}
             </div>}
             <nav
               id={navId}

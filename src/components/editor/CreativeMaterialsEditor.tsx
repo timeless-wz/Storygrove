@@ -6,6 +6,7 @@ import { NativeSelect } from '../ui/NativeSelect'
 import { confirm } from '../ui/Confirm'
 import { toast } from '../ui/Toast'
 import DocumentEditingSurface from './DocumentEditingSurface'
+import './creative-materials-editor.css'
 import { createBusinessFieldDocumentIdentity } from '../../shared/document-editing'
 import { useLocaleStore } from '../../stores/locale-store'
 import { useLLMStore } from '../../stores/llm-store'
@@ -322,7 +323,7 @@ export default function CreativeMaterialsEditor({
         : '记录尚未采用的事件、遗境、人物、设定、场景和爆点。候选状态与 AI 生成审批状态分别管理。'
 
   return (
-    <div className="h-full min-h-0 flex flex-col overflow-hidden" style={{ background: 'var(--color-editor-bg)', color: 'var(--color-text)' }}>
+    <div className="creative-materials-editor h-full min-h-0 flex flex-col overflow-hidden" data-materials-view={initialView} style={{ background: 'var(--color-editor-bg)', color: 'var(--color-text)' }}>
       <header className="shrink-0 px-5 py-4 border-b border-[var(--color-border)] space-y-1">
         <h1 className="text-lg font-semibold">{text(heading, heading)}</h1>
         <p className="text-xs text-[var(--color-text-secondary)]">{text(description, description)}</p>
@@ -358,6 +359,8 @@ export default function CreativeMaterialsEditor({
               <DocumentEditingSurface
                 documentIdentity={createBusinessFieldDocumentIdentity({ projectId: documentProjectId, entityType: 'legacy-creative-source', entityId: selectedLegacy.sourceField, fieldId: 'content' })}
                 layout="long-document"
+                outlineControl="floating"
+                appearance="full-bleed"
                 showHeadingToc
                 content={selectedLegacy.content}
                 editable={false}
@@ -367,8 +370,8 @@ export default function CreativeMaterialsEditor({
           </> : <div className="flex-1 grid place-items-center text-sm text-[var(--color-text-secondary)]">{loading ? '读取中…' : '没有待整理旧配置内容'}</div>}
         </div>
       ) : (
-        <div className="flex-1 min-h-0 flex">
-          <aside className="w-64 shrink-0 border-r border-[var(--color-border)] flex flex-col min-h-0">
+        <div className="creative-materials-editor__workspace flex-1 min-h-0 flex">
+          <aside className="creative-materials-editor__list w-64 shrink-0 border-r border-[var(--color-border)] flex flex-col min-h-0">
             <div className="p-3 border-b border-[var(--color-border)] flex items-center justify-between gap-2">
               <span className="text-xs text-[var(--color-text-secondary)]">{filteredEntries.length} 条记录</span>
               <div className="flex gap-1">
@@ -384,9 +387,9 @@ export default function CreativeMaterialsEditor({
               {!loading && filteredEntries.length === 0 && <p className="px-2 py-4 text-xs leading-5 text-[var(--color-text-secondary)]">{text('还没有记录。可新建一条，或先按左侧其他入口维护正式事实。', 'No entries yet. Create one here, or use the dedicated pages for formal facts.')}</p>}
             </div>
           </aside>
-          <main className="flex-1 min-w-0 min-h-0 flex flex-col">
-            <div className="shrink-0 p-3 border-b border-[var(--color-border)] flex flex-wrap items-center gap-2">
-              <Input className="min-w-48 flex-1" aria-label={text('资料标题', 'Entry title')} value={draft.title} onChange={event => setDraft({ ...draft, title: event.target.value })} placeholder={text('资料标题', 'Entry title')} />
+          <main className="creative-materials-editor__main flex-1 min-w-0 min-h-0 flex flex-col">
+            <div className="creative-materials-editor__entry-controls shrink-0 p-3 border-b border-[var(--color-border)] flex flex-wrap items-center gap-2">
+              <Input className="creative-materials-editor__title-field min-w-0 flex-1" aria-label={text('资料标题', 'Entry title')} value={draft.title} onChange={event => setDraft({ ...draft, title: event.target.value })} placeholder={text('资料标题', 'Entry title')} />
               <NativeSelect aria-label={text('素材用途', 'Material type')} className="w-36" value={draft.materialType ?? 'other'} onChange={event => setDraft({ ...draft, materialType: event.target.value as CreativeMaterialType })}>
                 {CREATIVE_MATERIAL_TYPES.map(type => <option key={type} value={type}>{text(MATERIAL_TYPE_LABELS[type], type[0]!.toUpperCase() + type.slice(1))}</option>)}
               </NativeSelect>
@@ -397,7 +400,7 @@ export default function CreativeMaterialsEditor({
               <span role="status" className="text-xs text-[var(--color-text-secondary)]">{tabDirty ? '未保存' : '已保存'}</span>
               {initialView === 'materials' && selectedEntry && ['candidate', 'adopted'].includes(selectedEntry.status) && <Button variant="outline" disabled={saving || tabDirty || brainstorming} onClick={() => void brainstormFromSelectedMaterial()}>{brainstorming ? '启动中…' : '基于此素材生成总纲候选'}</Button>}
             </div>
-            <div className="shrink-0 px-3 py-2 grid grid-cols-2 gap-2">
+            <div className="creative-materials-editor__provenance shrink-0 px-3 py-2 grid grid-cols-2 gap-2">
               <Input aria-label={text('来源文件名', 'Source file name')} value={draft.sourceFileName ?? ''} onChange={event => setDraft({ ...draft, sourceFileName: event.target.value })} placeholder={text('来源文件名（用于追溯）', 'Source filename (for provenance)')} />
               <Input aria-label={text('原文标题', 'Source heading')} value={draft.sourceHeading ?? ''} onChange={event => setDraft({ ...draft, sourceHeading: event.target.value })} placeholder={text('原文标题（用于追溯）', 'Original heading (for provenance)')} />
             </div>
@@ -405,6 +408,8 @@ export default function CreativeMaterialsEditor({
               <DocumentEditingSurface
                 documentIdentity={createBusinessFieldDocumentIdentity({ projectId: documentProjectId, entityType: `creative-material-${entryKind}`, entityId: draft.id ?? `new-${tabId}-${newDraftIdentity}`, fieldId: 'markdown' })}
                 layout="long-document"
+                outlineControl="floating"
+                appearance="full-bleed"
                 showHeadingToc
                 content={draft.markdown}
                 onChange={markdown => setDraft({ ...draft, markdown })}

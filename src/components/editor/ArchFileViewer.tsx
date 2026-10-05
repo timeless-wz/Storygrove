@@ -97,6 +97,7 @@ function ArchFileViewerSession({
 }: Props) {
   const stepKey = detectStepKey(filePath)
   const isCharacterProjection = stepKey === 'characters'
+  const useFullBleedDocumentSurface = stepKey === 'premise' || stepKey === 'worldbuilding'
   const meta = stepKey ? ARCH_META[stepKey] : null
   const currentProject = useProjectStore(s => s.currentProject)
   const text = useLocaleStore(s => s.text)
@@ -617,6 +618,8 @@ function ArchFileViewerSession({
         <DocumentEditingSurface
           documentIdentity={documentIdentity}
           layout="long-document"
+          outlineControl={useFullBleedDocumentSurface ? 'floating' : 'sidebar'}
+          appearance={useFullBleedDocumentSurface ? 'full-bleed' : 'paper'}
           content={editorContent}
           editable={!isCharacterProjection}
           onChange={isCharacterProjection ? undefined : handleChange}
