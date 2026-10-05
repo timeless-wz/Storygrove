@@ -8,7 +8,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Save,
-  List,
   ImagePlus,
   Database,
   DatabaseZap,
@@ -19,8 +18,8 @@ import {
 
 import {
   analyzeProjectDocumentMarkdown,
-  type MarkdownHeading,
 } from '../../shared/project-documents'
+import { createProjectDocumentIdentity } from '../../shared/document-editing'
 import { countDraftUnits } from '../../shared/draft-units'
 import { registerEditorExitSaveHandler, useEditorStore } from '../../stores/editor-store'
 import { useLocaleStore } from '../../stores/locale-store'
@@ -28,7 +27,7 @@ import { useProjectStore } from '../../stores/project-store'
 import { useProjectDocumentsStore } from '../../stores/project-documents-store'
 import { Button } from '../ui/Button'
 import { toast } from '../ui/Toast'
-import VditorProseEditor from './VditorProseEditor'
+import DocumentEditingSurface from './DocumentEditingSurface'
 import {
   captureProjectSession,
   isProjectSessionCurrent,
@@ -70,13 +69,16 @@ function ProjectDocumentEditorSession({
   const text = useLocaleStore(s => s.text)
   const projectMatches = currentProject?.path === projectKey
   const fileName = useMemo(() => documentPath.split('/').pop() ?? documentPath, [documentPath])
+  const documentIdentity = createProjectDocumentIdentity({
+    projectId: projectMatches && currentProject ? currentProject.id : `inactive:${projectKey}`,
+    documentPath,
+  })
 
   const knowledgeIndex = useProjectDocumentsStore(s => s.knowledgeIndex)
   const knowledgeBusyDocumentPath = useProjectDocumentsStore(s => s.knowledgeBusyDocumentPath)
   const addToKnowledge = useProjectDocumentsStore(s => s.addToKnowledge)
   const removeFromKnowledge = useProjectDocumentsStore(s => s.removeFromKnowledge)
 
-  const [showToc, setShowToc] = useState(true)
   const [saving, setSaving] = useState(false)
   const [isDirty, setIsDirty] = useState(initialContent !== initialSavedContent)
 
@@ -86,7 +88,6 @@ function ProjectDocumentEditorSession({
   const [editorContent, setEditorContent] = useState(initialContent)
   // 目录与字数分析基于实时文本。
   const [liveContent, setLiveContent] = useState(initialContent)
-  const [jumpTarget, setJumpTarget] = useState<{ line: number; index: number; text: string; requestId: number } | null>(null)
   const [insertRequest, setInsertRequest] = useState<{ text: string; requestId: number } | null>(null)
   const [assetBusy, setAssetBusy] = useState(false)
   const requestSequenceRef = useRef(0)
@@ -158,16 +159,6 @@ function ProjectDocumentEditorSession({
   // 同名文档以受控目录内的相对路径区分，互不覆盖。
   const indexedEntry = knowledgeIndex[documentPath]
   const knowledgeBusy = knowledgeBusyDocumentPath === documentPath
-
-  const jumpToHeading = useCallback((heading: MarkdownHeading, index: number) => {
-    requestSequenceRef.current += 1
-    setJumpTarget({
-      line: heading.line,
-      index,
-      text: heading.text,
-      requestId: requestSequenceRef.current,
-    })
-  }, [])
 
   const handleInsertImage = useCallback(async () => {
     if (assetBusy) return
@@ -250,15 +241,6 @@ function ProjectDocumentEditorSession({
           <span className="text-xs tabular-nums" style={{ color: 'var(--color-text-muted)' }}>
             {characterCount.toLocaleString()} {text('字', 'chars')}
           </span>
-          <button
-            type="button"
-            onClick={() => setShowToc(value => !value)}
-            aria-pressed={showToc}
-            className="icon-btn"
-            title={text('显示/隐藏文档目录', 'Show/hide document outline')}
-          >
-            <List size={13} />
-          </button>
           <Button
             variant="ghost"
             size="sm"
@@ -359,49 +341,17 @@ function ProjectDocumentEditorSession({
         </div>
       )}
 
-      <div className="flex-1 flex min-h-0 overflow-hidden">
-        {showToc && (
-          <nav
-            aria-label={text('文档目录', 'Document outline')}
-            className="w-52 flex-shrink-0 overflow-y-auto border-r px-2 py-2 text-xs"
-            style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-editor-bg)' }}
-          >
-            <div className="mb-1.5 font-medium" style={{ color: 'var(--color-text-muted)' }}>
-              {text('文档目录', 'Outline')}
-            </div>
-            {analysis.headings.length === 0 ? (
-              <div style={{ color: 'var(--color-text-muted)' }}>
-                {text('使用 # 至 ###### 添加标题后即可生成目录。', 'Add headings with # through ###### to build an outline.')}
-              </div>
-            ) : analysis.headings.map((heading, index) => (
-              <button
-                key={`${heading.id}-${index}`}
-                type="button"
-                onClick={() => jumpToHeading(heading, index)}
-                className="block w-full truncate rounded px-1.5 py-1 text-left hover:bg-[var(--color-hover)]"
-                style={{
-                  paddingLeft: 6 + (heading.level - 1) * 10,
-                  color: heading.level <= 2 ? 'var(--color-text)' : 'var(--color-text-secondary)',
-                }}
-                title={heading.text}
-              >
-                {heading.text}
-              </button>
-            ))}
-          </nav>
-        )}
-
-        <div className="flex-1 min-w-0 overflow-hidden">
-          <VditorProseEditor
-            content={editorContent}
-            editable={projectMatches}
-            onChange={handleChange}
-            onSave={handleSave}
-            jumpTarget={jumpTarget}
-            insertRequest={insertRequest}
-            placeholder={text('开始写你的设定笔记…', 'Start writing your notes…')}
-          />
-        </div>
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <DocumentEditingSurface
+          documentIdentity={documentIdentity}
+          layout="long-document"
+          content={editorContent}
+          editable={projectMatches}
+          onChange={handleChange}
+          onSave={handleSave}
+          insertRequest={insertRequest}
+          placeholder={text('开始写你的设定笔记…', 'Start writing your notes…')}
+        />
       </div>
     </div>
   )

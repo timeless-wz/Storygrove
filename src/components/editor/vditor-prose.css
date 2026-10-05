@@ -56,6 +56,8 @@
 .vditor-prose-host .vditor-sv {
   overflow-y: auto;
   overflow-x: hidden;
+  overscroll-behavior: contain;
+  scroll-padding-block-start: 40px;
   width: 100%;
   box-sizing: border-box;
   background-color: var(--editor-desk-bg, var(--bg-base, var(--color-editor-bg)));

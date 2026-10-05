@@ -104,8 +104,7 @@ beforeEach(async () => {
   pendingUiIpc = new Set()
   ;(window as unknown as { velaAPI: unknown }).velaAPI = {
     invoke: (channel: string, ...args: unknown[]) => {
-      let tracked!: Promise<unknown>
-      tracked = commands.cultivationIpc(channel, ...args).finally(() => pendingUiIpc.delete(tracked))
+      const tracked = commands.cultivationIpc(channel, ...args).finally(() => pendingUiIpc.delete(tracked))
       pendingUiIpc.add(tracked)
       return tracked
     },
@@ -126,6 +125,7 @@ afterEach(async () => {
 
 it('creates editable presets, persists names/order, and reads the same SQLite configuration after reopen', async () => {
   await render('settings')
+  document.documentElement.dataset.theme = 'verdant'
   await expect.element(page.getByText('尚未设置等级结构。需要时再新增等级；没有等级结构也可以保存力量机制。')).toBeVisible()
   await actOnUi(() => page.getByRole('button', { name: '新增大境界', exact: true }).click())
   await actOnUi(() => page.getByRole('textbox', { name: '大境界 1 名称' }).fill('炼气'))
@@ -139,12 +139,12 @@ it('creates editable presets, persists names/order, and reads the same SQLite co
   const system = await invoke<CultivationSystem>('db:cultivation-read')
   expect(system.realms[0].stages[1].name).toBe('入门')
   expect(system.realms[1].stages).toEqual([])
-  await page.screenshot({ path: 'output/cultivation-settings-desktop.png' })
+  await page.screenshot({ path: '../../../../output/playwright/cultivation-settings-desktop.png' })
   await reopen(); await render('settings')
   await expect.element(page.getByRole('textbox', { name: '大境界 2 名称' })).toHaveValue('筑基')
   expect(await invoke('db:cultivation-read')).toEqual(system)
   await page.viewport(380, 850)
-  await page.screenshot({ path: 'output/cultivation-settings-narrow.png' })
+  await page.screenshot({ path: '../../../../output/playwright/cultivation-settings-narrow.png' })
   expect(container.scrollWidth).toBeLessThanOrEqual(380)
   expect((await invoke<CharacterRosterSnapshot>('db:character-roster-read')).entries[0].currentState?.powerLevel).toBe('旧修为：筑基中期')
 })
@@ -169,7 +169,7 @@ it('explicitly binds, crosses realm boundaries, validates numbers, clears and pr
   await actOnUi(() => page.getByRole('textbox', { name: '等级序号' }).fill('1'))
   await actWithPendingUiIpc(() => page.getByRole('button', { name: '应用等级' }).click())
   await expect.element(page.getByRole('button', { name: '降低一级' })).toBeDisabled()
-  await page.screenshot({ path: 'output/cultivation-character-overview.png' })
+  await page.screenshot({ path: '../../../../output/playwright/cultivation-character-overview.png' })
   await actWithPendingUiIpc(() => page.getByRole('button', { name: '清除绑定' }).click())
   await expect.element(page.getByRole('button', { name: '提高一级' })).toBeDisabled()
   await reopen()
@@ -270,6 +270,7 @@ it('applies a preset to every realm, resolves multiple affected characters, and 
   document.documentElement.dataset.theme = 'starlight-dark'
   document.documentElement.classList.add('dark')
   await render('settings')
+  await page.screenshot({ path: '../../../../output/playwright/cultivation-settings-dark.png' })
   expect(getComputedStyle(document.documentElement).getPropertyValue('--color-text').trim()).not.toBe('')
   await expect.element(page.getByRole('heading', { name: 'Power system' })).toBeVisible()
   await act(async () => { await page.getByRole('checkbox', { name: 'Apply to all realms' }).click() })
