@@ -13,22 +13,6 @@
   background-color: var(--editor-solid-bg, var(--color-editor-bg));
 }
 
-/* Business-field panels can be much narrower than a prose editor. Keep their
-   toolbar on one row and scroll its controls within the editor surface. */
-.document-editing-surface .vditor-prose-host .vditor-toolbar {
-  min-width: 0;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  overflow-y: hidden;
-  overscroll-behavior-inline: contain;
-  scrollbar-width: thin;
-}
-
-.document-editing-surface .vditor-prose-host .vditor-toolbar__item,
-.document-editing-surface .vditor-prose-host .vditor-toolbar__divider {
-  flex: 0 0 auto;
-}
-
 /* Opening an action menu temporarily gives it room below the toolbar. */
 .document-editing-surface .vditor-prose-host .vditor-toolbar:has(.vditor-hint[style*="display: block"]) {
   flex-wrap: wrap;

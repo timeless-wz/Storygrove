@@ -11,6 +11,8 @@ import { useLayoutStore } from '../../../stores/layout-store'
 import { useLocaleStore } from '../../../stores/locale-store'
 import { useProjectStore } from '../../../stores/project-store'
 import CharacterEditor from '../CharacterEditor'
+import '../../../index.css'
+import '../../../styles/literary-themes.css'
 
 const PROJECT_PATH = 'C:\\novels\\character-edit'
 const PROJECT_SESSION = {
@@ -232,11 +234,19 @@ describe('character profile edit mode', () => {
       ['character-profile-notes', '作者备注'],
     ] as const) {
       await vi.waitFor(() => {
-        const host = container?.querySelector<HTMLElement>(`#${editorId} [data-vditor-prose-editor="true"]`)
+        const field = container?.querySelector<HTMLElement>(`#${editorId}[data-document-layout="business-field"]`)
+        const host = field?.querySelector<HTMLElement>('[data-vditor-prose-editor="true"]')
+        expect(field?.getAttribute('data-heading-toc')).toBe('disabled')
+        expect(field?.querySelector('nav[aria-label="文档目录"]')).toBeNull()
+        expect(getComputedStyle(field!.querySelector('.vditor-toolbar')!).display).toBe('none')
         expect(host?.getAttribute('data-vditor-ready')).toBe('true')
         expect(host?.querySelector('.vditor-ir pre.vditor-reset')?.textContent).toContain(value)
       })
     }
+    await page.viewport(462, 1000)
+    await page.screenshot({ path: '../../../../output/playwright/character-profile-fields-narrow.png', fullPage: true } as Parameters<typeof page.screenshot>[0])
+    await page.viewport(1280, 1000)
+    await page.screenshot({ path: '../../../../output/playwright/character-profile-fields.png', fullPage: true } as Parameters<typeof page.screenshot>[0])
     // 概览不会同时出现：这是可编辑表单，不是只读视图。
     expect(container?.querySelector('[data-testid="character-summary"]')).toBeNull()
   })

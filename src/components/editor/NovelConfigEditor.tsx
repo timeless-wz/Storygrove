@@ -134,7 +134,7 @@ function NovelConfigEditorSession({ projectKey }: { projectKey: string }) {
 
   return (
     <div className="novel-config-page h-full overflow-y-auto">
-      <div className="novel-config-page__content max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+      <div className="novel-config-page__content max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
         <header className="novel-config-page__header mb-5">
           <div className="min-w-0">
             <h2 className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>
@@ -263,29 +263,30 @@ function NovelConfigEditorSession({ projectKey }: { projectKey: string }) {
               <h3 id="novel-config-ideas-heading">{text('创作方向', 'Creative direction')}</h3>
               <p>{text('上方维护类型、细分类型与目标读者；这里说明核心阅读体验和创作原则。不要在这里展开剧情、世界规则或人物档案。', 'The fields above capture genre and audience. Describe the intended reading experience and creative principles here, keeping plot, world rules, and character profiles in their dedicated pages.')}</p>
             </div>
-            <Section title={text('核心阅读体验与创作原则', 'Reading experience and creative principles')} desc={text('回答希望读者获得什么体验、作品追求什么，以及具体的参考边界。', 'Explain what readers should experience, what the work values, and where references stop.')}>
-              <div className="h-[360px] min-h-[280px] min-w-0 rounded-lg border border-[var(--color-border)] overflow-hidden">
-                <DocumentEditingSurface
-                  documentIdentity={createBusinessFieldDocumentIdentity({ projectId: documentProjectId, entityType: 'project-config', entityId: 'novel-config', fieldId: 'creativeDirectionMarkdown' })}
-                  layout="business-field"
-                  showHeadingToc
-                  content={config.creativeDirectionMarkdown ?? ''}
-                  onChange={markdown => update('creativeDirectionMarkdown', markdown)}
-                  placeholder={text('粘贴或编写 Markdown 创作方向；支持标题、列表、引用和表格。', 'Write or paste Markdown for the creative direction, including headings, lists, quotes, and tables.')}
-                />
-              </div>
-            </Section>
-            <Section title={text('参考作品与借鉴边界', 'Reference works and borrowing boundaries')} desc={text('说明参考作品、借鉴的具体方面，以及明确不采用的部分。', 'Name references, the elements you draw from, and what you will not reuse.')}>
-              <div className="h-[240px] min-h-[200px] min-w-0 rounded-lg border border-[var(--color-border)] overflow-hidden">
-                <DocumentEditingSurface
-                  documentIdentity={createBusinessFieldDocumentIdentity({ projectId: documentProjectId, entityType: 'project-config', entityId: 'novel-config', fieldId: 'referenceWorks' })}
-                  layout="business-field"
-                  content={config.referenceWorks ?? ''}
-                  onChange={markdown => update('referenceWorks', markdown)}
-                  placeholder={text('参考哪些作品？借鉴哪些方面？哪些元素不采用？', 'Which works inform this project, which aspects, and what is out of scope?')}
-                />
-              </div>
-            </Section>
+            <div className="space-y-2">
+              <h4 className="text-sm font-semibold text-[var(--color-text)]">{text('核心阅读体验与创作原则', 'Reading experience and creative principles')}</h4>
+              <p className="text-xs leading-5 text-[var(--color-text-secondary)]">{text('回答希望读者获得什么体验、作品追求什么，以及具体的参考边界。', 'Explain what readers should experience, what the work values, and where references stop.')}</p>
+              <DocumentEditingSurface
+                documentIdentity={createBusinessFieldDocumentIdentity({ projectId: documentProjectId, entityType: 'project-config', entityId: 'novel-config', fieldId: 'creativeDirectionMarkdown' })}
+                layout="business-field"
+                ariaLabel={text('核心阅读体验与创作原则', 'Reading experience and creative principles')}
+                content={config.creativeDirectionMarkdown ?? ''}
+                onChange={markdown => update('creativeDirectionMarkdown', markdown)}
+                placeholder={text('粘贴或编写 Markdown 创作方向；支持标题、列表、引用和表格。', 'Write or paste Markdown for the creative direction, including headings, lists, quotes, and tables.')}
+              />
+            </div>
+            <div className="space-y-2">
+              <h4 className="text-sm font-semibold text-[var(--color-text)]">{text('参考作品与借鉴边界', 'Reference works and borrowing boundaries')}</h4>
+              <p className="text-xs leading-5 text-[var(--color-text-secondary)]">{text('说明参考作品、借鉴的具体方面，以及明确不采用的部分。', 'Name references, the elements you draw from, and what you will not reuse.')}</p>
+              <DocumentEditingSurface
+                documentIdentity={createBusinessFieldDocumentIdentity({ projectId: documentProjectId, entityType: 'project-config', entityId: 'novel-config', fieldId: 'referenceWorks' })}
+                layout="business-field"
+                ariaLabel={text('参考作品与借鉴边界', 'Reference works and borrowing boundaries')}
+                content={config.referenceWorks ?? ''}
+                onChange={markdown => update('referenceWorks', markdown)}
+                placeholder={text('参考哪些作品？借鉴哪些方面？哪些元素不采用？', 'Which works inform this project, which aspects, and what is out of scope?')}
+              />
+            </div>
           </section>
 
           {/* 正文表达规范 */}
@@ -312,18 +313,18 @@ function NovelConfigEditorSession({ projectKey }: { projectKey: string }) {
                 <option value="multi_pov">{text('多视角轮换', 'Multiple POV')}</option>
               </NativeSelect>
             </Field>
-            <Section title={text('正文执行规则', 'Prose rules')} desc={text('这里是正式写作规范；保存后由正文生成、续写与修稿工作流读取。', 'These are the authoritative rules read by drafting, continuation, and revision workflows.')}>
-              <div className="h-[380px] min-h-[300px] min-w-0 rounded-lg border border-[var(--color-border)] overflow-hidden">
-                <DocumentEditingSurface
-                  documentIdentity={createBusinessFieldDocumentIdentity({ projectId: documentProjectId, entityType: 'project-config', entityId: 'novel-config', fieldId: 'writingRulesMarkdown' })}
-                  layout="business-field"
-                  showHeadingToc
-                  content={config.writingRulesMarkdown ?? ''}
-                  onChange={markdown => update('writingRulesMarkdown', markdown)}
-                  placeholder={text('填写文风、语言表达、对话和描写要求、节奏、禁忌及自检规则。', 'Describe style, language, dialogue, description, pacing, restrictions, and self-checks.')}
-                />
-              </div>
-            </Section>
+            <div className="space-y-2">
+              <h4 className="text-sm font-semibold text-[var(--color-text)]">{text('正文执行规则', 'Prose rules')}</h4>
+              <p className="text-xs leading-5 text-[var(--color-text-secondary)]">{text('这里是正式写作规范；保存后由正文生成、续写与修稿工作流读取。', 'These are the authoritative rules read by drafting, continuation, and revision workflows.')}</p>
+              <DocumentEditingSurface
+                documentIdentity={createBusinessFieldDocumentIdentity({ projectId: documentProjectId, entityType: 'project-config', entityId: 'novel-config', fieldId: 'writingRulesMarkdown' })}
+                layout="business-field"
+                ariaLabel={text('正文执行规则', 'Prose rules')}
+                content={config.writingRulesMarkdown ?? ''}
+                onChange={markdown => update('writingRulesMarkdown', markdown)}
+                placeholder={text('填写文风、语言表达、对话和描写要求、节奏、禁忌及自检规则。', 'Describe style, language, dialogue, description, pacing, restrictions, and self-checks.')}
+              />
+            </div>
           </section>
 
           <details id="novel-config-legacy" className="novel-config-page__advanced">

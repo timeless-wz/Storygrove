@@ -175,15 +175,18 @@ describe('BlueprintV2Editor', () => {
         fieldId: 'body',
       }),
     )
-    expect(container!.querySelectorAll('[data-document-layout="business-field"][data-heading-toc="enabled"]')).toHaveLength(1)
-    expect(container!.querySelectorAll('[data-document-layout="business-field"][data-heading-toc="disabled"]')).toHaveLength(2)
+    expect(container!.querySelectorAll('[data-document-layout="business-field"][data-heading-toc="enabled"]')).toHaveLength(0)
+    expect(container!.querySelectorAll('[data-document-layout="business-field"][data-heading-toc="disabled"]')).toHaveLength(3)
+    for (const field of container!.querySelectorAll<HTMLElement>('.blueprint-v2__markdown-field')) {
+      expect(field.style.height).toBe('')
+      expect(getComputedStyle(field.querySelector('.vditor-toolbar')!).display).toBe('none')
+    }
     expect(container!.querySelector(`[data-testid="blueprint-v2-scene-markdown-${FIRST_SCENE_ID}"] .vditor-ir h2`)?.textContent)
       .toContain('时空与环境')
     const compactSceneHeight = container!.querySelector<HTMLElement>(
       `[data-testid="blueprint-v2-scene-markdown-${SECOND_SCENE_ID}"]`,
     )!.getBoundingClientRect().height
-    expect(compactSceneHeight).toBeGreaterThanOrEqual(210)
-    expect(compactSceneHeight).toBeLessThanOrEqual(250)
+    expect(compactSceneHeight).toBeLessThan(210)
   })
 
   it('routes scene and custom-body edits only to their matching stable fields', async () => {

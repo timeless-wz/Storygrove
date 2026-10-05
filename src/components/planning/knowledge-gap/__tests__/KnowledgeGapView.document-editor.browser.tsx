@@ -222,8 +222,9 @@ describe('KnowledgeGapView shared Markdown surface', () => {
       )).not.toBeNull()
     })
     expect(container?.querySelector(
-      '[data-testid="info-entry-truth-edit"] [data-document-layout="long-document"][data-heading-toc="enabled"]',
+      '[data-testid="info-entry-truth-edit"] [data-document-layout="business-field"][data-heading-toc="disabled"]',
     )).not.toBeNull()
+    expect(getComputedStyle(container!.querySelector('[data-testid="info-entry-truth-edit"] .vditor-toolbar')!).display).toBe('none')
 
     await typeAtEndOfMarkdown('[data-testid="info-entry-truth-edit"]', ' 临时真相，取消时丢弃')
     expect(container?.querySelector('[data-testid="info-entry-truth-edit"] .vditor-ir pre.vditor-reset')?.textContent)
@@ -281,5 +282,12 @@ describe('KnowledgeGapView shared Markdown surface', () => {
       baseRevision: 1,
     })
     expect(saveInputs[1].truth).toContain('更新后的真相')
+
+    await page.getByTestId('info-entry-create').click()
+    await vi.waitFor(() => expect(container?.querySelector(
+      '[data-testid="info-entry-truth"] [data-document-layout="business-field"] [data-vditor-ready="true"]',
+    )).not.toBeNull())
+    expect(container?.querySelector('[data-testid="info-entry-truth"] [data-heading-toc="disabled"]')).not.toBeNull()
+    expect(getComputedStyle(container!.querySelector('[data-testid="info-entry-truth"] .vditor-toolbar')!).display).toBe('none')
   })
 })

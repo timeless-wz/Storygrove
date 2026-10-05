@@ -103,6 +103,10 @@ it('edits a location in the live page, saves through project IPC to isolated SQL
   await render()
   const initialIdentity = container.querySelector<HTMLElement>('[data-document-identity]')?.dataset.documentIdentity
   expect(initialIdentity).toContain('entity/location/location-tide-harbor/field/markdown')
+  const editorSurface = container.querySelector<HTMLElement>('[data-document-layout="business-field"]')
+  expect(editorSurface?.getAttribute('data-heading-toc')).toBe('disabled')
+  expect(editorSurface?.querySelector('nav[aria-label="文档目录"]')).toBeNull()
+  expect(getComputedStyle(editorSurface!.querySelector('.vditor-toolbar')!).display).toBe('none')
 
   const appended = '\n\n## 潮汐回廊\n\n潮声沿着石阶回旋。'
   await appendMarkdown(appended)

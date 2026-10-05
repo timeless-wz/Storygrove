@@ -174,8 +174,22 @@ describe('NovelConfigEditor page sections', () => {
     expect(container.querySelector<HTMLDetailsElement>('details.novel-config-page__advanced')?.open).toBe(false)
     expect(container.querySelectorAll('[data-vditor-prose-editor="true"]')).toHaveLength(3)
     expect(container.querySelectorAll('[data-document-layout="business-field"]')).toHaveLength(3)
-    expect(container.querySelectorAll('[data-heading-toc="enabled"]')).toHaveLength(2)
-    expect(container.querySelectorAll('[data-heading-toc="disabled"]')).toHaveLength(1)
+    expect(container.querySelectorAll('[data-heading-toc="enabled"]')).toHaveLength(0)
+    expect(container.querySelectorAll('[data-heading-toc="disabled"]')).toHaveLength(3)
+    await vi.waitFor(() => expect(container.querySelectorAll('[data-vditor-prose-editor="true"][data-vditor-ready="true"]')).toHaveLength(3))
+    for (const surface of container.querySelectorAll<HTMLElement>('[data-document-layout="business-field"]')) {
+      expect(surface.querySelector('nav[aria-label="文档目录"]')).toBeNull()
+      expect(getComputedStyle(surface.querySelector('.vditor-toolbar')!).display).toBe('none')
+    }
+    expect(container.querySelector('.novel-config-page__content')?.classList.contains('max-w-6xl')).toBe(true)
+    await page.viewport(462, 1000)
+    await page.screenshot({ path: '../../../../output/playwright/novel-config-fields-narrow.png', fullPage: true } as Parameters<typeof page.screenshot>[0])
+    await page.viewport(1280, 1000)
+    await page.screenshot({ path: '../../../../output/playwright/novel-config-fields.png', fullPage: true } as Parameters<typeof page.screenshot>[0])
+    await act(async () => { await page.getByRole('link', { name: '写作规范' }).click() })
+    await page.screenshot({ path: '../../../../output/playwright/novel-config-writing-rules.png' })
+    await page.viewport(462, 1000)
+    await page.screenshot({ path: '../../../../output/playwright/novel-config-writing-rules-narrow.png', fullPage: true } as Parameters<typeof page.screenshot>[0])
 
     const direction = '# 阅读体验\n\n- 让读者感到辽阔\n- 保持人物选择有代价'
     const references = '| 作品 | 借鉴 |\n| --- | --- |\n| 参考文本甲 | 叙事节奏；不复用情节 |'

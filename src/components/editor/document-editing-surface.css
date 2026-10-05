@@ -18,6 +18,27 @@
   overflow: hidden;
 }
 
+.document-editing-surface[data-outline-control="page"] {
+  flex-direction: column;
+}
+
+.document-editing-surface__page-outline-control {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  padding: 0.125rem 0.25rem 0.375rem;
+}
+
+.document-editing-surface__page-outline-control .document-editing-surface__outline-toggle {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 0;
+  height: 1.75rem;
+  gap: 0.375rem;
+  padding-inline: 0.5rem;
+  font-size: 0.75rem;
+}
+
 .document-editing-surface__outline {
   display: flex;
   order: 2;
@@ -34,6 +55,10 @@
 .document-editing-surface__outline.is-open {
   flex-basis: 13rem;
   min-width: 13rem;
+}
+
+.document-editing-surface__outline[hidden] {
+  display: none;
 }
 
 .document-editing-surface__outline-header {
@@ -175,6 +200,97 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+/* Lightweight form fields grow with their Markdown instead of acting like
+   miniature document workbenches. This scope leaves prose and long documents
+   on their existing fixed-height editor surface. */
+.document-editing-surface[data-document-layout="business-field"] {
+  display: block;
+  height: auto;
+  overflow: visible;
+  container-type: normal;
+}
+
+.document-editing-surface[data-document-layout="business-field"] .document-editing-surface__body,
+.document-editing-surface[data-document-layout="business-field"] .document-editing-surface__editor {
+  display: block;
+  height: auto;
+  overflow: visible;
+}
+
+.document-editing-surface[data-document-layout="business-field"] .document-editing-surface__editor > div,
+.document-editing-surface[data-document-layout="business-field"] .vditor-prose-host,
+.document-editing-surface[data-document-layout="business-field"] .vditor-prose-host .vditor,
+.document-editing-surface[data-document-layout="business-field"] .vditor-prose-host .vditor-content,
+.document-editing-surface[data-document-layout="business-field"] .vditor-prose-host .vditor-ir {
+  display: block;
+  height: auto !important;
+  min-height: 0;
+  overflow: visible;
+}
+
+.document-editing-surface[data-toolbar-enabled="false"] .vditor-prose-host .vditor-toolbar {
+  display: none !important;
+}
+
+.document-editing-surface[data-document-layout="business-field"] .vditor-prose-host .vditor-ir {
+  padding: 0;
+  background: transparent;
+}
+
+.document-editing-surface[data-document-layout="business-field"] .vditor-prose-host .vditor-ir pre.vditor-reset {
+  width: 100%;
+  max-width: none;
+  min-height: 3.5rem;
+  margin: 0 !important;
+  padding: 0.625rem 0.75rem !important;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 6px);
+  box-shadow: none;
+  background: var(--color-editor-bg);
+  font-family: var(--font-sans, var(--font-writing));
+  font-size: 0.875rem;
+  line-height: 1.65;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.document-editing-surface[data-document-layout="business-field"] .vditor-prose-host .vditor-ir pre.vditor-reset:focus,
+.document-editing-surface[data-document-layout="business-field"] .vditor-prose-host .vditor-ir pre.vditor-reset:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+
+/* Long documents can opt out of the paper layer when the business page itself
+   is the document canvas (for example, the power-system mechanism page). */
+.document-editing-surface[data-editor-appearance="plain"] .vditor-prose-host,
+.document-editing-surface[data-editor-appearance="plain"] .vditor-prose-host .vditor,
+.document-editing-surface[data-editor-appearance="plain"] .vditor-prose-host .vditor-content,
+.document-editing-surface[data-editor-appearance="plain"] .vditor-prose-host .vditor-toolbar,
+.document-editing-surface[data-editor-appearance="plain"] .vditor-prose-host .vditor-ir,
+.document-editing-surface[data-editor-appearance="plain"] .vditor-prose-host .vditor-wysiwyg,
+.document-editing-surface[data-editor-appearance="plain"] .vditor-prose-host .vditor-sv {
+  background: transparent !important;
+}
+
+.document-editing-surface[data-editor-appearance="plain"] .vditor-prose-host .vditor-ir,
+.document-editing-surface[data-editor-appearance="plain"] .vditor-prose-host .vditor-wysiwyg,
+.document-editing-surface[data-editor-appearance="plain"] .vditor-prose-host .vditor-sv {
+  padding: 1rem;
+}
+
+.document-editing-surface[data-editor-appearance="plain"] .vditor-prose-host .vditor-ir pre.vditor-reset,
+.document-editing-surface[data-editor-appearance="plain"] .vditor-prose-host .vditor-wysiwyg pre.vditor-reset,
+.document-editing-surface[data-editor-appearance="plain"] .vditor-prose-host textarea.vditor-sv {
+  width: 100%;
+  max-width: 72rem;
+  min-height: calc(100% - 2rem);
+  margin: 0 auto !important;
+  padding: 0.75rem 1rem 24vh !important;
+  border: 0 !important;
+  border-radius: 0;
+  box-shadow: none !important;
+  background: transparent !important;
 }
 
 /* Shared long-document pages need less decorative paper margin than prose tabs. */

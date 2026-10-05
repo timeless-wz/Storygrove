@@ -191,4 +191,62 @@ describe('DocumentEditingSurface', () => {
     expect(onChange).not.toHaveBeenCalled()
     expect(onSave).not.toHaveBeenCalled()
   })
+
+  it('renders business fields without document chrome and expands or contracts with live Markdown', async () => {
+    const onChange = vi.fn()
+    const props: DocumentEditingSurfaceProps = {
+      documentIdentity: 'project/test/form/character/background',
+      layout: 'business-field',
+      ariaLabel: '背景故事',
+      content: '短文',
+      onChange,
+    }
+    await renderSurface(props)
+
+    const surface = panel.querySelector<HTMLElement>('[data-document-layout="business-field"]')!
+    const toolbar = surface.querySelector<HTMLElement>('.vditor-toolbar')!
+    const editor = surface.querySelector<HTMLElement>('.vditor-ir pre.vditor-reset')!
+    expect(surface.dataset.headingToc).toBe('disabled')
+    expect(surface.querySelector('nav[aria-label="文档目录"]')).toBeNull()
+    expect(getComputedStyle(toolbar).display).toBe('none')
+    expect(surface.getAttribute('aria-label')).toBe('背景故事')
+    expect(editor.getAttribute('aria-label')).toBe('背景故事')
+    const shortHeight = editor.getBoundingClientRect().height
+
+    const longText = Array.from({ length: 80 }, (_, index) => `第${index + 1}段内容继续展开，保持表单正文自然增高。`).join('\n')
+    await act(async () => {
+      editor.focus()
+      editor.textContent = longText
+      editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: longText }))
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+    })
+    await vi.waitFor(() => expect(onChange).toHaveBeenCalled())
+    const longHeight = editor.getBoundingClientRect().height
+    expect(longHeight).toBeGreaterThan(shortHeight * 3)
+
+    await act(async () => {
+      editor.textContent = '回缩后的短文'
+      editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward', data: null }))
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+    })
+    await vi.waitFor(() => expect(onChange.mock.calls.length).toBeGreaterThan(1))
+    expect(editor.getBoundingClientRect().height).toBeLessThan(longHeight)
+    expect(getComputedStyle(surface).overflowY).toBe('visible')
+  })
+
+  it('keeps a long-document outline collapsed on its page control until asked to open', async () => {
+    await renderSurface({
+      documentIdentity: 'project/test/document/page-outline.md',
+      layout: 'long-document',
+      outlineControl: 'page',
+      content: '## 机制标题\n\n规则正文',
+    })
+    const toggle = panel.querySelector<HTMLButtonElement>('.document-editing-surface__page-outline-control button')
+    expect(toggle?.textContent).toContain('目录')
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false')
+    expect(panel.querySelector<HTMLElement>('aside.document-editing-surface__outline')?.hidden).toBe(true)
+    await act(async () => toggle?.click())
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true')
+    expect(panel.querySelector<HTMLElement>('aside.document-editing-surface__outline')?.hidden).toBe(false)
+  })
 })

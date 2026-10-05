@@ -357,7 +357,8 @@ export default function CreativeMaterialsEditor({
             <div className="flex-1 min-h-0 min-w-0 rounded-lg border border-[var(--color-border)] overflow-hidden">
               <DocumentEditingSurface
                 documentIdentity={createBusinessFieldDocumentIdentity({ projectId: documentProjectId, entityType: 'legacy-creative-source', entityId: selectedLegacy.sourceField, fieldId: 'content' })}
-                layout="business-field"
+                layout="long-document"
+                showHeadingToc
                 content={selectedLegacy.content}
                 editable={false}
                 placeholder={text('旧配置为空', 'Legacy field is empty')}
@@ -403,7 +404,7 @@ export default function CreativeMaterialsEditor({
             <div className="flex-1 min-h-0 min-w-0 border-t border-[var(--color-border)]">
               <DocumentEditingSurface
                 documentIdentity={createBusinessFieldDocumentIdentity({ projectId: documentProjectId, entityType: `creative-material-${entryKind}`, entityId: draft.id ?? `new-${tabId}-${newDraftIdentity}`, fieldId: 'markdown' })}
-                layout="business-field"
+                layout="long-document"
                 showHeadingToc
                 content={draft.markdown}
                 onChange={markdown => setDraft({ ...draft, markdown })}
