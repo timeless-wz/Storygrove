@@ -1,3 +1,5 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { registerIPCHandlers } from './ipc-handlers'
 import { registerMCPHandlers } from './mcp/mcp-ipc-bridge'
@@ -40,7 +42,24 @@ import { configureSingleInstanceRuntime } from './services/single-instance-runti
 import { installWindowCloseGuard } from './controllers/window-controller'
 
 import { fileURLToPath } from 'node:url'
-import path from 'node:path'
+
+// Separate development checkouts can run side by side without sharing Electron
+// profile state or the ProcessSingleton lock. Packaged user profiles are never
+// redirected by this development-only override.
+if (!app.isPackaged) {
+  const developmentUserData = process.env.AI_NOVEL_DEV_USER_DATA?.trim()
+  if (developmentUserData) {
+    const userDataPath = path.resolve(developmentUserData)
+    const sessionDataPath = path.join(userDataPath, 'session-data')
+    const logsPath = path.join(userDataPath, 'logs')
+    fs.mkdirSync(userDataPath, { recursive: true })
+    fs.mkdirSync(sessionDataPath, { recursive: true })
+    fs.mkdirSync(logsPath, { recursive: true })
+    app.setPath('userData', userDataPath)
+    app.setPath('sessionData', sessionDataPath)
+    app.setPath('logs', logsPath)
+  }
+}
 
 // Electron 41 在部分 Windows 环境中无法启动受限 GPU 子进程（0xC0000135），
 // 随后会触发 Chromium 的致命检查。仅放宽 GPU 子进程，保持 renderer 隔离策略不变。

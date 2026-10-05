@@ -1,52 +1,58 @@
 .world-building-overview {
+  container-name: overview;
+  container-type: inline-size;
   min-width: 0;
+  min-height: 0;
   color: var(--color-text);
   background: var(--color-bg);
 }
 
 .world-building-overview__header {
-  display: flex;
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 18px 22px;
-  border-color: var(--color-border);
+  gap: 12px 20px;
+  padding: 13px clamp(16px, 2.2cqi, 28px);
+  border-bottom: 1px solid var(--color-border);
   background: var(--color-sidebar);
 }
 
 .world-building-overview__heading {
   display: flex;
+  min-width: 0;
   align-items: flex-start;
   gap: 10px;
-  min-width: 0;
   color: var(--color-text-muted);
 }
 
 .world-building-overview__heading > svg {
   flex: 0 0 auto;
-  margin-top: 2px;
+  margin-top: 3px;
+  color: var(--color-accent);
 }
 
 .world-building-overview__title {
   margin: 0;
   color: var(--color-text);
-  font-size: 1rem;
-  font-weight: 600;
+  font-size: 1.05rem;
+  font-weight: 650;
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
 .world-building-overview__description {
-  max-width: 68ch;
-  margin: 4px 0 0;
+  max-width: 62ch;
+  margin: 2px 0 0;
   color: var(--color-text-secondary);
-  font-size: 0.78rem;
-  line-height: 1.5;
+  font-size: 0.8rem;
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
 .world-building-overview__actions {
   display: flex;
+  min-width: 0;
   flex: 0 0 auto;
   flex-wrap: wrap;
   align-items: center;
@@ -57,53 +63,88 @@
 .world-building-overview__body {
   display: flex;
   min-height: 0;
+  flex: 1 1 auto;
   flex-direction: column;
-  gap: 12px;
-  padding: 18px 22px 24px;
+  gap: 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px clamp(16px, 2.2cqi, 28px) 28px;
 }
 
-.world-building-overview__grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
-  gap: 12px;
+.world-building-overview__groups {
+  display: flex;
   width: 100%;
-  max-width: 1080px;
+  flex-direction: column;
+  gap: 25px;
   margin-inline: auto;
+  padding-bottom: 4px;
+}
+
+.world-building-overview__group {
+  min-width: 0;
+}
+
+.world-building-overview__group-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 11px;
+  color: var(--color-text);
+  font-size: 0.96rem;
+  font-weight: 650;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.world-building-overview__group-title::after {
+  height: 1px;
+  flex: 1 1 auto;
+  background: var(--color-border);
+  content: '';
+}
+
+.world-building-overview__entries {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+  gap: 10px;
 }
 
 .world-building-overview__card {
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: 11px;
   background: var(--color-panel);
-  transition: border-color 150ms ease, background-color 150ms ease;
+  transition: border-color 140ms ease, background-color 140ms ease;
 }
 
-.world-building-overview__card:hover,
-.world-building-overview__card:focus-within {
-  border-color: var(--color-accent);
+.world-building-overview__card:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 48%, var(--color-border));
 }
 
 .world-building-overview__card--attention {
-  border-color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning) 62%, var(--color-border));
 }
 
 .world-building-overview__card-main {
-  display: flex;
+  display: grid;
   width: 100%;
   min-width: 0;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 9px;
-  padding: 14px 16px 12px;
+  gap: 7px;
+  padding: 12px 13px;
   border: 0;
+  border-radius: inherit;
   color: var(--color-text);
   background: transparent;
   font: inherit;
   text-align: left;
   cursor: pointer;
+  transition: background-color 140ms ease;
+}
+
+.world-building-overview__card-main:hover {
+  background: color-mix(in srgb, var(--color-accent) 4%, var(--color-panel));
 }
 
 .world-building-overview__card-main:focus {
@@ -113,53 +154,97 @@
 .world-building-overview__card-main:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: -3px;
-  border-radius: 11px;
 }
 
 .world-building-overview__card-heading {
-  display: flex;
+  display: grid;
   min-width: 0;
+  grid-template-columns: 25px minmax(0, 1fr) 15px;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
 }
 
 .world-building-overview__icon {
   display: grid;
-  width: 28px;
-  height: 28px;
+  width: 25px;
+  height: 25px;
   flex: 0 0 auto;
   place-items: center;
-  border: 1px solid var(--color-border);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 22%, var(--color-border));
   border-radius: 8px;
-  color: var(--color-text-secondary);
-  background: var(--color-bg);
+  color: var(--color-accent-text, var(--color-accent));
+  background: color-mix(in srgb, var(--color-accent) 8%, var(--color-panel));
+}
+
+.world-building-overview__icon svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  stroke-width: 1.8;
 }
 
 .world-building-overview__card-title {
   min-width: 0;
   color: var(--color-text);
-  font-size: 0.88rem;
-  font-weight: 600;
+  font-size: 0.93rem;
+  font-weight: 650;
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
 .world-building-overview__open-icon {
   flex: 0 0 auto;
-  margin-left: auto;
   color: var(--color-text-muted);
-  transition: color 150ms ease, transform 150ms ease;
+  transition: color 140ms ease, transform 140ms ease;
 }
 
 .world-building-overview__card-main:hover .world-building-overview__open-icon {
-  color: var(--color-accent);
+  color: var(--color-accent-text, var(--color-accent));
   transform: translate(1px, -1px);
 }
 
 .world-building-overview__purpose {
+  min-width: 0;
   color: var(--color-text-secondary);
-  font-size: 0.76rem;
-  line-height: 1.5;
+  font-size: 0.82rem;
+  line-height: 1.48;
+  overflow-wrap: anywhere;
+}
+
+.world-building-overview__summary {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding-top: 1px;
+  color: var(--color-text-secondary);
+  font-size: 0.77rem;
+  line-height: 1.42;
+  overflow-wrap: anywhere;
+}
+
+.world-building-overview__summary-context {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+}
+
+.world-building-overview__summary-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.world-building-overview__summary-label {
+  margin-right: 4px;
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+}
+
+.world-building-overview__summary-scale {
+  color: var(--color-text);
+  font-size: 0.77rem;
+  font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
 
@@ -168,7 +253,8 @@
   min-width: 0;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 9px;
+  gap: 4px 6px;
+  margin-top: 1px;
 }
 
 .world-building-overview__status {
@@ -176,70 +262,56 @@
   max-width: 100%;
   align-items: center;
   gap: 5px;
-  padding: 3px 7px;
-  border: 1px solid var(--color-border);
-  border-radius: 5px;
   color: var(--color-text-secondary);
-  background: var(--color-bg);
-  font-size: 0.7rem;
-  line-height: 1.35;
+  font-size: 0.73rem;
+  line-height: 1.4;
   overflow-wrap: anywhere;
 }
 
 .world-building-overview__status--present {
-  color: var(--color-text-secondary);
+  color: var(--color-accent-text, var(--color-accent));
+}
+
+.world-building-overview__status--error {
+  color: var(--color-error-text, var(--color-warning-text));
+}
+
+.world-building-overview__status svg {
+  flex: 0 0 auto;
+}
+
+.world-building-overview__meta-separator,
+.world-building-overview__count {
+  color: var(--color-text-muted);
+  font-size: 0.76rem;
+  line-height: 1.4;
 }
 
 .world-building-overview__count {
-  color: var(--color-text-muted);
-  font-size: 0.72rem;
-  line-height: 1.4;
   font-variant-numeric: tabular-nums;
-}
-
-.world-building-overview__summary {
-  display: flex;
-  width: 100%;
-  flex-wrap: wrap;
-  gap: 5px;
-  padding-top: 2px;
-}
-
-.world-building-overview__summary-item {
-  max-width: 100%;
-  padding: 3px 6px;
-  border-radius: 4px;
-  color: var(--color-text-secondary);
-  background: var(--color-bg);
-  font-size: 0.68rem;
-  line-height: 1.35;
   overflow-wrap: anywhere;
-}
-
-.world-building-overview__open-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--color-accent);
-  font-size: 0.72rem;
-  font-weight: 500;
 }
 
 .world-building-overview__card-secondary {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 0 14px 10px;
+  gap: 8px 12px;
+  padding: 0 13px 10px;
 }
 
 .world-building-overview__card-secondary p {
   min-width: 0;
+  flex: 1 1 150px;
   margin: 0;
   color: var(--color-text-muted);
-  font-size: 0.7rem;
+  font-size: 0.71rem;
   line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+.world-building-overview__card-secondary > button {
+  flex: 0 0 auto;
 }
 
 .world-building-overview__recovery {
@@ -248,15 +320,16 @@
   align-items: center;
   justify-content: space-between;
   gap: 6px 10px;
-  padding: 8px 14px 10px;
+  padding: 8px 12px 10px;
   border-top: 1px solid var(--color-border);
   background: color-mix(in srgb, var(--color-warning) 7%, var(--color-panel));
 }
 
 .world-building-overview__recovery-title {
   color: var(--color-warning-text);
-  font-size: 0.7rem;
+  font-size: 0.73rem;
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .world-building-overview__recovery-actions {
@@ -272,15 +345,18 @@
 }
 
 .world-building-overview__candidate-preview {
-  padding: 10px 14px 12px;
+  min-width: 0;
+  padding: 10px 12px 12px;
   border-top: 1px solid var(--color-border);
   color: var(--color-warning-text);
   background: var(--color-panel);
-  font-size: 0.72rem;
+  font-size: 0.74rem;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .world-building-overview__candidate-preview pre {
+  max-width: 100%;
   max-height: 16rem;
   overflow: auto;
   margin: 7px 0 0;
@@ -296,10 +372,10 @@
   gap: 7px;
   padding: 9px 11px;
   border: 1px solid var(--color-accent);
-  border-radius: 8px;
+  border-radius: 9px;
   color: var(--color-text-secondary);
   background: var(--color-panel);
-  font-size: 0.74rem;
+  font-size: 0.76rem;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
@@ -309,41 +385,57 @@
   color: var(--color-warning-text);
 }
 
-@media (max-width: 760px) {
-  .world-building-overview__header {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 12px;
-    padding: 14px 16px;
-  }
-
-  .world-building-overview__actions {
-    width: 100%;
-    justify-content: flex-start;
-  }
-
-  .world-building-overview__body {
-    padding: 14px 16px 20px;
-  }
-
-  .world-building-overview__grid {
-    grid-template-columns: minmax(0, 1fr);
+@container overview (max-width: 980px) {
+  .world-building-overview__entries {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-@media (max-width: 420px) {
-  .world-building-overview__header,
+@container overview (max-width: 680px) {
+  .world-building-overview__header {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 9px;
+  }
+
+  .world-building-overview__actions {
+    justify-content: flex-start;
+  }
+
+  .world-building-overview__entries {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .world-building-overview__groups {
+    gap: 22px;
+  }
+}
+
+@container overview (max-width: 420px) {
+  .world-building-overview__header {
+    padding-inline: 13px;
+  }
+
   .world-building-overview__body {
-    padding-inline: 12px;
+    padding: 15px 13px 22px;
   }
 
   .world-building-overview__card-main {
-    padding: 13px 12px 11px;
+    padding: 11px 12px;
   }
 
   .world-building-overview__card-secondary {
     align-items: flex-start;
     flex-direction: column;
     padding-inline: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .world-building-overview__card,
+  .world-building-overview__card-main,
+  .world-building-overview__open-icon {
+    transition: none;
   }
 }
