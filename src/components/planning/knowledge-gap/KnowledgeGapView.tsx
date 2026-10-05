@@ -6,7 +6,7 @@
  * 已有知情记录可能需要检查，不批量改写人物认知。
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BookOpenText, Eye, Plus, RefreshCw, Trash2, Users } from 'lucide-react'
 import { useLocaleStore } from '../../../stores/locale-store'
 import { useProjectStore } from '../../../stores/project-store'
@@ -18,7 +18,9 @@ import { usePlanningBackPath } from '../planning-navigation'
 import { Button } from '../../ui/Button'
 import { Input } from '../../ui/Input'
 import { NativeSelect } from '../../ui/NativeSelect'
-import VditorProseEditor from '../../editor/VditorProseEditor'
+import DocumentEditingSurface from '../../editor/DocumentEditingSurface'
+import type { VditorProseEditorRef } from '../../editor/VditorProseEditor'
+import { createBusinessFieldDocumentIdentity } from '../../../shared/document-editing'
 import { EmptyState as BaseEmptyState } from '../../ui/EmptyState'
 import { confirm } from '../../ui/Confirm'
 import { toast } from '../../ui/Toast'
@@ -53,6 +55,12 @@ interface KnowledgeGapViewProps {
   initialChapterFilter?: number
 }
 
+function createDraftDocumentId(): string {
+  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `draft-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
 const STATUS_BADGE_COLOR: Record<InfoTruthStatus, string> = {
   confirmed: 'var(--color-success-text)',
   undecided: 'var(--color-warning-text)',
@@ -76,6 +84,10 @@ export default function KnowledgeGapView({ projectKey, initialChapterFilter }: K
   const characters = useCharacterStore(s => s.characters)
   const characterIdentities = useCharacterStore(s => s.characterIdentities)
   const addLog = useWorkflowStore(s => s.addLog)
+  const documentSession = captureProjectSession(currentProject)
+  const documentProjectId = documentSession?.projectPath === projectKey
+    ? documentSession.projectId
+    : `inactive:${projectKey}`
 
   const [entries, setEntries] = useState<InfoEntry[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -101,6 +113,8 @@ export default function KnowledgeGapView({ projectKey, initialChapterFilter }: K
   const [formChapterRef, setFormChapterRef] = useState('')
   const [formNoteRef, setFormNoteRef] = useState('')
   const [formPlanIds, setFormPlanIds] = useState<string>('')
+  const [newEntryDraftId, setNewEntryDraftId] = useState(() => createDraftDocumentId())
+  const truthEditorRef = useRef<VditorProseEditorRef | null>(null)
   const [showHistory, setShowHistory] = useState(false)
 
   const selectedEntry = useMemo(
@@ -230,12 +244,13 @@ export default function KnowledgeGapView({ projectKey, initialChapterFilter }: K
 
   const handleCreateEntry = async () => {
     const projectSession = captureProjectSession(currentProject)
-    if (!projectSession) return
+    if (!projectSession || projectSession.projectPath !== projectKey) return
+    const truth = truthEditorRef.current?.getCurrentMarkdown() ?? formTruth
     try {
       const result = await saveInfoEntry(projectSession, {
         title: formTitle.trim() || text('未命名信息', 'Untitled info'),
         summary: formSummary,
-        truth: formTruth,
+        truth,
         truthStatus: formStatus,
         sourceRefs: [
           ...(Number.parseInt(formChapterRef, 10) > 0 ? [{ kind: 'chapter' as const, chapterNumber: Number.parseInt(formChapterRef, 10) }] : []),
@@ -245,6 +260,8 @@ export default function KnowledgeGapView({ projectKey, initialChapterFilter }: K
       })
       if (!isProjectSessionCurrent(projectSession)) return
       setCreating(false)
+      setNewEntryDraftId(createDraftDocumentId())
+      truthEditorRef.current = null
       resetForm(null)
       await loadAll(true)
       setSelectedId(result.id)
@@ -256,14 +273,15 @@ export default function KnowledgeGapView({ projectKey, initialChapterFilter }: K
 
   const handleUpdateEntry = async () => {
     const projectSession = captureProjectSession(currentProject)
-    if (!projectSession || !selectedEntry) return
+    if (!projectSession || projectSession.projectPath !== projectKey || !selectedEntry) return
+    const truth = truthEditorRef.current?.getCurrentMarkdown() ?? formTruth
     try {
       const result = await saveInfoEntry(projectSession, {
         id: selectedEntry.id,
         baseRevision: selectedEntry.revision,
         title: formTitle.trim() || selectedEntry.title,
         summary: formSummary,
-        truth: formTruth,
+        truth,
         truthStatus: formStatus,
         sourceRefs: [
           ...selectedEntry.sourceRefs,
@@ -276,7 +294,7 @@ export default function KnowledgeGapView({ projectKey, initialChapterFilter }: K
       if (!isProjectSessionCurrent(projectSession)) return
       setEditing(false)
       await loadAll(true)
-      if (result.knowledgeRecordsAffected > 0 && (formTruth !== selectedEntry.truth || formStatus !== selectedEntry.truthStatus)) {
+      if (result.knowledgeRecordsAffected > 0 && (truth !== selectedEntry.truth || formStatus !== selectedEntry.truthStatus)) {
         toast.info(text(
           `真相已更新。该条目下有 ${result.knowledgeRecordsAffected} 条知情记录，可能需要检查。`,
           `Truth updated. ${result.knowledgeRecordsAffected} knowledge record(s) under this entry may need review.`,
@@ -291,7 +309,7 @@ export default function KnowledgeGapView({ projectKey, initialChapterFilter }: K
 
   const handleDeleteEntry = async () => {
     const projectSession = captureProjectSession(currentProject)
-    if (!projectSession || !selectedEntry) return
+    if (!projectSession || projectSession.projectPath !== projectKey || !selectedEntry) return
     const recordCount = records.length
     const ok = await confirm(text(
       `删除信息条目「${selectedEntry.title}」？其下 ${recordCount} 条知情记录与真相历史将一并删除；人物、时间线与正文不受影响。`,
@@ -363,7 +381,14 @@ export default function KnowledgeGapView({ projectKey, initialChapterFilter }: K
             variant="default"
             size="sm"
             data-testid="info-entry-create"
-            onClick={() => { setEditing(false); setCreating(!creating); resetForm(null) }}
+            onClick={() => {
+              const nextCreating = !creating
+              setEditing(false)
+              setCreating(nextCreating)
+              truthEditorRef.current = null
+              if (nextCreating) setNewEntryDraftId(createDraftDocumentId())
+              resetForm(null)
+            }}
           >
             <Plus size={12} /> {text('新建信息条目', 'New info entry')}
           </Button>
@@ -433,8 +458,16 @@ export default function KnowledgeGapView({ projectKey, initialChapterFilter }: K
             <div className="rounded-md border p-3 flex flex-col gap-2 text-xs" style={{ borderColor: 'var(--color-border)' }}>
               <Input value={formTitle} onChange={e => setFormTitle(e.target.value)} placeholder={text('名称', 'Title')} className="h-8 text-xs" data-testid="info-entry-title" />
               <Input value={formSummary} onChange={e => setFormSummary(e.target.value)} placeholder={text('主题说明', 'Summary')} className="h-8 text-xs" />
-              <div className="h-[320px] min-h-[240px] rounded-lg border border-[var(--color-border)] overflow-hidden" data-testid="info-entry-truth">
-                <VditorProseEditor content={formTruth} onChange={setFormTruth} placeholder={text('实际真相（未决定时留空，不虚构）。可粘贴完整 Markdown。', 'Actual truth (leave empty if undecided; do not invent). Full Markdown is supported.')} />
+              <div className="min-w-0 overflow-hidden rounded-lg border border-[var(--color-border)]" style={{ height: 'clamp(360px, 58vh, 760px)' }} data-testid="info-entry-truth">
+                <DocumentEditingSurface
+                  documentIdentity={createBusinessFieldDocumentIdentity({ projectId: documentProjectId, entityType: 'info-truth', entityId: `draft:${newEntryDraftId}`, fieldId: 'truth' })}
+                  layout="long-document"
+                  showHeadingToc
+                  editorRef={truthEditorRef}
+                  content={formTruth}
+                  onChange={setFormTruth}
+                  placeholder={text('实际真相（未决定时留空，不虚构）。可粘贴完整 Markdown。', 'Actual truth (leave empty if undecided; do not invent). Full Markdown is supported.')}
+                />
               </div>
               <div className="flex flex-wrap gap-2 items-center">
                 <NativeSelect value={formStatus} onChange={e => setFormStatus(e.target.value as InfoTruthStatus)} className="h-8 text-xs" data-testid="info-entry-status">
@@ -446,7 +479,7 @@ export default function KnowledgeGapView({ projectKey, initialChapterFilter }: K
                 <Input value={formNoteRef} onChange={e => setFormNoteRef(e.target.value)} placeholder={text('来源说明（可选）', 'Source note (optional)')} className="h-8 text-xs w-44" />
                 <Input value={formPlanIds} onChange={e => setFormPlanIds(e.target.value)} placeholder={text('关联脉络计划 ID（顿号分隔，可选）', 'Related thread plan IDs (optional)')} className="h-8 text-xs w-56" />
                 <div className="flex-1" />
-                <Button variant="ghost" size="sm" onClick={() => setCreating(false)}>{text('取消', 'Cancel')}</Button>
+                <Button variant="ghost" size="sm" onClick={() => { setCreating(false); setNewEntryDraftId(createDraftDocumentId()); truthEditorRef.current = null; resetForm(null) }}>{text('取消', 'Cancel')}</Button>
                 <Button variant="outline" size="sm" data-testid="info-entry-create-save" onClick={() => { void handleCreateEntry() }}>{text('创建', 'Create')}</Button>
               </div>
             </div>
@@ -470,7 +503,7 @@ export default function KnowledgeGapView({ projectKey, initialChapterFilter }: K
                   <StatusBadge status={selectedEntry.truthStatus} label={text(INFO_TRUTH_STATUS_LABEL[selectedEntry.truthStatus].zh, INFO_TRUTH_STATUS_LABEL[selectedEntry.truthStatus].en)} />
                   <div className="flex-1" />
                   {!editing && (
-                    <Button variant="ghost" size="sm" onClick={() => { resetForm(selectedEntry); setEditing(true) }}>{text('编辑', 'Edit')}</Button>
+                    <Button variant="ghost" size="sm" onClick={() => { truthEditorRef.current = null; resetForm(selectedEntry); setEditing(true) }}>{text('编辑', 'Edit')}</Button>
                   )}
                   <Button variant="ghost" size="sm" onClick={() => setShowHistory(!showHistory)}>{text('真相历史', 'Truth history')}</Button>
                   <Button variant="ghost" size="sm" className="text-[var(--color-destructive)]" onClick={() => { void handleDeleteEntry() }}>
@@ -484,7 +517,7 @@ export default function KnowledgeGapView({ projectKey, initialChapterFilter }: K
                   {!editing ? (
                     <>
                       {selectedEntry.truth.trim()
-                        ? <div className="h-auto min-h-[150px] max-h-[60vh] rounded-lg border border-[var(--color-border)] overflow-auto" data-testid="info-entry-truth-view"><VditorProseEditor content={selectedEntry.truth} editable={false} /></div>
+                        ? <div key={`truth-view:${selectedEntry.id}`} className="min-w-0 overflow-hidden rounded-lg border border-[var(--color-border)]" style={{ height: 'clamp(300px, 52vh, 680px)' }} data-testid="info-entry-truth-view"><DocumentEditingSurface documentIdentity={createBusinessFieldDocumentIdentity({ projectId: documentProjectId, entityType: 'info-truth', entityId: selectedEntry.id, fieldId: 'truth' })} layout="long-document" showHeadingToc content={selectedEntry.truth} editable={false} /></div>
                         : <div className="leading-5 text-[var(--color-text-secondary)]" data-testid="info-entry-truth-view">{text('（作者尚未确定真相——不要虚构）', '(The author has not decided the truth — do not invent it)')}</div>}
                       {selectedEntry.sourceRefs.length > 0 && (
                         <div className="flex flex-wrap gap-1.5">
@@ -517,8 +550,16 @@ export default function KnowledgeGapView({ projectKey, initialChapterFilter }: K
                     <div className="flex flex-col gap-2">
                       <Input value={formTitle} onChange={e => setFormTitle(e.target.value)} placeholder={text('名称', 'Title')} className="h-8 text-xs" />
                       <Input value={formSummary} onChange={e => setFormSummary(e.target.value)} placeholder={text('主题说明', 'Summary')} className="h-8 text-xs" />
-                      <div className="h-[320px] min-h-[240px] rounded-lg border border-[var(--color-border)] overflow-hidden" data-testid="info-entry-truth-edit">
-                        <VditorProseEditor content={formTruth} onChange={setFormTruth} placeholder={text('实际真相（未决定时留空）。可粘贴完整 Markdown。', 'Actual truth (leave empty if undecided). Full Markdown is supported.')} />
+                      <div key={`truth-edit:${selectedEntry.id}`} className="min-w-0 overflow-hidden rounded-lg border border-[var(--color-border)]" style={{ height: 'clamp(360px, 58vh, 760px)' }} data-testid="info-entry-truth-edit">
+                        <DocumentEditingSurface
+                          documentIdentity={createBusinessFieldDocumentIdentity({ projectId: documentProjectId, entityType: 'info-truth', entityId: selectedEntry.id, fieldId: 'truth' })}
+                          layout="long-document"
+                          showHeadingToc
+                          editorRef={truthEditorRef}
+                          content={formTruth}
+                          onChange={setFormTruth}
+                          placeholder={text('实际真相（未决定时留空）。可粘贴完整 Markdown。', 'Actual truth (leave empty when undecided). Full Markdown is supported.')}
+                        />
                       </div>
                       <div className="flex flex-wrap gap-2 items-center">
                         <NativeSelect value={formStatus} onChange={e => setFormStatus(e.target.value as InfoTruthStatus)} className="h-8 text-xs">
@@ -530,7 +571,7 @@ export default function KnowledgeGapView({ projectKey, initialChapterFilter }: K
                         <Input value={formNoteRef} onChange={e => setFormNoteRef(e.target.value)} placeholder={text('补充来源说明', 'Add source note')} className="h-8 text-xs w-44" />
                         <Input value={formPlanIds} onChange={e => setFormPlanIds(e.target.value)} placeholder={text('关联脉络计划 ID', 'Related thread plan IDs')} className="h-8 text-xs w-56" />
                         <div className="flex-1" />
-                        <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>{text('取消', 'Cancel')}</Button>
+                        <Button variant="ghost" size="sm" onClick={() => { setEditing(false); truthEditorRef.current = null; resetForm(selectedEntry) }}>{text('取消', 'Cancel')}</Button>
                         <Button variant="outline" size="sm" data-testid="info-entry-update-save" onClick={() => { void handleUpdateEntry() }}>{text('保存', 'Save')}</Button>
                       </div>
                     </div>

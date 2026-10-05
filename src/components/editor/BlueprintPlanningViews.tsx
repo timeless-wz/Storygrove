@@ -12,6 +12,10 @@ import type {
   BlueprintVolumeOutlineImportPreview,
 } from '../../services/blueprint-planning-exchange'
 import { useLocaleStore } from '../../stores/locale-store'
+import { useProjectStore } from '../../stores/project-store'
+import { captureProjectSession } from '../project-session-gate'
+import { createBusinessFieldDocumentIdentity } from '../../shared/document-editing'
+import DocumentEditingSurface from './DocumentEditingSurface'
 import { Button } from '../ui/Button'
 import { Textarea } from '../ui/Textarea'
 import { cn } from '../../lib/utils'
@@ -262,6 +266,10 @@ const BOOK_TEMPLATE = `# 故事主线\n\n# 核心矛盾\n\n# 人物总体成长\
 
 export function BlueprintBookOutlineEditor(props: BlueprintBookOutlineEditorProps) {
   const text = useLocaleStore(state => state.text)
+  const currentProject = useProjectStore(state => state.currentProject)
+  const documentProjectId = captureProjectSession(currentProject)?.projectId
+    ?? currentProject?.id
+    ?? `inactive:${currentProject?.path ?? 'blueprint-planning'}`
   const [showCandidates, setShowCandidates] = useState(false)
   const [showChecks, setShowChecks] = useState(false)
   const [guidance, setGuidance] = useState('')
@@ -299,16 +307,16 @@ export function BlueprintBookOutlineEditor(props: BlueprintBookOutlineEditorProp
         <input id="blueprint-book-guidance" value={guidance} onChange={event => setGuidance(event.target.value)} placeholder={text('可留空', 'Optional')} />
         <span className="blueprint-planning__muted">{text('使用上方按钮时会把指导作为候选输入。', 'The buttons above use this guidance as candidate input.')}</span>
       </div>
-      <Textarea
-        className="blueprint-planning-editor__markdown"
-        value={props.markdown}
-        onChange={event => props.onChange(event.target.value)}
-        rows={24}
-        spellCheck
-        aria-label={text('全书总纲 Markdown 正文', 'Book outline Markdown')}
-        placeholder={text('在这里按原文编辑全书总纲…', 'Edit the book outline here…')}
-        data-testid="blueprint-book-outline-markdown"
-      />
+      <div className="blueprint-planning-editor__document" data-testid="blueprint-book-outline-markdown">
+        <DocumentEditingSurface
+          documentIdentity={createBusinessFieldDocumentIdentity({ projectId: documentProjectId, entityType: 'project-core', entityId: 'main', fieldId: 'synopsis' })}
+          layout="long-document"
+          showHeadingToc
+          content={props.markdown}
+          onChange={props.onChange}
+          placeholder={text('在这里按原文编辑全书总纲…', 'Edit the book outline here…')}
+        />
+      </div>
       {props.importPreview && <div className="blueprint-planning-import" role="dialog" aria-modal="true" aria-label={text('总纲导入预览', 'Book outline import preview')} data-testid="blueprint-book-import-preview">
         <div className="blueprint-planning-import__card">
           <header><h3>{text('确认导入全书总纲 Markdown', 'Confirm book outline Markdown import')}</h3><button type="button" onClick={props.onCancelImport} aria-label={text('关闭', 'Close')}>×</button></header>
@@ -384,6 +392,10 @@ function plannedChapterCount(markdown: string): string {
 
 export function BlueprintVolumeOutlineEditor(props: BlueprintVolumeOutlineEditorProps) {
   const text = useLocaleStore(state => state.text)
+  const currentProject = useProjectStore(state => state.currentProject)
+  const documentProjectId = captureProjectSession(currentProject)?.projectId
+    ?? currentProject?.id
+    ?? `inactive:${currentProject?.path ?? 'blueprint-planning'}`
   const [showCandidates, setShowCandidates] = useState(false)
   const [showChecks, setShowChecks] = useState(false)
   const [guidance, setGuidance] = useState('')
@@ -446,16 +458,16 @@ export function BlueprintVolumeOutlineEditor(props: BlueprintVolumeOutlineEditor
         <label>{text('本卷章号范围（可选）', 'Chapter range (optional)')}<span><input inputMode="numeric" type="number" min="1" value={rangeStartInput} onChange={event => setRangeStartInput(event.target.value)} placeholder={text('起始', 'From')} /><input inputMode="numeric" type="number" min="1" value={rangeEndInput} onChange={event => setRangeEndInput(event.target.value)} placeholder={text('结束', 'To')} /></span></label>
         <label className="blueprint-planning-editor__workflow-guidance">{text('作者指导（仅用于候选）', 'Author guidance (candidate input only)')}<input value={guidance} onChange={event => setGuidance(event.target.value)} placeholder={text('可留空', 'Optional')} /></label>
       </div>
-      <Textarea
-        className="blueprint-planning-editor__markdown"
-        value={props.markdown}
-        onChange={event => props.onChange(event.target.value)}
-        rows={22}
-        spellCheck
-        aria-label={text('本卷卷纲 Markdown 正文', 'Volume outline Markdown')}
-        placeholder={text('可直接写自由 Markdown，也可按上方分区导航插入标题…', 'Write free-form Markdown or use the section navigation to insert headings…')}
-        data-testid="blueprint-volume-outline-markdown"
-      />
+      <div className="blueprint-planning-editor__document" data-testid="blueprint-volume-outline-markdown">
+        <DocumentEditingSurface
+          documentIdentity={createBusinessFieldDocumentIdentity({ projectId: documentProjectId, entityType: 'blueprint-volume-outline', entityId: props.volumeId, fieldId: 'markdown' })}
+          layout="long-document"
+          showHeadingToc
+          content={props.markdown}
+          onChange={props.onChange}
+          placeholder={text('可直接写自由 Markdown，也可按上方分区导航插入标题…', 'Write free-form Markdown or use the section navigation to insert headings…')}
+        />
+      </div>
       {props.importPreview && <div className="blueprint-planning-import" role="dialog" aria-modal="true" aria-label={text('卷纲导入预览', 'Volume outline import preview')} data-testid="blueprint-volume-import-preview">
         <div className="blueprint-planning-import__card">
           <header><h3>{text('确认导入卷纲 Markdown', 'Confirm volume Markdown import')}</h3><button type="button" onClick={props.onCancelImport} aria-label={text('关闭', 'Close')}>×</button></header>
