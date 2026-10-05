@@ -3,6 +3,9 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { page } from 'vitest/browser'
 
+import '../../../index.css'
+import '../../../styles/literary-themes.css'
+
 import { setActiveProjectSessionContext } from '../../../shared/project-session-context'
 import type { ProjectData } from '../../../shared/ipc-channels'
 import { useLocaleStore } from '../../../stores/locale-store'
