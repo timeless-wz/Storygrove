@@ -486,6 +486,7 @@ export interface VditorProseEditorProps {
   content: string
   editable?: boolean
   placeholder?: string
+  ariaLabel?: string
   onChange?: (markdown: string) => void
   onSave?: (markdown: string) => void | Promise<void>
   onCharCountChange?: (count: number) => void
@@ -516,6 +517,8 @@ export interface VditorProseEditorProps {
   onToggleForeshadowingCompleted?: (id: string, completed: boolean) => void
   onOpenForeshadowingManager?: () => void
   onMarkForeshadowing?: (info: ForeshadowingSelectionInfo) => void
+  /** Disable the selection bubble in lightweight business-field forms. */
+  selectionActionsEnabled?: boolean
   editorRef?: React.RefObject<VditorProseEditorRef | null> | React.MutableRefObject<VditorProseEditorRef | null>
 }
 
@@ -523,6 +526,7 @@ export default function VditorProseEditor({
   content,
   editable = true,
   placeholder,
+  ariaLabel,
   onChange,
   onSave,
   onCharCountChange,
@@ -536,6 +540,7 @@ export default function VditorProseEditor({
   onToggleForeshadowingCompleted,
   onOpenForeshadowingManager,
   onMarkForeshadowing,
+  selectionActionsEnabled = true,
   editorRef,
 }: VditorProseEditorProps) {
   const text = useLocaleStore(s => s.text)
@@ -559,6 +564,8 @@ export default function VditorProseEditor({
   const onActiveHeadingChangeRef = useRef(onActiveHeadingChange)
   const editableRef = useRef(editable)
   const placeholderTextRef = useRef(placeholder)
+  const ariaLabelRef = useRef(ariaLabel)
+  const selectionActionsEnabledRef = useRef(selectionActionsEnabled)
   const uploadNoticeRef = useRef('')
   useEffect(() => {
     onChangeRef.current = onChange
@@ -567,8 +574,27 @@ export default function VditorProseEditor({
     onActiveHeadingChangeRef.current = onActiveHeadingChange
     editableRef.current = editable
     placeholderTextRef.current = placeholder
+    ariaLabelRef.current = ariaLabel
+    selectionActionsEnabledRef.current = selectionActionsEnabled
     uploadNoticeRef.current = text('图片导入功能待接入', 'Image import is not connected yet')
   })
+
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+    const applyLabel = () => {
+      for (const editor of host.querySelectorAll<HTMLElement>(
+        '.vditor-ir pre.vditor-reset, .vditor-wysiwyg pre.vditor-reset, textarea.vditor-sv',
+      )) {
+        if (ariaLabelRef.current) editor.setAttribute('aria-label', ariaLabelRef.current)
+        else editor.removeAttribute('aria-label')
+      }
+    }
+    applyLabel()
+    const observer = new MutationObserver(applyLabel)
+    observer.observe(host, { childList: true, subtree: true })
+    return () => observer.disconnect()
+  }, [ariaLabel])
 
   // ===== Bubble Menu 状态 =====
   const [bubbleOpen, setBubbleOpen] = useState(false)
@@ -1612,6 +1638,7 @@ export default function VditorProseEditor({
     let rafId: number
 
     const handleSelectionCheck = () => {
+      if (!selectionActionsEnabledRef.current) return
       cancelAnimationFrame(rafId)
       rafId = requestAnimationFrame(() => {
         const vditor = vditorRef.current
@@ -1845,7 +1872,7 @@ export default function VditorProseEditor({
       <div ref={hostRef} className="vditor-prose-host h-full min-h-0" data-vditor-prose-editor="true" />
 
       {/* Bubble Menu */}
-      {bubbleOpen && (editable || aiResult !== null) && bubblePos.top !== 0 && (
+      {selectionActionsEnabled && bubbleOpen && (editable || aiResult !== null) && bubblePos.top !== 0 && (
         <div
           className="fixed z-50 flex items-center gap-0.5 p-1 rounded-xl border select-none shadow-xl transform -translate-x-1/2 -translate-y-full"
           style={{

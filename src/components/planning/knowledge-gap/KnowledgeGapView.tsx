@@ -458,11 +458,11 @@ export default function KnowledgeGapView({ projectKey, initialChapterFilter }: K
             <div className="rounded-md border p-3 flex flex-col gap-2 text-xs" style={{ borderColor: 'var(--color-border)' }}>
               <Input value={formTitle} onChange={e => setFormTitle(e.target.value)} placeholder={text('名称', 'Title')} className="h-8 text-xs" data-testid="info-entry-title" />
               <Input value={formSummary} onChange={e => setFormSummary(e.target.value)} placeholder={text('主题说明', 'Summary')} className="h-8 text-xs" />
-              <div className="min-w-0 overflow-hidden rounded-lg border border-[var(--color-border)]" style={{ height: 'clamp(360px, 58vh, 760px)' }} data-testid="info-entry-truth">
+              <div className="min-w-0" data-testid="info-entry-truth">
                 <DocumentEditingSurface
                   documentIdentity={createBusinessFieldDocumentIdentity({ projectId: documentProjectId, entityType: 'info-truth', entityId: `draft:${newEntryDraftId}`, fieldId: 'truth' })}
-                  layout="long-document"
-                  showHeadingToc
+                  layout="business-field"
+                  ariaLabel={text('实际真相', 'Actual truth')}
                   editorRef={truthEditorRef}
                   content={formTruth}
                   onChange={setFormTruth}
@@ -550,11 +550,11 @@ export default function KnowledgeGapView({ projectKey, initialChapterFilter }: K
                     <div className="flex flex-col gap-2">
                       <Input value={formTitle} onChange={e => setFormTitle(e.target.value)} placeholder={text('名称', 'Title')} className="h-8 text-xs" />
                       <Input value={formSummary} onChange={e => setFormSummary(e.target.value)} placeholder={text('主题说明', 'Summary')} className="h-8 text-xs" />
-                      <div key={`truth-edit:${selectedEntry.id}`} className="min-w-0 overflow-hidden rounded-lg border border-[var(--color-border)]" style={{ height: 'clamp(360px, 58vh, 760px)' }} data-testid="info-entry-truth-edit">
+                      <div key={`truth-edit:${selectedEntry.id}`} className="min-w-0" data-testid="info-entry-truth-edit">
                         <DocumentEditingSurface
                           documentIdentity={createBusinessFieldDocumentIdentity({ projectId: documentProjectId, entityType: 'info-truth', entityId: selectedEntry.id, fieldId: 'truth' })}
-                          layout="long-document"
-                          showHeadingToc
+                          layout="business-field"
+                          ariaLabel={text('实际真相', 'Actual truth')}
                           editorRef={truthEditorRef}
                           content={formTruth}
                           onChange={setFormTruth}

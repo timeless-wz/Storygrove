@@ -1,5 +1,5 @@
 import CharacterCultivationField from './CharacterCultivationField'
-import { Sparkles, BookOpen, Users, Activity } from 'lucide-react'
+import { Sparkles, Users, Activity } from 'lucide-react'
 import type { CharacterCard, CharacterCurrentState } from '../../../stores/character-store'
 import { EMPTY_STATE } from '../../../stores/character-store'
 import { useLocaleStore } from '../../../stores/locale-store'
@@ -73,7 +73,7 @@ export default function CharacterProfileForm({
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-6 py-5 space-y-4" data-testid="character-profile-form">
+    <div className="max-w-6xl mx-auto px-6 py-5 space-y-4" data-testid="character-profile-form">
       <CharacterCultivationField card={card} onChange={id => onUpdateField('cultivationLevelId', id)} />
       {/* 基础身份卡片 */}
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-editor-bg)]/80 p-4 space-y-4 shadow-xs">
@@ -209,38 +209,21 @@ export default function CharacterProfileForm({
         </div>
       </div>
 
-      {/* 生平与能力 */}
-      <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-editor-bg)]/80 p-4 space-y-4 shadow-xs">
-        <div className="flex items-center gap-2 border-b border-[var(--color-border)] pb-2">
-          <BookOpen size={14} className="text-[var(--color-info)]" />
-          <h4 className="text-xs font-semibold text-[var(--color-text)]">
-            {text('生平与能力', 'Lore and Abilities')}
-          </h4>
+      {/* 长文本分别保存，但按正文宽度纵向展开。 */}
+      <section className="space-y-4 border-t border-[var(--color-border)] pt-4" aria-label={text('人物背景与作者备注', 'Character background and author notes')}>
+        <div className="space-y-2">
+          <h4 className="text-sm font-semibold text-[var(--color-text)]">{text('背景故事', 'Background')}</h4>
+          <DocumentEditingSurface id="character-profile-background" documentIdentity={createBusinessFieldDocumentIdentity({ projectId, entityType: 'character', entityId: characterId, fieldId: 'background' })} layout="business-field" ariaLabel={text('背景故事', 'Background')} content={card.background} onChange={value => onUpdateField('background', value)} placeholder={text('背景出身、过往经历、关键事件。可粘贴完整 Markdown。', 'Origins, past events, and key history. Full Markdown is supported.')} />
         </div>
-
-        <div className="space-y-3">
-          <div>
-            <Label htmlFor="character-profile-background">{text('背景故事', 'Background')}</Label>
-            <div id="character-profile-background" className="h-[300px] min-h-[220px] min-w-0 rounded-lg border border-[var(--color-border)] overflow-hidden">
-              <DocumentEditingSurface documentIdentity={createBusinessFieldDocumentIdentity({ projectId, entityType: 'character', entityId: characterId, fieldId: 'background' })} layout="business-field" showHeadingToc content={card.background} onChange={value => onUpdateField('background', value)} placeholder={text('背景出身、过往经历、关键事件。可粘贴完整 Markdown。', 'Origins, past events, and key history. Full Markdown is supported.')} />
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="character-profile-abilities">{text('能力/技能', 'Abilities / skills')}</Label>
-              <div id="character-profile-abilities" className="h-[280px] min-h-[200px] min-w-0 rounded-lg border border-[var(--color-border)] overflow-hidden">
-                <DocumentEditingSurface documentIdentity={createBusinessFieldDocumentIdentity({ projectId, entityType: 'character', entityId: characterId, fieldId: 'abilities' })} layout="business-field" content={card.abilities} onChange={value => onUpdateField('abilities', value)} placeholder={text('记录这个人物独有的能力、成长条件、限制与代价；多人共用的机制放到力量体系。', 'Record this character’s abilities, growth, limits, and costs. Shared mechanics belong in the power system.')} />
-              </div>
-            </div>
-            <div>
-              <Label htmlFor="character-profile-notes">{text('备注', 'Notes')}</Label>
-              <div id="character-profile-notes" className="h-[280px] min-h-[200px] min-w-0 rounded-lg border border-[var(--color-border)] overflow-hidden">
-                <DocumentEditingSurface documentIdentity={createBusinessFieldDocumentIdentity({ projectId, entityType: 'character', entityId: characterId, fieldId: 'notes' })} layout="business-field" content={card.notes} onChange={value => onUpdateField('notes', value)} placeholder={text('作者备忘、待确认设想与出处。不要把未来剧情计划写成已发生的人物事实。', 'Author notes, pending ideas, and provenance. Keep future plot plans separate from established character facts.')} />
-              </div>
-            </div>
-          </div>
+        <div className="space-y-2">
+          <h4 className="text-sm font-semibold text-[var(--color-text)]">{text('能力/技能', 'Abilities / skills')}</h4>
+          <DocumentEditingSurface id="character-profile-abilities" documentIdentity={createBusinessFieldDocumentIdentity({ projectId, entityType: 'character', entityId: characterId, fieldId: 'abilities' })} layout="business-field" ariaLabel={text('能力/技能', 'Abilities / skills')} content={card.abilities} onChange={value => onUpdateField('abilities', value)} placeholder={text('记录这个人物独有的能力、成长条件、限制与代价；多人共用的机制放到力量体系。', 'Record this character’s abilities, growth, limits, and costs. Shared mechanics belong in the power system.')} />
         </div>
-      </div>
+        <div className="space-y-2">
+          <h4 className="text-sm font-semibold text-[var(--color-text)]">{text('作者备注', 'Author notes')}</h4>
+          <DocumentEditingSurface id="character-profile-notes" documentIdentity={createBusinessFieldDocumentIdentity({ projectId, entityType: 'character', entityId: characterId, fieldId: 'notes' })} layout="business-field" ariaLabel={text('作者备注', 'Author notes')} content={card.notes} onChange={value => onUpdateField('notes', value)} placeholder={text('作者备忘、待确认设想与出处。不要把未来剧情计划写成已发生的人物事实。', 'Author notes, pending ideas, and provenance. Keep future plot plans separate from established character facts.')} />
+        </div>
+      </section>
 
       {/* 关系网 */}
       <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-editor-bg)]/80 p-4 space-y-4 shadow-xs">

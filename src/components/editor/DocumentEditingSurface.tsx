@@ -10,6 +10,7 @@ import './document-editing-surface.css'
 export type DocumentEditingLayout = 'long-document' | 'business-field'
 
 export interface DocumentEditingSurfaceProps {
+  id?: string
   /** Stable identity that changes when project, entity, field, or document changes. */
   documentIdentity: string
   layout: DocumentEditingLayout
@@ -18,8 +19,15 @@ export interface DocumentEditingSurfaceProps {
   onSave?: VditorProseEditorProps['onSave']
   editable?: VditorProseEditorProps['editable']
   placeholder?: VditorProseEditorProps['placeholder']
+  ariaLabel?: string
   /** Defaults on for long documents and off for business fields. */
   showHeadingToc?: boolean
+  /** Defaults on for long documents; business-field mode always hides it. */
+  showToolbar?: boolean
+  /** Page toggle keeps a long-document outline collapsed until requested. */
+  outlineControl?: 'sidebar' | 'page'
+  /** Plain removes the paper layer while retaining long-document behavior. */
+  appearance?: 'paper' | 'plain'
   /** Reports the heading currently at the editor's reading position. */
   onActiveHeadingChange?: VditorProseEditorProps['onActiveHeadingChange']
   /** Kept for existing page-level character counters. */
@@ -40,6 +48,7 @@ export default function DocumentEditingSurface(props: DocumentEditingSurfaceProp
 }
 
 function DocumentEditingSurfaceSession({
+  id,
   documentIdentity,
   layout,
   content,
@@ -47,7 +56,11 @@ function DocumentEditingSurfaceSession({
   onSave,
   editable,
   placeholder,
+  ariaLabel,
   showHeadingToc,
+  showToolbar,
+  outlineControl = 'sidebar',
+  appearance = 'paper',
   onActiveHeadingChange,
   onCharCountChange,
   editorRef,
@@ -58,7 +71,8 @@ function DocumentEditingSurfaceSession({
   const text = useLocaleStore(s => s.text)
   const rootRef = useRef<HTMLDivElement>(null)
   const navId = useId()
-  const headingTocEnabled = showHeadingToc ?? layout === 'long-document'
+  const headingTocEnabled = layout !== 'business-field' && (showHeadingToc ?? layout === 'long-document')
+  const toolbarEnabled = layout !== 'business-field' && (showToolbar ?? true)
   const canEdit = editable ?? true
 
   // Mirror the editor's live value for the outline without feeding each keystroke
@@ -71,8 +85,12 @@ function DocumentEditingSurfaceSession({
     setOutlineContent(content)
   }, [content])
 
-  const analysis = useMemo(() => analyzeProjectDocumentMarkdown(outlineContent), [outlineContent])
-  const [outlineOpen, setOutlineOpen] = useState(headingTocEnabled)
+  const headings = useMemo(
+    () => headingTocEnabled ? analyzeProjectDocumentMarkdown(outlineContent).headings : [],
+    [headingTocEnabled, outlineContent],
+  )
+  const [outlineOpen, setOutlineOpen] = useState(headingTocEnabled && outlineControl === 'sidebar')
+  const isOutlineOpen = outlineOpen && (outlineControl !== 'page' || headings.length > 0)
   const previousTocEnabledRef = useRef(headingTocEnabled)
   const lastCompactRef = useRef<boolean | null>(null)
   const jumpSequenceRef = useRef(0)
@@ -82,39 +100,39 @@ function DocumentEditingSurfaceSession({
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set())
 
   const headingGroupIds = useMemo(() => {
-    return analysis.headings.map((heading, index) => {
+    return headings.map((heading, index) => {
       if (heading.level <= 2) return heading.level === 2 ? `${heading.line}:${heading.id}` : null
 
       let previousIndex = index - 1
-      while (previousIndex >= 0 && analysis.headings[previousIndex].level > 2) previousIndex -= 1
-      const parent = analysis.headings[previousIndex]
+      while (previousIndex >= 0 && headings[previousIndex].level > 2) previousIndex -= 1
+      const parent = headings[previousIndex]
       return parent?.level === 2 ? `${parent.line}:${parent.id}` : null
     })
-  }, [analysis.headings])
+  }, [headings])
 
   const headingsWithChildren = useMemo(() => {
     const groups = new Set<string>()
-    analysis.headings.forEach((heading, index) => {
+    headings.forEach((heading, index) => {
       if (heading.level !== 2) return
       let hasH3 = false
-      for (const next of analysis.headings.slice(index + 1)) {
+      for (const next of headings.slice(index + 1)) {
         if (next.level <= 2) break
         if (next.level === 3) { hasH3 = true; break }
       }
       if (hasH3) groups.add(`${heading.line}:${heading.id}`)
     })
     return groups
-  }, [analysis.headings])
+  }, [headings])
 
   useLayoutEffect(() => {
     if (previousTocEnabledRef.current !== headingTocEnabled) {
       previousTocEnabledRef.current = headingTocEnabled
-      setOutlineOpen(headingTocEnabled)
+      setOutlineOpen(headingTocEnabled && outlineControl === 'sidebar')
     }
-  }, [headingTocEnabled])
+  }, [headingTocEnabled, outlineControl])
 
   useLayoutEffect(() => {
-    if (!headingTocEnabled) return
+    if (!headingTocEnabled || outlineControl !== 'sidebar') return
     const root = rootRef.current
     if (!root) return
 
@@ -141,13 +159,13 @@ function DocumentEditingSurfaceSession({
     const handleResize = () => syncResponsiveDefault(root.getBoundingClientRect().width || root.clientWidth)
     window.addEventListener('resize', handleResize)
     return () => window.removeEventListener('resize', handleResize)
-  }, [headingTocEnabled])
+  }, [headingTocEnabled, outlineControl])
 
   const handleChange = useCallback((markdown: string) => {
     if (!canEdit) return
-    setOutlineContent(markdown)
+    if (headingTocEnabled) setOutlineContent(markdown)
     onChange?.(markdown)
-  }, [canEdit, onChange])
+  }, [canEdit, headingTocEnabled, onChange])
 
   const handleHeadingClick = useCallback((heading: { line: number; text: string }, index: number) => {
     jumpSequenceRef.current += 1
@@ -173,53 +191,64 @@ function DocumentEditingSurfaceSession({
 
   return (
     <div
+      id={id}
       ref={rootRef}
       className={cn('document-editing-surface', className)}
       data-document-layout={layout}
       data-document-identity={documentIdentity}
       data-heading-toc={headingTocEnabled ? 'enabled' : 'disabled'}
-      data-outline-open={outlineOpen ? 'true' : 'false'}
+      data-toolbar-enabled={toolbarEnabled ? 'true' : 'false'}
+      data-outline-control={outlineControl}
+      data-editor-appearance={appearance}
+      data-outline-open={isOutlineOpen ? 'true' : 'false'}
       data-editable={canEdit ? 'true' : 'false'}
+      role={ariaLabel ? 'group' : undefined}
+      aria-label={ariaLabel}
     >
-      <div className="document-editing-surface__body">
-        {headingTocEnabled && (
-          <aside
-            className={cn('document-editing-surface__outline', outlineOpen && 'is-open')}
-            data-outline-panel={outlineOpen ? 'open' : 'collapsed'}
+      {outlineControl === 'page' && headingTocEnabled && headings.length > 0 && (
+        <div className="document-editing-surface__page-outline-control">
+          <button
+            type="button"
+            className="document-editing-surface__outline-toggle"
+            aria-expanded={isOutlineOpen}
+            aria-controls={navId}
+            onClick={() => setOutlineOpen(open => !open)}
           >
-            <div className="document-editing-surface__outline-header">
-              {outlineOpen && (
-                <span className="document-editing-surface__outline-title">
-                  {text('文档目录', 'Document outline')}
-                </span>
-              )}
+            <List size={14} aria-hidden="true" />
+            <span>{isOutlineOpen ? text('收起目录', 'Hide outline') : text('目录', 'Outline')}</span>
+          </button>
+        </div>
+      )}
+      <div className="document-editing-surface__body">
+        {headingTocEnabled && (outlineControl !== 'page' || headings.length > 0) && (
+          <aside
+            className={cn('document-editing-surface__outline', isOutlineOpen && 'is-open')}
+            data-outline-panel={isOutlineOpen ? 'open' : 'collapsed'}
+            hidden={outlineControl === 'page' && !isOutlineOpen}
+          >
+            {outlineControl === 'sidebar' && <div className="document-editing-surface__outline-header">
+              {outlineOpen && <span className="document-editing-surface__outline-title">{text('文档目录', 'Document outline')}</span>}
               <button
                 type="button"
                 className="document-editing-surface__outline-toggle"
                 aria-expanded={outlineOpen}
                 aria-controls={navId}
-                aria-label={outlineOpen
-                  ? text('收起文档目录', 'Collapse document outline')
-                  : text('展开文档目录', 'Expand document outline')}
-                title={outlineOpen
-                  ? text('收起文档目录', 'Collapse document outline')
-                  : text('展开文档目录', 'Expand document outline')}
+                aria-label={outlineOpen ? text('收起文档目录', 'Collapse document outline') : text('展开文档目录', 'Expand document outline')}
+                title={outlineOpen ? text('收起文档目录', 'Collapse document outline') : text('展开文档目录', 'Expand document outline')}
                 onClick={() => setOutlineOpen(open => !open)}
-              >
-                <List size={14} aria-hidden="true" />
-              </button>
-            </div>
+              ><List size={14} aria-hidden="true" /></button>
+            </div>}
             <nav
               id={navId}
               aria-label={text('文档目录', 'Document outline')}
               className="document-editing-surface__outline-nav"
-              hidden={!outlineOpen}
+              hidden={!isOutlineOpen}
             >
-              {analysis.headings.length === 0 ? (
+              {headings.length === 0 ? (
                 <div className="document-editing-surface__outline-empty">
                   {text('使用 # 至 ###### 添加标题后即可生成目录。', 'Add headings with # through ###### to build an outline.')}
                 </div>
-              ) : analysis.headings.map((heading, index) => {
+              ) : headings.map((heading, index) => {
                 const groupId = headingGroupIds[index]
                 const headingKey = `${heading.line}:${heading.id}`
                 const isHidden = heading.level >= 3 && !!groupId && collapsedGroups.has(groupId)
@@ -277,11 +306,13 @@ function DocumentEditingSurfaceSession({
             onSave={canEdit ? onSave : undefined}
             editable={editable}
             placeholder={placeholder}
+            ariaLabel={ariaLabel}
             onCharCountChange={onCharCountChange}
-            onActiveHeadingChange={handleActiveHeadingChange}
+            onActiveHeadingChange={headingTocEnabled ? handleActiveHeadingChange : undefined}
             editorRef={editorRef}
             jumpTarget={activeJumpTarget}
             insertRequest={canEdit ? insertRequest : undefined}
+            selectionActionsEnabled={layout !== 'business-field'}
             className="h-full min-h-0"
           />
         </div>

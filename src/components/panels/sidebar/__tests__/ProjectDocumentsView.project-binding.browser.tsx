@@ -223,7 +223,7 @@ describe('ProjectDocumentsView', () => {
       await vi.waitFor(() => expect(container.textContent).toContain('还没有项目文档'))
     })
     expect(container.textContent).toContain('新建文档')
-    expect(container.textContent).toContain('导入 Markdown')
+    expect(container.textContent).toContain('导入为项目文档')
     expect(container.textContent).toContain('.vela/documents')
   })
 })

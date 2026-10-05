@@ -25,7 +25,6 @@ import {
   type BlueprintChapterPlanning,
   type ChapterBlueprintV2Content,
 } from '../../shared/blueprint-v2'
-import { analyzeProjectDocumentMarkdown } from '../../shared/project-documents'
 import { useLocaleStore } from '../../stores/locale-store'
 import { useProjectStore } from '../../stores/project-store'
 import { createBusinessFieldDocumentIdentity } from '../../shared/document-editing'
@@ -59,14 +58,6 @@ const CHECK_MODE_LABELS: Record<BlueprintV2CheckMode, [string, string]> = {
 function textareaRows(markdown: string, min = 3, max = 22): number {
   const lines = markdown.split('\n').length
   return Math.max(min, Math.min(max, lines + 1))
-}
-
-function shouldShowMarkdownOutline(markdown: string): boolean {
-  return analyzeProjectDocumentMarkdown(markdown).headings.length > 1
-}
-
-function isLongMarkdownField(markdown: string): boolean {
-  return markdown.length >= 600 || markdown.split('\n').length >= 12
 }
 
 export interface BlueprintV2EditorProps {
@@ -242,11 +233,11 @@ export default function BlueprintV2Editor({ content, onChange }: BlueprintV2Edit
                 </span>
                 <span className="blueprint-v2__section-tag">{text('未归类', 'Unclassified')}</span>
               </header>
-              <div className={cn('blueprint-v2__long-markdown-editor', isLongMarkdownField(section.body) && 'blueprint-v2__long-markdown-editor--long')} data-testid="blueprint-v2-custom-body-editor" data-document-identity={documentIdentity}>
+              <div className="blueprint-v2__markdown-field" data-testid="blueprint-v2-custom-body-editor" data-document-identity={documentIdentity}>
                 <DocumentEditingSurface
                   documentIdentity={documentIdentity}
                   layout="business-field"
-                  showHeadingToc={shouldShowMarkdownOutline(section.body)}
+                  ariaLabel={text(`分区「${section.title}」正文`, `Body of section “${section.title}”`)}
                   content={section.body}
                   onChange={body => patchCustomBody(sectionIndex, body)}
                   placeholder={text(`分区「${section.title}」正文`, `Body of section “${section.title}”`)}
@@ -369,11 +360,11 @@ export default function BlueprintV2Editor({ content, onChange }: BlueprintV2Edit
                           </Button>
                         </div>
                       </div>
-                      <div className={cn('blueprint-v2__long-markdown-editor', isLongMarkdownField(item.markdown) && 'blueprint-v2__long-markdown-editor--long')} data-testid={`blueprint-v2-scene-markdown-${item.id}`} data-document-identity={documentIdentity}>
+                      <div className="blueprint-v2__markdown-field" data-testid={`blueprint-v2-scene-markdown-${item.id}`} data-document-identity={documentIdentity}>
                         <DocumentEditingSurface
                           documentIdentity={documentIdentity}
                           layout="business-field"
-                          showHeadingToc={shouldShowMarkdownOutline(item.markdown)}
+                          ariaLabel={text('分镜正文', 'Scene body')}
                           content={item.markdown}
                           onChange={markdown => patchItem(sectionIndex, item.id, current => (
                             current.kind === 'scene' ? { ...current, markdown } : current

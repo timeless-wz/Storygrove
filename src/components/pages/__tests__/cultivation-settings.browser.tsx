@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { commands, page } from 'vitest/browser'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -45,6 +45,24 @@ async function actWithPendingUiIpc(action: () => Promise<unknown>) {
 }
 async function actOnUi(action: () => Promise<unknown>) {
   await act(async () => { await action() })
+}
+async function openLevelsTab() {
+  const label = useLocaleStore.getState().locale === 'en-US' ? 'Levels' : '等级结构'
+  await actOnUi(() => page.getByRole('tab', { name: label }).click())
+}
+async function setCultivationMarkdown(markdown: string) {
+  const surface = container.querySelector<HTMLElement>('[data-testid="cultivation-settings"] [data-document-layout="long-document"]')
+  await vi.waitFor(() => expect(surface?.querySelector('[data-vditor-ready="true"]')).not.toBeNull())
+  const sourceMode = surface?.querySelector<HTMLButtonElement>('.vditor-toolbar button[data-mode="sv"]')
+  expect(sourceMode).not.toBeNull()
+  await actOnUi(async () => { sourceMode?.click() })
+  const textarea = surface?.querySelector<HTMLTextAreaElement>('textarea.vditor-sv')
+  expect(textarea).not.toBeNull()
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+    setter?.call(textarea, markdown)
+    textarea?.dispatchEvent(new Event('input', { bubbles: true }))
+  })
 }
 async function dismissToasts() {
   const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('#vela-toast-root button'))
@@ -126,7 +144,29 @@ afterEach(async () => {
 it('creates editable presets, persists names/order, and reads the same SQLite configuration after reopen', async () => {
   await render('settings')
   document.documentElement.dataset.theme = 'verdant'
-  await expect.element(page.getByText('尚未设置等级结构。需要时再新增等级；没有等级结构也可以保存力量机制。')).toBeVisible()
+  await actOnUi(() => page.getByRole('tab', { name: '机制说明' }).click())
+  await vi.waitFor(() => expect(container.querySelector('[data-document-layout="long-document"] [data-vditor-ready="true"]')).not.toBeNull())
+  const mechanismText = '## 力量源头\n\n力量来自潮汐晶核，成长需要承担对应代价。'
+  await setCultivationMarkdown(mechanismText)
+  const mechanismSurface = container.querySelector<HTMLElement>('[data-document-layout="long-document"]')!
+  const irMode = mechanismSurface.querySelector<HTMLButtonElement>('.vditor-toolbar button[data-mode="ir"]')
+  await actOnUi(async () => { irMode?.click() })
+  await vi.waitFor(() => expect(mechanismSurface.querySelector('.vditor-ir h2')?.textContent).toContain('力量源头'))
+  expect(mechanismSurface.dataset.editorAppearance).toBe('plain')
+  const mechanismTextSurface = mechanismSurface.querySelector('.vditor-ir pre.vditor-reset')!
+  expect(getComputedStyle(mechanismTextSurface).borderTopWidth).toBe('0px')
+  expect(getComputedStyle(mechanismTextSurface).backgroundColor).toBe('rgba(0, 0, 0, 0)')
+  for (const selector of ['.vditor-prose-host', '.vditor', '.vditor-content', '.vditor-ir']) {
+    expect(getComputedStyle(mechanismSurface.querySelector(selector)!).backgroundColor).toBe('rgba(0, 0, 0, 0)')
+  }
+  expect(container.querySelector<HTMLElement>('[data-document-layout="long-document"]')?.dataset.toolbarEnabled).toBe('false')
+  expect(getComputedStyle(mechanismSurface.querySelector('.vditor-toolbar')!).display).toBe('none')
+  await expect.element(page.getByRole('button', { name: '目录' })).toHaveAttribute('aria-expanded', 'false')
+  expect(container.querySelector<HTMLElement>('nav[aria-label="文档目录"]')?.hidden).toBe(true)
+  await page.screenshot({ path: '../../../../output/playwright/cultivation-settings-mechanism.png' })
+  await actOnUi(() => page.getByRole('tab', { name: '等级结构' }).click())
+  expect(container.querySelector<HTMLTextAreaElement>('[data-testid="cultivation-settings"] [data-document-layout="long-document"] textarea.vditor-sv')?.value).toBe(mechanismText)
+  await expect.element(page.getByTestId('cultivation-levels-empty')).toBeVisible()
   await actOnUi(() => page.getByRole('button', { name: '新增大境界', exact: true }).click())
   await actOnUi(() => page.getByRole('textbox', { name: '大境界 1 名称' }).fill('炼气'))
   await actOnUi(() => page.getByRole('button', { name: '一到九层', exact: true }).click())
@@ -139,8 +179,10 @@ it('creates editable presets, persists names/order, and reads the same SQLite co
   const system = await invoke<CultivationSystem>('db:cultivation-read')
   expect(system.realms[0].stages[1].name).toBe('入门')
   expect(system.realms[1].stages).toEqual([])
+  expect(system.markdown?.trimEnd()).toBe(mechanismText)
   await page.screenshot({ path: '../../../../output/playwright/cultivation-settings-desktop.png' })
   await reopen(); await render('settings')
+  await actOnUi(() => page.getByRole('tab', { name: '等级结构' }).click())
   await expect.element(page.getByRole('textbox', { name: '大境界 2 名称' })).toHaveValue('筑基')
   expect(await invoke('db:cultivation-read')).toEqual(system)
   await page.viewport(380, 850)
@@ -184,6 +226,7 @@ it('cancels preset replacement and impact resolution without writes, then atomic
   await actWithPendingUiIpc(() => useCharacterStore.getState().saveAll(session.projectPath, session))
   const before = await invoke('db:cultivation-read')
   await render('settings')
+  await openLevelsTab()
   await actOnUi(() => page.getByRole('button', { name: '初期到圆满', exact: true }).click())
   await act(async () => {
     await page.getByRole('button', { name: '取消', exact: true }).click()
@@ -213,6 +256,7 @@ it('cancels preset replacement and impact resolution without writes, then atomic
 
 it('retains failed settings and profile edits, disables quick writes over a pending profile, and saves on retry', async () => {
   await seed(); await render('settings')
+  await openLevelsTab()
   await actOnUi(() => page.getByRole('textbox', { name: '大境界 1 名称' }).fill('气海'))
   await commands.cultivationIpc('fixture:fail-save', true)
   await actWithPendingUiIpc(() => page.getByRole('button', { name: '保存力量体系', exact: true }).click())
@@ -252,6 +296,7 @@ it('rebases atomic level migration into a renamed unsaved profile without overwr
   await actOnUi(() => page.getByRole('textbox', { name: '姓名', exact: true }).fill('沈砺改名'))
   await act(async () => { useCharacterStore.getState().updateField('沈砺改名', 'notes', '与等级迁移同时保留的草稿') })
   await render('settings')
+  await openLevelsTab()
   await actOnUi(() => page.getByRole('button', { name: '删除大境界 1', exact: true }).click())
   await actWithPendingUiIpc(() => page.getByRole('button', { name: '保存力量体系', exact: true }).click())
   await actOnUi(() => page.getByRole('combobox', { name: '沈砺 的新等级' }).selectOptions('foundation-base'))
@@ -270,6 +315,7 @@ it('applies a preset to every realm, resolves multiple affected characters, and 
   document.documentElement.dataset.theme = 'starlight-dark'
   document.documentElement.classList.add('dark')
   await render('settings')
+  await openLevelsTab()
   await page.screenshot({ path: '../../../../output/playwright/cultivation-settings-dark.png' })
   expect(getComputedStyle(document.documentElement).getPropertyValue('--color-text').trim()).not.toBe('')
   await expect.element(page.getByRole('heading', { name: 'Power system' })).toBeVisible()
@@ -282,6 +328,7 @@ it('applies a preset to every realm, resolves multiple affected characters, and 
     await page.getByRole('button', { name: 'Replace', exact: true }).click()
     await new Promise(resolve => setTimeout(resolve, 250))
   })
+  await actOnUi(() => page.getByText('Complete level preview', { exact: true }).click())
   await expect.element(page.getByText('8 = 筑基·圆满', { exact: true })).toBeVisible()
   expect(useCultivationStore.getState().realms.map(realm => realm.stages.map(stage => stage.name))).toEqual([
     ['初期', '中期', '后期', '圆满'], ['初期', '中期', '后期', '圆满'],
@@ -310,6 +357,7 @@ it('applies a preset to every realm, resolves multiple affected characters, and 
   await page.screenshot({ path: 'output/cultivation-settings-english-dark.png' })
 
   await render('settings')
+  await openLevelsTab()
   await act(async () => { await page.getByRole('textbox', { name: 'Realm 1 name' }).fill('气海') })
   await commands.cultivationIpc('fixture:fail-save', true)
   await actWithPendingUiIpc(() => page.getByRole('button', { name: 'Save power system', exact: true }).click())

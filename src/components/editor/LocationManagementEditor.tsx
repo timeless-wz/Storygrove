@@ -203,18 +203,18 @@ export default function LocationManagementEditor({
             {!loading && locations.length === 0 && <p className="px-2 py-4 text-xs leading-5 text-[var(--color-text-secondary)]">尚无地点资料。可以先新建记录，地图视图稍后再补。</p>}
           </div>
         </aside>
-        <main className="flex-1 min-w-0 min-h-0 flex flex-col">
+        <main className="flex-1 min-w-0 min-h-0 flex flex-col overflow-y-auto">
           <div className="shrink-0 p-3 border-b border-[var(--color-border)] flex flex-wrap items-center gap-2">
             <Input className="min-w-40 flex-1" aria-label={text('地点名称', 'Location name')} value={draftState.name} onChange={event => setDraft({ ...draftRef.current, name: event.target.value })} placeholder={text('地点名称', 'Location name')} />
             <NativeSelect className="w-36" aria-label={text('地点类型', 'Location type')} value={draftState.type} onChange={event => setDraft({ ...draftRef.current, type: event.target.value as WorldMapNodeType })}>{Object.entries(WORLD_MAP_NODE_TYPE_LABELS).map(([key, label]) => <option key={key} value={key}>{text(label.zh, label.en)}</option>)}</NativeSelect>
             <NativeSelect className="w-44" aria-label={text('关联地图', 'Associated map')} value={draftState.mapId} onChange={event => setDraft({ ...draftRef.current, mapId: event.target.value })}><option value="">{text('不关联地图', 'No map')}</option>{(atlas?.maps ?? []).map(map => <option key={map.id} value={map.id}>{map.name}</option>)}</NativeSelect>
             <Button disabled={saving || !dirty} onClick={() => void save()}><Save size={14} />{saving ? '保存中…' : '保存'}</Button><span role="status" className="text-xs text-[var(--color-text-secondary)]">{dirty ? '未保存' : '已保存'}</span>
           </div>
-          <div className="flex-1 min-h-0 min-w-0 border-t border-[var(--color-border)]">
+          <div className="shrink-0 min-w-0 border-t border-[var(--color-border)]">
             <DocumentEditingSurface
               documentIdentity={createBusinessFieldDocumentIdentity({ projectId: documentProjectId, entityType: 'location', entityId: draftState.id ?? `new-${tabId}`, fieldId: 'markdown' })}
               layout="business-field"
-              showHeadingToc
+              ariaLabel={text('地点详细说明', 'Location details')}
               content={draftState.markdown}
               onChange={markdown => setDraft({ ...draftRef.current, markdown })}
               onSave={() => save()}

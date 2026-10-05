@@ -244,23 +244,14 @@
   line-height: 1.6;
 }
 
-.blueprint-v2__long-markdown-editor {
+.blueprint-v2__markdown-field {
   width: 100%;
   min-width: 0;
-  min-height: 210px;
-  height: 230px;
-  overflow: hidden;
-  border: 1px solid var(--color-border);
-  border-radius: 7px;
+  overflow: visible;
 }
 
-.blueprint-v2__long-markdown-editor--long {
-  min-height: 270px;
-  height: min(38vh, 420px);
-}
-
-.blueprint-v2__long-markdown-editor .document-editing-surface {
-  height: 100%;
+.blueprint-v2__markdown-field .document-editing-surface {
+  height: auto;
   min-height: 0;
 }
 
