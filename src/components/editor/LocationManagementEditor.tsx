@@ -4,9 +4,10 @@ import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
 import { NativeSelect } from '../ui/NativeSelect'
 import { confirm } from '../ui/Confirm'
-import VditorProseEditor from './VditorProseEditor'
+import DocumentEditingSurface from './DocumentEditingSurface'
 import { useLocaleStore } from '../../stores/locale-store'
 import { useProjectStore } from '../../stores/project-store'
+import { createBusinessFieldDocumentIdentity } from '../../shared/document-editing'
 import { useEditorStore, registerEditorExitSaveHandler } from '../../stores/editor-store'
 import { ipc } from '../../services/ipc-client'
 import { captureProjectSession, isProjectSessionCurrent } from '../project-session-gate'
@@ -65,6 +66,7 @@ export default function LocationManagementEditor({
   const dirty = useEditorStore(state => state.tabs.find(tab => tab.id === tabId)?.dirty ?? false)
   const captured = captureProjectSession(project)
   const session = captured?.projectPath === projectKey ? captured : null
+  const documentProjectId = session?.projectId ?? `inactive:${projectKey}`
   const [atlas, setAtlas] = useState<WorldMapAtlas | null>(null)
   const [draftState, setDraftState] = useState<LocationDraft>(() => parseSnapshot(initialContent) ?? blankDraft())
   const [selectedId, setSelectedId] = useState(parseSnapshot(initialContent)?.id ?? '')
@@ -208,7 +210,17 @@ export default function LocationManagementEditor({
             <NativeSelect className="w-44" aria-label={text('关联地图', 'Associated map')} value={draftState.mapId} onChange={event => setDraft({ ...draftRef.current, mapId: event.target.value })}><option value="">{text('不关联地图', 'No map')}</option>{(atlas?.maps ?? []).map(map => <option key={map.id} value={map.id}>{map.name}</option>)}</NativeSelect>
             <Button disabled={saving || !dirty} onClick={() => void save()}><Save size={14} />{saving ? '保存中…' : '保存'}</Button><span role="status" className="text-xs text-[var(--color-text-secondary)]">{dirty ? '未保存' : '已保存'}</span>
           </div>
-          <div className="flex-1 min-h-0 border-t border-[var(--color-border)]"><VditorProseEditor content={draftState.markdown} onChange={markdown => setDraft({ ...draftRef.current, markdown })} onSave={() => save()} placeholder={text('粘贴或编写 Markdown 地点资料。此处内容同时作为该地点的正式详细说明。', 'Paste or write Markdown about this location. This is the authoritative detailed description for the location.')} /></div>
+          <div className="flex-1 min-h-0 min-w-0 border-t border-[var(--color-border)]">
+            <DocumentEditingSurface
+              documentIdentity={createBusinessFieldDocumentIdentity({ projectId: documentProjectId, entityType: 'location', entityId: draftState.id ?? `new-${tabId}`, fieldId: 'markdown' })}
+              layout="business-field"
+              showHeadingToc
+              content={draftState.markdown}
+              onChange={markdown => setDraft({ ...draftRef.current, markdown })}
+              onSave={() => save()}
+              placeholder={text('粘贴或编写 Markdown 地点资料。此处内容同时作为该地点的正式详细说明。', 'Paste or write Markdown about this location. This is the authoritative detailed description for the location.')}
+            />
+          </div>
         </main>
       </div>
       {error && <div role="alert" className="shrink-0 px-4 py-2 text-sm text-[var(--color-danger-text)] border-t border-[var(--color-border)]"><MapPin size={14} className="inline mr-1" />{error}</div>}

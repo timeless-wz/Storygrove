@@ -173,6 +173,9 @@ describe('NovelConfigEditor page sections', () => {
     await expect.element(page.getByRole('button', { name: '生成初始构想' })).toBeVisible()
     expect(container.querySelector<HTMLDetailsElement>('details.novel-config-page__advanced')?.open).toBe(false)
     expect(container.querySelectorAll('[data-vditor-prose-editor="true"]')).toHaveLength(3)
+    expect(container.querySelectorAll('[data-document-layout="business-field"]')).toHaveLength(3)
+    expect(container.querySelectorAll('[data-heading-toc="enabled"]')).toHaveLength(2)
+    expect(container.querySelectorAll('[data-heading-toc="disabled"]')).toHaveLength(1)
 
     const direction = '# 阅读体验\n\n- 让读者感到辽阔\n- 保持人物选择有代价'
     const references = '| 作品 | 借鉴 |\n| --- | --- |\n| 参考文本甲 | 叙事节奏；不复用情节 |'

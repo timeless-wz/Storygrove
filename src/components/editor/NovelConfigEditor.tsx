@@ -5,6 +5,7 @@ import { registerEditorExitSaveHandler } from '../../stores/editor-store'
 import { useLLMStore } from '../../stores/llm-store'
 import { useWorkflowStore, workflowResourceKey } from '../../stores/workflow-store'
 import type { NovelConfig } from '../../shared/ipc-channels'
+import { createBusinessFieldDocumentIdentity } from '../../shared/document-editing'
 import { sameProjectSessionContext } from '../../shared/project-session-context'
 import {
   resolveWritingLanguage,
@@ -23,7 +24,7 @@ import {
 } from '../project-session-gate'
 import { AUDIENCE_EN, GENRE_EN } from './novel-config-labels'
 import { openCreativeMaterialsView } from '../panels/sidebar/sidebar-file-openers'
-import VditorProseEditor from './VditorProseEditor'
+import DocumentEditingSurface from './DocumentEditingSurface'
 import './novel-config-editor.css'
 
 /** 小说配置编辑器 — Tab 内的可视化配置面板 */
@@ -63,6 +64,7 @@ function NovelConfigEditorSession({ projectKey }: { projectKey: string }) {
 
   // 直接从 Store 读取配置 — 单一数据源，无需 local state 镜像
   const projectMatches = currentProject?.path === projectKey
+  const documentProjectId = projectMatches && currentProject ? currentProject.id : `inactive:${projectKey}`
   const config = projectMatches ? currentProject.novelConfig : null
   const exitSaveRef = useRef<() => Promise<void>>(async () => undefined)
   useEffect(() => {
@@ -262,13 +264,26 @@ function NovelConfigEditorSession({ projectKey }: { projectKey: string }) {
               <p>{text('上方维护类型、细分类型与目标读者；这里说明核心阅读体验和创作原则。不要在这里展开剧情、世界规则或人物档案。', 'The fields above capture genre and audience. Describe the intended reading experience and creative principles here, keeping plot, world rules, and character profiles in their dedicated pages.')}</p>
             </div>
             <Section title={text('核心阅读体验与创作原则', 'Reading experience and creative principles')} desc={text('回答希望读者获得什么体验、作品追求什么，以及具体的参考边界。', 'Explain what readers should experience, what the work values, and where references stop.')}>
-              <div className="h-[360px] min-h-[280px] rounded-lg border border-[var(--color-border)] overflow-hidden">
-                <VditorProseEditor content={config.creativeDirectionMarkdown ?? ''} onChange={markdown => update('creativeDirectionMarkdown', markdown)} placeholder={text('粘贴或编写 Markdown 创作方向；支持标题、列表、引用和表格。', 'Write or paste Markdown for the creative direction, including headings, lists, quotes, and tables.')} />
+              <div className="h-[360px] min-h-[280px] min-w-0 rounded-lg border border-[var(--color-border)] overflow-hidden">
+                <DocumentEditingSurface
+                  documentIdentity={createBusinessFieldDocumentIdentity({ projectId: documentProjectId, entityType: 'project-config', entityId: 'novel-config', fieldId: 'creativeDirectionMarkdown' })}
+                  layout="business-field"
+                  showHeadingToc
+                  content={config.creativeDirectionMarkdown ?? ''}
+                  onChange={markdown => update('creativeDirectionMarkdown', markdown)}
+                  placeholder={text('粘贴或编写 Markdown 创作方向；支持标题、列表、引用和表格。', 'Write or paste Markdown for the creative direction, including headings, lists, quotes, and tables.')}
+                />
               </div>
             </Section>
             <Section title={text('参考作品与借鉴边界', 'Reference works and borrowing boundaries')} desc={text('说明参考作品、借鉴的具体方面，以及明确不采用的部分。', 'Name references, the elements you draw from, and what you will not reuse.')}>
-              <div className="h-[240px] min-h-[200px] rounded-lg border border-[var(--color-border)] overflow-hidden">
-                <VditorProseEditor content={config.referenceWorks ?? ''} onChange={markdown => update('referenceWorks', markdown)} placeholder={text('参考哪些作品？借鉴哪些方面？哪些元素不采用？', 'Which works inform this project, which aspects, and what is out of scope?')} />
+              <div className="h-[240px] min-h-[200px] min-w-0 rounded-lg border border-[var(--color-border)] overflow-hidden">
+                <DocumentEditingSurface
+                  documentIdentity={createBusinessFieldDocumentIdentity({ projectId: documentProjectId, entityType: 'project-config', entityId: 'novel-config', fieldId: 'referenceWorks' })}
+                  layout="business-field"
+                  content={config.referenceWorks ?? ''}
+                  onChange={markdown => update('referenceWorks', markdown)}
+                  placeholder={text('参考哪些作品？借鉴哪些方面？哪些元素不采用？', 'Which works inform this project, which aspects, and what is out of scope?')}
+                />
               </div>
             </Section>
           </section>
@@ -298,8 +313,15 @@ function NovelConfigEditorSession({ projectKey }: { projectKey: string }) {
               </NativeSelect>
             </Field>
             <Section title={text('正文执行规则', 'Prose rules')} desc={text('这里是正式写作规范；保存后由正文生成、续写与修稿工作流读取。', 'These are the authoritative rules read by drafting, continuation, and revision workflows.')}>
-              <div className="h-[380px] min-h-[300px] rounded-lg border border-[var(--color-border)] overflow-hidden">
-                <VditorProseEditor content={config.writingRulesMarkdown ?? ''} onChange={markdown => update('writingRulesMarkdown', markdown)} placeholder={text('填写文风、语言表达、对话和描写要求、节奏、禁忌及自检规则。', 'Describe style, language, dialogue, description, pacing, restrictions, and self-checks.')} />
+              <div className="h-[380px] min-h-[300px] min-w-0 rounded-lg border border-[var(--color-border)] overflow-hidden">
+                <DocumentEditingSurface
+                  documentIdentity={createBusinessFieldDocumentIdentity({ projectId: documentProjectId, entityType: 'project-config', entityId: 'novel-config', fieldId: 'writingRulesMarkdown' })}
+                  layout="business-field"
+                  showHeadingToc
+                  content={config.writingRulesMarkdown ?? ''}
+                  onChange={markdown => update('writingRulesMarkdown', markdown)}
+                  placeholder={text('填写文风、语言表达、对话和描写要求、节奏、禁忌及自检规则。', 'Describe style, language, dialogue, description, pacing, restrictions, and self-checks.')}
+                />
               </div>
             </Section>
           </section>

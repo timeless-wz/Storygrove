@@ -5,7 +5,8 @@ import { Input } from '../ui/Input'
 import { NativeSelect } from '../ui/NativeSelect'
 import { confirm } from '../ui/Confirm'
 import { toast } from '../ui/Toast'
-import VditorProseEditor from './VditorProseEditor'
+import DocumentEditingSurface from './DocumentEditingSurface'
+import { createBusinessFieldDocumentIdentity } from '../../shared/document-editing'
 import { useLocaleStore } from '../../stores/locale-store'
 import { useLLMStore } from '../../stores/llm-store'
 import { useProjectStore } from '../../stores/project-store'
@@ -14,6 +15,7 @@ import { ipc } from '../../services/ipc-client'
 import { captureProjectSession, isProjectSessionCurrent } from '../project-session-gate'
 import { startBlueprintPlanningWorkflow } from '../../services/workflows/blueprint-planning-workflow'
 import { openBuiltinEditor } from '../panels/sidebar/sidebar-file-openers'
+import { randomUUID } from '../../utils/id'
 import {
   CREATIVE_CONTENT_CATEGORIES,
   CREATIVE_MATERIAL_TYPES,
@@ -88,9 +90,11 @@ export default function CreativeMaterialsEditor({
   const tabDirty = useEditorStore(state => state.tabs.find(tab => tab.id === tabId)?.dirty ?? false)
   const projectSession = captureProjectSession(project)
   const session = projectSession?.projectPath === projectKey ? projectSession : null
+  const documentProjectId = session?.projectId ?? `inactive:${projectKey}`
   const [entries, setEntries] = useState<CreativeMaterialEntry[]>([])
   const [legacySources, setLegacySources] = useState<LegacyCreativeSource[]>([])
   const [selectedId, setSelectedId] = useState(initialEntryId ?? '')
+  const [newDraftIdentity, setNewDraftIdentity] = useState(() => randomUUID())
   const [draft, setDraftState] = useState<MaterialDraft>(() => blankDraft(
     initialView === 'retired' ? 'retired' : initialView === 'issues' ? 'issue' : 'material',
   ))
@@ -224,6 +228,7 @@ export default function CreativeMaterialsEditor({
   const createEntry = async () => {
     if (tabDirty && !(await confirm(text('当前资料有未保存修改。放弃修改并新建？', 'This entry has unsaved changes. Discard them and create a new one?'), { title: text('新建资料', 'New entry'), danger: true }))) return
     const next = blankDraft(entryKind)
+    setNewDraftIdentity(randomUUID())
     draftRef.current = next
     setDraftState(next)
     setSelectedId('')
@@ -349,8 +354,14 @@ export default function CreativeMaterialsEditor({
               <Button variant="ghost" disabled={loading || saving} onClick={() => void organizeLegacy('ignored')}>标记不再使用</Button>
               <Button variant="ghost" disabled={loading} onClick={() => void load()}><RefreshCw size={14} />重新读取</Button>
             </div>
-            <div className="flex-1 min-h-0 rounded-lg border border-[var(--color-border)] overflow-hidden">
-              <VditorProseEditor content={selectedLegacy.content} editable={false} placeholder={text('旧配置为空', 'Legacy field is empty')} />
+            <div className="flex-1 min-h-0 min-w-0 rounded-lg border border-[var(--color-border)] overflow-hidden">
+              <DocumentEditingSurface
+                documentIdentity={createBusinessFieldDocumentIdentity({ projectId: documentProjectId, entityType: 'legacy-creative-source', entityId: selectedLegacy.sourceField, fieldId: 'content' })}
+                layout="business-field"
+                content={selectedLegacy.content}
+                editable={false}
+                placeholder={text('旧配置为空', 'Legacy field is empty')}
+              />
             </div>
           </> : <div className="flex-1 grid place-items-center text-sm text-[var(--color-text-secondary)]">{loading ? '读取中…' : '没有待整理旧配置内容'}</div>}
         </div>
@@ -389,8 +400,16 @@ export default function CreativeMaterialsEditor({
               <Input aria-label={text('来源文件名', 'Source file name')} value={draft.sourceFileName ?? ''} onChange={event => setDraft({ ...draft, sourceFileName: event.target.value })} placeholder={text('来源文件名（用于追溯）', 'Source filename (for provenance)')} />
               <Input aria-label={text('原文标题', 'Source heading')} value={draft.sourceHeading ?? ''} onChange={event => setDraft({ ...draft, sourceHeading: event.target.value })} placeholder={text('原文标题（用于追溯）', 'Original heading (for provenance)')} />
             </div>
-            <div className="flex-1 min-h-0 border-t border-[var(--color-border)]">
-              <VditorProseEditor content={draft.markdown} onChange={markdown => setDraft({ ...draft, markdown })} onSave={() => save()} placeholder={text('在这里粘贴 Markdown。标题、列表、引用、表格和长篇场景文本都会保留。', 'Paste Markdown here. Headings, lists, quotes, tables, and long scene text are preserved.')} />
+            <div className="flex-1 min-h-0 min-w-0 border-t border-[var(--color-border)]">
+              <DocumentEditingSurface
+                documentIdentity={createBusinessFieldDocumentIdentity({ projectId: documentProjectId, entityType: `creative-material-${entryKind}`, entityId: draft.id ?? `new-${tabId}-${newDraftIdentity}`, fieldId: 'markdown' })}
+                layout="business-field"
+                showHeadingToc
+                content={draft.markdown}
+                onChange={markdown => setDraft({ ...draft, markdown })}
+                onSave={() => save()}
+                placeholder={text('在这里粘贴 Markdown。标题、列表、引用、表格和长篇场景文本都会保留。', 'Paste Markdown here. Headings, lists, quotes, tables, and long scene text are preserved.')}
+              />
             </div>
           </main>
         </div>
