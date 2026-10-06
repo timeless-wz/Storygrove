@@ -45,8 +45,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "EthanYoQ",
-        "repo": "AI-Novel-Writer",
+        "owner": "timeless-wz",
+        "repo": "Storygrove",
         "channel": "latest",
         "releaseType": "release",
         "publishAutoUpdate": true,

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { closeProjectDatabase, getProjectDb, initProjectDatabase } from '../electron/database'
 import { BlueprintRepository } from '../electron/repositories/blueprint-repository'
 import { DraftRepository } from '../electron/repositories/draft-repository'
-import { ProjectCoreRepository } from '../electron/repositories/project-core-repository'
+import { hashProjectSynopsis, ProjectCoreRepository } from '../electron/repositories/project-core-repository'
 import { CharacterRepository } from '../electron/repositories/character-repository'
 import { WorldMapRepository } from '../electron/repositories/world-map-repository'
 import { StoryTimelineRepository } from '../electron/repositories/story-timeline-repository'
@@ -128,20 +128,24 @@ describe('NAV-05 & FUNC-01: Real SQLite Backend Persistence, Multi-Volume & Read
 
     // 4. 准备每章两份草稿 (Ch 1: v1, v2; Ch 2: v1, v2; Ch 3: v1; Ch 4: v1)
     const ch1_v1 = insertTestDraft(1, 1, '【初稿草稿】林风站在石台前，手掌按向测试灵石。')
-    const ch1_v2 = insertTestDraft(1, 2, '【修订二稿】林风站在青苍石台前，手掌缓缓按向悬浮的测试灵石。光芒冲天而起！', 'finalized')
+    insertTestDraft(1, 2, '【修订二稿】林风站在青苍石台前，手掌缓缓按向悬浮的测试灵石。光芒冲天而起！', 'finalized')
 
-    const ch2_v1 = insertTestDraft(2, 1, '夜黑风高，寒潭水面波澜不惊。')
-    const ch2_v2 = insertTestDraft(2, 2, '夜黑风高，寒潭水面泛起一丝刺骨冰寒。林风屏息凝神，隐于树荫深处。')
+    insertTestDraft(2, 1, '夜黑风高，寒潭水面波澜不惊。')
+    insertTestDraft(2, 2, '夜黑风高，寒潭水面泛起一丝刺骨冰寒。林风屏息凝神，隐于树荫深处。')
 
-    const ch3_v1 = insertTestDraft(3, 1, '狂沙漫天，视野不足三尺。')
+    insertTestDraft(3, 1, '狂沙漫天，视野不足三尺。')
 
     // 5. 写入核心架构文档 (Premise, Worldbuilding, Synopsis)
     ProjectCoreRepository.init('测试小说')
-    ProjectCoreRepository.update({
+    // project_core.synopsis is protected by a compare-and-swap hash; the update
+    // must bind the hash of the currently stored synopsis to be accepted.
+    const synopsisUpdate = ProjectCoreRepository.update({
       premise: '【核心故事前提】天才少年意外觉醒上古神灵血脉，逆境崛起打破神界桎梏。',
       worldbuilding: '【世界观】九天十地，以灵气凝聚度划分为凡尘、玄域、天阙三层境界。',
       synopsis: '【全书大纲】全书分五卷，共60章，从边境小镇至横扫玄域。',
+      expectedSynopsisHash: hashProjectSynopsis(ProjectCoreRepository.get()?.synopsis ?? ''),
     })
+    expect(synopsisUpdate).toEqual({ success: true })
 
     // 6. 写入角色档案
     CharacterRepository.upsert({

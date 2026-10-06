@@ -106,6 +106,7 @@ describe('isolated Markdown project import, database reopen, and export', () => 
         return { chapters, receipt: frozenReceipt } as never
       }
       if (channel === 'db:draft-export-selection-current') return true as never
+      if (channel === 'db:prose-order') return [] as never
       throw new Error(`Unexpected database IPC: ${channel}`)
     }) as never)
     vi.mocked(ipc.invoke).mockImplementation(async (channel, ...args) => {

@@ -70,6 +70,14 @@ beforeEach(() => {
       invoke: vi.fn(async (channel: string) => {
         if (channel === 'prompt:load-global') return { templates: [], diagnostics: [] }
         if (channel === 'fs:check-exists') return false
+        // Creative-context sources must not read the live project store:
+        // this workflow is bound to the frozen novelConfigSnapshot.
+        if (channel === 'db:project-core-get') {
+          return { premise: '', worldbuilding: '', charactersArch: '', creativeDirectionMarkdown: '', writingLanguage: 'en-US' }
+        }
+        if (channel === 'db:creative-legacy-list') return []
+        if (channel === 'db:cultivation-read') return { revision: 0, realms: [], markdown: '' }
+        if (channel === 'db:map-get-all') return { maps: [], nodes: [], edges: [] }
         return { success: true }
       }),
     },

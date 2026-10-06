@@ -4,6 +4,7 @@ import { useLocaleStore } from '../../../stores/locale-store'
 import { useLLMStore } from '../../../stores/llm-store'
 import { useProjectStore } from '../../../stores/project-store'
 import { createArchitectureWorkflow, createConfigGenerationWorkflow } from '../architecture-workflow'
+import { withWorkflowCreativeContextIpcDefaults } from '../../../../test/workflow-creative-context-ipc'
 
 const originalLocale = useLocaleStore.getState().locale
 const originalDefaultModelId = useLLMStore.getState().defaultModelId
@@ -96,7 +97,7 @@ function arrangeConfigGenerationJourney(responses: Array<{ content: string; fini
   })
   vi.stubGlobal('window', {
     velaAPI: {
-      invoke,
+      invoke: withWorkflowCreativeContextIpcDefaults(invoke),
       on: vi.fn(),
       once: vi.fn(),
       send: vi.fn(),

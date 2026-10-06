@@ -40,6 +40,8 @@ vi.mock('../controllers/phase3-8-controller', () => ({ registerPhase3To8Controll
 vi.mock('../controllers/backup-controller', () => ({ registerBackupController: vi.fn() }))
 vi.mock('../controllers/project-documents-controller', () => ({ registerProjectDocumentsController: vi.fn() }))
 vi.mock('../controllers/world-map-image-controller', () => ({ registerWorldMapImageController: vi.fn() }))
+vi.mock('../controllers/revision-learning-controller', () => ({ registerRevisionLearningController: vi.fn() }))
+vi.mock('../controllers/creative-content-controller', () => ({ registerCreativeContentController: vi.fn() }))
 
 import { registerIPCHandlers } from '../ipc-handlers'
 

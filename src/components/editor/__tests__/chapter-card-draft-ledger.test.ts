@@ -315,7 +315,7 @@ describe('chapter-card draft ledger', () => {
     )
 
     expect(source).toContain('const handleOpenOrNewDraft = async (bp: ChapterBlueprint) => {')
-    expect(source).toContain('onDoubleClick={() => void handleOpenOrNewDraft(bp)}')
+    expect(source).toContain('onOpenDraft={() => void handleOpenOrNewDraft(selected)}')
     expect(source).toContain('onClick={() => handleOpenOrNewDraft(selected)}')
     expect(source).toContain("text('新建正文草稿', 'New draft')")
     expect(source).not.toContain('nextWritableBlueprint')

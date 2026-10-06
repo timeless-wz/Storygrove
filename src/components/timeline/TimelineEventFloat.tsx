@@ -106,16 +106,27 @@ export function TimelineEventFloat({
   useEffect(() => {
     const container = panelRef.current?.parentElement
     if (!container || typeof ResizeObserver === 'undefined') return
-    const update = () => {
+    let frame: number | null = null
+    const measure = () => {
       const rect = container.getBoundingClientRect()
-      setLiveBounds({ left: rect.left, top: rect.top, width: rect.width, height: rect.height })
+      setLiveBounds(previous => previous && previous.left === rect.left && previous.top === rect.top
+        && previous.width === rect.width && previous.height === rect.height
+        ? previous : { left: rect.left, top: rect.top, width: rect.width, height: rect.height })
     }
-    update()
+    const update = () => {
+      if (frame !== null) cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        frame = null
+        measure()
+      })
+    }
+    measure()
     const observer = new ResizeObserver(update)
     observer.observe(container)
     window.addEventListener('resize', update)
     return () => {
       observer.disconnect()
+      if (frame !== null) cancelAnimationFrame(frame)
       window.removeEventListener('resize', update)
     }
   }, [])

@@ -87,7 +87,7 @@ describe('v1.1.0 release metadata', () => {
         'Windows x64',
         'Apple Silicon',
         'Intel',
-        'https://github.com/EthanYoQ/AI-Novel-Writer/releases/latest',
+        'https://github.com/timeless-wz/Storygrove/releases/latest',
       ]) expect(readme).toContain(expected)
 
       for (const installer of [

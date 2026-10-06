@@ -204,6 +204,35 @@ describe('story timeline scene acceptance', () => {
     }
   })
 
+  it('waits for the appended event layout before consuming its focus request', async () => {
+    const first = makeEvent({ id: 'first', sortOrder: 1 })
+    const next = makeEvent({ id: 'next', sortOrder: 100 })
+    const callbacks = {
+      onSelectEvent: vi.fn(), onOpenEventFloat: vi.fn(), onToggleBranch: vi.fn(),
+      onCanvasContextMenu: vi.fn(), onAnchorContextMenu: vi.fn(), onOpenRangeEditor: vi.fn(),
+    }
+    const render = async (events: StoryTimelineEvent[], intent: TimelineViewportIntent) => {
+      await act(async () => root.render(
+        <div className="writer-timeline-flow" style={{ position: 'absolute', inset: 0 }}>
+          <StoryTimelineScene layout={buildStoryTimelineLayout(events)} selectedId={null}
+            contentReady viewportIntent={intent} callbacks={callbacks} />
+        </div>,
+      ))
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 350)) })
+    }
+    await render([first], INTENT)
+    const focus: TimelineViewportIntent = { nonce: 1, kind: 'focus-event', eventId: next.id }
+    // Saving and branch expansion can make the request precede the visible node layout.
+    await render([first], focus)
+    await render([first, next], focus)
+    const node = container.querySelector<HTMLElement>('[data-id="next"]')!.getBoundingClientRect()
+    const pane = container.querySelector<HTMLElement>('.react-flow__pane')!.getBoundingClientRect()
+    expect(node.left).toBeLessThan(pane.right)
+    expect(node.right).toBeGreaterThan(pane.left)
+    expect(node.top).toBeLessThan(pane.bottom)
+    expect(node.bottom).toBeGreaterThan(pane.top)
+  })
+
   it('keeps the canvas pannable and zoomable without dragging nodes or editing data', async () => {
     const layout = cases[2].build()
     await act(async () => {

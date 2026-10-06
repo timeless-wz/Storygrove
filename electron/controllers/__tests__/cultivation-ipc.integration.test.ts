@@ -141,7 +141,7 @@ it('runs the production preload and database controller against initialized, mig
   currentSession = beginSession(legacyRoot, legacyId)
   const migratedSystem = await invoke('db:cultivation-read') as { revision: number; realms: unknown[] }
   const migratedRoster = await invoke('db:character-roster-read') as CharacterRosterSnapshot
-  expect(migratedSystem).toEqual({ revision: 0, realms: [] })
+  expect(migratedSystem).toEqual({ revision: 0, realms: [], markdown: '' })
   expect(migratedRoster.entries[0]).toMatchObject({ name: '旧角色', currentState: { powerLevel: '旧修为文字保持原样' } })
   expect(migratedRoster.entries[0]?.cultivationLevelId).toBeUndefined()
 

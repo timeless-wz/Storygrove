@@ -123,9 +123,13 @@ describe('Codex Fiction Creative Workbench Closure Integration Tests', () => {
 
   // 2. 保持作者主导：不恢复批量入口或自动合并回写；AI 单章写稿必须先确认。
   it('keeps batch creation and revision writeback disabled while requiring confirmation for AI-assisted drafting', () => {
-    // 2.1 Layout store openChapterCreation is a no-op
+    // 2.1 Layout store openChapterCreation is an author-invoked popup: it only
+    // opens the confirmation dialog (with prefill) and never starts a run.
     const layoutStore = useLayoutStore.getState()
     layoutStore.openChapterCreation({ chapterNumber: 1 })
+    expect(useLayoutStore.getState().chapterCreationOpen).toBe(true)
+    expect(useLayoutStore.getState().chapterCreationPrefill).toEqual({ chapterNumber: 1 })
+    useLayoutStore.getState().closeChapterCreation()
     expect(useLayoutStore.getState().chapterCreationOpen).toBe(false)
 
     // 2.2 Draft store has no applyMergedRevision function

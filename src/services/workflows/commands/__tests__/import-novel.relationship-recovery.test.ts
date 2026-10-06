@@ -6,6 +6,7 @@ import type { CharacterRosterEntry } from '../../../../shared/character-roster'
 import type { StepCallbacks, WorkflowContext } from '../../../../stores/workflow-store'
 import { InferGlobalSettingsCommand as RuntimeInferGlobalSettingsCommand } from '../import-novel.command'
 import { workflowRuntimeDependencies } from './workflow-generation-runtime.fixture'
+import { withWorkflowCreativeContextIpcDefaults } from '../../../../../test/workflow-creative-context-ipc'
 
 class InferGlobalSettingsCommand extends RuntimeInferGlobalSettingsCommand {
   constructor() { super(workflowRuntimeDependencies) }
@@ -104,6 +105,18 @@ function withMissingEndpoint(name = '韩烁') {
   return inference
 }
 
+// These assertions verify fail-closed behavior; creative-context source reads
+// are verified separately and should not count as mutations.
+const CREATIVE_CONTEXT_READ_CHANNELS = new Set([
+  'db:creative-legacy-list', 'db:cultivation-read', 'db:character-roster-read',
+  'db:character-identities-get', 'db:map-get-all', 'db:info-entry-list',
+  'db:knowledge-record-list', 'db:creative-material-list', 'db:project-core-get',
+])
+
+const recordedChannels = (invoke: ReturnType<typeof vi.fn>) => (invoke.mock.calls as Array<[string]>)
+  .map(([channel]) => channel)
+  .filter(channel => !CREATIVE_CONTEXT_READ_CHANNELS.has(channel))
+
 function stubIpcInvoke(handler: (channel: string, ...args: unknown[]) => unknown) {
   const invoke = vi.fn((channel: string, ...args: unknown[]) => Promise.resolve(
     channel === 'prompt:load-global' ? { templates: [], diagnostics: [] }
@@ -112,7 +125,7 @@ function stubIpcInvoke(handler: (channel: string, ...args: unknown[]) => unknown
   ))
   vi.stubGlobal('window', {
     velaAPI: {
-      invoke,
+      invoke: withWorkflowCreativeContextIpcDefaults(invoke),
       on: vi.fn(),
       once: vi.fn(),
       send: vi.fn(),
@@ -282,7 +295,7 @@ describe('InferGlobalSettingsCommand relationship endpoint recovery', () => {
       .rejects.toThrow(/受限补卡校正|delta|保留原有/)
 
     expect(generateStream).toHaveBeenCalledTimes(2)
-    expect(invoke.mock.calls.map(([channel]) => channel)).toEqual([
+    expect(recordedChannels(invoke)).toEqual([
       'kb:search', 'kb:search', 'kb:search', 'kb:search',
     ])
   })
@@ -301,7 +314,7 @@ describe('InferGlobalSettingsCommand relationship endpoint recovery', () => {
       .rejects.toThrow(/受限补卡校正|额外字段/)
 
     expect(generateStream).toHaveBeenCalledTimes(2)
-    expect(invoke.mock.calls.map(([channel]) => channel)).toEqual([
+    expect(recordedChannels(invoke)).toEqual([
       'kb:search', 'kb:search', 'kb:search', 'kb:search',
     ])
   })
@@ -321,7 +334,7 @@ describe('InferGlobalSettingsCommand relationship endpoint recovery', () => {
       .rejects.toThrow(/受限补卡校正|新增角色/)
 
     expect(generateStream).toHaveBeenCalledTimes(2)
-    expect(invoke.mock.calls.map(([channel]) => channel)).toEqual([
+    expect(recordedChannels(invoke)).toEqual([
       'kb:search', 'kb:search', 'kb:search', 'kb:search',
     ])
   })
@@ -342,7 +355,7 @@ describe('InferGlobalSettingsCommand relationship endpoint recovery', () => {
       .rejects.toThrow(/重复|缺失/)
 
     expect(generateStream).toHaveBeenCalledTimes(2)
-    expect(invoke.mock.calls.map(([channel]) => channel)).toEqual([
+    expect(recordedChannels(invoke)).toEqual([
       'kb:search', 'kb:search', 'kb:search', 'kb:search',
     ])
   })

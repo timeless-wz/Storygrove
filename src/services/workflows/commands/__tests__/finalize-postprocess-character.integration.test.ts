@@ -25,6 +25,7 @@ import { useProjectStore } from '../../../../stores/project-store'
 import { RunFinalizePostProcessCommand } from '../finalize-chapter.command'
 import { GenerateDraftCommand } from '../generate-draft.command'
 import { workflowRuntimeDependencies } from './workflow-generation-runtime.fixture'
+import { withWorkflowCreativeContextIpcDefaults } from '../../../../../test/workflow-creative-context-ipc'
 
 let projectPath = ''
 let cardResponse = '{"updates":[]}'
@@ -125,91 +126,96 @@ function insertFinalizedDraft(
 }
 
 function installRealRepositoryIpc(): void {
+  const invoke = async (channel: string, ...args: unknown[]) => {
+    switch (channel) {
+      case 'prompt:load-global':
+        return { templates: [], diagnostics: [] }
+      case 'fs:check-exists':
+        return false
+      case 'db:draft-get-latest':
+        return null
+      case 'kb:import-text':
+        return { success: true, chunkCount: 1, docId: 'doc-1' }
+      case 'db:finalization-link-knowledge-document':
+        return { success: true }
+      case 'db:continuity-save-finalized':
+        try {
+          SummaryRepository.saveFinalizedContinuity(args[0] as SaveFinalizedContinuityRequest)
+          return { success: true }
+        } catch (error) {
+          return { success: false, error: String(error) }
+        }
+      case 'db:continuity-save-character-state-candidates':
+        try {
+          SummaryRepository.saveFinalizedCharacterStateCandidates(
+            args[0] as SaveFinalizedCharacterStateCandidatesRequest,
+          )
+          return { success: true }
+        } catch (error) {
+          return { success: false, error: String(error) }
+        }
+      case 'db:continuity-read-source':
+        return SummaryRepository.readFinalizedSource(Number(args[0]))
+      case 'db:blueprint-update-notes':
+        return { success: true, updated: false }
+      case 'db:project-core-get':
+        return ProjectCoreRepository.get()
+      case 'db:character-get-all':
+        return CharacterRepository.getAll()
+      case 'fs:list-dir':
+      case 'db:blueprint-get-all':
+      case 'db:narrative-thread-list-relevant':
+        return []
+      case 'db:continuity-list-before':
+        return SummaryRepository.listFinalizedContinuityBefore(Number(args[0]))
+      case 'kb:search-writing-context':
+        return { success: true, value: [] }
+      case 'db:blueprint-list-summary':
+        return []
+      case 'db:blueprint-v2-summary-list':
+        return []
+      case 'db:blueprint-get':
+      case 'db:blueprint-v2-get':
+        return null
+      case 'db:draft-get-finalized':
+        return getProjectDb()?.prepare(`
+          SELECT id FROM drafts
+          WHERE chapter_number = ? AND status = 'finalized'
+          ORDER BY version DESC, id DESC LIMIT 1
+        `).get(Number(args[0])) ?? null
+      case 'db:character-roster-read':
+        return CharacterRosterRepository.read()
+      case 'db:character-roster-commit':
+        try {
+          return {
+            success: true,
+            receipt: CharacterRosterRepository.commit(args[0] as CharacterRosterCommitRequest),
+          }
+        } catch (error) {
+          return { success: false, error: String(error) }
+        }
+      case 'db:post-process-get-latest-run':
+        return PostProcessRepository.getLatestRun(String(args[0]), String(args[1]))
+      case 'db:post-process-create-run':
+        return {
+          success: true,
+          id: PostProcessRepository.createRun(args[0] as Parameters<typeof PostProcessRepository.createRun>[0]),
+        }
+      case 'db:post-process-get-steps':
+        return PostProcessRepository.getSteps(String(args[0]))
+      case 'db:post-process-mark-step-ok':
+        PostProcessRepository.markStepOk(String(args[0]), String(args[1]))
+        return { success: true }
+      case 'db:post-process-mark-step-failed':
+        PostProcessRepository.markStepFailed(String(args[0]), String(args[1]), String(args[2]))
+        return { success: true }
+      default:
+        throw new Error(`unexpected IPC: ${channel}`)
+    }
+  }
   vi.stubGlobal('window', {
     velaAPI: {
-      invoke: async (channel: string, ...args: unknown[]) => {
-        switch (channel) {
-          case 'prompt:load-global':
-            return { templates: [], diagnostics: [] }
-          case 'fs:check-exists':
-            return false
-          case 'db:draft-get-latest':
-            return null
-          case 'kb:import-text':
-            return { success: true, chunkCount: 1, docId: 'doc-1' }
-          case 'db:finalization-link-knowledge-document':
-            return { success: true }
-          case 'db:continuity-save-finalized':
-            try {
-              SummaryRepository.saveFinalizedContinuity(args[0] as SaveFinalizedContinuityRequest)
-              return { success: true }
-            } catch (error) {
-              return { success: false, error: String(error) }
-            }
-          case 'db:continuity-save-character-state-candidates':
-            try {
-              SummaryRepository.saveFinalizedCharacterStateCandidates(
-                args[0] as SaveFinalizedCharacterStateCandidatesRequest,
-              )
-              return { success: true }
-            } catch (error) {
-              return { success: false, error: String(error) }
-            }
-          case 'db:continuity-read-source':
-            return SummaryRepository.readFinalizedSource(Number(args[0]))
-          case 'db:blueprint-update-notes':
-            return { success: true, updated: false }
-          case 'db:project-core-get':
-            return ProjectCoreRepository.get()
-          case 'db:character-get-all':
-            return CharacterRepository.getAll()
-          case 'fs:list-dir':
-          case 'db:blueprint-get-all':
-          case 'db:narrative-thread-list-relevant':
-            return []
-          case 'db:continuity-list-before':
-            return SummaryRepository.listFinalizedContinuityBefore(Number(args[0]))
-          case 'kb:search-writing-context':
-            return { success: true, value: [] }
-          case 'db:blueprint-get':
-          case 'db:blueprint-v2-get':
-            return null
-          case 'db:draft-get-finalized':
-            return getProjectDb()?.prepare(`
-              SELECT id FROM drafts
-              WHERE chapter_number = ? AND status = 'finalized'
-              ORDER BY version DESC, id DESC LIMIT 1
-            `).get(Number(args[0])) ?? null
-          case 'db:character-roster-read':
-            return CharacterRosterRepository.read()
-          case 'db:character-roster-commit':
-            try {
-              return {
-                success: true,
-                receipt: CharacterRosterRepository.commit(args[0] as CharacterRosterCommitRequest),
-              }
-            } catch (error) {
-              return { success: false, error: String(error) }
-            }
-          case 'db:post-process-get-latest-run':
-            return PostProcessRepository.getLatestRun(String(args[0]), String(args[1]))
-          case 'db:post-process-create-run':
-            return {
-              success: true,
-              id: PostProcessRepository.createRun(args[0] as Parameters<typeof PostProcessRepository.createRun>[0]),
-            }
-          case 'db:post-process-get-steps':
-            return PostProcessRepository.getSteps(String(args[0]))
-          case 'db:post-process-mark-step-ok':
-            PostProcessRepository.markStepOk(String(args[0]), String(args[1]))
-            return { success: true }
-          case 'db:post-process-mark-step-failed':
-            PostProcessRepository.markStepFailed(String(args[0]), String(args[1]), String(args[2]))
-            return { success: true }
-          default:
-            throw new Error(`unexpected IPC: ${channel}`)
-        }
-      },
+      invoke: withWorkflowCreativeContextIpcDefaults(invoke),
     },
   })
 }

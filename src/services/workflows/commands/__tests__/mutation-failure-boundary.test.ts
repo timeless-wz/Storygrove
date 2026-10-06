@@ -17,6 +17,7 @@ import { savePartialData } from '../architecture.command'
 import { runPostProcessPipeline } from '../../workflow-utils'
 import { createBoundedCompletionError } from '../../bounded-completion'
 import { workflowRuntimeDependencies } from './workflow-generation-runtime.fixture'
+import { withWorkflowCreativeContextIpcDefaults } from '../../../../../test/workflow-creative-context-ipc'
 import type { CharacterRosterEntry } from '../../../../shared/character-roster'
 import type { FinalizedSourceIdentity } from '../../../../shared/finalized-continuity'
 
@@ -155,6 +156,7 @@ function stubVelaIpc(
   invoke: (channel: string, ...args: unknown[]) => Promise<unknown>,
   storedReviewDraft?: { content: string; blueprintChapterNumber?: number; blueprintReadFailure?: boolean },
 ): void {
+  const creativeAwareInvoke = withWorkflowCreativeContextIpcDefaults(invoke)
   vi.stubGlobal('window', {
     velaAPI: {
       invoke: (channel: string, ...args: unknown[]) => (
@@ -169,7 +171,7 @@ function stubVelaIpc(
               : Promise.resolve(null)
           : channel === 'fs:check-exists' && String(args[0]).endsWith('/.vela/prompts')
             ? Promise.resolve(false)
-            : invoke(channel, ...args)
+            : creativeAwareInvoke(channel, ...args)
       ),
     },
   })

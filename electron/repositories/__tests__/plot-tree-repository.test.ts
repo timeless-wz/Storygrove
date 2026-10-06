@@ -96,17 +96,26 @@ function updateSynopsis(synopsis: string): void {
 }
 
 describe('PlotTreeRepository', () => {
-  it('returns the highest finalized version per chapter even when its id is lower', () => {
+  it('keeps the highest-version finalized manuscript per chapter even when its id is lower', () => {
     const db = getProjectDb()!
     db.prepare(`
       INSERT INTO blueprints (chapter_number, title, purpose, key_events)
       VALUES (1, 'Versioned chapter', 'Advance the plot', 'The authoritative version wins.')
     `).run()
     db.prepare("INSERT INTO contents (id, body) VALUES (1, 'older'), (2, 'newer')").run()
+    // One current manuscript per chapter: publishing version 2 demotes the
+    // older finalized version exactly like the idx_one_current_manuscript
+    // migration, so version — not id — decides which draft survives.
     db.prepare(`
       INSERT INTO drafts (id, chapter_number, version, status, content_id)
-      VALUES (200, 1, 1, 'finalized', 1), (100, 1, 2, 'finalized', 2)
+      VALUES (200, 1, 1, 'finalized', 1)
     `).run()
+    db.prepare(`
+      INSERT INTO drafts (id, chapter_number, version, status, content_id)
+      VALUES (100, 1, 2, 'draft', 2)
+    `).run()
+    db.prepare(`UPDATE drafts SET status = 'draft' WHERE id = 200`).run()
+    db.prepare(`UPDATE drafts SET status = 'finalized' WHERE id = 100`).run()
 
     expect(PlotTreeRepository.read().finalizedChapters).toEqual([
       expect.objectContaining({ draftId: 100, chapterNumber: 1 }),

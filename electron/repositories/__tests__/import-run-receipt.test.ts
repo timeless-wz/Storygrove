@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { closeProjectDatabase, getProjectDb, initProjectDatabase } from '../../database'
-import { ProjectCoreRepository } from '../project-core-repository'
+import { hashProjectSynopsis, ProjectCoreRepository } from '../project-core-repository'
 import { ImportRunRepository } from '../import-run-repository'
 import { BlueprintRepository, type BlueprintData } from '../blueprint-repository'
 import { CharacterRosterRepository } from '../character-roster-repository'
@@ -126,6 +126,7 @@ function prepareCommittedGlobalReceipt(): void {
     payload: {
       operationId: 'novel-import-global-receipt-run',
       expectedRosterRevision: 0,
+      expectedSynopsisHash: hashProjectSynopsis(ProjectCoreRepository.get()?.synopsis ?? ''),
       core: {
         genre: 'Literary', subGenre: 'Drama', targetAudience: 'General', totalChapters: 1,
         wordsPerChapter: 2000, plotStructure: 'three_act', narrativePov: 'third_limited',

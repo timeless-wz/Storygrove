@@ -392,6 +392,7 @@ export function StoryTimelineScene({
   const wrapperRef = useRef<HTMLDivElement>(null)
   const instanceRef = useRef<ReactFlowInstance<SceneNode, SceneEdge> | null>(null)
   const handledNonceRef = useRef<number>(-1)
+  const viewportFrameRef = useRef<number | null>(null)
   const callbacksRef = useRef(callbacks)
   const viewportStateRef = useRef({ intent: viewportIntent, layout, ready: contentReady })
 
@@ -404,24 +405,37 @@ export function StoryTimelineScene({
 
   /** 视口意图统一在这里消费；同一 nonce 只执行一次。 */
   const tryApplyViewport = useCallback(() => {
-    const instance = instanceRef.current
-    const { intent, layout: currentLayout, ready } = viewportStateRef.current
-    if (!instance || !ready || handledNonceRef.current === intent.nonce) return
-    handledNonceRef.current = intent.nonce
-    // 等下一帧让 React Flow 完成新节点的测量，避免落在旧的空白坐标上。
-    requestAnimationFrame(() => {
+    if (viewportFrameRef.current !== null) cancelAnimationFrame(viewportFrameRef.current)
+    // Read the latest committed layout in the frame, rather than capturing a stale
+    // layout before newly saved events / expanded branches have been rendered.
+    viewportFrameRef.current = requestAnimationFrame(() => {
+      viewportFrameRef.current = null
+      const instance = instanceRef.current
+      const { intent, layout: currentLayout, ready } = viewportStateRef.current
+      const rect = wrapperRef.current?.getBoundingClientRect()
+      if (!instance || !ready || !rect || rect.width <= 0 || rect.height <= 0
+        || handledNonceRef.current === intent.nonce) return
+      const target = intent.kind === 'focus-event'
+        ? currentLayout.events.find(item => item.id === intent.eventId)
+        : null
+      // A pending focus request must survive until its node becomes visible.
+      if (intent.kind === 'focus-event' && (!target || ![
+        target.x, target.y, target.width, target.height,
+      ].every(Number.isFinite))) return
+      handledNonceRef.current = intent.nonce
       if (intent.kind === 'fit-all') {
         void instance.fitView({ padding: 0.2, minZoom: 0.05, maxZoom: FIT_MAX_ZOOM, duration: 250 })
         return
       }
       if (intent.kind === 'focus-event' && intent.eventId) {
-        const placed = currentLayout.events.find(item => item.id === intent.eventId)
-        if (!placed) return
-        const zoom = Math.max(instance.getZoom(), FOCUS_MIN_ZOOM)
+        const placed = target!
+        const currentZoom = instance.getZoom()
+        const zoom = Number.isFinite(currentZoom)
+          ? Math.min(2, Math.max(currentZoom, FOCUS_MIN_ZOOM)) : FOCUS_MIN_ZOOM
         instance.setCenter(
           placed.x + placed.width / 2,
           placed.y + placed.height / 2,
-          { zoom, duration: 250 },
+          { zoom, duration: 250, interpolate: 'linear' },
         )
         return
       }
@@ -431,9 +445,8 @@ export function StoryTimelineScene({
         void instance.fitView({ padding: 0.2, minZoom: 0.05, maxZoom: FIT_MAX_ZOOM, duration: 0 })
         return
       }
-      const rect = wrapperRef.current?.getBoundingClientRect()
-      const viewWidth = rect?.width ?? 1200
-      const viewHeight = rect?.height ?? 800
+      const viewWidth = rect.width
+      const viewHeight = rect.height
       const contentWidth = Math.max(1, bounds.maxX - bounds.minX)
       const contentHeight = Math.max(1, bounds.maxY - bounds.minY)
       const usableWidth = viewWidth * (1 - INITIAL_FIT_PADDING * 2)
@@ -464,31 +477,46 @@ export function StoryTimelineScene({
     tryApplyViewport()
   }, [viewportIntent, layout, contentReady, tryApplyViewport])
 
-  // 容器尺寸变化（侧栏伸缩等）：保持原画布中心与 zoom，不触发 fitView，
-  // 也绝不回写布局，因此不会产生 ResizeObserver 循环。
+  useEffect(() => () => {
+    if (viewportFrameRef.current !== null) cancelAnimationFrame(viewportFrameRef.current)
+  }, [])
+
+  // Defer viewport writes outside ResizeObserver delivery. Ignore hidden/zero-size
+  // containers so a transient resize cannot move the entire graph off screen.
   useEffect(() => {
     const el = wrapperRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
     let last = el.getBoundingClientRect()
+    let frame: number | null = null
     const observer = new ResizeObserver(() => {
-      const instance = instanceRef.current
-      if (!instance) return
-      const rect = el.getBoundingClientRect()
-      if (rect.width === last.width && rect.height === last.height) return
-      const viewport = instance.getViewport()
-      const zoom = viewport.zoom || 1
-      const centerX = (last.width / 2 - viewport.x) / zoom
-      const centerY = (last.height / 2 - viewport.y) / zoom
-      instance.setViewport({
-        x: rect.width / 2 - centerX * zoom,
-        y: rect.height / 2 - centerY * zoom,
-        zoom,
+      if (frame !== null) cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        frame = null
+        const instance = instanceRef.current
+        if (!instance) return
+        const rect = el.getBoundingClientRect()
+        if (rect.width <= 0 || rect.height <= 0) return
+        if (rect.width !== last.width || rect.height !== last.height) {
+          const viewport = instance.getViewport()
+          if (last.width > 0 && last.height > 0 && viewport.zoom > 0
+            && [viewport.x, viewport.y, viewport.zoom].every(Number.isFinite)) {
+            void instance.setViewport({
+              x: viewport.x + (rect.width - last.width) / 2,
+              y: viewport.y + (rect.height - last.height) / 2,
+              zoom: viewport.zoom,
+            })
+          }
+          last = rect
+        }
+        tryApplyViewport()
       })
-      last = rect
     })
     observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
+    return () => {
+      observer.disconnect()
+      if (frame !== null) cancelAnimationFrame(frame)
+    }
+  }, [tryApplyViewport])
 
   /** 画布空白右键：换算鼠标位置的刻度，供「在此创建事件」预填。 */
   const handlePaneContextMenu = useCallback((e: MouseEvent | React.MouseEvent) => {

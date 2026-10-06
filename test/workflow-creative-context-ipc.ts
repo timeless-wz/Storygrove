@@ -50,6 +50,8 @@ function isGenericUnmatchedChannel(error: unknown, channel: string): boolean {
   const message = error instanceof Error ? error.message : String(error)
   return message === `Unexpected IPC channel: ${channel}`
     || message === `unexpected IPC: ${channel}`
+    || message === `unexpected IPC ${channel}`
+    || message === `未预期的 IPC 通道：${channel}`
 }
 
 /**

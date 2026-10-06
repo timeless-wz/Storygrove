@@ -252,7 +252,7 @@ describe('Windows cloud build workflow contract', () => {
         'init',
         '--platform', 'windows',
         '--evidence-root', evidenceRoot,
-        '--repository', 'EthanYoQ/AI-Novel-Writer',
+        '--repository', 'timeless-wz/Storygrove',
         '--commit', 'a'.repeat(40),
         '--run-id', '123',
         '--run-attempt', '1',

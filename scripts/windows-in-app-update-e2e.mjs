@@ -11,11 +11,9 @@ import {
   readFileSync,
   realpathSync,
   renameSync,
-  statSync,
   writeFileSync,
 } from 'node:fs'
 import { createRequire } from 'node:module'
-import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve, win32 } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
@@ -26,8 +24,8 @@ const apiBaseUrl = 'https://api.github.com'
 
 /** The release source is deliberately not configurable by workflow inputs or CLI flags. */
 export const OFFICIAL_UPDATE_REPOSITORY = Object.freeze({
-  owner: 'EthanYoQ',
-  repo: 'AI-Novel-Writer',
+  owner: 'timeless-wz',
+  repo: 'Storygrove',
 })
 
 // A cold GitHub Windows runner spends around 15 seconds compiling the monitor's

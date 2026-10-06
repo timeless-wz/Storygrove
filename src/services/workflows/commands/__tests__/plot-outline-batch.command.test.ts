@@ -10,6 +10,7 @@ import {
   synopsisFactsFingerprint,
 } from '../architecture.command'
 import { createWorkflowRuntimeDependencies } from './workflow-generation-runtime.fixture'
+import { withWorkflowCreativeContextIpcDefaults } from '../../../../../test/workflow-creative-context-ipc'
 import { clearProjectCustomPrompts, getBuiltinPromptTemplate } from '../../../prompt-templates'
 
 /**
@@ -68,7 +69,7 @@ function currentFingerprint(
       writingLanguage: 'zh-CN',
       plotStructure: novelConfig.plotStructure,
       narrativePov: novelConfig.narrativePOV,
-      globalGuidance: novelConfig.globalGuidance,
+      creativeDirectionMarkdown: '',
     }),
     stepGuidance,
     `${range.from}:${range.to}`,
@@ -218,7 +219,7 @@ function harnessWith(
   })
   vi.stubGlobal('window', {
     velaAPI: {
-      invoke, on: vi.fn(), once: vi.fn(), send: vi.fn(),
+      invoke: withWorkflowCreativeContextIpcDefaults(invoke), on: vi.fn(), once: vi.fn(), send: vi.fn(),
       setZoomLevel: vi.fn(), setZoomFactor: vi.fn(), getZoomLevel: vi.fn(),
     },
   })
@@ -314,7 +315,7 @@ describe('GeneratePlotArchitectureCommand 批次状态机', () => {
       generateStream: responseStream([completed]),
     })
     const harness = harnessWith()
-    const command = makeCommand()
+    const command = makeCommand({ synopsisRange: { from: 1, to: 100 } })
 
     const result = await command.execute({ step: {}, context, callbacks })
 
@@ -341,7 +342,7 @@ describe('GeneratePlotArchitectureCommand 批次状态机', () => {
       writingLanguage: 'zh-CN',
       plotStructure: novelConfig.plotStructure,
       narrativePov: novelConfig.narrativePOV,
-      globalGuidance: novelConfig.globalGuidance,
+      creativeDirectionMarkdown: '',
     })
   })
 
@@ -353,7 +354,7 @@ describe('GeneratePlotArchitectureCommand 批次状态机', () => {
       generateStream: responseStream([truncated]),
     })
     const harness = harnessWith()
-    const command = makeCommand()
+    const command = makeCommand({ synopsisRange: { from: 1, to: 100 } })
 
     const failure = await command.execute({ step: {}, context, callbacks }).catch((error: unknown) => error)
     expect(failure).toBeInstanceOf(PlotOutlineResumeAvailableError)
@@ -634,7 +635,7 @@ describe('GeneratePlotArchitectureCommand 批次状态机', () => {
       generateStream: responseStream([wrongMarkBody]),
     })
     const harness = harnessWith()
-    const command = makeCommand()
+    const command = makeCommand({ synopsisRange: { from: 1, to: 100 } })
 
     const failure = await command.execute({ step: {}, context, callbacks }).catch((error: unknown) => error)
     expect(failure).toBeInstanceOf(PlotOutlineResumeAvailableError)
@@ -676,7 +677,7 @@ describe('GeneratePlotArchitectureCommand 批次状态机', () => {
     })
     const harness = harnessWith()
 
-    const failure = await makeCommand().execute({ step: {}, context, callbacks }).catch((error: unknown) => error)
+    const failure = await makeCommand({ synopsisRange: { from: 1, to: 100 } }).execute({ step: {}, context, callbacks }).catch((error: unknown) => error)
 
     if (resumable) {
       expect(failure).toBeInstanceOf(PlotOutlineResumeAvailableError)
@@ -695,7 +696,7 @@ describe('GeneratePlotArchitectureCommand 批次状态机', () => {
     useLLMStore.setState({ defaultModelId: 'model-1', generateStream: responseStream([body]) })
     const harness = harnessWith()
 
-    const failure = await makeCommand().execute({ step: {}, context, callbacks }).catch((error: unknown) => error)
+    const failure = await makeCommand({ synopsisRange: { from: 1, to: 100 } }).execute({ step: {}, context, callbacks }).catch((error: unknown) => error)
 
     expect(failure).toBeInstanceOf(Error)
     expect(failure).not.toBeInstanceOf(PlotOutlineResumeAvailableError)
@@ -745,7 +746,7 @@ describe('GeneratePlotArchitectureCommand 批次状态机', () => {
       generateStream: responseStream([`${body}\n\n${progressLine(1, 100, 100)}`]),
     })
 
-    await expect(makeCommand().execute({ step: {}, context, callbacks }))
+    await expect(makeCommand({ synopsisRange: { from: 1, to: 100 } }).execute({ step: {}, context, callbacks }))
       .rejects.toThrow('Project data changed while the outline was being generated')
 
     expect(harness.synopsisCommits).toHaveLength(1)
@@ -786,7 +787,7 @@ describe('GeneratePlotArchitectureCommand 批次状态机', () => {
       },
     })
 
-    await expect(makeCommand().execute({ step: {}, context, callbacks }))
+    await expect(makeCommand({ synopsisRange: { from: 1, to: 100 } }).execute({ step: {}, context, callbacks }))
       .rejects.toThrow('工作流已取消')
 
     expect(harness.synopsisCommits).toHaveLength(0)
@@ -813,7 +814,7 @@ describe('GeneratePlotArchitectureCommand 批次状态机', () => {
     })
     const harness = harnessWith()
     context.data.stepGuidance = { synopsis: '只属于旧检查点的指导' }
-    await expect(makeCommand().execute({ step: {}, context, callbacks }))
+    await expect(makeCommand({ synopsisRange: { from: 1, to: 100 } }).execute({ step: {}, context, callbacks }))
       .rejects.toBeInstanceOf(PlotOutlineResumeAvailableError)
     context.data.stepGuidance = { synopsis: '恢复时新增但不应使用的指导' }
 
@@ -835,7 +836,7 @@ describe('GeneratePlotArchitectureCommand 批次状态机', () => {
     useLLMStore.setState({ defaultModelId: 'model-1', generateStream })
     const harness = harnessWith()
 
-    const failure = await makeCommand().execute({ step: {}, context, callbacks }).catch((error: unknown) => error)
+    const failure = await makeCommand({ synopsisRange: { from: 1, to: 100 } }).execute({ step: {}, context, callbacks }).catch((error: unknown) => error)
 
     expect(failure).toBeInstanceOf(Error)
     expect(failure).not.toBeInstanceOf(PlotOutlineResumeAvailableError)
@@ -851,7 +852,7 @@ describe('GeneratePlotArchitectureCommand 批次状态机', () => {
     const generateStream = lengthThenNetworkFailure(firstBody)
     useLLMStore.setState({ defaultModelId: 'model-1', generateStream })
     const harness = harnessWith()
-    const command = makeCommand()
+    const command = makeCommand({ synopsisRange: { from: 1, to: 100 } })
 
     const failure = await command.execute({ step: {}, context, callbacks }).catch((error: unknown) => error)
     expect(failure).toBeInstanceOf(PlotOutlineResumeAvailableError)

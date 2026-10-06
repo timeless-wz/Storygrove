@@ -791,6 +791,36 @@ describe('story timeline horizontal axis', () => {
     expect(container.querySelector('.writer-timeline-modal')).toBeNull()
   })
 
+  it('keeps newly appended events inside the visible canvas', async () => {
+    invoke.mockImplementation(async (channel: string, ...args: unknown[]) => {
+      if (channel === 'db:timeline-get-all') return { settings, events: timelineEvents }
+      if (channel === 'db:map-get-all') return { nodes: [], edges: [], layers: [] }
+      if (channel === 'db:timeline-event-upsert') return { success: true, event: args[0] }
+      return { success: false, error: `unexpected channel ${channel}` }
+    })
+    await renderTimeline()
+    let source = 'e2'
+    for (let index = 0; index < 3; index++) {
+      await rightClickLabel(source)
+      await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="timeline-float-create-next"]')!.click())
+      await act(async () => setInputValue(formField('事件标题'), `后续事件 ${index}`))
+      const save = Array.from(container.querySelectorAll<HTMLButtonElement>('.writer-timeline-modal button')).find(button => button.textContent?.includes('保存事件'))!
+      await act(async () => save.click())
+      await act(async () => { await vi.waitFor(() => expect(labels().length).toBe(timelineEvents.length + index + 1)) })
+      await settleCanvas(400)
+      const event = useStoryTimelineStore.getState().events.find(item => item.title === `后续事件 ${index}`)!
+      source = event.id
+      const rect = labelFor(source).getBoundingClientRect()
+      const pane = container.querySelector<HTMLElement>('.react-flow__pane')!.getBoundingClientRect()
+      expect(rect.width).toBeGreaterThan(0)
+      expect(rect.right).toBeGreaterThan(pane.left)
+      expect(rect.left).toBeLessThan(pane.right)
+      expect(rect.bottom).toBeGreaterThan(pane.top)
+      expect(rect.top).toBeLessThan(pane.bottom)
+      expect(container.querySelector('.react-flow__viewport')?.getAttribute('style')).not.toMatch(/NaN|Infinity/)
+    }
+  })
+
   it('keeps the canvas and its anchors visible after saving the first event from an empty timeline', async () => {
     const savedEvents: StoryTimelineEvent[] = []
     invoke.mockImplementation(async (channel: string, ...args: unknown[]) => {

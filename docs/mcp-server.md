@@ -1,9 +1,9 @@
-# AI-Novel-Writer 本地 MCP Server
+# Storygrove 本地 MCP Server
 
 服务使用 STDIO，不监听网络端口，也不会向外暴露 SQLite、LanceDB 或项目文件句柄。启动前必须指定已经初始化的项目目录：
 
 ```powershell
-$env:AI_NOVEL_PROJECT_PATH = 'D:\ai\AI-Novel-Writer-master\your-project'
+$env:AI_NOVEL_PROJECT_PATH = 'D:\Storygrove\your-project'
 $env:AI_NOVEL_PROJECT_ID = 'main'
 node scripts/start-story-mcp.mjs
 ```
@@ -14,16 +14,16 @@ node scripts/start-story-mcp.mjs
 
 ```powershell
 # Codex CLI：项目路径替换为实际已初始化的创作项目，而不是小说母稿目录
-codex mcp add ai-novel-writer `
+codex mcp add storygrove `
   --env 'AI_NOVEL_PROJECT_PATH=D:\your-project' `
   --env 'AI_NOVEL_PROJECT_ID=main' `
-  -- node 'D:\ai\AI-Novel-Writer-master\scripts\start-story-mcp.mjs'
+  -- node 'D:\Storygrove\scripts\start-story-mcp.mjs'
 
 # Antigravity CLI
 agy mcp add `
   --env 'AI_NOVEL_PROJECT_PATH=D:\your-project' `
   --env 'AI_NOVEL_PROJECT_ID=main' `
-  ai-novel-writer node 'D:\ai\AI-Novel-Writer-master\scripts\start-story-mcp.mjs'
+  storygrove node 'D:\Storygrove\scripts\start-story-mcp.mjs'
 ```
 
 验收时先在两个客户端执行其 `mcp list`，然后要求客户端调用

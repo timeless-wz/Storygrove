@@ -47,7 +47,7 @@ describe('AI output failure presentation', () => {
       promptBudgetReport('global-guidance'),
     )).toMatchObject({
       action: 'open-novel-config',
-      guidance: 'Shorten the listed project configuration fields in Novel configuration, then try again.',
+      guidance: 'Shorten the listed project configuration fields in Creative direction, then try again.',
     })
   })
 

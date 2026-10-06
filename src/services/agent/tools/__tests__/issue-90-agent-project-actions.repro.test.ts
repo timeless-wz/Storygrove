@@ -101,7 +101,7 @@ describe('Issue #90 AI assistant project actions', () => {
       label: 'architecture config',
       intent: { workflow: 'generate_architecture' } as const,
       prepare: () => useProjectStore.setState({ currentProject: { ...project, novelConfig: { ...project.novelConfig, coreOutline: '', protagonistProfile: '', worldSetting: '' } } as never }),
-      expected: '小说配置',
+      expected: '创作方向',
     },
     {
       label: 'directory prerequisites',

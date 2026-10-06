@@ -1,17 +1,17 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
-describe('README language variants', () => {
-  it('keeps Chinese README as the repository default with a localized product screenshot', () => {
-    const readme = readFileSync('README.md', 'utf8')
-    expect(readme).toContain('ui-zh-v085-project-config.png')
-    expect(readme).toMatch(/\[English\]\(README_en\.md\)\s*\|\s*\*\*中文\*\*/)
-  })
-
-  it('uses an independent English hero for the English README', () => {
-    const readme = readFileSync('README_en.md', 'utf8')
-    expect(readme).toContain('hero-en-v2.png')
-    expect(readme).not.toContain('hero-zh-v2.png')
-    expect(readme).toMatch(/\*\*English\*\*\s*\|\s*\[中文\]\(README\.md\)/)
+describe('Storygrove README language variants', () => {
+  it('keeps both language entry points on the current repository and documents MCP', () => {
+    for (const name of ['README.md', 'README_en.md']) {
+      const readme = readFileSync(name, 'utf8')
+      expect(readme).toContain('# Storygrove')
+      expect(readme).toContain('https://github.com/timeless-wz/Storygrove')
+      expect(readme).toContain('docs/mcp-server.md')
+      expect(readme).toContain('UPSTREAM.md')
+      expect(readme).not.toContain('https://github.com/EthanYoQ/')
+    }
+    expect(readFileSync('README.md', 'utf8')).toContain('[English](README_en.md)')
+    expect(readFileSync('README_en.md', 'utf8')).toContain('[中文](README.md)')
   })
 })

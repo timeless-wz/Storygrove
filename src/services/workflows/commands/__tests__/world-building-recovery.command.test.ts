@@ -10,6 +10,7 @@ import {
   type ArchitectureProjectSnapshot,
 } from '../architecture.command'
 import { createWorkflowRuntimeDependencies } from './workflow-generation-runtime.fixture'
+import { withWorkflowCreativeContextIpcDefaults } from '../../../../../test/workflow-creative-context-ipc'
 import { clearProjectCustomPrompts } from '../../../prompt-templates'
 
 const projectPath = 'C:\\novels\\世界观恢复测试'
@@ -98,32 +99,33 @@ let formalWrites: string[]
 let partialWriteCount: number
 
 function installIpc(): void {
+  const invoke = vi.fn(async (channel: string, ...args: unknown[]) => {
+    if (channel === 'prompt:load-global') return { templates: [], diagnostics: [] }
+    if (channel === 'fs:check-exists') return false
+    if (channel === 'db:project-core-get') {
+      return { premise: currentPremise, worldbuilding: formalWorldbuilding }
+    }
+    if (channel === 'fs:read-json') {
+      return { success: true, data: structuredClone(partialFile) }
+    }
+    if (channel === 'fs:write-json') {
+      partialWriteCount += 1
+      partialFile = structuredClone(args[1] as Record<string, unknown>)
+      return { success: true }
+    }
+    if (channel === 'db:project-core-update') {
+      const update = args[0] as { worldbuilding?: string }
+      if (typeof update.worldbuilding === 'string') {
+        formalWorldbuilding = update.worldbuilding
+        formalWrites.push(update.worldbuilding)
+      }
+      return { success: true }
+    }
+    throw new Error(`未预期的 IPC 通道：${channel}`)
+  })
   vi.stubGlobal('window', {
     velaAPI: {
-      invoke: vi.fn(async (channel: string, ...args: unknown[]) => {
-        if (channel === 'prompt:load-global') return { templates: [], diagnostics: [] }
-        if (channel === 'fs:check-exists') return false
-        if (channel === 'db:project-core-get') {
-          return { premise: currentPremise, worldbuilding: formalWorldbuilding }
-        }
-        if (channel === 'fs:read-json') {
-          return { success: true, data: structuredClone(partialFile) }
-        }
-        if (channel === 'fs:write-json') {
-          partialWriteCount += 1
-          partialFile = structuredClone(args[1] as Record<string, unknown>)
-          return { success: true }
-        }
-        if (channel === 'db:project-core-update') {
-          const update = args[0] as { worldbuilding?: string }
-          if (typeof update.worldbuilding === 'string') {
-            formalWorldbuilding = update.worldbuilding
-            formalWrites.push(update.worldbuilding)
-          }
-          return { success: true }
-        }
-        throw new Error(`未预期的 IPC 通道：${channel}`)
-      }),
+      invoke: withWorkflowCreativeContextIpcDefaults(invoke),
       on: vi.fn(),
       once: vi.fn(),
       send: vi.fn(),

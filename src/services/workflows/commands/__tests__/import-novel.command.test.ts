@@ -9,6 +9,7 @@ import {
   InferGlobalSettingsCommand as RuntimeInferGlobalSettingsCommand,
 } from '../import-novel.command'
 import { workflowRuntimeDependencies } from './workflow-generation-runtime.fixture'
+import { withWorkflowCreativeContextIpcDefaults } from '../../../../../test/workflow-creative-context-ipc'
 
 class InferBlueprintsPerChapterCommand extends RuntimeInferBlueprintsPerChapterCommand {
   constructor() { super(workflowRuntimeDependencies) }
@@ -137,6 +138,18 @@ function successfulInferenceIpc() {
   })
 }
 
+// These assertions verify fail-closed behavior; creative-context source reads
+// are verified separately and should not count as mutations.
+const CREATIVE_CONTEXT_READ_CHANNELS = new Set([
+  'db:creative-legacy-list', 'db:cultivation-read', 'db:character-roster-read',
+  'db:character-identities-get', 'db:map-get-all', 'db:info-entry-list',
+  'db:knowledge-record-list', 'db:creative-material-list', 'db:project-core-get',
+])
+
+const recordedChannels = (invoke: ReturnType<typeof vi.fn>) => (invoke.mock.calls as Array<[string]>)
+  .map(([channel]) => channel)
+  .filter(channel => !CREATIVE_CONTEXT_READ_CHANNELS.has(channel))
+
 function stubIpcInvoke(handler: (channel: string, ...args: unknown[]) => unknown) {
   const invoke = vi.fn((channel: string, ...args: unknown[]) => Promise.resolve(
     channel === 'prompt:load-global' ? { templates: [], diagnostics: [] }
@@ -148,7 +161,7 @@ function stubIpcInvoke(handler: (channel: string, ...args: unknown[]) => unknown
   ))
   vi.stubGlobal('window', {
     velaAPI: {
-      invoke,
+      invoke: withWorkflowCreativeContextIpcDefaults(invoke),
       on: vi.fn(),
       once: vi.fn(),
       send: vi.fn(),
@@ -669,7 +682,7 @@ describe('InferGlobalSettingsCommand', () => {
     await expect(new InferGlobalSettingsCommand().execute({ step: {}, context: createContext(), callbacks }))
       .rejects.toThrow('code=missing_field path=architectureFiles.synopsis')
     expect(generateStream).toHaveBeenCalledOnce()
-    expect(invoke.mock.calls.map(([channel]) => channel)).toEqual([
+    expect(recordedChannels(invoke)).toEqual([
       'kb:search', 'kb:search', 'kb:search', 'kb:search',
     ])
   })
@@ -692,7 +705,7 @@ describe('InferGlobalSettingsCommand', () => {
     await expect(new InferGlobalSettingsCommand().execute({ step: {}, context: createContext(), callbacks }))
       .rejects.toThrow(/本次请求长度限制/)
     expect(generateStream).toHaveBeenCalledTimes(2)
-    expect(invoke.mock.calls.map(([channel]) => channel)).toEqual([
+    expect(recordedChannels(invoke)).toEqual([
       'kb:search', 'kb:search', 'kb:search', 'kb:search',
     ])
   })
@@ -766,7 +779,7 @@ describe('InferGlobalSettingsCommand', () => {
     await expect(new InferGlobalSettingsCommand().execute({ step: {}, context: createContext(), callbacks }))
       .rejects.toThrow('code=invalid_type path=characterCards[0].relationships')
 
-    expect(invoke.mock.calls.map(([channel]) => channel)).toEqual([
+    expect(recordedChannels(invoke)).toEqual([
       'kb:search',
       'kb:search',
       'kb:search',

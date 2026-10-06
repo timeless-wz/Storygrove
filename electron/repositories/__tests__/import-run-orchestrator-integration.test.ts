@@ -12,6 +12,7 @@ import {
 } from '../blueprint-repository'
 import { CharacterRosterRepository } from '../character-roster-repository'
 import { ImportRunRepository } from '../import-run-repository'
+import { hashProjectSynopsis, ProjectCoreRepository } from '../project-core-repository'
 import {
   ImportRunOrchestrator,
   type ImportRunOrchestratorDependencies,
@@ -135,6 +136,7 @@ function fullRecoveryDependencies(trace: RecoveryTrace): ImportRunOrchestratorDe
       await commit({
         operationId: `novel-import-global-${run.id}`,
         expectedRosterRevision: 0,
+        expectedSynopsisHash: hashProjectSynopsis(ProjectCoreRepository.get()?.synopsis ?? ''),
         core: {
           genre: 'Science fiction',
           subGenre: 'Mystery',
