@@ -2,6 +2,8 @@
 
 **English** | [中文](README.md)
 
+[![Download for Windows](https://img.shields.io/badge/%E2%AC%87%EF%B8%8F%20Download-Windows%20x64-2ea44f?style=for-the-badge&logo=github&logoColor=white)](https://github.com/timeless-wz/Storygrove/releases/latest)
+
 A place for stories to grow.
 
 Storygrove is a local-first, AI-assisted novel-writing workspace with MCP integration. It brings together worldbuilding, character management, outlining, drafting, review, and revision while keeping authors in control of accepted changes.

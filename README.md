@@ -2,6 +2,8 @@
 
 [English](README_en.md) | **中文**
 
+[![下载安装 Windows](https://img.shields.io/badge/%E2%AC%87%EF%B8%8F%20%E4%B8%8B%E8%BD%BD%E5%AE%89%E8%A3%85-Windows%20x64-2ea44f?style=for-the-badge&logo=github&logoColor=white)](https://github.com/timeless-wz/Storygrove/releases/latest)
+
 让故事从一个念头，生长为一部长篇。
 
 Storygrove 是本地优先的 AI 辅助小说创作工作台，支持设定管理、章节规划、正文写作与修订，并通过 MCP 连接外部 AI 客户端。你维护故事事实与创作方向，AI 协助起草、检查和修改，重要变更由作者审核。
